@@ -8,7 +8,7 @@
 # decision allows a crate one edge outside its set in `verify/arch/placement.toml`, and
 # `crates/microvms-cli/tests/dependency_direction.rs` holds it to the tree.
 
-enforced = ["subprocess", "port-impl", "adapter-logic"]
+enforced = ["subprocess", "port-impl", "adapter-logic", "parity-drift"]
 
 [[decision]]
 category = "port-impl"

@@ -170,13 +170,13 @@ capabilities, or `verify/parity/capabilities.toml` says why one doesn't.
   generated surfaces.
 - A bug in behavior the surfaces share is a case in `verify/parity/cases/`,
   which every surface's runner checks against one `expect`, not a new test and
-  seeded fault on each surface. Where main marks the wrong surface with
-  `known_drift`, the marker is the failing-first proof, since every runner fails
-  a marked path that starts agreeing, and the fix deletes it. A case the corpus
-  doesn't have yet lands with the fix, and the pull request shows it failing on
-  the merge base (review holds that). The ratchet counts markers as parity-drift,
-  so a pull request can't add one, and the runners' own seeded faults prove each
-  runner can fail. CONTRIBUTING.md has the rest.
+  seeded fault on each surface. The case lands with the fix, and its
+  failing-first proof is the case failing on the merge base. Review holds that
+  for now, because `tools/fail-to-pass.py` doesn't yet read a parity case file.
+  No case marks a surface as disagreeing: the ratchet enforces parity-drift, so
+  every runner refuses a `known_drift` marker, and a skip takes a decision. The
+  runners' own seeded faults prove each runner can fail. CONTRIBUTING.md has the
+  rest.
 
 ## Maintenance rules
 

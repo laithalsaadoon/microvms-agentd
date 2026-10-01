@@ -41,7 +41,7 @@ run = ["./tools/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
 message = "stale decision: [subprocess] crates/agentd/src/exec.rs: Command::new(gone) decides a finding the tree doesn't have"
-transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\"]\n", with = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\"]\n\n[[decision]]\ncategory = \"subprocess\"\nkey = \"crates/agentd/src/exec.rs: Command::new(gone)\"\nreason = \"seeded\"\n" }
+transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"parity-drift\"]\n", with = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"parity-drift\"]\n\n[[decision]]\ncategory = \"subprocess\"\nkey = \"crates/agentd/src/exec.rs: Command::new(gone)\"\nreason = \"seeded\"\n" }
 
 [[fault]]
 id = "ratchet-enforced-with-drift"
@@ -50,7 +50,7 @@ run = ["./tools/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
 message = "placement is enforced by crates/microvms-cli/tests/dependency_direction.rs, which holds every set exactly (#260), so it can't carry drift"
-transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\"]\n", with = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\"]\n" }
+transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"parity-drift\"]\n", with = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"parity-drift\", \"placement\"]\n" }
 
 # The decisions reader's floor: one that read no decision would turn every decided finding into
 # drift on both trees and compare them equal.

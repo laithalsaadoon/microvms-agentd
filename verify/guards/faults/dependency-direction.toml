@@ -93,7 +93,7 @@ expect = "test-failed"
 suite = "rust"
 note = "crates/microvms-cli/tests/dependency_direction.rs::every_set_and_placement_record_belongs_to_a_crate_held_here"
 message = "which names microvms-edges, a crate with no set"
-transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\"]\n", with = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\"]\n\n[[decision]]\ncategory = \"placement\"\nkey = \"microvms-edges -> reqwest\"\nreason = \"seeded\"\n" }
+transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"parity-drift\"]\n", with = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"parity-drift\"]\n\n[[decision]]\ncategory = \"placement\"\nkey = \"microvms-edges -> reqwest\"\nreason = \"seeded\"\n" }
 
 [[fault]]
 id = "deps-record-in-set"
@@ -111,7 +111,7 @@ run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", 
 expect = "test-failed"
 suite = "rust"
 message = "the placement record \"microvms-cli -> tar\" is written twice, the second time as a decision"
-transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\"]\n", with = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\"]\n\n[[decision]]\ncategory = \"placement\"\nkey = \"microvms-cli -> tar\"\nreason = \"seeded\"\n" }
+transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"parity-drift\"]\n", with = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"parity-drift\"]\n\n[[decision]]\ncategory = \"placement\"\nkey = \"microvms-cli -> tar\"\nreason = \"seeded\"\n" }
 
 [[fault]]
 id = "deps-record-shape"

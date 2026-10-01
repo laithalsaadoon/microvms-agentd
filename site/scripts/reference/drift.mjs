@@ -55,7 +55,7 @@ export const CATEGORIES = {
   },
   "parity-drift": {
     kind: "parity",
-    meaning: `an answer one surface gives wrongly, or can't give offline, in the shared case corpus: a ${code("known_drift")} path or a ${code("skip")} in ${code("verify/parity/cases/")}`
+    meaning: `a case one surface can't answer offline in the shared case corpus: a ${code("skip")} in ${code("verify/parity/cases/")}. Every corpus runner refuses a ${code("known_drift")} marker, so a surface that answers wrongly fails its case`
   },
   untraced: {
     kind: "traceability",

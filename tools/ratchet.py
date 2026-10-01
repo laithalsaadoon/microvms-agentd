@@ -320,8 +320,8 @@ PROMOTE = {
         "last gap"
     ),
     "parity-drift": (
-        "the corpus runners refusing a known_drift marker, once #255, #256 and #258 remove the "
-        "last (a skip no issue will close is a decision)"
+        "every corpus runner refusing a known_drift marker, and a decision for each skip no "
+        "issue will close (#258)"
     ),
     "untraced": (
         "tools/check-trace.py failing on a spec key no file in verify/spec/traced/ lists, once #301 "
