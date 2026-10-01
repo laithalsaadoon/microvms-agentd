@@ -34,7 +34,7 @@ use microvms_core::agents::{
 use microvms_core::control::{BaseImage, CreateImageRequest};
 use microvms_core::prelude::*;
 use microvms_core::sandbox::Sandbox as CoreSandbox;
-use microvms_core::{Error, ErrorKind, Region as CoreRegion};
+use microvms_core::{Error, Region as CoreRegion};
 use napi_derive::napi;
 use tokio::sync::Mutex;
 
@@ -330,6 +330,11 @@ pub fn agent_constants() -> String {
         "defaultMemoryMib": DEFAULT_SIZE.baseline_mib(),
         "defaultPromptTimeoutSec": DEFAULT_PROMPT_TIMEOUT.as_secs_f64(),
         "maxTokenLifetimeSec": MAX_LIFETIME.as_secs_f64(),
+        // The agents a VM carries when its caller names none, the core's list.
+        "defaultAgents": agents::default_specs()
+            .iter()
+            .map(|spec| spec.agent.as_str())
+            .collect::<Vec<_>>(),
         "profiles": profiles,
     })
     .to_string()
@@ -429,15 +434,8 @@ impl AgentVm {
     fn require_session(
         sandbox: &CoreSandbox,
     ) -> Result<&microvms_core::session::Session, AsyncError> {
-        sandbox
-            .session()
-            .ok_or_else(|| {
-                Error::new(
-                    ErrorKind::Precondition,
-                    "this agent VM has not been launched; call `launch` first.",
-                )
-            })
-            .map_err(js_async)
+        // The core's refusal, the one its own `AgentVm` makes before a launch.
+        agents::launched_session(sandbox).map_err(js_async)
     }
 
     fn spec(&self, agent: &str) -> Result<CoreSpec, AsyncError> {
@@ -461,7 +459,7 @@ impl AgentVm {
     ) -> Result<AgentVm, AsyncError> {
         let specs = match agents_ {
             Some(inputs) => specs_from(inputs).map_err(js_async)?,
-            None => vec![CoreSpec::new(Agent::ClaudeCode)],
+            None => agents::default_specs(),
         };
         let sandbox = CoreSandbox::new(region.inner.clone())
             .await
@@ -484,7 +482,7 @@ impl AgentVm {
     ) -> Result<AgentVm, AsyncError> {
         let specs = match agents_ {
             Some(inputs) => specs_from(inputs).map_err(js_async)?,
-            None => vec![CoreSpec::new(Agent::ClaudeCode)],
+            None => agents::default_specs(),
         };
         let vm = agents::AgentVm::from_name(
             &registry.store,
@@ -518,7 +516,7 @@ impl AgentVm {
     ) -> Result<AgentVm, AsyncError> {
         let specs = match agents_ {
             Some(inputs) => specs_from(inputs).map_err(js_async)?,
-            None => vec![CoreSpec::new(Agent::ClaudeCode)],
+            None => agents::default_specs(),
         };
         let vm = agents::AgentVm::adopt_in(
             region.inner.clone(),

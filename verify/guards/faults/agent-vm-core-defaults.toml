@@ -1,0 +1,51 @@
+# ── an `AgentVm`'s default agents and its before-launch refusal come from core (#266) ──
+
+# Each binding writes a default list of its own, one that drifted from core's.
+[[fault]]
+id = "py-agent-vm-restates-the-default-agents"
+guard = "bindings/microvms-py/tests/test_control.py::test_an_agent_vm_takes_its_default_agents_and_its_refusal_from_core"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_control.py::test_an_agent_vm_takes_its_default_agents_and_its_refusal_from_core"],
+]
+expect = "test-failed"
+suite = "bindings"
+note = "bindings/microvms-py/tests/test_control.py::test_an_agent_vm_takes_its_default_agents_and_its_refusal_from_core"
+transform = { file = "bindings/microvms-py/src/agents.rs", replace = "            .unwrap_or_else(agents::default_specs);\n        agents::require_specs(&specs).map_err(CoreError)?;\n", with = "            .unwrap_or_else(|| vec![AgentSpec::new(Agent::Codex)]);\n        agents::require_specs(&specs).map_err(CoreError)?;\n" }
+
+# Each binding refuses a call before `launch` with a message of its own.
+[[fault]]
+id = "py-agent-vm-restates-the-launch-refusal"
+guard = "bindings/microvms-py/tests/test_control.py::test_an_agent_vm_takes_its_default_agents_and_its_refusal_from_core"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_control.py::test_an_agent_vm_takes_its_default_agents_and_its_refusal_from_core"],
+]
+expect = "test-failed"
+suite = "bindings"
+note = "bindings/microvms-py/tests/test_control.py::test_an_agent_vm_takes_its_default_agents_and_its_refusal_from_core"
+transform = { file = "bindings/microvms-py/src/agents.rs", replace = "        body(agents::launched_session(sandbox)?)\n", with = "        body(sandbox.session().ok_or_else(|| {\n            Error::new(microvms_core::ErrorKind::Precondition, \"the agent VM is not running\")\n        })?)\n" }
+
+[[fault]]
+id = "js-agent-vm-restates-the-default-agents"
+guard = "an agent VM takes its default agents and its refusal from core"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/control.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+note = "bindings/microvms-js/__test__/control.mjs::an agent VM takes its default agents and its refusal from core"
+transform = { file = "bindings/microvms-js/src/agents.rs", replace = "            None => agents::default_specs(),\n        };\n        let sandbox = CoreSandbox::new(region.inner.clone())\n", with = "            None => vec![CoreSpec::new(Agent::Codex)],\n        };\n        let sandbox = CoreSandbox::new(region.inner.clone())\n" }
+
+[[fault]]
+id = "js-agent-vm-restates-the-launch-refusal"
+guard = "an agent VM takes its default agents and its refusal from core"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/control.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+note = "bindings/microvms-js/__test__/control.mjs::an agent VM takes its default agents and its refusal from core"
+transform = { file = "bindings/microvms-js/src/agents.rs", replace = "        agents::launched_session(sandbox).map_err(js_async)\n", with = "        sandbox\n            .session()\n            .ok_or_else(|| {\n                Error::new(microvms_core::ErrorKind::Precondition, \"the agent VM is not running\")\n            })\n            .map_err(js_async)\n" }

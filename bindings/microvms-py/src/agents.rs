@@ -36,7 +36,7 @@ use microvms_core::agents::{
 use microvms_core::control::BaseImage;
 use microvms_core::prelude::*;
 use microvms_core::sandbox::Sandbox;
-use microvms_core::{Error, ErrorKind, Region};
+use microvms_core::{Error, Region};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 
@@ -333,6 +333,14 @@ pub fn agent_constants(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
         DEFAULT_PROMPT_TIMEOUT.as_secs_f64(),
     )?;
     dict.set_item("max_token_lifetime_sec", MAX_LIFETIME.as_secs_f64())?;
+    // The agents a VM carries when its caller names none, the core's list.
+    dict.set_item(
+        "default_agents",
+        agents::default_specs()
+            .iter()
+            .map(|spec| spec.agent.as_str())
+            .collect::<Vec<_>>(),
+    )?;
     let profiles = PyDict::new(py);
     for agent in Agent::ALL {
         let row = agent.profile();
@@ -391,13 +399,8 @@ impl PyAgentVm {
         sandbox: &Sandbox,
         body: impl FnOnce(&microvms_core::session::Session) -> Result<T, Error>,
     ) -> Result<T, Error> {
-        let session = sandbox.session().ok_or_else(|| {
-            Error::new(
-                ErrorKind::Precondition,
-                "this agent VM has not been launched; call `launch` first.",
-            )
-        })?;
-        body(session)
+        // The core's refusal, the one its own `AgentVm` makes before a launch.
+        body(agents::launched_session(sandbox)?)
     }
 }
 
@@ -416,7 +419,7 @@ impl PyAgentVm {
     ) -> PyCoreResult<PyAgentVm> {
         let specs: Vec<AgentSpec> = agents
             .map(|agents| agents.into_iter().map(|spec| spec.inner).collect())
-            .unwrap_or_else(|| vec![AgentSpec::new(Agent::ClaudeCode)]);
+            .unwrap_or_else(agents::default_specs);
         agents::require_specs(&specs).map_err(CoreError)?;
         let sandbox = runtime::block_on(py, Sandbox::new(region.inner.clone()))?;
         Ok(PyAgentVm {
@@ -439,7 +442,7 @@ impl PyAgentVm {
     ) -> PyCoreResult<PyAgentVm> {
         let specs: Vec<AgentSpec> = agents
             .map(|agents| agents.into_iter().map(|spec| spec.inner).collect())
-            .unwrap_or_else(|| vec![AgentSpec::new(Agent::ClaudeCode)]);
+            .unwrap_or_else(agents::default_specs);
         let store = registry.store.clone();
         let wanted = region.inner.clone();
         let vm = runtime::block_on(py, async move {
@@ -470,7 +473,7 @@ impl PyAgentVm {
     ) -> PyCoreResult<PyAgentVm> {
         let specs: Vec<AgentSpec> = agents
             .map(|agents| agents.into_iter().map(|spec| spec.inner).collect())
-            .unwrap_or_else(|| vec![AgentSpec::new(Agent::ClaudeCode)]);
+            .unwrap_or_else(agents::default_specs);
         let vm = runtime::block_on(
             py,
             agents::AgentVm::adopt_in(

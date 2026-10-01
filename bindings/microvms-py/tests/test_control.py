@@ -128,6 +128,28 @@ def test_an_agent_vm_takes_vpc_connectors_and_checks_them_locally() -> None:
         vm.launch(image_identifier="arn:image", log_stream="s")
 
 
+def test_an_agent_vm_takes_its_default_agents_and_its_refusal_from_core() -> None:
+    """The defaults an `AgentVm` takes are the core's (#266).
+
+    With no agents named it carries the list `agent_constants()` publishes from the core, and a
+    call before `launch` meets the core's refusal word for word, so a binding that wrote its
+    own list or message and let it drift would fail here.
+
+    **Falsification**: default to `[AgentSpec(Agent::Codex)]` in `AgentVm(...)` instead of the
+    core's list, and the VM carries codex where the constants say claude-code; refuse with a
+    message of the binding's own in `with_session`, and the refusal reads differently.
+    """
+    published = microvms.agent_constants()["default_agents"]
+    assert published == ["claude-code"]
+    vm = microvms.AgentVm(region())
+    assert [spec.agent for spec in vm.agents] == published
+    with pytest.raises(microvms.PreconditionError) as raised:
+        vm.prompt("claude-code", "a task")
+    assert (
+        str(raised.value) == "this agent VM has not been launched; call `launch` first."
+    )
+
+
 def test_terminate_waits_for_a_bool_or_a_number_of_seconds() -> None:
     """`wait_for_terminated` takes `True`, for the core's lifecycle default, or seconds (#267).
 
