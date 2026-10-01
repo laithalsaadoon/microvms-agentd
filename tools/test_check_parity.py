@@ -78,7 +78,7 @@ ts = "Session.attach"
 [[capability]]
 id = "file-exists"
 core = "microvms_core::session::Session::file_exists"
-cli = { exempt = "no command", issue = "#269" }
+cli = { exempt = "no command" }
 py = "Session.file_exists"
 ts = "Session.fileExists"
 
@@ -91,7 +91,7 @@ ts = { exempt = "local CLI state" }
 
 [[type]]
 name = "Sandbox"
-exempt_members.ts = { create = "the async factory idiom", region = { exempt = "Python lacks it", issue = "#267" } }
+exempt_members.ts = { create = "the async factory idiom", region = { exempt = "Python lacks it" } }
 
 [exempt_names]
 ts = { __napiBindingTarget = "a napi-rs build artifact" }
@@ -113,6 +113,17 @@ id = "watch-interval"
 exempt = "a terminal affordance"
 cli = "ls --interval-sec"
 """
+
+# The table with two tracked gaps, one on a row and one on a type's member: the records
+# `--exemptions` reports with their issues, and what the full check refuses since parity-gap is
+# enforced at zero (#280).
+TRACKED = TABLE.replace(
+    'cli = { exempt = "no command" }', 'cli = { exempt = "no command", issue = "#269" }'
+).replace(
+    'region = { exempt = "Python lacks it" }',
+    'region = { exempt = "Python lacks it", issue = "#267" }',
+)
+assert TRACKED.count("issue = ") == 2, "the tracked variant names both gaps"
 
 
 def function(name, **defaults):
@@ -349,9 +360,7 @@ class RuleTests(FixtureCase):
         )
 
     def test_a_missing_cli_cell_with_no_exemption_fails(self):
-        self.table = self.table.replace(
-            'cli = { exempt = "no command", issue = "#269" }\n', ""
-        )
+        self.table = self.table.replace('cli = { exempt = "no command" }\n', "")
         self.assertProblem("file-exists: cli: no cell")
 
     def test_an_exemption_with_an_empty_reason_fails(self):
@@ -359,14 +368,31 @@ class RuleTests(FixtureCase):
         self.assertProblem("file-exists: cli: the exemption has an empty reason")
 
     def test_an_issue_that_is_not_a_number_fails(self):
-        self.table = self.table.replace('issue = "#269"', 'issue = "TBD"')
+        self.table = TRACKED.replace('issue = "#269"', 'issue = "TBD"')
         self.assertProblem("file-exists: cli: issue 'TBD' isn't of the form #<number>")
 
     def test_an_issue_on_an_exempt_member_is_held_to_the_same_form(self):
-        self.table = self.table.replace('issue = "#267"', 'issue = "267"')
+        self.table = TRACKED.replace('issue = "#267"', 'issue = "267"')
         self.assertProblem(
             "type Sandbox: ts: region: issue '267' isn't of the form #<number>"
         )
+
+    def test_an_exemption_with_an_issue_is_refused_as_a_gap(self):
+        """Parity-gap is enforced at zero (#280), so a tracked gap on a row or on a type's
+        member fails the check, which names the two ways out.
+
+        **Falsification**: `verify/guards/faults/parity-gap-enforced.toml` entry
+        `parity-check-takes-a-gap` (the refusal is dropped, and both gaps pass).
+        """
+        self.table = TRACKED
+        gap = "an exemption with an issue is a parity gap"
+        problems = self.problems()
+        for where in ("file-exists: cli", "type Sandbox: ts: region"):
+            self.assertTrue(
+                any(problem.startswith(f"{where}: {gap}") for problem in problems),
+                f"{where}: {problems}",
+            )
+        self.assertEqual(len(problems), 2, problems)
 
     def test_an_empty_griffe_dump_fails_on_the_sentinels(self):
         self.griffe["members"] = []
@@ -656,7 +682,7 @@ class ExemptionRecordTests(unittest.TestCase):
     """`--json`'s exemption records, the contract the ratchet's parity-gap category reads."""
 
     def test_each_exemption_is_one_record_with_its_issue(self):
-        records = PARITY["exemptions"](PARITY["parse_table"](TABLE))
+        records = PARITY["exemptions"](PARITY["parse_table"](TRACKED))
         self.assertIn(
             {"key": "file-exists/cli", "reason": "no command", "issue": 269}, records
         )
@@ -695,16 +721,18 @@ class ExemptionRecordTests(unittest.TestCase):
             )
 
     def test_the_exemptions_mode_prints_the_records_from_the_table_alone(self):
-        done = self.exemptions_mode(TABLE)
+        # The tracked variant: the mode reports a gap the full check refuses, which is how a
+        # gap that reached the table still counts as drift in the ratchet's enforced category.
+        done = self.exemptions_mode(TRACKED)
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertEqual(
             json.loads(done.stdout),
-            {"exemptions": PARITY["exemptions"](PARITY["parse_table"](TABLE))},
+            {"exemptions": PARITY["exemptions"](PARITY["parse_table"](TRACKED))},
         )
 
     def test_the_exemptions_mode_refuses_an_issue_it_cannot_read(self):
         # A malformed issue would read as a decision, and the ratchet would stop counting it.
-        done = self.exemptions_mode(TABLE.replace('issue = "#269"', 'issue = "TBD"'))
+        done = self.exemptions_mode(TRACKED.replace('issue = "#269"', 'issue = "TBD"'))
         self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
         self.assertIn(
             "file-exists: cli: issue 'TBD' isn't of the form #<number>", done.stdout

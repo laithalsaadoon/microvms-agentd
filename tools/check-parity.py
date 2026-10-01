@@ -9,8 +9,9 @@
 Core is the one implementation, and the CLI, Python and TypeScript are thin surfaces over it.
 Nothing used to say whether a name on one surface should exist on the others, so a gap couldn't
 be told apart from a decision. The table has one row per capability, naming it on each surface
-or exempting that surface with a reason. With an `issue`, an exemption is a tracked gap; without
-one, it's a permanent decision.
+or exempting that surface with a reason. An exemption is a permanent decision: one with an `issue`
+would be a tracked gap, and since #280 closed the last of those the check refuses one, which is
+the rule that keeps the ratchet's parity-gap category at zero.
 
 Each surface is read by the tool that already owns it:
 
@@ -43,7 +44,9 @@ The check fails when:
 (b) a name in a row doesn't exist on its surface: a core path, a CLI command or one of its flags,
     a Python or TypeScript name (`Class`, `Class.member`, or a module-level name).
 (c) a row has no cell for a surface, or an exemption has an empty reason.
-- an `issue` isn't `#<number>`, so a placeholder can't merge.
+- an exemption carries an `issue`: that's a parity gap, and the category is enforced at zero
+  (`verify/ratchet/decisions.toml`). Give the surface the capability, or drop the issue and say
+  why the surface won't have it. An issue that isn't `#<number>` is also named as such.
 - a `[[type]]` member exists on one side only (names pair as `snake_case` equals `camelCase`)
   and its side's `exempt_members` doesn't name it, or an exempt member has a twin or is gone.
 - a sentinel row doesn't resolve on all four surfaces. The table must mark `launch`, `health`,
@@ -82,7 +85,7 @@ or `Class(param)` for a constructor's. The check fails when:
   a row marked `sentinel = true` names a default the surface doesn't state or doesn't compare.
   The table must mark one.
 
-A cell is a name, a list of names, or `{ exempt = "<reason>", issue = "#N" }`. A CLI name is
+A cell is a name, a list of names, or `{ exempt = "<reason>" }`. A CLI name is
 `<command>`, `<command> --<flag> ...`, or `@<group>` for a `[flag_groups]` entry, flags every
 attached command shares.
 
@@ -95,8 +98,9 @@ attached command shares.
 member, or `<name>/<surface>` for an exempt name, and `issue` is the number or null.
 
 `--exemptions` prints `{"exemptions"}` alone, the same records, from the table without reading
-any surface, and fails on an exemption it can't read. The ratchet's parity-gap category reads
-it and counts the records with an issue. It doesn't read the surfaces because holding the table
+any surface, and fails on an exemption it can't read. It reports an exemption with an issue
+instead of refusing it: the ratchet's parity-gap category reads it and counts those records,
+so a gap that reached the table is drift in an enforced category there too. It doesn't read the surfaces because holding the table
 to them is this check's job, and the ratchet runs in a CI job with no Node for TypeDoc.
 
     ./tools/check-parity.py --exemptions    # the table's exemptions, for the ratchet
@@ -310,8 +314,13 @@ def names_of(cell: Any) -> list[str] | None:
     return None
 
 
-def exemption_problems(where: str, cell: Any) -> list[str]:
-    """What's wrong with an exemption: `{ exempt = "<reason>" }`, plus an optional issue."""
+def exemption_problems(where: str, cell: Any, *, refuse_gaps: bool = True) -> list[str]:
+    """What's wrong with an exemption: `{ exempt = "<reason>" }`, and no `issue`.
+
+    An `issue` makes the exemption a parity gap, and parity-gap is enforced at zero (#280), so
+    the table refuses one. `--exemptions` reads the table for the ratchet with `refuse_gaps` off:
+    it reports a gap rather than refusing it, so a seeded one still reaches the ratchet's count.
+    """
     if isinstance(cell, str):
         cell = {"exempt": cell}
     if not isinstance(cell, dict):
@@ -326,6 +335,12 @@ def exemption_problems(where: str, cell: Any) -> list[str]:
         isinstance(cell["issue"], str) and ISSUE.fullmatch(cell["issue"])
     ):
         problems.append(f"{where}: issue {cell['issue']!r} isn't of the form #<number>")
+    if refuse_gaps and "issue" in cell:
+        problems.append(
+            f"{where}: an exemption with an issue is a parity gap, and parity-gap is enforced "
+            "at zero (verify/ratchet/decisions.toml): give the surface the capability, or drop "
+            "the issue and say why the surface won't have it"
+        )
     return problems
 
 
@@ -788,7 +803,9 @@ def print_exemptions(table: dict[str, Any]) -> int:
     problems = [
         problem
         for key, cell in exemption_cells(table)
-        for problem in exemption_problems(": ".join(key.rsplit("/", 1)), cell)
+        for problem in exemption_problems(
+            ": ".join(key.rsplit("/", 1)), cell, refuse_gaps=False
+        )
     ]
     if problems:
         print("parity: the table's exemptions can't be read:")

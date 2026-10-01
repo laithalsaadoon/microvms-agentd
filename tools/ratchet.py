@@ -119,7 +119,10 @@ the collector's own diff are what hold the collectors.
   `tools/check-parity.py --exemptions` prints: `<capability>/<surface>`,
   `<Type>.<member>/<surface>` or `<name>/<surface>`. An exemption without an issue is the
   table's own decision and isn't read. `parity:check` holds the table to the surfaces, so a gap
-  the table doesn't record fails there, not here.
+  the table doesn't record fails there, not here. Enforced since #280 closed the last gap:
+  `parity:check` refuses an exemption with an issue, and one that reaches the table is drift in
+  an enforced category here. A table whose records are all missing reads as no gaps, so the
+  collector refuses a table with no exemption at all.
 - parity-drift: each `known_drift` path and each `skip` in the shared case corpus,
   `verify/parity/cases/<area>/<case>.json` (#320). A marker says a surface gives another answer
   than `expect` at those dot paths until its issue fixes it, and a skip that a surface the row
@@ -316,10 +319,7 @@ PROMOTE = {
     "adapter-logic": (
         "verify/ratchet/rules/operation-literal.yml and literal-default.yml as a hard gate (#273)"
     ),
-    "parity-gap": (
-        "tools/check-parity.py refusing an exemption with an issue, once #280 closes the "
-        "last gap"
-    ),
+    "parity-gap": "tools/check-parity.py refusing an exemption with an issue (#280)",
     "parity-drift": (
         "every corpus runner refusing a known_drift marker, and a decision for each skip no "
         "issue will close (#258)"
@@ -1290,6 +1290,14 @@ def parity_gaps(scope: Scope) -> Counter:
             f"{out.stdout}{out.stderr}"
         )
     records = json.loads(out.stdout)["exemptions"]
+    # The floor: the real table holds dozens of decisions, so no record at all is a reader that
+    # found nothing, and with the category at zero it would pass as every gap closed.
+    if not records:
+        raise SystemExit(
+            f"check-parity.py --exemptions printed no exemption for {scope.parity_table}: a "
+            "capability table with none is one the collector didn't read, and every gap in it "
+            "would read as closed"
+        )
     return Counter(
         ("parity-gap", record["key"])
         for record in records

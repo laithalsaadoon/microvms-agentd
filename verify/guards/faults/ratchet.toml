@@ -41,7 +41,7 @@ run = ["./tools/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
 message = "stale decision: [subprocess] crates/agentd/src/exec.rs: Command::new(gone) decides a finding the tree doesn't have"
-transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\", \"parity-drift\"]\n", with = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\", \"parity-drift\"]\n\n[[decision]]\ncategory = \"subprocess\"\nkey = \"crates/agentd/src/exec.rs: Command::new(gone)\"\nreason = \"seeded\"\n" }
+transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\", \"parity-drift\", \"parity-gap\"]\n", with = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\", \"parity-drift\", \"parity-gap\"]\n\n[[decision]]\ncategory = \"subprocess\"\nkey = \"crates/agentd/src/exec.rs: Command::new(gone)\"\nreason = \"seeded\"\n" }
 
 [[fault]]
 id = "ratchet-enforced-with-drift"
@@ -49,8 +49,8 @@ guard = "verify/ratchet/decisions.toml"
 run = ["./tools/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
-message = "parity-gap is enforced by tools/check-parity.py refusing an exemption with an issue, once #280 closes the last gap, so it can't carry drift"
-transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\", \"parity-drift\"]\n", with = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\", \"parity-drift\", \"parity-gap\"]\n" }
+message = "parity-gap is enforced by tools/check-parity.py refusing an exemption with an issue (#280), so it can't carry drift"
+transform = { file = "verify/parity/capabilities.toml", replace = "cli = { exempt = \"`ls --remote` lists images; no command asks about one\" }", with = "cli = { exempt = \"`ls --remote` lists images; no command asks about one\", issue = \"#269\" }" }
 
 # The decisions reader's floor: one that read no decision would turn every decided finding into
 # drift on both trees and compare them equal.

@@ -1,0 +1,12 @@
+# ── parity-gap enforced at zero (#280): the table refuses an exemption with an issue ────────
+
+# The refusal is dropped, so a tracked gap on a row or a type's member passes the check.
+[[fault]]
+id = "parity-check-takes-a-gap"
+guard = "tools/test_check_parity.py::RuleTests::test_an_exemption_with_an_issue_is_refused_as_a_gap"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "test_an_exemption_with_an_issue_is_refused_as_a_gap"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_exemption_with_an_issue_is_refused_as_a_gap ("
+note = "tools/test_check_parity.py::RuleTests::test_an_exemption_with_an_issue_is_refused_as_a_gap"
+transform = { file = "tools/check-parity.py", replace = "    if refuse_gaps and \"issue\" in cell:\n", with = "    if refuse_gaps and \"issue\" in cell and False:\n" }
