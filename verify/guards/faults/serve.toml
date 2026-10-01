@@ -30,3 +30,14 @@ expect = "test-failed"
 suite = "rust"
 message = "both slow requests must be in flight at once"
 transform = { file = "crates/microvms-edges/src/session/serve.rs", replace = "                    let handle = tasks.spawn(spawn(stream, peer));\n                    peers.insert(handle.id(), peer);", with = "                    let handle = tasks.spawn(spawn(stream, peer));\n                    peers.insert(handle.id(), peer);\n                    if let Some(joined) = tasks.join_next_with_id().await {\n                        finish(&mut peers, joined);\n                    }" }
+
+# A handle's grace runs out and nothing is cut, so a client that keeps its connection open keeps
+# `stop(timeout)` waiting, and a dropped handle's relays outlive it.
+[[fault]]
+id = "serve-handle-cut-does-nothing"
+guard = "a_stop_with_a_grace_cuts_the_connection_left_open"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "serve", "--", "--exact", "a_stop_with_a_grace_cuts_the_connection_left_open"]
+expect = "test-failed"
+suite = "rust"
+message = "the grace ends the wait"
+transform = { file = "crates/microvms-edges/src/session/serve.rs", replace = "                tasks.abort_all();", with = "                let _ = &tasks;" }
