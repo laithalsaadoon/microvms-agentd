@@ -1,0 +1,31 @@
+# ── `dockerfile --wrap` and `dockerfile --agent`, core's two other Dockerfiles (#269) ──
+
+# The wrap ignores the flags: the stanza takes the default port and no workdir.
+[[fault]]
+id = "cli-dockerfile-wrap-ignores-flags"
+guard = "commands::local::tests::a_wrapped_dockerfile_is_cores_wrap_of_the_file"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "commands::local::tests::a_wrapped_dockerfile_is_cores_wrap_of_the_file"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/microvms-cli/src/commands/local.rs::a_wrapped_dockerfile_is_cores_wrap_of_the_file"
+transform = { file = "crates/microvms-cli/src/commands/local.rs", replace = "        &microvms_core::control::artifact::WrapOptions {\n            port: args.port,\n            workdir: args.workdir.clone(),\n            inherit_workdir: args.inherit_workdir,\n        },\n", with = "        &microvms_core::control::artifact::WrapOptions::default(),\n" }
+
+# The agent image drops the version pins.
+[[fault]]
+id = "cli-dockerfile-agent-drops-pins"
+guard = "commands::local::tests::an_agent_dockerfile_is_the_image_agent_up_builds"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "commands::local::tests::an_agent_dockerfile_is_the_image_agent_up_builds"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/microvms-cli/src/commands/local.rs::an_agent_dockerfile_is_the_image_agent_up_builds"
+transform = { file = "crates/microvms-cli/src/commands/local.rs", replace = "        (None, version.clone())\n", with = "        let _ = version;\n        (None, None)\n" }
+
+# `--wrap` prints the default stanza, and the CLI's answers to the corpus's wrap cases stop
+# matching core's and the bindings'.
+[[fault]]
+id = "cli-corpus-wrap-prints-the-default"
+guard = "the_cli_process_answers_the_shared_case_corpus"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "parity_cases", "--", "--exact", "the_cli_process_answers_the_shared_case_corpus"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-cli/src/commands/local.rs", replace = "    if let Some(task) = &args.wrap {\n        return wrapped_dockerfile(args, task);\n    }\n", with = "    let _ = wrapped_dockerfile;\n" }
