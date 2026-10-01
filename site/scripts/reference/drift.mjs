@@ -59,7 +59,7 @@ export const CATEGORIES = {
   },
   untraced: {
     kind: "traceability",
-    meaning: `a requirement in ${code("verify/spec/")} that no group file in ${code("verify/spec/traced/")} lists, so ${code("trace:check")} holds no layer to it`
+    meaning: `a requirement in ${code("verify/spec/")} that no group file in ${code("verify/spec/traced/")} lists, or whose entry there waives every layer, so no layer checks it. ${code("trace:check")} fails on one`
   }
 }
 

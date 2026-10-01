@@ -128,7 +128,8 @@ own. A permanent exception is a decision in
 `verify/ratchet/decisions.toml`, with its reason, and a decision whose finding is
 gone fails the check. An untraced requirement takes no decision: list it in its
 group's file under `verify/spec/traced/` (`verify/spec/traced/TRAP.toml` for a
-TRAP key) and waive there any layer it can't carry, with its reason. The edges
+TRAP key) and waive there any layer it can't carry, with its reason;
+`trace:check` fails on a requirement no group file lists. The edges
 between the workspace's crates, and each adapter's and layer's direct
 dependencies against its set in `verify/arch/placement.toml`, are computed in one
 place: `crates/microvms-cli/tests/dependency_direction.rs`. It holds each crate

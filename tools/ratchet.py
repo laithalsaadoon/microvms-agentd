@@ -325,8 +325,8 @@ PROMOTE = {
         "issue will close (#258)"
     ),
     "untraced": (
-        "tools/check-trace.py failing on a spec key no file in verify/spec/traced/ lists, once #301 "
-        "to #307 trace the last key"
+        "tools/check-trace.py failing on a spec key no file in verify/spec/traced/ lists, or one "
+        "that waives every layer (#307)"
     ),
 }
 
