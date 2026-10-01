@@ -1398,6 +1398,466 @@ class RegistryFiles(unittest.TestCase):
         )
 
 
+def family(*rows: str, **header: str) -> str:
+    """A `[[family]]` with `header`'s fields (the test entries' by default) and `rows`, each
+    a row's own lines."""
+    fields = {
+        "guard": "the_guard",
+        "run": toml_run(CARGO),
+        "expect": '"test-failed"',
+        "suite": '"rust"',
+        **header,
+    }
+    head = "[[family]]\n" + "".join(f"{k} = {v}\n" for k, v in fields.items() if v)
+    return (
+        head.replace("guard = the_guard", 'guard = "the_guard"')
+        + "".join(f"\n[[family.fault]]\n{row}" for row in rows)
+        + "\n"
+    )
+
+
+def row(fid: str, **extra: str) -> str:
+    """A family row: its id, the test entries' fault, and `extra` fields."""
+    lines = [
+        f"id = {toml_str(fid)}",
+        'transform = { file = "state.txt", replace = "the_guard=ok", with = "the_guard=fail" }',
+        *(f"{k} = {v}" for k, v in extra.items()),
+    ]
+    return "\n".join(lines) + "\n"
+
+
+class FaultFamilies(unittest.TestCase):
+    """A `[[family]]` is its entries, each its header's fields with a row's, in the place it
+    takes in its file: every reader sees the entries a file of `[[fault]]` tables would hold.
+    `-k FaultFamilies` runs this class alone for the registry's own entries."""
+
+    def repo(self, files: dict[str, str]) -> Repo:
+        return Repo(self, {"state.txt": "the_guard=ok\n", **files})
+
+    def fails(self, files: dict[str, str], message: str) -> None:
+        repo = self.repo(files)
+        for command in ("list", "fire"):
+            out = repo.run(command)
+            self.assertEqual(out.returncode, 1, f"{command}: {out.stdout}")
+            self.assertIn(message, out.stderr, command)
+
+    def test_a_family_is_its_entries_in_the_place_it_takes(self):
+        text = entry(fid="a") + "\n" + family(row("b"), row("c")) + entry(fid="d")
+        repo = self.repo({REGISTRY: text})
+        faults, problems = fire_module()["load"](repo.root)
+        self.assertEqual(problems, [])
+        self.assertEqual([f.id for f in faults], ["a", "b", "c", "d"])
+        out = repo.run("fire")
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(fired_ids(out.stdout), ["a", "b", "c", "d"])
+
+    def test_a_family_reads_as_the_tables_its_entries_would_be(self):
+        parse = fire_module()["parse_registry"]
+        flat = entry(fid="b", note="x.rs::f") + "\n" + entry(fid="c", note="x.rs::f")
+        folded = family(row("b"), row("c"), note='"x.rs::f"')
+        tables, problems = parse({REGISTRY: folded})
+        self.assertEqual(problems, [])
+        self.assertEqual(tables, parse({REGISTRY: flat})[0])
+
+    def test_a_row_missing_a_field_fails_as_its_entry_would(self):
+        self.fails(
+            {REGISTRY: family(row("no-message"), expect='"exit-nonzero"')},
+            f"{REGISTRY} entry 'no-message': `expect = 'exit-nonzero'` needs a `message` "
+            "the output must contain",
+        )
+
+    def test_an_id_in_a_family_and_in_an_entry_fails_naming_both(self):
+        self.fails(
+            {
+                "verify/guards/faults/a.toml": entry(fid="twice"),
+                "verify/guards/faults/b.toml": family(row("twice")),
+            },
+            "verify/guards/faults/b.toml entry 'twice': the id is used twice, here and in "
+            "verify/guards/faults/a.toml",
+        )
+
+    def test_a_header_holds_only_the_shared_fields(self):
+        self.fails(
+            {REGISTRY: family(row("one"), message='"shared"')},
+            f"{REGISTRY}: family 1 its header sets message, which a row sets: a header holds "
+            "only guard, run, expect, suite, note",
+        )
+
+    def test_a_row_that_sets_its_headers_field_is_refused(self):
+        self.fails(
+            {REGISTRY: family(row("one", suite='"script"'))},
+            f"{REGISTRY}: family 1 row 'one' sets suite, which its header sets",
+        )
+
+    def test_a_family_with_no_row_is_refused(self):
+        self.fails(
+            {REGISTRY: entry() + "\n" + family()},
+            f"{REGISTRY}: family 1 has no [[family.fault]] row",
+        )
+
+    def test_a_header_line_inside_a_string_leaves_the_order_unread(self):
+        # The text's headers are what place the tables; a `[[fault]]` line inside a
+        # multi-line string would place a table that isn't there.
+        text = entry(fid="a") + "note = '''\n[[fault]]\n'''\n\n" + family(row("b"))
+        self.fails(
+            {REGISTRY: text},
+            f"{REGISTRY}: its [[fault]], [[family]] and [[scanner]] headers don't count out "
+            "to its tables",
+        )
+
+    def test_the_registry_holds_families(self):
+        # The floor for the form: the real registry's families expand, and the sentinel's
+        # neighbours in them load.
+        tables, problems = fire_module()["registry_tables"](HERE.parent)
+        self.assertEqual(problems, [])
+        text = "".join(
+            path.read_text(encoding="utf-8")
+            for path in sorted((HERE.parent / "verify/guards/faults").glob("*.toml"))
+        )
+        self.assertIn("[[family]]", text)
+        self.assertEqual(
+            len(tables), len({t.data["id"] for t in tables if isinstance(t.data, dict)})
+        )
+
+
+# A scanner for the fixture repos: it reads a.cfg and b.cfg, and fails on an empty one, on one
+# that doesn't parse (a line that isn't `key=value`), and when a.cfg lacks `sentinel=on`.
+SCANNER_GATE = """\
+import pathlib
+import sys
+
+problems = []
+for name in ("a.cfg", "b.cfg"):
+    text = pathlib.Path(name).read_text()
+    if not text:
+        problems.append(f"{name} is empty")
+    elif any("=" not in line for line in text.splitlines()):
+        problems.append(f"{name} doesn't parse")
+if "sentinel=on" not in pathlib.Path("a.cfg").read_text():
+    problems.append("the sentinel is gone from a.cfg")
+print("\\n".join(problems) or "scanner: ok")
+sys.exit(1 if problems else 0)
+"""
+SCANNER = f"""\
+[[scanner]]
+id = "cfg"
+guard = "tools/scanner.py"
+run = [{toml_str(sys.executable)}, "tools/scanner.py"]
+suite = "script"
+inputs = ["a.cfg", "b.cfg"]
+empty = "{{input}} is empty"
+unreadable = "{{input}} doesn't parse"
+sentinel = {{ file = "a.cfg", replace = "sentinel=on\\n", with = "", message = "the sentinel is gone from a.cfg" }}
+"""
+
+
+class ScannerEntries(unittest.TestCase):
+    """A `[[scanner]]` declares its inputs and its sentinel once, and the loader writes each
+    input's empty and unreadable entries and the sentinel's. `-k ScannerEntries` runs this
+    class alone for the registry's own entries."""
+
+    def repo(self, registry: str = SCANNER, **files: str) -> Repo:
+        return Repo(
+            self,
+            {
+                REGISTRY: registry,
+                "tools/scanner.py": SCANNER_GATE,
+                "a.cfg": "sentinel=on\nmode=a\n",
+                "b.cfg": "mode=b\n",
+                **files,
+            },
+        )
+
+    def fails(self, registry: str, message: str, **files: str) -> None:
+        repo = self.repo(registry, **files)
+        for command in ("list", "fire"):
+            out = repo.run(command)
+            self.assertEqual(out.returncode, 1, f"{command}: {out.stdout}")
+            self.assertIn(message, out.stderr, command)
+
+    def test_a_scanner_writes_each_inputs_entries_and_its_sentinels(self):
+        tables, problems = fire_module()["parse_registry"]({REGISTRY: SCANNER})
+        self.assertEqual(problems, [])
+        head = {
+            "guard": "tools/scanner.py",
+            "run": [sys.executable, "tools/scanner.py"],
+            "suite": "script",
+            "expect": "exit-nonzero",
+        }
+        unreadable = fire_module()["UNREADABLE"]
+        self.assertEqual(
+            [t.data for t in tables],
+            [
+                {"id": "cfg-empty-a-cfg", **head, "message": "a.cfg is empty",
+                 "transform": {"file": "a.cfg", "with": ""}},
+                {"id": "cfg-unreadable-a-cfg", **head, "message": "a.cfg doesn't parse",
+                 "transform": {"file": "a.cfg", "with": unreadable}},
+                {"id": "cfg-empty-b-cfg", **head, "message": "b.cfg is empty",
+                 "transform": {"file": "b.cfg", "with": ""}},
+                {"id": "cfg-unreadable-b-cfg", **head, "message": "b.cfg doesn't parse",
+                 "transform": {"file": "b.cfg", "with": unreadable}},
+                {"id": "cfg-sentinel-removed", **head,
+                 "message": "the sentinel is gone from a.cfg",
+                 "transform": {"file": "a.cfg", "replace": "sentinel=on\n", "with": ""}},
+            ],
+        )  # fmt: skip
+
+    def test_each_written_entry_fires(self):
+        repo = self.repo()
+        out = repo.run("fire")
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(
+            fired_ids(out.stdout),
+            [
+                "cfg-empty-a-cfg",
+                "cfg-unreadable-a-cfg",
+                "cfg-empty-b-cfg",
+                "cfg-unreadable-b-cfg",
+                "cfg-sentinel-removed",
+            ],
+        )
+
+    def test_a_scanner_with_no_inputs_is_refused(self):
+        self.fails(
+            SCANNER.replace('inputs = ["a.cfg", "b.cfg"]', "inputs = []"),
+            f"{REGISTRY}: scanner 1 declares no inputs",
+        )
+
+    def test_a_scanner_with_no_sentinel_is_refused(self):
+        registry = "\n".join(
+            line for line in SCANNER.splitlines() if not line.startswith("sentinel")
+        )
+        self.fails(registry + "\n", f"{REGISTRY}: scanner 1 declares no sentinel")
+
+    def test_a_scanner_that_names_no_failure_is_refused(self):
+        registry = "\n".join(
+            line
+            for line in SCANNER.splitlines()
+            if not line.startswith(("empty", "unreadable"))
+        )
+        self.fails(
+            registry + "\n",
+            f"{REGISTRY}: scanner 1 says no failure an input's fault draws",
+        )
+
+    def test_a_scanner_takes_only_its_own_fields(self):
+        self.fails(
+            SCANNER + 'expect = "test-failed"\n',
+            f"{REGISTRY}: scanner 1 sets expect, which a scanner doesn't take",
+        )
+
+    def test_an_input_that_already_holds_what_its_fault_writes_is_stale(self):
+        # An empty input can't be emptied: its entry would seed nothing.
+        out = self.repo(**{"b.cfg": ""}).run("list")
+        self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        self.assertIn(
+            "guards: stale anchor: cfg-empty-b-cfg: b.cfg already holds the whole text its "
+            "transform writes",
+            out.stderr,
+        )
+
+    def test_a_missing_input_is_stale(self):
+        repo = self.repo()
+        (repo.root / "b.cfg").unlink()
+        repo.commit()
+        out = repo.run("list")
+        self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        self.assertIn(
+            "guards: stale anchor: cfg-empty-b-cfg: b.cfg doesn't exist", out.stderr
+        )
+
+    def test_a_scanners_entries_sit_in_its_place(self):
+        text = entry(fid="before") + "\n" + SCANNER + "\n" + entry(fid="after")
+        tables, problems = fire_module()["parse_registry"]({REGISTRY: text})
+        self.assertEqual(problems, [])
+        ids = [t.data["id"] for t in tables]
+        self.assertEqual((ids[0], ids[-1], len(ids)), ("before", "after", 7))
+
+    def test_the_registry_declares_scanners(self):
+        text = "".join(
+            path.read_text(encoding="utf-8")
+            for path in sorted((HERE.parent / "verify/guards/faults").glob("*.toml"))
+        )
+        self.assertIn("[[scanner]]", text)
+        faults, problems = fire_module()["load"](HERE.parent)
+        self.assertEqual(problems, [])
+        self.assertIn("ci-parity-sentinel-removed", {f.id for f in faults})
+
+
+def note(block: str, marker: str = MARKER, attribute: str = "#[test]") -> str:
+    """A library's test module whose test carries a note ending in `block`."""
+    lines = "".join(f"    /// {line}".rstrip() + "\n" for line in block.splitlines())
+    return (
+        "#[cfg(test)]\nmod tests {\n"
+        f"    /// {marker}: the block below turns the guard red.\n    ///\n"
+        f"{lines}    {attribute}\n    fn the_guard() {{}}\n}}\n"
+    )
+
+
+BLOCK = """\
+```falsification
+id = "lib-guard"
+file = "state.txt"
+replace = "tests::the_guard=ok"
+with = "tests::the_guard=fail"
+```"""
+CRATE = '[package]\nname = "fixture"\nversion = "0.0.0"\n'
+
+
+class FalsificationBlocks(unittest.TestCase):
+    """A Rust test's note writes its entry from a fenced block: the fault in the block, the
+    rest from where the test is. `-k FalsificationBlocks` runs this class alone for the
+    registry's own entries."""
+
+    def repo(self, **files: str) -> Repo:
+        other = entry(
+            fid="other",
+            fault='transform = { file = "state-b.txt", replace = "the_guard=ok", with = "the_guard=fail" }',
+        )
+        return Repo(
+            self,
+            {
+                REGISTRY: other,
+                "state.txt": "tests::the_guard=ok\n",
+                "state-b.txt": "the_guard=ok\n",
+                "crate/Cargo.toml": CRATE,
+                **files,
+            },
+        )
+
+    def written(self, repo: Repo) -> tuple[list[dict], list[str]]:
+        tables, problems = fire_module()["registry_tables"](repo.root)
+        return [t.data for t in tables if t.file.endswith(".rs")], problems
+
+    def refused(self, message: str, **files: str) -> None:
+        repo = self.repo(**files)
+        out = repo.run("list")
+        self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        self.assertIn(message, out.stderr)
+
+    def test_a_block_writes_its_entry_from_where_its_test_is(self):
+        repo = self.repo(**{"crate/src/lib.rs": note(BLOCK)})
+        written, problems = self.written(repo)
+        self.assertEqual(problems, [])
+        guard = "tests::the_guard"
+        self.assertEqual(
+            written,
+            [
+                {
+                    "id": "lib-guard",
+                    "guard": guard,
+                    "run": [
+                        "cargo",
+                        "test",
+                        "-p",
+                        "fixture",
+                        "--lib",
+                        "--",
+                        "--exact",
+                        guard,
+                    ],
+                    "expect": "test-failed",
+                    "suite": "rust",
+                    "note": "crate/src/lib.rs::the_guard",
+                    "transform": {
+                        "file": "state.txt",
+                        "replace": "tests::the_guard=ok",
+                        "with": "tests::the_guard=fail",
+                    },
+                }
+            ],
+        )
+        # The census ties the note to the entry the block writes.
+        out = repo.run("list")
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        out = repo.run("fire", "--only", "lib-guard")
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(fired_ids(out.stdout), ["lib-guard"])
+
+    def test_a_block_in_a_test_target_runs_that_target(self):
+        lines = "".join(f"/// {line}".rstrip() + "\n" for line in BLOCK.splitlines())
+        text = f"/// {MARKER}: the block below.\n///\n{lines}#[test]\nfn the_guard() {{}}\n"
+        repo = self.repo(**{"crate/src/lib.rs": "", "crate/tests/it.rs": text})
+        written, problems = self.written(repo)
+        self.assertEqual(problems, [])
+        self.assertEqual(
+            (written[0]["guard"], written[0]["run"][4:6]),
+            ("the_guard", ["--test", "it"]),
+        )
+
+    def test_a_block_in_a_crate_with_only_a_binary_runs_the_binary(self):
+        manifest = CRATE + '\n[[bin]]\nname = "tool"\npath = "src/main.rs"\n'
+        repo = self.repo(
+            **{
+                "crate/Cargo.toml": manifest,
+                "crate/src/main.rs": "mod cmd;\nfn main() {}\n",
+                "crate/src/cmd.rs": note(BLOCK),
+            }
+        )
+        written, problems = self.written(repo)
+        self.assertEqual(problems, [])
+        self.assertEqual(
+            (written[0]["guard"], written[0]["run"][4:6]),
+            ("cmd::tests::the_guard", ["--bin", "tool"]),
+        )
+
+    def test_the_id_is_the_package_and_test_when_the_block_gives_none(self):
+        block = BLOCK.replace('id = "lib-guard"\n', "")
+        written, _ = self.written(self.repo(**{"crate/src/lib.rs": note(block)}))
+        self.assertEqual(written[0]["id"], "fixture-the-guard")
+
+    def test_a_block_that_no_longer_applies_is_a_stale_anchor(self):
+        block = BLOCK.replace('replace = "tests::the_guard=ok"', 'replace = "gone=ok"')
+        self.refused(
+            "guards: stale anchor: lib-guard: state.txt: the anchor 'gone=ok' matches 0 times",
+            **{"crate/src/lib.rs": note(block)},
+        )
+
+    def test_a_block_outside_a_note_is_refused(self):
+        self.refused(
+            "crate/src/lib.rs:5: a Falsification block sits in a note",
+            **{"crate/src/lib.rs": note(BLOCK, marker="Plain text")},
+        )
+
+    def test_a_block_on_a_function_that_isnt_a_test_is_refused(self):
+        self.refused(
+            "crate/src/lib.rs:5: the Falsification block isn't on a `#[test]` function",
+            **{"crate/src/lib.rs": note(BLOCK, attribute="#[inline]")},
+        )
+
+    def test_a_block_that_doesnt_parse_or_holds_another_key_is_refused(self):
+        for block, message in (
+            (BLOCK.replace('with = "', "with = "), "doesn't parse"),
+            (
+                BLOCK.replace('id = "lib-guard"', 'guard = "x"'),
+                "holds `replace` and `with`",
+            ),
+        ):
+            with self.subTest(message=message):
+                self.refused(
+                    f"crate/src/lib.rs:5: {'the ' if 'parse' in message else 'a '}"
+                    f"Falsification block {message}",
+                    **{"crate/src/lib.rs": note(block)},
+                )
+
+    def test_a_block_never_closed_is_refused(self):
+        self.refused(
+            "crate/src/lib.rs:5: the Falsification block is never closed",
+            **{"crate/src/lib.rs": note(BLOCK.rsplit("\n", 1)[0])},
+        )
+
+    def test_the_trees_blocks_write_entries(self):
+        # The floor: the real tree's blocks write entries, the first converted set among them.
+        faults, problems = fire_module()["load"](HERE.parent)
+        self.assertEqual(problems, [])
+        written = {f.id: f for f in faults if f.file and f.file.endswith(".rs")}
+        self.assertIn("deps-py-globset", written)
+        self.assertEqual(
+            written["deps-py-globset"].run[0][:6],
+            ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction"],
+        )
+
+
 TIMING = re.compile(r"\(\d+\.\d s(?: of faults)?\)")
 
 

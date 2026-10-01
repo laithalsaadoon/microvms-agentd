@@ -1,15 +1,5 @@
 # ── dependency_direction.rs: the crate graph and verify/arch/placement.toml ─────────
 
-[[fault]]
-id = "deps-py-globset"
-guard = "each_adapter_depends_on_exactly_its_allowed_set"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "each_adapter_depends_on_exactly_its_allowed_set"]
-expect = "test-failed"
-suite = "rust"
-note = "crates/microvms-cli/tests/dependency_direction.rs::each_adapter_depends_on_exactly_its_allowed_set"
-message = "Outside the set: [\"globset\"]"
-transform = { file = "bindings/microvms-py/Cargo.toml", replace = "[dependencies]\n", with = "[dependencies]\nglobset = \"0.4\"\n" }
-
 # The binding keys these tests trace (#306). BIND-1: a binding that depends on a layer below
 # core reaches past the composition root. The edges among the four crates in `IN_QUESTION` don't
 # see it; the test's member-edge assertion does.
@@ -24,12 +14,14 @@ transform = { file = "bindings/microvms-js/Cargo.toml", replace = "[dependencies
 
 # BIND-4: the Node binding's set is the thin wrapper, so a crate that does work of its own fails
 # it. `deps-py-globset` above is BIND-3's.
-[[fault]]
-id = "deps-js-globset"
+[[family]]
 guard = "each_adapter_depends_on_exactly_its_allowed_set"
 run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "each_adapter_depends_on_exactly_its_allowed_set"]
 expect = "test-failed"
 suite = "rust"
+
+[[family.fault]]
+id = "deps-js-globset"
 message = "microvms-js's direct normal dependencies differ from its set"
 transform = { file = "bindings/microvms-js/Cargo.toml", replace = "[dependencies]\n", with = "[dependencies]\nglobset = \"0.4\"\n" }
 
@@ -37,21 +29,13 @@ transform = { file = "bindings/microvms-js/Cargo.toml", replace = "[dependencies
 # the one place the ratchet's placement category is computed. New drift in the CLI fails here,
 # and so does drift whose edge is gone. reqwest is in the lock already, and without its default
 # features it brings no crate the lock lacks.
-[[fault]]
+[[family.fault]]
 id = "deps-cli-new-drift"
-guard = "each_adapter_depends_on_exactly_its_allowed_set"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "each_adapter_depends_on_exactly_its_allowed_set"]
-expect = "test-failed"
-suite = "rust"
 message = "Outside the set: [\"reqwest\"]"
 transform = { file = "crates/microvms-cli/Cargo.toml", replace = "[dependencies]\n", with = "[dependencies]\nreqwest = { version = \"0.13\", default-features = false }\n" }
 
-[[fault]]
+[[family.fault]]
 id = "deps-cli-stale-drift"
-guard = "each_adapter_depends_on_exactly_its_allowed_set"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "each_adapter_depends_on_exactly_its_allowed_set"]
-expect = "test-failed"
-suite = "rust"
 message = "Listed but unused: [\"reqwest\"]"
 transform = { file = "verify/arch/placement.toml", replace = "[microvms-cli]\nnormal = [\"microvms-core\", \"clap\", \"ratatui\", \"serde\", \"serde_json\", \"tokio\", \"toml\", \"unicode-width\"]\n", with = "[microvms-cli]\nnormal = [\"microvms-core\", \"clap\", \"ratatui\", \"serde\", \"serde_json\", \"tokio\", \"toml\", \"unicode-width\"]\n\n[microvms-cli.drift]\nnormal = [\"reqwest\"]\n" }
 
@@ -59,12 +43,8 @@ transform = { file = "verify/arch/placement.toml", replace = "[microvms-cli]\nno
 # CLI none of it, so the CLI's exact set fails naming each crate it read nothing for. No crate
 # carries drift since #260, so the drift floor's fault seeds a record and the crate it allows, then
 # breaks the reader.
-[[fault]]
+[[family.fault]]
 id = "deps-drift-floor"
-guard = "each_adapter_depends_on_exactly_its_allowed_set"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "each_adapter_depends_on_exactly_its_allowed_set"]
-expect = "test-failed"
-suite = "rust"
 message = "Outside the set: [\"tar\"]"
 transform = [
   { file = "verify/arch/placement.toml", replace = "[microvms-cli]\nnormal = [\"microvms-core\", \"clap\", \"ratatui\", \"serde\", \"serde_json\", \"tokio\", \"toml\", \"unicode-width\"]\n", with = "[microvms-cli]\nnormal = [\"microvms-core\", \"clap\", \"ratatui\", \"serde\", \"serde_json\", \"tokio\", \"toml\", \"unicode-width\"]\n\n[microvms-cli.drift]\nnormal = [\"tar\"]\n" },
@@ -72,130 +52,71 @@ transform = [
   { file = "crates/microvms-cli/tests/dependency_direction.rs", replace = "let Some(drift) = table.get(\"drift\") else", with = "let Some(drift) = table.get(\"drifts\") else" },
 ]
 
-[[fault]]
+[[family.fault]]
 id = "deps-decisions-floor"
-guard = "each_adapter_depends_on_exactly_its_allowed_set"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "each_adapter_depends_on_exactly_its_allowed_set"]
-expect = "test-failed"
-suite = "rust"
 message = "Outside the set: [\"notify\"]"
 transform = { file = "crates/microvms-cli/tests/dependency_direction.rs", replace = "decision[\"category\"].as_str() == Some(\"placement\")", with = "decision[\"category\"].as_str() == Some(\"placements\")" }
 
 # The bindings carry no drift: a drift table for one is the record edited around the exact set.
-[[fault]]
+[[family.fault]]
 id = "deps-binding-drift"
-guard = "each_adapter_depends_on_exactly_its_allowed_set"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "each_adapter_depends_on_exactly_its_allowed_set"]
-expect = "test-failed"
-suite = "rust"
 message = "microvms-py has placement drift in verify/arch/placement.toml"
 transform = { file = "verify/arch/placement.toml", replace = "[microvms-js]\n", with = "[microvms-py.drift]\nnormal = [\"globset\"]\n\n[microvms-js]\n" }
 
-[[fault]]
-id = "deps-record-without-set"
+[[family]]
 guard = "every_set_and_placement_record_belongs_to_a_crate_held_here"
 run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "every_set_and_placement_record_belongs_to_a_crate_held_here"]
 expect = "test-failed"
 suite = "rust"
+
+[[family.fault]]
+id = "deps-record-without-set"
 note = "crates/microvms-cli/tests/dependency_direction.rs::every_set_and_placement_record_belongs_to_a_crate_held_here"
 message = "which names microvms-edges, a crate with no set"
 transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"port-impl\", \"adapter-logic\", \"placement\"]\n", with = "enforced = [\"port-impl\", \"adapter-logic\", \"placement\"]\n\n[[decision]]\ncategory = \"placement\"\nkey = \"microvms-edges -> reqwest\"\nreason = \"seeded\"\n" }
 
-[[fault]]
+[[family.fault]]
 id = "deps-record-in-set"
-guard = "every_set_and_placement_record_belongs_to_a_crate_held_here"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "every_set_and_placement_record_belongs_to_a_crate_held_here"]
-expect = "test-failed"
-suite = "rust"
 message = "already lists, so the record allows nothing"
 transform = { file = "verify/ratchet/decisions.toml", replace = "key = \"microvms-cli -> notify\"\n", with = "key = \"microvms-cli -> clap\"\n" }
 
-[[fault]]
+[[family.fault]]
 id = "deps-record-twice"
-guard = "every_set_and_placement_record_belongs_to_a_crate_held_here"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "every_set_and_placement_record_belongs_to_a_crate_held_here"]
-expect = "test-failed"
-suite = "rust"
 message = "the placement record \"microvms-cli -> notify\" is written twice, the second time as a decision"
 transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"port-impl\", \"adapter-logic\", \"placement\"]\n", with = "enforced = [\"port-impl\", \"adapter-logic\", \"placement\"]\n\n[[decision]]\ncategory = \"placement\"\nkey = \"microvms-cli -> notify\"\nreason = \"seeded\"\n" }
 
-[[fault]]
+[[family.fault]]
 id = "deps-record-shape"
-guard = "every_set_and_placement_record_belongs_to_a_crate_held_here"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "every_set_and_placement_record_belongs_to_a_crate_held_here"]
-expect = "test-failed"
-suite = "rust"
 message = "which isn't `<crate> -> <dependency>`"
 transform = { file = "verify/ratchet/decisions.toml", replace = "key = \"microvms-cli -> notify\"\n", with = "key = \"microvms-cli->notify\"\n" }
 
 # A set for a crate no test here holds would be a set nothing checks.
-[[fault]]
+[[family.fault]]
 id = "deps-set-nobody-holds"
-guard = "every_set_and_placement_record_belongs_to_a_crate_held_here"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "every_set_and_placement_record_belongs_to_a_crate_held_here"]
-expect = "test-failed"
-suite = "rust"
 message = "the tests here hold those crates to their sets and no other"
 transform = { file = "verify/arch/placement.toml", replace = "[microvms-core]\n", with = "[microvms-edges]\nnormal = []\n\n[microvms-core]\n" }
 
-[[fault]]
+[[family.fault]]
 id = "deps-set-unknown-list"
-guard = "every_set_and_placement_record_belongs_to_a_crate_held_here"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "every_set_and_placement_record_belongs_to_a_crate_held_here"]
-expect = "test-failed"
-suite = "rust"
 message = "and a drift table, not [\"dev\"]"
 transform = { file = "verify/arch/placement.toml", replace = "[microvms-py]\n", with = "[microvms-py]\ndev = [\"tempfile\"]\n" }
 
-[[fault]]
+[[family.fault]]
 id = "deps-drift-unknown-list"
-guard = "every_set_and_placement_record_belongs_to_a_crate_held_here"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "every_set_and_placement_record_belongs_to_a_crate_held_here"]
-expect = "test-failed"
-suite = "rust"
 message = "[microvms-cli.drift] in verify/arch/placement.toml takes only normal and build lists, not [\"dev\"]"
 transform = { file = "verify/arch/placement.toml", replace = "[microvms-cli]\nnormal = [\"microvms-core\", \"clap\", \"ratatui\", \"serde\", \"serde_json\", \"tokio\", \"toml\", \"unicode-width\"]\n", with = "[microvms-cli]\nnormal = [\"microvms-core\", \"clap\", \"ratatui\", \"serde\", \"serde_json\", \"tokio\", \"toml\", \"unicode-width\"]\n\n[microvms-cli.drift]\ndev = [\"tempfile\"]\n" }
 
-[[fault]]
-id = "deps-domain-tokio"
-guard = "each_layer_depends_on_exactly_its_allowed_set"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "each_layer_depends_on_exactly_its_allowed_set"]
-expect = "test-failed"
-suite = "rust"
-note = "crates/microvms-cli/tests/dependency_direction.rs::each_layer_depends_on_exactly_its_allowed_set"
-message = "Outside the set: [\"tokio\"]"
-transform = { file = "crates/microvms-domain/Cargo.toml", replace = "[dependencies]\n", with = "[dependencies]\ntokio = \"1\"\n" }
-
-# A dev edge, because the normal edge is a cargo cycle that fails every command.
-[[fault]]
-id = "deps-app-edges"
-guard = "each_member_depends_on_exactly_the_crates_of_ours_its_layer_allows"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "each_member_depends_on_exactly_the_crates_of_ours_its_layer_allows"]
-expect = "test-failed"
-suite = "rust"
-note = "crates/microvms-cli/tests/dependency_direction.rs::each_member_depends_on_exactly_the_crates_of_ours_its_layer_allows"
-message = "left: {\"microvms-domain\", \"microvms-edges\", \"microvms-protocol\"}"
-transform = { file = "crates/microvms-app/Cargo.toml", replace = "[dev-dependencies]\n", with = "[dev-dependencies]\nmicrovms-edges = { path = \"../microvms-edges\" }\n" }
-
 # The model as a normal dependency of agentd: stateright in the guest binary. The member-edge
 # test counts every kind, so it stays green; only the kind check sees it.
-[[fault]]
-id = "deps-agentd-model-normal"
+[[family]]
 guard = "the_proof_edges_are_dev_dependencies_only"
 run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "the_proof_edges_are_dev_dependencies_only"]
 expect = "test-failed"
 suite = "rust"
-note = "crates/microvms-cli/tests/dependency_direction.rs::the_proof_edges_are_dev_dependencies_only"
-message = "agentd depends on agentd-model as [Normal]"
-transform = { file = "crates/agentd/Cargo.toml", replace = "[dependencies]\n", with = "[dependencies]\nagentd-model = { path = \"../model\", version = \"0.1.0\" }\n" }
 
 # The kind check's floor: an edge it can't find is one it can't hold.
-[[fault]]
+[[family.fault]]
 id = "deps-proof-edge-missing"
-guard = "the_proof_edges_are_dev_dependencies_only"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "the_proof_edges_are_dev_dependencies_only"]
-expect = "test-failed"
-suite = "rust"
 message = "agentd declares no edge onto agentd-model"
 transform = { file = "crates/microvms-cli/tests/dependency_direction.rs", replace = ".filter(|dependency| dependency.name == onto)", with = ".filter(|dependency| dependency.name == onto && false)" }
 
@@ -211,23 +132,21 @@ patch = "verify/guards/faults/deps-cli-lib.patch"
 # The layering keys these tests trace (#307), each broken where a manifest can say it without
 # breaking the build (a build that breaks doesn't count as a fire). ARCH-1: a binding that
 # depends on a layer below core as well reaches past the composition root.
-[[fault]]
-id = "deps-py-onto-app"
+[[family]]
 guard = "each_member_depends_on_exactly_the_crates_of_ours_its_layer_allows"
 run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "each_member_depends_on_exactly_the_crates_of_ours_its_layer_allows"]
 expect = "test-failed"
 suite = "rust"
+
+[[family.fault]]
+id = "deps-py-onto-app"
 message = "microvms-py's dependencies among the workspace's crates"
 transform = { file = "bindings/microvms-py/Cargo.toml", replace = "[dependencies]\n", with = "[dependencies]\nmicrovms-app = { path = \"../../crates/microvms-app\" }\n" }
 
 # ARCH-2: a daemon without the protocol crate has to carry its own copy of the wire types, and
 # a copy drifts without a compile error.
-[[fault]]
+[[family.fault]]
 id = "deps-agentd-protocol-dropped"
-guard = "each_member_depends_on_exactly_the_crates_of_ours_its_layer_allows"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "each_member_depends_on_exactly_the_crates_of_ours_its_layer_allows"]
-expect = "test-failed"
-suite = "rust"
 message = "agentd's dependencies among the workspace's crates"
 transform = { file = "crates/agentd/Cargo.toml", replace = "protocol = { package = \"microvms-protocol\"", with = "# protocol = { package = \"microvms-protocol\"" }
 

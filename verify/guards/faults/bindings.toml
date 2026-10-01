@@ -39,8 +39,7 @@ transform = { file = "bindings/microvms-js/src/exec.rs", replace = "match sender
 # `napi::Error` there drops the chain, and core's stderr copy, its drive-error text and its two
 # sends at once are each put back the way #252 found them.
 
-[[fault]]
-id = "js-spawn-gap-code-chain"
+[[family]]
 guard = "a gap errors both streams by default and names the range to resume from"
 run = [
   ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
@@ -48,19 +47,15 @@ run = [
 ]
 expect = "test-failed"
 suite = "bindings"
+
+[[family.fault]]
+id = "js-spawn-gap-code-chain"
 message = "stdout: the ERR_ code is on the cause"
 note = "bindings/microvms-js/__test__/process.mjs::a gap errors both streams by default and names the range to resume from"
 transform = { file = "bindings/microvms-js/src/process.rs", replace = "        .map_err(|error| js_async(error).into())\n", with = "        .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))\n" }
 
-[[fault]]
+[[family.fault]]
 id = "js-spawn-gap-stderr-chain"
-guard = "a gap errors both streams by default and names the range to resume from"
-run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
-  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/process.mjs"],
-]
-expect = "test-failed"
-suite = "bindings"
 message = "stderr: the wire kind is one level deeper"
 transform = { file = "crates/microvms-app/src/session/split.rs", replace = "        Some(wire) => Error::wire(wire, error.to_string()),\n", with = "        Some(_) => Error::new(error.kind(), error.to_string()),\n" }
 
@@ -166,8 +161,7 @@ suite = "bindings"
 message = "pip install pytestCOPY agentd"
 transform = { file = "crates/microvms-app/src/control/artifact.rs", replace = "    wrapped.push_str(task);\n    if !task.ends_with('\\n') {\n        wrapped.push('\\n');\n    }\n", with = "    wrapped.push_str(task);\n" }
 
-[[fault]]
-id = "parity-py-empty-corpus"
+[[family]]
 guard = "bindings/microvms-py/tests/test_parity_cases.py::test_every_area_and_the_sentinel_run"
 run = [
   ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
@@ -175,18 +169,14 @@ run = [
 ]
 expect = "test-failed"
 suite = "bindings"
+
+[[family.fault]]
+id = "parity-py-empty-corpus"
 message = "no case runs in area 'image-name' on py"
 transform = { file = "bindings/microvms-py/tests/test_parity_cases.py", replace = "CASES = ROOT / \"verify\" / \"parity\" / \"cases\"\n", with = "CASES = Path(__import__(\"tempfile\").mkdtemp())\n" }
 
-[[fault]]
+[[family.fault]]
 id = "parity-py-loader-returns-nothing"
-guard = "bindings/microvms-py/tests/test_parity_cases.py::test_every_area_and_the_sentinel_run"
-run = [
-  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
-  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_every_area_and_the_sentinel_run"],
-]
-expect = "test-failed"
-suite = "bindings"
 message = "the sentinel wrap-dockerfile/sentinel.json wasn't loaded"
 transform = { file = "bindings/microvms-py/tests/test_parity_cases.py", replace = "                cases.append(read_case(path, area.name))\n", with = "                read_case(path, area.name)\n" }
 
@@ -202,8 +192,7 @@ suite = "bindings"
 message = "the py runner has no handler for area 'size-class'"
 transform = { file = "bindings/microvms-py/tests/test_parity_cases.py", replace = "    \"size-class\": size_class,\n", with = "" }
 
-[[fault]]
-id = "parity-ts-empty-corpus"
+[[family]]
 guard = "every area and the sentinel run"
 run = [
   ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
@@ -211,18 +200,14 @@ run = [
 ]
 expect = "test-failed"
 suite = "bindings"
+
+[[family.fault]]
+id = "parity-ts-empty-corpus"
 message = "no case runs in area image-name on ts"
 transform = { file = "bindings/microvms-js/__test__/parity_cases.mjs", replace = "const CASES = join(ROOT, 'verify', 'parity', 'cases');\n", with = "const CASES = (await import('node:fs')).mkdtempSync(join((await import('node:os')).tmpdir(), 'parity-empty-'));\n" }
 
-[[fault]]
+[[family.fault]]
 id = "parity-ts-loader-returns-nothing"
-guard = "every area and the sentinel run"
-run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
-  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
-]
-expect = "test-failed"
-suite = "bindings"
 message = "the sentinel wrap-dockerfile/sentinel.json wasn't loaded"
 transform = { file = "bindings/microvms-js/__test__/parity_cases.mjs", replace = "        cases.push(readCase(path, area, name));\n", with = "        readCase(path, area, name);\n" }
 

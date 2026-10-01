@@ -25,61 +25,55 @@ transform = { file = "tools/check-parity.py", replace = "    if problems:\n     
 
 # The parity-gap collector. Its sentinel first: a collector that reads nothing, and one that reads
 # the decisions instead of the gaps, both fail against verify/ratchet/fixtures/sentinel/parity/.
-[[fault]]
-id = "ratchet-parity-gap-sentinel"
+[[family]]
 guard = "verify/ratchet/fixtures/sentinel/expected.json"
 run = ["./tools/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "ratchet-parity-gap-sentinel"
 message = "sentinel: the parity-gap collector found nothing"
 transform = { file = "tools/ratchet.py", replace = "records = json.loads(out.stdout)[\"exemptions\"]", with = "records = []" }
 
-[[fault]]
+[[family.fault]]
 id = "ratchet-parity-gap-sentinel-decisions"
-guard = "verify/ratchet/fixtures/sentinel/expected.json"
-run = ["./tools/ratchet.py", "--base", "HEAD"]
-expect = "exit-nonzero"
-suite = "script"
 message = "sentinel: unexpected [parity-gap] ledger/core"
 transform = { file = "tools/ratchet.py", replace = "if record[\"issue\"] is not None", with = "if record[\"issue\"] is None" }
 
-[[fault]]
-id = "ratchet-parity-gap-unit"
+[[family]]
 guard = "test_ratchet.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "ParityGapTests"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "ratchet-parity-gap-unit"
 message = "FAIL: test_a_tracked_exemption_is_a_gap_and_a_decision_is_not ("
 transform = { file = "tools/ratchet.py", replace = "if record[\"issue\"] is not None", with = "if record[\"issue\"] is None" }
 
-[[fault]]
+[[family.fault]]
 id = "ratchet-parity-gap-unreadable-issue"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "ParityGapTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_an_issue_the_check_cannot_read_is_an_error ("
 transform = { file = "tools/check-parity.py", replace = "    if problems:\n        print(\"parity: the table's exemptions can't be read:\")", with = "    if False:\n        print(\"parity: the table's exemptions can't be read:\")" }
 
 # The real tree: an empty table, which leaves the category nothing to hold, and a gap the base
 # doesn't have.
-[[fault]]
-id = "ratchet-parity-gap-empty-table"
+[[family]]
 guard = "tools/ratchet.py"
 run = ["./tools/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "ratchet-parity-gap-empty-table"
 # Both trees are read through the same scope, so both come up empty, and the category with no
 # drift reads as ready to promote.
 message = "promote parity-gap: move its rule into"
 transform = { file = "tools/ratchet.py", replace = "parity_table=root / \"verify\" / \"parity\" / \"capabilities.toml\",", with = "parity_table=root / \"verify\" / \"parity\" / \"fixtures\" / \"empty.toml\"," }
 
-[[fault]]
+[[family.fault]]
 id = "ratchet-parity-gap-new-drift"
-guard = "tools/ratchet.py"
-run = ["./tools/ratchet.py", "--base", "HEAD"]
-expect = "exit-nonzero"
-suite = "script"
 message = "new drift: [parity-gap] image-exists/cli. Give that surface the capability"
 transform = { file = "verify/parity/capabilities.toml", replace = "cli = { exempt = \"`ls --remote` lists images; no command asks about one\" }", with = "cli = { exempt = \"`ls --remote` lists images; no command asks about one\", issue = \"#269\" }" }
 
@@ -93,52 +87,44 @@ message = "FAIL: test_rule_1_a_new_parity_gap_points_at_the_table ("
 transform = { file = "tools/ratchet.py", replace = "NEW_DRIFT_FIX.get(category, LAYERING_FIX)", with = "LAYERING_FIX" }
 
 # The drift page's history: a category a commit's ratchet didn't collect is null there, not 0.
-[[fault]]
-id = "ratchet-history-not-collected"
+[[family]]
 guard = "test_ratchet.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "HistoryTests"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "ratchet-history-not-collected"
 message = "FAIL: test_a_category_a_commit_did_not_collect_is_null_there ("
 transform = { file = "tools/ratchet-history.py", replace = "counts[category] if category in collected else None", with = "counts[category]" }
 
-[[fault]]
+[[family.fault]]
 id = "ratchet-history-untraced-null"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "HistoryTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_untraced_is_null_before_the_commit_that_collects_it ("
 transform = { file = "tools/ratchet-history.py", replace = "counts[category] if category in collected else None", with = "counts[category]" }
 
 # The untraced collector (#295). The real tree first: a traced key dropped from its group's file in
 # verify/spec/traced/ and a new requirement with no entry are both new drift, with rule 1's advice for
 # the category.
-[[fault]]
-id = "ratchet-untraced-traced-deletion"
+[[family]]
 guard = "tools/ratchet.py"
 run = ["./tools/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "ratchet-untraced-traced-deletion"
 message = "new drift: [untraced] IMAGE-8. Trace the requirement: list its key in its group's file"
 transform = { file = "verify/spec/traced/IMAGE.toml", replace = "[IMAGE-8]\nissue = \"#221\"\n\n", with = "" }
 
-[[fault]]
+[[family.fault]]
 id = "ratchet-untraced-new-key"
-guard = "tools/ratchet.py"
-run = ["./tools/ratchet.py", "--base", "HEAD"]
-expect = "exit-nonzero"
-suite = "script"
 message = "new drift: [untraced] TRAP-14. Trace the requirement: list its key in its group's file"
 transform = { file = "verify/spec/core.symspec.json", replace = "    \"5fc0dbf7-83f6-4d1d-96ea-902bfacee0b1\": {\n", with = "    \"seeded-trap-14\": { \"key\": \"TRAP-14\", \"sentence\": \"A seeded requirement.\" },\n    \"5fc0dbf7-83f6-4d1d-96ea-902bfacee0b1\": {\n" }
 
 # A spec the collector can't read is an error, not every entry fixed.
-[[fault]]
+[[family.fault]]
 id = "ratchet-untraced-no-requirements"
-guard = "tools/ratchet.py"
-run = ["./tools/ratchet.py", "--base", "HEAD"]
-expect = "exit-nonzero"
-suite = "script"
 message = "core.symspec.json has no requirements object"
 transform = { file = "verify/spec/core.symspec.json", replace = "  \"requirements\": {", with = "  \"requirement\": {" }
 
@@ -154,39 +140,29 @@ transform = { file = "tools/ratchet.py", replace = "return Counter((\"untraced\"
 
 # Its unit tests: the fixture's exact keys, the empty-input refusals, the repo scope reading
 # every spec check-trace.py reads, and rule 1's advice.
-[[fault]]
-id = "ratchet-untraced-unit"
+[[family]]
 guard = "test_ratchet.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "UntracedTests"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "ratchet-untraced-unit"
 message = "FAIL: test_the_fixture_spec_yields_exactly_its_untraced_keys ("
 transform = { file = "tools/ratchet.py", replace = "for key in keys - checked)", with = "for key in keys)" }
 
-[[fault]]
+[[family.fault]]
 id = "ratchet-untraced-empty-spec"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "UntracedTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_one_empty_spec_is_refused_too ("
 transform = { file = "tools/ratchet.py", replace = "        if not found:\n", with = "        if False:\n" }
 
-[[fault]]
+[[family.fault]]
 id = "ratchet-untraced-empty-traced"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "UntracedTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_an_empty_traced_is_refused ("
 transform = { file = "tools/ratchet.py", replace = "    if not traced:\n", with = "    if False:\n" }
 
-[[fault]]
+[[family.fault]]
 id = "ratchet-untraced-repo-specs"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "UntracedTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_the_repo_scope_reads_every_spec_check_trace_reads ("
 transform = { file = "tools/ratchet.py", replace = "        specs=(\n            root / \"verify\" / \"spec\" / \"core.symspec.json\",\n            root / \"verify\" / \"spec\" / \"agentd.symspec.json\",\n        ),", with = "        specs=(\n            root / \"verify\" / \"spec\" / \"core.symspec.json\",\n        )," }
 
@@ -286,44 +262,40 @@ suite = "script"
 message = "py: AgentVm.image_name belongs to no row"
 transform = { file = "verify/parity/capabilities.toml", replace = "py = \"AgentVm.image_name\"\n", with = "py = { exempt = \"seeded\" }\n" }
 
-[[fault]]
-id = "parity-test-type-method"
+[[family]]
 guard = "test_check_parity.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "RuleTests"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "parity-test-type-method"
 message = "FAIL: test_a_new_method_on_both_sides_of_a_type_needs_a_row ("
 transform = { file = "tools/check-parity.py", replace = "    if key != \"ts\" or cls not in types:\n        return methods\n", with = "    if cls in types:\n        return set()\n    if key != \"ts\":\n        return methods\n" }
 
 # The TypeScript side of a `[[type]]` holds a method only when its Python twin is a method: napi
 # writes each getter as a method, and holding those would ask for a row per accessor.
-[[fault]]
+[[family.fault]]
 id = "parity-test-type-accessor"
-guard = "test_check_parity.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "RuleTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_type_accessor_is_held_by_the_pairing_alone ("
 transform = { file = "tools/check-parity.py", replace = "    return {name for name in methods if normalize(name) in python_methods}\n", with = "    return methods\n" }
 
 # The TypeScript reader (#271 review): a function inside a namespace, the shape napi-rs writes
 # for `#[napi(namespace = ...)]`, and a declaration TypeDoc drops for its JSDoc tag. Each one
 # is seeded into the real declarations, TS-only, with no row.
-[[fault]]
-id = "parity-ts-namespace-function"
+[[family]]
 guard = "tools/check-parity.py"
 run = ["./tools/check-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "parity-ts-namespace-function"
 message = "ts: snapshots.snapshotVm belongs to no row"
 transform = { file = "bindings/microvms-js/index.d.ts", replace = "/** The layer's fixed values as JSON, for a caller that wants to reason about the guest. */\n", with = "export declare namespace snapshots {\n  export function snapshotVm(): void\n}\n/** The layer's fixed values as JSON, for a caller that wants to reason about the guest. */\n" }
 
-[[fault]]
+[[family.fault]]
 id = "parity-ts-hidden-tag"
-guard = "tools/check-parity.py"
-run = ["./tools/check-parity.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "has JSDoc tags TypeDoc drops a declaration for"
 transform = { file = "bindings/microvms-js/index.d.ts", replace = "/** The layer's fixed values as JSON, for a caller that wants to reason about the guest. */\n", with = "/** Snapshots the VM. @hidden */\nexport declare function snapshotVm(): void\n/** The layer's fixed values as JSON, for a caller that wants to reason about the guest. */\n" }
 
@@ -349,86 +321,60 @@ transform = { file = "tools/check-parity.py", replace = "    if hidden:\n       
 # The locate runs under a lock beside npm's cache; without it the fake npx finds the lock free.
 # The lock is `tools/npx_cache.py`'s, which check-dts-consumer.py's tsc install shares (#348), so
 # the entries after this one seed it there and fire through the TypeDoc locate's tests.
-[[fault]]
-id = "parity-npx-lock-dropped"
+[[family]]
 guard = "test_check_parity.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "NpxLockTests"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "parity-npx-lock-dropped"
 message = "FAIL: test_typedoc_is_located_with_the_npx_lock_held ("
 transform = { file = "tools/check-parity.py", replace = "    with npx_lock():\n        where = run(", with = "    with contextlib.nullcontext():\n        where = run(" }
 
 # A blank answer from npm would lock a file nobody else opens.
-[[fault]]
+[[family.fault]]
 id = "parity-npx-lock-blank-cache"
-guard = "test_check_parity.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "NpxLockTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_an_npm_that_names_no_cache_is_refused ("
 transform = { file = "tools/npx_cache.py", replace = "    if not cache.is_absolute():\n", with = "    if False:\n" }
 
 # A shared lock lets a second caller into the install, so the race comes back with the lock taken.
-[[fault]]
+[[family.fault]]
 id = "parity-npx-lock-shared"
-guard = "test_check_parity.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "NpxLockTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_typedoc_is_located_with_the_npx_lock_held ("
 transform = { file = "tools/npx_cache.py", replace = "fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)", with = "fcntl.flock(handle, fcntl.LOCK_SH | fcntl.LOCK_NB)" }
 
 # The same for the wait: a second caller waiting shared still gets in beside a third.
-[[fault]]
+[[family.fault]]
 id = "parity-npx-lock-shared-wait"
-guard = "test_check_parity.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "NpxLockTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_second_caller_waits_for_the_lock ("
 transform = { file = "tools/npx_cache.py", replace = "            fcntl.flock(handle, fcntl.LOCK_EX)\n", with = "            fcntl.flock(handle, fcntl.LOCK_SH)\n" }
 
 # A lock that doesn't wait raises for a second caller, so every overlap fails instead of the rare
 # race.
-[[fault]]
+[[family.fault]]
 id = "parity-npx-lock-nonblocking"
-guard = "test_check_parity.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "NpxLockTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_second_caller_waits_for_the_lock ("
 transform = { file = "tools/npx_cache.py", replace = "            fcntl.flock(handle, fcntl.LOCK_EX)\n", with = "            raise\n" }
 
 # A lock that polls for a second and then installs anyway passes a short hold (#347 review): the
 # cold install it's for takes longer, so the race comes back. The recorded calls catch it.
-[[fault]]
+[[family.fault]]
 id = "parity-npx-lock-gives-up"
-guard = "test_check_parity.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "NpxLockTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_second_caller_waits_for_the_lock ("
 transform = { file = "tools/npx_cache.py", replace = "            fcntl.flock(handle, fcntl.LOCK_EX)\n", with = "            for _ in range(50):\n                try:\n                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)\n                    break\n                except BlockingIOError:\n                    __import__(\"time\").sleep(0.02)\n" }
 
 # A waiter that prints nothing leaves a host-wide stall behind a slow install with no trace in the
 # log (#347 review).
-[[fault]]
+[[family.fault]]
 id = "parity-npx-lock-silent-wait"
-guard = "test_check_parity.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "NpxLockTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_second_caller_waits_for_the_lock ("
 transform = { file = "tools/npx_cache.py", replace = "            print(\n                f\"{who}: waiting for {lock}, held by another npx install\",\n                file=sys.stderr,\n            )\n", with = "            pass\n" }
 
 # The race needs only this package set's directory to be cold, not the whole cache, so a lock
 # skipped once `_npx` exists lets it back in (#347 review).
-[[fault]]
+[[family.fault]]
 id = "parity-npx-lock-skipped-when-warm"
-guard = "test_check_parity.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "NpxLockTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_typedoc_is_located_with_the_npx_lock_held ("
 transform = { file = "tools/npx_cache.py", replace = "    lock = cache / \"microvms-agentd-npx.lock\"\n", with = "    if (cache / \"_npx\").is_dir():\n        yield cache\n        return\n    lock = cache / \"microvms-agentd-npx.lock\"\n" }
 

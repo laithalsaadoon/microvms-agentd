@@ -2844,9 +2844,15 @@ mod tests {
     /// the waiter task after the child had started, so the exec never published a
     /// result and a wait on it hung (#335).
     ///
-    /// **Falsification**: `verify/guards/faults/seconds-flags.toml` entry
-    /// `agentd-timeout-past-the-clock-panics` restores the unchecked
-    /// `Instant::now() + budget`, and the exec never finishes.
+    /// **Falsification**: the block below restores the unchecked `Instant::now() + budget`, and
+    /// the exec never finishes.
+    ///
+    /// ```falsification
+    /// id = "agentd-timeout-past-the-clock-panics"
+    /// replace = "    let deadline = timeout.and_then(|budget| Instant::now().checked_add(budget));\n"
+    /// with = "    let deadline = timeout.map(|budget| Instant::now() + budget);\n"
+    /// message = "exec hugetimeout never finished"
+    /// ```
     #[tokio::test]
     async fn a_timeout_past_what_the_clock_can_hold_still_finishes() {
         for huge in [1e19, 1.8e19] {

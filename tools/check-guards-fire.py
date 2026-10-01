@@ -285,10 +285,84 @@ An entry, in `verify/guards/faults/<owner>.toml`:
   suite = "rust"                # rust | script | bindings
   note = "<path>::<item>"       # the Falsification note this entry registers, if any
   # and exactly one fault:
-  transform = { file = "...", replace = "...", with = "..." }   # or a list of them
+  transform = { file = "...", replace = "...", with = "..." }   # or a list of them; with no
+                                                                # `replace`, `with` is the
+                                                                # file's whole text
   patch = "verify/guards/faults/<id>.patch"
   argv_fault = ["--root", "{empty_dir}"]   # appended to the last command; for a gate whose
                                            # proof is the input it's handed, not the tree
+
+Entries that share their guard, command, `expect` and `suite` (and `note`, when every one has
+the same) are written once as a family: the shared fields in a `[[family]]` header, and each
+entry's own fields in a `[[family.fault]]` row under it.
+
+  [[family]]
+  guard = "tools/check-agents-md.py"
+  run = ["./tools/check-agents-md.py"]
+  expect = "exit-nonzero"
+  suite = "script"
+
+  [[family.fault]]
+  id = "agents-md-task-renamed"
+  message = "..."
+  transform = { file = "...", replace = "...", with = "..." }
+
+The loader (`parse_registry`) expands each family into its entries, a row's fields with its
+header's, in the place the family takes in its file, so everything that reads the registry
+(`list`, `fire`, `build`, the verdict cache, check-agents-md.py and check-ci-parity.py) sees
+exactly the entries a file of `[[fault]]` tables would hold. A header holds only those shared
+fields (`FAMILY_HEADER`), a row sets none of its header's, and a family has a row; the loader
+refuses a family that breaks one of those, and each expanded entry is held to the schema above
+like any other, so a row missing a field fails as the entry would.
+
+A gate's vacuity entries (each input emptied, each input unreadable, its sentinel removed) are
+declared rather than written, once per gate, in a `[[scanner]]`:
+
+  [[scanner]]
+  id = "ci-parity"                        # each generated id starts with it
+  guard = "tools/check-ci-parity.py"
+  run = ["./tools/check-ci-parity.py"]
+  suite = "script"
+  inputs = [".github/workflows/ci.yml", "rust-toolchain.toml"]
+  empty = "{input} is empty"              # what a run with an emptied input prints
+  unreadable = "{input} doesn't parse"    # and with one no parser reads
+  sentinel = { file = "...", replace = "...", with = "...", message = "..." }
+
+The loader (`scanner_entries`) writes, in the scanner's place, an `exit-nonzero` entry for each
+input and each failure the scanner gives, `<id>-empty-<input>` and `<id>-unreadable-<input>`,
+each seeded by a whole-file transform (`{ file, with }` with no `replace`: `with` is the file's
+whole text, `""` or `UNREADABLE`, which TOML, YAML and JSON refuse), and `<id>-sentinel-removed`
+for the sentinel, which every scanner has to declare. `{input}` in a failure is the input's
+path. A whole-file transform has no anchor to go stale; one that writes what its file already
+holds seeds nothing, and `list` says so. A scanner's inputs are only the files whose empty and
+unreadable failures it prints in those words; an input whose reader says it otherwise keeps a
+written entry.
+
+A Rust test's Falsification note can write its entry itself, in a fenced block at its end:
+
+  /// **Falsification**: the block below lets `../x` normalize to `x`, and this is red.
+  ///
+  /// ```falsification
+  /// id = "agentd-fs-pop"          # `<package>-<test>` when there's none
+  /// file = "crates/agentd/src/fs.rs"   # the test's own file when there's none
+  /// replace = "parts.pop()?"
+  /// with = "parts.pop()"
+  /// message = "..."               # when the entry needs one
+  /// ```
+  #[test]
+  fn normalize_rejects_escapes_and_absorbs_benign_traversal() { ... }
+
+The loader (`falsification_entries`, through `registry_tables`) finds each block with `git
+grep`, places it on the function its doc comment is on with ast-grep, and writes the rest of the
+entry from where the test is (`rust_target`): `guard` is the test's path in its target (its
+file's module path and the modules around it), `run` is `cargo test -p <package>` with `--lib`,
+`--bin <name>` or `--test <name>` and `-- --exact <guard>`, `suite` is `rust`, `expect` is
+`test-failed`, and `note` is the note's key, so the census ties the note to its entry by
+construction. These entries follow the registry's files, by file and line. The loader refuses a
+block that isn't closed, doesn't parse, holds another key, sits outside a note or on a function
+that isn't a `#[test]`, or on a test whose run it can't write; `list` holds a block's anchor like
+any other, so a block that no longer applies is a stale anchor there. A note in prose still
+takes a written entry or its line in the unregistered list.
 
 Every cargo test run passes `--exact` (cargo's filter is a substring match). A bindings entry
 rebuilds the extension first (`maturin develop`, `napi build`), or the test loads the stale
@@ -457,7 +531,8 @@ class Fault:
 
 @dataclass(frozen=True)
 class Table:
-    """One `[[fault]]` table as its registry file holds it, before its shape is checked."""
+    """One entry as its registry file holds it, before its shape is checked: a `[[fault]]`
+    table, or a `[[family]]` row with its family's header in it."""
 
     file: str
     number: int
@@ -480,10 +555,129 @@ def registry_file(path: str) -> bool:
     return path.rpartition("/")[0] == REGISTRY_DIR and path.endswith(".toml")
 
 
+# What a family's header may hold, which each of its rows then has: the fields its entries
+# share. The rest (the id, the fault, its message) is each row's own.
+FAMILY_HEADER = ("guard", "run", "expect", "suite", "note")
+# A file's top-level tables, as a line of its text writes each one's header.
+TOP_TABLE = re.compile(
+    r"^[ \t]*\[\[[ \t]*(fault|family|scanner)[ \t]*\]\][ \t]*(?:#.*)?$"
+)
+# What a `[[scanner]]` declares (`scanner_entries`), and its sentinel's fields.
+SCANNER_KEYS = (
+    "id",
+    "guard",
+    "run",
+    "suite",
+    "inputs",
+    "empty",
+    "unreadable",
+    "sentinel",
+)
+SENTINEL_KEYS = ("file", "replace", "with", "message")
+# What an unreadable input is made to hold: text that TOML, YAML and JSON all refuse.
+UNREADABLE = "{[\n"
+
+
+def family_rows(family: object) -> tuple[list[dict], str | None]:
+    """A `[[family]]` table's entries, each its header's fields with a row's, or why it has
+    none: a header field outside `FAMILY_HEADER`, no row, or a row that sets a field its
+    header sets. Each entry's own shape is `shape`'s to check, as a `[[fault]]` table's is."""
+    if not isinstance(family, dict):
+        return [], "isn't a table"
+    header = {k: v for k, v in family.items() if k != "fault"}
+    if extra := sorted(set(header) - set(FAMILY_HEADER)):
+        return [], (
+            f"its header sets {', '.join(extra)}, which a row sets: a header holds only "
+            f"{', '.join(FAMILY_HEADER)}"
+        )
+    rows = family.get("fault")
+    if not isinstance(rows, list) or not rows:
+        return [], "has no [[family.fault]] row"
+    entries = []
+    for number, row in enumerate(rows, 1):
+        if not isinstance(row, dict):
+            return [], f"row {number} isn't a table"
+        if both := sorted(set(row) & set(header)):
+            name = row.get("id", number)
+            return [], f"row {name!r} sets {', '.join(both)}, which its header sets"
+        entries.append({**header, **row})
+    return entries, None
+
+
+def scanner_entries(scanner: object) -> tuple[list[dict], str | None]:
+    """A `[[scanner]]`'s entries, or why it has none. For each of its `inputs`, one entry
+    empties the file when `empty` gives the failure that says so, and one makes it text no
+    parser reads when `unreadable` does; `{input}` in either names the input. One more removes
+    its sentinel, which every scanner declares. Each is an `exit-nonzero` entry on the
+    scanner's guard and command, held to the schema like any other, with an id made of the
+    scanner's: `<id>-empty-<input>`, `<id>-unreadable-<input>`, `<id>-sentinel-removed`."""
+    if not isinstance(scanner, dict):
+        return [], "isn't a table"
+    if extra := sorted(set(scanner) - set(SCANNER_KEYS)):
+        return [], f"sets {', '.join(extra)}, which a scanner doesn't take"
+    sid = scanner.get("id")
+    if not isinstance(sid, str) or not ID.match(sid):
+        return [], "needs an `id`, a lowercase [a-z0-9-] prefix for its entries' ids"
+    inputs = scanner.get("inputs")
+    if (
+        not isinstance(inputs, list)
+        or not inputs
+        or not all(isinstance(path, str) and path for path in inputs)
+    ):
+        return [], "declares no inputs: `inputs` is a non-empty list of paths"
+    failures = {
+        kind: scanner[kind] for kind in ("empty", "unreadable") if kind in scanner
+    }
+    if not failures or not all(
+        isinstance(text, str) and text for text in failures.values()
+    ):
+        return [], (
+            "says no failure an input's fault draws: `empty` or `unreadable`, the message "
+            "a run with that input prints"
+        )
+    sentinel = scanner.get("sentinel")
+    if not isinstance(sentinel, dict) or set(sentinel) != set(SENTINEL_KEYS):
+        return [], (
+            "declares no sentinel: `sentinel` is the `file`, `replace` and `with` that "
+            "remove it and the `message` a run without it prints"
+        )
+    header = {
+        key: scanner[key] for key in ("guard", "run", "suite") if key in scanner
+    } | {"expect": "exit-nonzero"}
+    entries = []
+    for path in inputs:
+        name = re.sub(r"[^a-z0-9]+", "-", path.lower()).strip("-")
+        for kind, text in (("empty", ""), ("unreadable", UNREADABLE)):
+            if kind in failures:
+                entries.append(
+                    {
+                        "id": f"{sid}-{kind}-{name}",
+                        **header,
+                        "message": failures[kind].replace("{input}", path),
+                        "transform": {"file": path, "with": text},
+                    }
+                )
+    entries.append(
+        {
+            "id": f"{sid}-sentinel-removed",
+            **header,
+            "message": sentinel["message"],
+            "transform": {key: sentinel[key] for key in ("file", "replace", "with")},
+        }
+    )
+    return entries, None
+
+
 def parse_registry(texts: dict[str, str]) -> tuple[list[Table], list[str]]:
-    """The `[[fault]]` tables of the registry files in `texts` (path to text), in sorted file
-    order, and what's wrong with the files: none at all (the floor), one that doesn't parse,
-    and one that holds no entry."""
+    """The entries of the registry files in `texts` (path to text), in sorted file order and
+    each file's own, and what's wrong with the files: none at all (the floor), one that doesn't
+    parse, one that holds no entry, and a `[[family]]` whose rows can't be read.
+
+    A family is its entries, each its header's fields with a row's, in the place the family
+    takes in the file. TOML reads a file's `[[fault]]` and `[[family]]` tables as two arrays,
+    so the order they're written in comes from the text's headers; a file whose headers don't
+    count out to its arrays (a header written inside a multi-line string) is refused rather
+    than read in some other order."""
     if not texts:
         return [], [f"no file matches {REGISTRY}, so the registry has no entry"]
     tables: list[Table] = []
@@ -494,11 +688,42 @@ def parse_registry(texts: dict[str, str]) -> tuple[list[Table], list[str]]:
         except tomllib.TOMLDecodeError as error:
             problems.append(f"{name} doesn't parse: {error}")
             continue
-        raw = data.get("fault")
-        if not isinstance(raw, list) or not raw:
+        arrays = {kind: data.get(kind, []) for kind in ("fault", "family", "scanner")}
+        if not all(isinstance(array, list) for array in arrays.values()):
+            problems.append(f"{name}: fault, family and scanner are arrays of tables")
+            continue
+        if not any(arrays.values()):
             problems.append(f"{name} has no [[fault]] entry")
             continue
-        tables += [Table(name, number, entry) for number, entry in enumerate(raw, 1)]
+        order = [
+            match.group(1)
+            for line in texts[name].splitlines()
+            if (match := TOP_TABLE.match(line))
+        ]
+        counted = tuple(order.count(kind) for kind in arrays)
+        if counted != tuple(len(array) for array in arrays.values()):
+            problems.append(
+                f"{name}: its [[fault]], [[family]] and [[scanner]] headers don't count out "
+                "to its tables, so the order they're in can't be read"
+            )
+            continue
+        written = {kind: iter(array) for kind, array in arrays.items()}
+        number = 0
+        seen = dict.fromkeys(arrays, 0)
+        for kind in order:
+            table = next(written[kind])
+            seen[kind] += 1
+            entries, why = [table], None
+            if kind == "family":
+                entries, why = family_rows(table)
+            elif kind == "scanner":
+                entries, why = scanner_entries(table)
+            if why:
+                problems.append(f"{name}: {kind} {seen[kind]} {why}")
+                continue
+            for entry in entries:
+                number += 1
+                tables.append(Table(name, number, entry))
     return tables, problems
 
 
@@ -519,6 +744,206 @@ def registry_tables(root: Path) -> tuple[list[Table], list[str]]:
             f"owner, and nothing reads it: move its entries into their owners' files in "
             f"{REGISTRY_DIR}/ and delete it",
         )
+    written, refused = falsification_entries(root)
+    return tables + written, problems + refused
+
+
+# A Falsification block: the fenced lines of a Rust test's note that say what to replace, from
+# which the entry that seeds it is written (`falsification_entries`).
+BLOCK_OPEN = re.compile(r"^\s*///[ \t]?```falsification[ \t]*$")
+BLOCK_CLOSE = re.compile(r"^\s*///[ \t]?```[ \t]*$")
+BLOCK_KEYS = ("id", "file", "replace", "with", "message")
+# A test attribute: `#[test]`, or a runtime's (`#[tokio::test]`, with its arguments or not).
+TEST_ATTRIBUTE = re.compile(r"^\s*#\[(?:\w+::)*test\b")
+BLOCK_RULES = [
+    {
+        "id": "block-fn",
+        "language": "Rust",
+        "rule": {"kind": "function_item", "has": {"field": "name", "pattern": "$NAME"}},
+    },
+    {
+        "id": "block-mod",
+        "language": "Rust",
+        "rule": {
+            "kind": "mod_item",
+            "all": [
+                {"has": {"field": "name", "pattern": "$NAME"}},
+                {"has": {"field": "body", "kind": "declaration_list"}},
+            ],
+        },
+    },
+]
+
+
+def rust_target(root: Path, path: str) -> tuple[str, list[str], list[str]] | str:
+    """The package, cargo target flags and module path a test in `path` runs under, or why
+    they can't be said. A file directly in a crate's `tests/` is that test target's. One under
+    its `src/` (outside `src/bin/`) is its library's, or, in a crate with none, its
+    `src/main.rs` binary's (the `[[bin]]` at that path, or the package's own name)."""
+    parts = Path(path).parts
+    for depth in range(len(parts) - 1, 0, -1):
+        manifest = root.joinpath(*parts[:depth], "Cargo.toml")
+        if manifest.is_file():
+            break
+    else:
+        return "no Cargo.toml above it"
+    data = tomllib.loads(manifest.read_text(encoding="utf-8"))
+    package = data.get("package")
+    name = package.get("name") if isinstance(package, dict) else None
+    if not isinstance(name, str):
+        return f"{Path(*parts[:depth], 'Cargo.toml')} names no package"
+    inner = list(parts[depth:])
+    if inner[:1] == ["tests"] and len(inner) == 2:
+        return name, ["--test", Path(inner[1]).stem], []
+    if inner[:1] != ["src"] or inner[1:2] == ["bin"]:
+        return (
+            "its test isn't in a crate's src/ (outside src/bin/) or directly in tests/"
+        )
+    crate = root.joinpath(*parts[:depth])
+    if (crate / "src" / "lib.rs").is_file():
+        flags, top = ["--lib"], "lib.rs"
+    else:
+        bins = [
+            b.get("name")
+            for b in data.get("bin", [])
+            if isinstance(b, dict) and b.get("path") == "src/main.rs"
+        ]
+        binary = (
+            bins[0] if bins else name if (crate / "src/main.rs").is_file() else None
+        )
+        if not isinstance(binary, str):
+            return "its crate has no library and no src/main.rs binary"
+        flags, top = ["--bin", binary], "main.rs"
+    modules = inner[1:]
+    if modules == [top]:
+        return name, flags, []
+    if modules in (["lib.rs"], ["main.rs"]):
+        return "its test is in the crate's other target"
+    last = modules.pop()
+    return name, flags, modules + ([] if last == "mod.rs" else [Path(last).stem])
+
+
+def falsification_entries(root: Path) -> tuple[list[Table], list[str]]:
+    """The entries the tree's Falsification blocks write, and what's wrong with a block.
+
+    A block is a fenced ```falsification in a Rust test's Falsification note, a TOML table of
+    `replace` and `with` (the transform), and, if it needs them, `file` (the test's own file
+    otherwise), `message`, and `id` (`<package>-<test>` otherwise). The rest is the test's:
+    `guard` is its path in its target, the module path of its file and the modules around
+    it; `run` is `cargo test -p <package> <target> -- --exact <guard>`; `suite` is `rust`,
+    `expect` is `test-failed`, and `note` is the note's key, so the census ties the note to
+    its entry by construction. The entries follow the registry's files, by file and line."""
+    listing = git(
+        root, "grep", "--untracked", "-n", "-I", "-E", r"^\s*///\s?```falsification",
+        "--", "*.rs", check=False,
+    )  # fmt: skip
+    files = sorted(
+        {line.split(":", 1)[0] for line in listing.stdout.splitlines() if line}
+    )
+    if not files:
+        return [], []
+    tables: list[Table] = []
+    problems: list[str] = []
+    placed = ast_grep(root, files, BLOCK_RULES)
+    for path in files:
+        lines = (root / path).read_text(encoding="utf-8").splitlines()
+        fns = sorted(
+            (
+                m["range"]["start"]["line"] + 1,
+                m["metaVariables"]["single"]["NAME"]["text"],
+            )
+            for m in placed
+            if m["file"] == path and m["ruleId"] == "block-fn"
+        )
+        mods = [
+            (
+                m["range"]["start"]["line"] + 1,
+                m["range"]["end"]["line"] + 1,
+                m["metaVariables"]["single"]["NAME"]["text"],
+            )
+            for m in placed
+            if m["file"] == path and m["ruleId"] == "block-mod"
+        ]
+        number = 0
+        while number < len(lines):
+            if not BLOCK_OPEN.match(lines[number]):
+                number += 1
+                continue
+            start = number + 1
+            close = next(
+                (n for n in range(start, len(lines)) if BLOCK_CLOSE.match(lines[n])),
+                None,
+            )
+            where = f"{path}:{start}"
+            if close is None:
+                problems.append(f"{where}: the Falsification block is never closed")
+                break
+            number = close + 1
+            body = "\n".join(
+                re.sub(r"^\s*///[ \t]?", "", line) for line in lines[start:close]
+            )
+            try:
+                block = tomllib.loads(body)
+            except tomllib.TOMLDecodeError as error:
+                problems.append(
+                    f"{where}: the Falsification block doesn't parse: {error}"
+                )
+                continue
+            if (
+                set(block) - set(BLOCK_KEYS)
+                or not {"replace", "with"} <= set(block)
+                or not all(isinstance(v, str) for v in block.values())
+            ):
+                problems.append(
+                    f"{where}: a Falsification block holds `replace` and `with` strings, "
+                    "and `id`, `file` or `message` if it needs them, and nothing else"
+                )
+                continue
+            fn = next(((line, name) for line, name in fns if line > close), None)
+            doc = [
+                n
+                for n in range(close, 0, -1)
+                if not lines[n - 1].lstrip().startswith("///")
+            ]
+            run_start = doc[0] if doc else 0
+            if not any(MARKER in line for line in lines[run_start:close]):
+                problems.append(
+                    f"{where}: a Falsification block sits in a note: its doc comment "
+                    f"carries {MARKER}"
+                )
+                continue
+            between = lines[close + 1 : fn[0] - 1] if fn else []
+            if fn is None or not any(TEST_ATTRIBUTE.match(line) for line in between):
+                problems.append(
+                    f"{where}: the Falsification block isn't on a `#[test]` function"
+                )
+                continue
+            target = rust_target(root, path)
+            if isinstance(target, str):
+                problems.append(f"{where}: the test's run can't be written: {target}")
+                continue
+            package, flags, modules = target
+            inline = [
+                name for first, last, name in sorted(mods) if first <= fn[0] <= last
+            ]
+            guard = "::".join([*modules, *inline, fn[1]])
+            fid = block.get("id") or f"{package}-{fn[1]}".replace("_", "-").lower()
+            data = {
+                "id": fid,
+                "guard": guard,
+                "run": ["cargo", "test", "-p", package, *flags, "--", "--exact", guard],
+                "expect": "test-failed",
+                "suite": "rust",
+                "note": f"{path}::{fn[1]}",
+                "transform": {
+                    "file": block.get("file", path),
+                    "replace": block["replace"],
+                    "with": block["with"],
+                },
+            }
+            if "message" in block:
+                data["message"] = block["message"]
+            tables.append(Table(path, start, data))
     return tables, problems
 
 
@@ -600,12 +1025,13 @@ def seeded_versions(entry: dict, root: Path) -> set[str]:
     transform = entry.get("transform")
     items = [transform] if isinstance(transform, dict) else transform
     for item in items if isinstance(items, list) else []:
-        if (
-            isinstance(item, dict)
-            and isinstance(item.get("with"), str)
-            and isinstance(item.get("replace"), str)
-        ):
+        if not isinstance(item, dict) or not isinstance(item.get("with"), str):
+            continue
+        if isinstance(item.get("replace"), str):
             out |= _versions([item["with"]]) - _versions([item["replace"]])
+        elif "replace" not in item:
+            # A whole-file transform writes every version its `with` holds.
+            out |= _versions([item["with"]])
     argv = entry.get("argv_fault")
     if isinstance(argv, list):
         out |= _versions([a for a in argv if isinstance(a, str)])
@@ -685,7 +1111,8 @@ def shape(entry: dict, root: Path) -> list[str]:
             out.append("`transform` must be a table or a list of tables")
             items = []
         for item in items:
-            if (
+            whole = isinstance(item, dict) and set(item) == {"file", "with"}
+            if not whole and (
                 not isinstance(item, dict)
                 or set(item) != {"file", "replace", "with"}
                 or not all(isinstance(v, str) for v in item.values())
@@ -695,8 +1122,13 @@ def shape(entry: dict, root: Path) -> list[str]:
             ):
                 out.append(
                     "each transform needs exactly `file`, `replace` and `with` strings, "
-                    "and `with` must differ from `replace`"
+                    "and `with` must differ from `replace`, or exactly `file` and `with` for "
+                    "the file's whole text"
                 )
+            elif whole and not (
+                all(isinstance(v, str) for v in item.values()) and item["file"]
+            ):
+                out.append("a whole-file transform's `file` and `with` are strings")
     if "argv_fault" in entry and not _argv(entry["argv_fault"]):
         out.append("`argv_fault` must be a non-empty argv list")
     message = entry.get("message")
@@ -714,6 +1146,14 @@ def shape(entry: dict, root: Path) -> list[str]:
                 "seeds"
             )
     return out
+
+
+def applied(text: str, item: dict) -> str:
+    """`text` with one transform made: its anchor replaced by its `with`, or, for a
+    whole-file transform (no `replace`), its `with` in place of the whole text."""
+    if "replace" not in item:
+        return item["with"]
+    return text.replace(item["replace"], item["with"])
 
 
 def seed(tree: Path, fault: Fault, dry: bool) -> str | None:
@@ -736,13 +1176,22 @@ def seed(tree: Path, fault: Fault, dry: bool) -> str | None:
                 edited[path] = path.read_text(encoding="utf-8")
             except FileNotFoundError:
                 return f"{item['file']} doesn't exist"
+        if "replace" not in item:
+            # A whole-file transform has no anchor to go stale, but one that writes what the
+            # file already holds seeds nothing.
+            if edited[path] == item["with"]:
+                return (
+                    f"{item['file']} already holds the whole text its transform writes"
+                )
+            edited[path] = applied(edited[path], item)
+            continue
         count = edited[path].count(item["replace"])
         if count != 1:
             first = item["replace"].splitlines()[0] if item["replace"] else ""
             return (
                 f"{item['file']}: the anchor {first!r} matches {count} times, not once"
             )
-        edited[path] = edited[path].replace(item["replace"], item["with"])
+        edited[path] = applied(edited[path], item)
     if not dry:
         for path, text in edited.items():
             path.write_text(text, encoding="utf-8")
@@ -852,10 +1301,12 @@ def tracked(root: Path) -> list[str]:
     return [p for p in out.split("\0") if p and p not in CENSUS_SKIPS]
 
 
-def ast_grep(root: Path, files: list[str]) -> list[dict]:
+def ast_grep(
+    root: Path, files: list[str], rules: list[dict] | None = None
+) -> list[dict]:
     if not files:
         return []
-    inline = "\n---\n".join(json.dumps(rule) for rule in RULES)
+    inline = "\n---\n".join(json.dumps(rule) for rule in rules or RULES)
     try:
         out = subprocess.run(
             ["ast-grep", "scan", "--inline-rules", inline, "--json=stream", *files],
@@ -1846,7 +2297,7 @@ def plan_batch(tree: Path, faults: list[Fault]) -> Plan:
             if name not in originals:
                 originals[name] = (tree / name).read_text(encoding="utf-8")
             text = edited.get(name, originals[name])
-            edited[name] = text.replace(item["replace"], item["with"])
+            edited[name] = applied(text, item)
         hunks = [
             (name, *changed_lines(originals[name], text))
             for name, text in edited.items()

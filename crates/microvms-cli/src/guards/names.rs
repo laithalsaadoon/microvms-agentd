@@ -452,6 +452,14 @@ async fn a_lifecycle_command_by_name_asks_for_the_records_region_over_the_enviro
 /// **Falsification** (#251). Make `shell`'s region `args.region.resolve(ctx.env)?` instead of
 /// `record.region()` and the `shell` row goes red with `left: ["us-east-1"]`; the same change
 /// in `agent-up`'s refresh turns the `agent-up` row red.
+///
+/// ```falsification
+/// id = "names-shell-record-region"
+/// file = "crates/microvms-cli/src/commands/attached.rs"
+/// replace = "        let region = record.region();\n        (record.endpoint, record.microvm_id, region)\n"
+/// with = "        let region = args.region.resolve(ctx.env)?;\n        (record.endpoint, record.microvm_id, region)\n"
+/// message = "shell by name"
+/// ```
 #[tokio::test]
 async fn a_shell_or_agent_up_by_name_asks_for_the_records_region_over_the_environments() {
     use clap::Parser as _;
@@ -524,6 +532,14 @@ impl CoreSeam for WindowInUsWest2 {
 /// **Falsification** (#251). Pass `args.region.resolve(ctx.env).unwrap_or(region)` to
 /// `idle_window_of` in `keepalive` (the flag or environment region back) and this goes red
 /// with `refused: keepalive interval 60s exceeds half the 60s idle window`.
+///
+/// ```falsification
+/// id = "names-keepalive-window-region"
+/// file = "crates/microvms-cli/src/commands/attached.rs"
+/// replace = "idle_window_of(ctx, region, &microvm_id)"
+/// with = "idle_window_of(ctx, args.region.resolve(ctx.env).unwrap_or(region), &microvm_id)"
+/// message = "exceeds half the 60s idle window"
+/// ```
 #[tokio::test(start_paused = true)]
 async fn keepalive_by_name_reads_the_idle_window_in_the_records_region() {
     use clap::Parser as _;
@@ -596,6 +612,14 @@ async fn keepalive_by_name_reads_the_idle_window_in_the_records_region() {
 ///
 /// **Falsification** (#251). Make `Names::resolve` read `self.store.get(name).unwrap_or(None)`, and
 /// the `health` row goes red with `no VM named "x"`, a message that doesn't name `x.json`.
+///
+/// ```falsification
+/// id = "names-torn-record-refused"
+/// file = "crates/microvms-cli/src/ledger.rs"
+/// replace = "let found = self.store.get(name)?;"
+/// with = "let found = self.store.get(name).unwrap_or(None);"
+/// message = "health: no VM named \"x\""
+/// ```
 #[tokio::test]
 async fn a_torn_record_under_a_name_is_refused_before_any_door() {
     use clap::Parser as _;

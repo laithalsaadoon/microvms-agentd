@@ -1,41 +1,31 @@
 # ── the live suite's COST checks, offline (#303) ────────────────────────────
 
 # COST-1: a check that reads only the measured durations can't see a projected one on a run.
-[[fault]]
-id = "conformance-cost-run-provenance-filtered"
+[[family]]
 guard = "conformance/selftest/cost.py"
 run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "conformance-cost-run-provenance-filtered"
 message = "FAIL  the run cost checks refuse a run duration labelled projected"
 transform = { file = "conformance/lanes/lifecycle.py", replace = "                for item in items\n                if item.get(\"duration\")\n", with = "                for item in items\n                if (item.get(\"duration\") or {}).get(\"provenance\") == \"measured\"\n" }
 
 # COST-3: a check that finds the build line and never reads its amount passes a `$0.00`.
-[[fault]]
+[[family.fault]]
 id = "conformance-cost-run-build-kind-ignored"
-guard = "conformance/selftest/cost.py"
-run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL  the run cost checks refuse an image build priced at zero dollars"
 transform = { file = "conformance/lanes/lifecycle.py", replace = "        [(amount.get(\"kind\"), \"usd\" in amount) for amount in builds] or None,\n", with = "        [(\"unpriced\", False) for amount in builds] or None,\n" }
 
 # COST-4: a check that reads the render and not the bound passes a plain sum that names the line.
-[[fault]]
+[[family.fault]]
 id = "conformance-cost-run-total-bound-ignored"
-guard = "conformance/selftest/cost.py"
-run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL  the run cost checks refuse a total that isn't a lower bound"
 transform = { file = "conformance/lanes/lifecycle.py", replace = "        (total.get(\"isLowerBound\"), \"image-build\" in str(total.get(\"render\"))),\n", with = "        (True, \"image-build\" in str(total.get(\"render\"))),\n" }
 
 # COST-10: a check that assumes the label passes a run report handed back for an estimate.
-[[fault]]
+[[family.fault]]
 id = "conformance-cost-estimate-label-ignored"
-guard = "conformance/selftest/cost.py"
-run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL  the estimate cost check refuses an estimate labelled as a run"
 transform = { file = "conformance/lanes/local.py", replace = "            planned.get(\"label\"),\n", with = "            \"estimate\",\n" }

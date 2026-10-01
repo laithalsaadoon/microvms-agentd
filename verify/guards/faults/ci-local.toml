@@ -3,69 +3,47 @@
 # The runner's own suite: the checkout's depth, the caller's index, the environment a clone's
 # run gets, what a timed-out step is sent, a failed job's tree, and the runs it refuses.
 
-[[fault]]
-id = "ci-local-unit-depth"
+[[family]]
 guard = "test_ci_local.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ci_local.py"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "ci-local-unit-depth"
 message = "FAIL: test_a_shallow_job_gets_one_commit_and_no_remote ("
 transform = { file = "tools/ci-local.py", replace = "        fetch += [\"--depth\", \"1\", commit]\n", with = "        fetch += [commit]\n" }
 
-[[fault]]
+[[family.fault]]
 id = "ci-local-unit-index"
-guard = "test_ci_local.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ci_local.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_run_leaves_the_source_repo_as_it_was ("
 transform = { file = "tools/ci-local.py", replace = "    scratch = env | {\"GIT_INDEX_FILE\": str(index)}\n", with = "    scratch = env\n" }
 
 # The caller's mise variables reaching a clone's run, which on a runner starts fresh.
-[[fault]]
+[[family.fault]]
 id = "ci-local-unit-env"
-guard = "test_ci_local.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ci_local.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_step_gets_the_workflow_job_step_and_mise_env_and_not_the_callers ("
 transform = { file = "tools/ci-local.py", replace = "        and not (k.startswith((\"MISE_\", \"__MISE_\")) and k not in MISE_KEPT)\n", with = "" }
 
 # A timed-out step killed first, before the signal it cleans up on (the gauntlet's finding).
-[[fault]]
+[[family.fault]]
 id = "ci-local-unit-timeout-grace"
-guard = "test_ci_local.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ci_local.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_timed_out_step_gets_a_signal_it_can_clean_up_on ("
 transform = { file = "tools/ci-local.py", replace = "ESCALATION = ((signal.SIGINT, 7.5), (signal.SIGTERM, 2.5), (signal.SIGKILL, None))", with = "ESCALATION = ((signal.SIGKILL, None),)" }
 
-[[fault]]
+[[family.fault]]
 id = "ci-local-unit-keep-failed"
-guard = "test_ci_local.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ci_local.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "test_a_failing_step_ends_the_job_and_its_tree_is_kept ("
 transform = { file = "tools/ci-local.py", replace = "    if failed and (work / \"src\").is_dir():\n        keep_failed(", with = "    if False:\n        keep_failed(" }
 
 # An expression the runner doesn't answer, run with its text in instead of refused.
-[[fault]]
+[[family.fault]]
 id = "ci-local-unit-refuse"
-guard = "test_ci_local.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ci_local.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_an_expression_it_cant_answer_refuses_the_run ("
 transform = { file = "tools/ci-local.py", replace = "        if expr in EXPRESSIONS:\n            return EXPRESSIONS[expr]\n", with = "        if expr in EXPRESSIONS:\n            return EXPRESSIONS[expr]\n        return match.group(0)\n" }
 
 # A budget written as an expression, or `inf`, run with no deadline where CI stops the job.
-[[fault]]
+[[family.fault]]
 id = "ci-local-unit-timeout-refused"
-guard = "test_ci_local.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ci_local.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_timeout_it_cant_hold_a_job_to_refuses_the_run ("
 transform = { file = "tools/ci-local.py", replace = "            if timeout is not None and not (\n", with = "            if False and not (\n" }

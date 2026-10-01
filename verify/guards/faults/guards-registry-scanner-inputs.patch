@@ -1,0 +1,15 @@
+diff --git a/verify/guards/faults/guards-registry-scanner.toml b/verify/guards/faults/guards-registry-scanner.toml
+new file mode 100644
+--- /dev/null
++++ b/verify/guards/faults/guards-registry-scanner.toml
+@@ -0,0 +1,10 @@
++# ── an owner whose scanner declares no inputs ──
++
++[[scanner]]
++id = "guards-registry-scanner"
++guard = "tools/release-gate.py"
++run = ["./tools/release-gate.py", "graph"]
++suite = "script"
++inputs = []
++empty = "{input} has no jobs"
++sentinel = { file = "AGENTS.md", replace = "# Repository guide\n", with = "# Guide\n", message = "x" }
