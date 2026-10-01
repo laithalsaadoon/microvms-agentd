@@ -44,8 +44,8 @@ from typing import Iterable
 
 # Stable 1.98 writes 60 and 1.99 (2026-10-01) writes 61. 61's one change makes `Stability`
 # serialize without a self-describing format, and the walk reads no stability field: nightly's
-# 61 gave the same paths with the same kinds (#271). CI and rust-toolchain.toml float `stable`,
-# so the next stable's version has to be here before it ships, or every PR goes red that day.
+# 61 gave the same paths with the same kinds (#271). rust-toolchain.toml pins the release, so the
+# pull request that moves it to one writing a new format version adds that version here.
 ACCEPTED_FORMAT_VERSIONS = frozenset({60, 61})
 
 # The module-level kinds a path can name. `impl`, `extern_crate` and the proc-macro kinds aren't

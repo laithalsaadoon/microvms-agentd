@@ -65,7 +65,7 @@ the trap ladder.
 | Layer | Technology | Source |
 | --- | --- | --- |
 | Language | Rust, `edition = "2024"`, `resolver = "3"` | `Cargo.toml:23`, `Cargo.toml:11` |
-| Toolchain and targets | `channel = "stable"`, `targets = ["aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl"]` | `rust-toolchain.toml:13-16` |
+| Toolchain and targets | `channel = "1.99.0"`, `targets = ["aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl"]` | `rust-toolchain.toml:21-24` |
 | Shipping artifact | `lto`, `codegen-units = 1`, `panic = "unwind"`, `strip`, `opt-level = "z"` | `Cargo.toml:38-61` |
 | Daemon HTTP | `axum = "0.8.9"`; `tower-http` `"0.6"` with `limit` + `catch-panic` | `crates/agentd/Cargo.toml:16`, `crates/agentd/Cargo.toml:25` |
 | Async runtime | `tokio = "1.53"`, no `rt-multi-thread` in the daemon or the library | `crates/agentd/Cargo.toml:35-45`, `crates/microvms-app/Cargo.toml:33`, `crates/microvms-edges/Cargo.toml:88` |

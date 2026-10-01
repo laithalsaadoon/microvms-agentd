@@ -10,7 +10,15 @@
 # aarch64 is the shipping target because Lambda MicroVMs are ARM64-only. The x86
 # musl target is here for local experiments on this box; it costs a download and
 # saves the same confusing failure.
+#
+# The channel is an exact release. `stable` let a new release change the compiler
+# with no change in the tree: 1.99.0 went stable on 2026-10-01, deprecated
+# `fetch_update`, and main went red under `-D warnings` until #505. A new release
+# now arrives as a pull request that moves this channel, mise.toml's `rust`, and
+# the `toolchain` input of every workflow but fuzz.yml's nightly ones, together.
+# `ci:parity` holds ci.yml and mise.toml to this channel, and `guards:list` names
+# a seeded fault whose anchor still quotes the old release.
 [toolchain]
-channel = "stable"
+channel = "1.99.0"
 components = ["clippy", "rustfmt"]
 targets = ["aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl"]

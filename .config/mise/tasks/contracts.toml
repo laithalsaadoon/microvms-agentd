@@ -26,9 +26,10 @@ hide = true
 # entry with no braces, so `agents:check` holds every one to a tracked file. mise reads `src/**`
 # as directories only, which is why each says `src/**/*`.
 #
-# Then the toolchain, which is this task. `rust-toolchain.toml` says `stable`, so a new stable
-# changes the compiler with no file in the tree changing, and a new rustdoc can write JSON the
-# walk reads differently. Each gate depends on this task, which mise runs before it decides
+# Then the toolchain, which is this task. `rust-toolchain.toml` pins a release, but the compiler
+# cargo uses here can still change with no tracked file changing (a `RUSTUP_TOOLCHAIN` or a
+# `rustup override` in the shell picks another), and a new rustdoc can write JSON the walk reads
+# differently. Each gate depends on this task, which mise runs before it decides
 # whether to skip the gate, and lists `target/toolchain-id`, whose mtime moves only when the
 # toolchain cargo would use here does.
 #

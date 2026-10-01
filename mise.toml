@@ -19,14 +19,14 @@
 min_version = "2026.8.1"
 
 [tools]
-# `rust = "stable"` makes mise provide the toolchain via rustup, which then honors
-# `rust-toolchain.toml` — and that file is the only place that can declare the
-# cross-compile *targets*. Pinning an exact version here instead (we tried 1.97)
-# gives a compiler with no `aarch64-unknown-linux-musl`, so the build fails with
-# "can't find crate for `std`" and a suggestion naming a toolchain the reader did
-# not know they were using. Removing the entry entirely is worse: cargo then
-# leaves mise's PATH and every task fails with "command not found".
-rust = "stable"
+# `rust` is the release `rust-toolchain.toml` pins, with that file's components and targets
+# repeated. mise selects the toolchain by setting `RUSTUP_TOOLCHAIN`, which rustup puts ahead of
+# `rust-toolchain.toml`, so under mise the file's lists reach rustup only through this entry.
+# Without them (tried with 1.97, and with 1.99.0 on mise 2026.8.1) the toolchain has no
+# `aarch64-unknown-linux-musl`, and the build fails with "can't find crate for `std`".
+# `ci:parity` holds the version to the file's channel. Removing the entry entirely is worse:
+# cargo then leaves mise's PATH and every task fails with "command not found".
+rust = { version = "1.99.0", components = ["clippy", "rustfmt"], targets = ["aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl"] }
 # Every other tool is an exact version, and mise.lock records what each one resolved to (#315),
 # with each platform's checksum. They were `latest`, which meant a contributor's ruff or semgrep
 # was whatever that machine had last installed while CI fetched a newer one, and a finding could
