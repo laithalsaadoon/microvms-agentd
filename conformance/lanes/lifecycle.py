@@ -124,19 +124,38 @@ def check_run_cost(report: dict[str, Any], results: Results) -> None:
     that breaks its rule.
     """
     items = report.get("items") or []
-    # A run's durations were timed, so each is `measured` and none is unlabelled. The set is
-    # empty (and the check fails) when the report carries no duration at all.
+    # COST-1 is a label on every duration, measured or projected, not "a run is measured": the
+    # phases a clock timed are measured, and `image-storage`'s one-week retention floor, which
+    # nobody timed, is projected, as core's own test of the mixed report in
+    # `crates/microvms-domain/src/cost.rs` pins. Wave 3's live run (d56806a) failed the first
+    # version of this check, which wanted every duration measured. The tuple is absent (and the
+    # check fails) when the report carries no duration at all.
+    durations = [
+        (item.get("phase"), (item.get("duration") or {}).get("provenance"))
+        for item in items
+        if item.get("duration")
+    ]
     results.eq(
-        "COST-1 every duration on the run's cost report is labelled measured",
-        sorted(
-            {
-                str((item.get("duration") or {}).get("provenance"))
-                for item in items
-                if item.get("duration")
-            }
+        "COST-1 every duration on the run's cost report is labelled: "
+        "the timed phases measured, the retention floor projected",
+        (
+            [
+                phase
+                for phase, label in durations
+                if label not in ("measured", "projected")
+            ],
+            sorted(
+                {
+                    phase
+                    for phase, label in durations
+                    if phase in ("image-build", "running") and label != "measured"
+                }
+            ),
+            sorted({label for phase, label in durations if phase == "image-storage"}),
         )
-        or None,
-        ["measured"],
+        if durations
+        else None,
+        ([], [], ["projected"]),
     )
     # This run built its image, and AWS publishes no rate for the build: the line is unpriced,
     # with no dollar figure, rather than `$0.00`.

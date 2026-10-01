@@ -28,12 +28,14 @@ UNPRICED = {
     "reason": "AWS does not publish whether the build is billed",
 }
 
-#: A run that built its image: the build line unpriced, the rest priced, every duration timed.
+#: A run that built its image, as `run`'s envelope reports one: the build line unpriced, the rest
+#: priced, the timed phases measured and the storage line's retention floor projected.
 RUN = {
     "label": "run microvm-cli-conformance",
-    "fullyMeasured": True,
+    "fullyMeasured": False,
     "items": [
         item("image-build", UNPRICED, "measured"),
+        item("image-storage", PRICED, "projected"),
         item("launch", PRICED, None),
         item("running", PRICED, "measured"),
     ],
@@ -77,8 +79,14 @@ def check_cost_checks(results: Results) -> None:
         edit(copied)
         return copied
 
+    def timed_projected(report: dict[str, Any]) -> None:
+        report["items"][3]["duration"]["provenance"] = "projected"
+
     def unlabelled(report: dict[str, Any]) -> None:
-        report["items"][2]["duration"]["provenance"] = "projected"
+        del report["items"][3]["duration"]["provenance"]
+
+    def retention_measured(report: dict[str, Any]) -> None:
+        report["items"][1]["duration"]["provenance"] = "measured"
 
     def zero_build(report: dict[str, Any]) -> None:
         report["items"][0]["amount"] = {"kind": "estimated-usd", "usd": "0.00"}
@@ -94,7 +102,9 @@ def check_cost_checks(results: Results) -> None:
             line["duration"] = None
 
     for name, edit, key in (
-        ("a run duration labelled projected", unlabelled, "COST-1"),
+        ("a timed run duration labelled projected", timed_projected, "COST-1"),
+        ("a run duration with no provenance", unlabelled, "COST-1"),
+        ("a retention floor labelled measured", retention_measured, "COST-1"),
         ("a run report with no duration at all", no_durations, "COST-1"),
         ("an image build priced at zero dollars", zero_build, "COST-3"),
         ("a report with no image build line", no_build, "COST-3"),
