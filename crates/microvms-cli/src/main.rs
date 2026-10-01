@@ -473,6 +473,7 @@ async fn handle<O: std::io::Write, E: std::io::Write>(
         Command::Ps(args) => commands::attached::ps(ctx, args).await,
         Command::Stdin(args) => commands::attached::stdin(ctx, args).await,
         Command::Cp(args) => commands::attached::cp(ctx, args).await,
+        Command::Exists(args) => commands::attached::exists(ctx, args).await,
         // The third command that takes the interrupt, and like the other two it is the
         // expected ending rather than an abort: `sync --watch` runs until the caller
         // stops it, and Ctrl-C resolves into the summary envelope.

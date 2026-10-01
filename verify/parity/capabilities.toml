@@ -231,7 +231,7 @@ ts = "Session.downloadFile"
 [[capability]]
 id = "file-exists"
 core = "microvms_core::session::Session::file_exists"
-cli = { exempt = "no command", issue = "#269" }
+cli = "exists"
 py = "Session.file_exists"
 ts = "Session.fileExists"
 

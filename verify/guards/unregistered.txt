@@ -166,5 +166,3 @@ crates/microvms-edges/src/session/forward.rs::the_caller_cannot_smuggle_its_own_
 crates/microvms-edges/src/session/shell.rs::a_control_frame_the_platform_would_not_recognize_is_refused_before_the_wire
 crates/microvms-edges/src/session/shell.rs::the_shell_offers_two_subprotocols_and_no_port
 bindings/microvms-py/tests/test_exec.py::test_a_stream_survives_more_events_than_the_channel_can_hold
-bindings/microvms-py/tests/test_smoke.py::test_duration_has_no_constructor_at_all
-bindings/microvms-py/tests/test_smoke.py::test_estimated_usd_refuses_float

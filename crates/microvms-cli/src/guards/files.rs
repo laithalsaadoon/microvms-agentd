@@ -749,3 +749,64 @@ impl TempFile {
         &self.0
     }
 }
+
+/// The `exists` command over one scripted answer.
+async fn exists_against(
+    status: u16,
+    body: &str,
+) -> (
+    Result<crate::commands::Rendered, crate::exit::CliError>,
+    Vec<String>,
+) {
+    let script = DaemonScript::new();
+    script.reply(status, body);
+    let command = Command::Exists(crate::cli::ExistsArgs {
+        path: "/workspace/out.json".into(),
+        attach: attach_flags(),
+        region: region_flags(),
+    });
+    let (result, _, _) = against_daemon(&script, &command).await;
+    (result, script.paths())
+}
+
+/// **`microvm exists` is core's `file_exists` (#269):** a read of the path, `true` on 200,
+/// `false` on the daemon's 404, and exit 0 either way.
+///
+/// **Falsification**: answer `exists: true` from the handler instead of reading core's answer,
+/// and the 404 case reports a file that isn't there.
+#[tokio::test]
+async fn exists_reports_the_daemons_answer_for_the_path() {
+    let (found, paths) = exists_against(200, "{}").await;
+    let found = found.expect("a 200 is an answer");
+    assert_eq!(found.kind, "microvm.exists");
+    assert_eq!(found.data["exists"], true);
+    assert_eq!(found.data["path"], "/workspace/out.json");
+    assert_eq!(found.already_reported, None, "exit 0");
+    assert_eq!(paths.len(), 1, "one read: {paths:?}");
+    assert_eq!(
+        paths,
+        ["GET /v1/fs/file?path=%2Fworkspace%2Fout.json"],
+        "the path reaches the daemon as given"
+    );
+
+    let (absent, _) = exists_against(404, r#"{"error": "not_found"}"#).await;
+    let absent = absent.expect("a 404 is an answer too");
+    assert_eq!(absent.data["exists"], false);
+    assert_eq!(
+        absent.already_reported, None,
+        "exit 0 for an absent path as well"
+    );
+}
+
+/// Any refusal but not-found fails the command with its own code, so a bad request never
+/// reads as a missing file.
+#[tokio::test]
+async fn exists_fails_on_any_refusal_but_not_found() {
+    let (result, _) = exists_against(
+        400,
+        r#"{"error": "bad_request", "detail": "relative path"}"#,
+    )
+    .await;
+    let failure = result.expect_err("a 400 is not an absent file");
+    assert_eq!(failure.exit, Exit::Protocol, "{}", failure.message);
+}
