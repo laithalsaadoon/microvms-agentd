@@ -1,0 +1,27 @@
+# ── `AgentVm.launch` takes `launch_env`, `shell` and `ready_timeout` (#267) ───────
+
+# Each binding drops the launch env on its way to the core's `RunRequest`, so an env over the
+# run-hook payload's budget is no longer refused.
+[[fault]]
+id = "py-agent-vm-launch-drops-launch-env"
+guard = "bindings/microvms-py/tests/test_control.py::test_an_agent_vm_launch_takes_the_launch_env_and_the_ready_timeout"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_control.py::test_an_agent_vm_launch_takes_the_launch_env_and_the_ready_timeout"],
+]
+expect = "test-failed"
+suite = "bindings"
+note = "bindings/microvms-py/tests/test_control.py::test_an_agent_vm_launch_takes_the_launch_env_and_the_ready_timeout"
+transform = { file = "bindings/microvms-py/src/agents.rs", replace = "        if let Some(env) = launch_env {\n            request.launch_env = env;\n        }\n", with = "        let _ = launch_env;\n" }
+
+[[fault]]
+id = "js-agent-vm-launch-drops-launch-env"
+guard = "an agent VM launch takes the launch env and the ready timeout"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/control.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+note = "bindings/microvms-js/__test__/control.mjs::an agent VM launch takes the launch env and the ready timeout"
+transform = { file = "bindings/microvms-js/src/agents.rs", replace = "        if let Some(env) = options.launch_env {\n            request.launch_env = env;\n        }\n", with = "" }

@@ -935,7 +935,7 @@ py = ["Sandbox.run(deny_egress)", "egress_posture_for(deny_egress)"]
 [[default]]
 id = "launch-shell"
 core = "launch.shell"
-py = "Sandbox.run(shell)"
+py = ["Sandbox.run(shell)", "AgentVm.launch(shell)"]
 
 [[default]]
 id = "launch-wait"

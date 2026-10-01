@@ -96,6 +96,24 @@ test('an agent VM takes VPC connectors and checks them locally', async () => {
   await refused(vm.launch({ imageIdentifier: 'arn:image', logStream: 's' }), /pass log_group/);
 });
 
+test('an agent VM launch takes the launch env and the ready timeout', async () => {
+  // `AgentVm.launch` takes `launchEnv`, `shell` and `readyTimeout`, as `Sandbox.run` does. Both
+  // are refused locally when core can't take them, which is what shows they reach it: a launch
+  // env over the run-hook payload's budget, and a wait that isn't a duration. `shell` changes
+  // only the `RunMicrovm` body, which no offline test can read, so it's shown accepted.
+  //
+  // **Falsification**: drop `launchEnv` on its way to the core's `RunRequest` in
+  // `AgentVm.launch`, and the over-budget env launches as if it weren't there.
+  const vm = await AgentVm.create(region(), [{ agent: 'claude-code' }]);
+  const big = { BIG: 'x'.repeat(5000) };
+  await refused(vm.launch({ imageIdentifier: 'arn:image', launchEnv: big }), /launch env contributed/);
+  await refused(vm.launch({ imageIdentifier: 'arn:image', readyTimeout: -1 }));
+  await refused(
+    vm.launch({ imageIdentifier: 'arn:image', shell: true, launchEnv: big }),
+    /launch env contributed/,
+  );
+});
+
 test('terminate waits for a boolean or a number of seconds', async () => {
   // A sandbox that launched nothing has no VM to wait for, so each report comes back at once:
   // what's asserted is that both shapes reach the core's teardown options, and that a number no
