@@ -295,9 +295,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-sso"
-version = "1.113.0"
+version = "1.114.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87184f36ade012f46cdc773c7be10031b4545a1aea70a9a22a044e8f36f1e5c5"
+checksum = "12be2f9c8eef7f5fc919c96d538e629698469a02b4cb75408b26b1bd984ebe79"
 dependencies = [
  "arc-swap",
  "aws-credential-types",
@@ -320,9 +320,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-ssooidc"
-version = "1.115.0"
+version = "1.116.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84edc7495d56e006dff0031cbc9782784902456f7024651c2da902a3d2336262"
+checksum = "d7645db8724ea3b82fdccfb67e1b0f637c9d8ab0e7ef29d84884d8d8d73f805d"
 dependencies = [
  "arc-swap",
  "aws-credential-types",
@@ -345,9 +345,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-sts"
-version = "1.118.0"
+version = "1.119.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df7572569d018ca72923073494eac3c4671a0daea90b9e3923c2d27a3a02a2c1"
+checksum = "03e490aa904849b38e770922faac779dd245f5cf8be81f19065acf18d276e4ad"
 dependencies = [
  "arc-swap",
  "aws-credential-types",
@@ -424,9 +424,9 @@ dependencies = [
 
 [[package]]
 name = "aws-smithy-http-client"
-version = "1.4.2"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7bd25384a4e437aa8d8f339afad4b69e786b936a7cb10db668a7aaf66717b1a8"
+checksum = "51c89cc3f1f281d659a67a519a1b5c6d445b5ce09fa7e5aee40c2c2707e9509d"
 dependencies = [
  "aws-smithy-async",
  "aws-smithy-runtime-api",
@@ -481,9 +481,9 @@ dependencies = [
 
 [[package]]
 name = "aws-smithy-runtime"
-version = "1.15.0"
+version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "591e0024cdf2a8de8711860f7e1d5cfbca26b800ce13793a9aa2f4f5918e6d95"
+checksum = "d6e302ac1d88b99652489df31abdec6ac42a2ab2ac3982ad0ac49f64dfaf28ba"
 dependencies = [
  "aws-smithy-async",
  "aws-smithy-http",
@@ -505,9 +505,9 @@ dependencies = [
 
 [[package]]
 name = "aws-smithy-runtime-api"
-version = "1.18.0"
+version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9bb0deb40a69de59f7809251cfe1ab16de135f42c49d222d1202b4d0ce19720f"
+checksum = "c0730c16f91124c6a2abb4932c77e299288b3dd9f967ea2e9ec48cc6731e87a4"
 dependencies = [
  "aws-smithy-async",
  "aws-smithy-runtime-api-macros",
@@ -2659,9 +2659,9 @@ checksum = "bf36173d4167ed999940f804952e6b08197cae5ad5d572eb4db150ce8ad5d58f"
 
 [[package]]
 name = "lazy_static"
-version = "1.5.0"
+version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
+checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 
 [[package]]
 name = "libc"
@@ -2750,12 +2750,12 @@ checksum = "4050469837a6ff301cd14c1f8f24f88549e6d548f24f64e2148eb0f72cebc51f"
 
 [[package]]
 name = "mac_address"
-version = "1.1.8"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0aeb26bf5e836cc1c341c8106051b573f1766dfa05aa87f0b98be5e51b02303"
+checksum = "b367b50a9be9a5d3b5718c1da74e5d6b9c17647f89752ee2562a470cc3c4eb1a"
 dependencies = [
- "nix 0.29.0",
- "winapi",
+ "nix 0.30.1",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3015,9 +3015,9 @@ checksum = "add0ac067452ff1aca8c5002111bd6b1c895baee6e45fcbc44e0193aea17be56"
 
 [[package]]
 name = "napi"
-version = "3.13.0"
+version = "3.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b12638855cec016784a7e17cc4ecbdee7ca8b0a3456aa50640d0ee5ed1a42f8"
+checksum = "15301c22171e8397a7b17beb3c75bf486bf67ca3bdad8ea347835b770df61969"
 dependencies = [
  "bitflags 2.13.2",
  "ctor",
@@ -3034,15 +3034,15 @@ dependencies = [
 
 [[package]]
 name = "napi-build"
-version = "2.5.0"
+version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0941983559cd62bfa7f04646a16428967a847365adeef27711e4e3927046bbed"
+checksum = "b899b545d3aa6dca985939059f258c5488d34e4ecf39c274e20009748f4b846d"
 
 [[package]]
 name = "napi-derive"
-version = "3.6.9"
+version = "3.6.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b1d232c24dc6754979b27efdf2047a5849efc7c92c1245de87e6bedbb9f5c3c"
+checksum = "d11174f7507d7f6cdd69874f541eff194e81c95652b775e69036bcf8d5b7a805"
 dependencies = [
  "convert_case 0.12.0",
  "ctor",
@@ -3067,9 +3067,9 @@ dependencies = [
 
 [[package]]
 name = "napi-sys"
-version = "3.3.2"
+version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6801fc65ba4d7035636e93635e281113f00410401a237dcd4f55b1565ead2115"
+checksum = "e22a4f25c16a5c5411d987cd6fbd48313522ae1789ade2d6dd3efdc6d40a0fc8"
 dependencies = [
  "libloading",
 ]
@@ -3079,6 +3079,18 @@ name = "nix"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
+dependencies = [
+ "bitflags 2.13.2",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
+
+[[package]]
+name = "nix"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74523f3a35e05aba87a1d978330aef40f67b0304ac79c1c00b294c9830543db6"
 dependencies = [
  "bitflags 2.13.2",
  "cfg-if",
@@ -3485,9 +3497,9 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
 name = "pin-utils"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
+checksum = "13bee6c73da26345c729282832b60b0363cf3dd9f4bfd81d8551b7a1c889a113"
 
 [[package]]
 name = "pkg-config"
@@ -3602,9 +3614,9 @@ dependencies = [
 
 [[package]]
 name = "pyo3"
-version = "0.29.2"
+version = "0.29.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4688ddedf473e32662b9b067670129a8afb8c18e351482c70d62ba4a88171e8b"
+checksum = "700d18fa267b73b9b521fd7e13580e2f446916f176cacee1ab63fcc8191f1655"
 dependencies = [
  "libc",
  "once_cell",
@@ -3616,18 +3628,18 @@ dependencies = [
 
 [[package]]
 name = "pyo3-build-config"
-version = "0.29.2"
+version = "0.29.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f41027e41b4bd03f6e60f9f417fe24a6341a6bb744edd62b6f709f2a52ea30e9"
+checksum = "7b3fc0c4d08f6bb10e71fe39dfb9e2f59c6eb6854e22ec8092f50c69a4499adb"
 dependencies = [
  "target-lexicon",
 ]
 
 [[package]]
 name = "pyo3-ffi"
-version = "0.29.2"
+version = "0.29.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e591a95526fead067432c3b3a33fc74770b87b1e04e73671090d9c2055a2b327"
+checksum = "dfc0b8e19df29aad7086cf977bb0c2a2f143e30567eb113e9cf72b62ca698330"
 dependencies = [
  "libc",
  "pyo3-build-config",
@@ -3635,9 +3647,9 @@ dependencies = [
 
 [[package]]
 name = "pyo3-macros"
-version = "0.29.2"
+version = "0.29.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73225868fc1cd84eef2c3c230ddb91273bf1de46aeb8a4248da76d32a0924a1c"
+checksum = "6100e8a4b5eba53afaa5ed078364851a0b2499c553a44c31026b929049b49dc6"
 dependencies = [
  "proc-macro2",
  "pyo3-macros-backend",
@@ -3647,9 +3659,9 @@ dependencies = [
 
 [[package]]
 name = "pyo3-macros-backend"
-version = "0.29.2"
+version = "0.29.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "571575aa3749fa6216757dd47d2a3e7ef360f329a40f0666a9fbd14889024952"
+checksum = "6143877a16e82b5a727b7127ff4cd86858a24a28d745d72f43e6f227c7b1bdb3"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -3694,9 +3706,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.18"
+version = "0.11.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9746dbde176634f4f2f1faf2404e30a31b2bc1e9cafb5329c95d8177a18c9fc"
+checksum = "0e750cca55fe4f0439a15d0bb529da9651e79993e8e72c61a899a36d462befbe"
 dependencies = [
  "aws-lc-rs",
  "bytes",
@@ -3717,9 +3729,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-udp"
-version = "0.5.15"
+version = "0.5.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35a133f956daabe89a61a685c2649f13d82d5aa4bd5d12d1277e1072a21c0694"
+checksum = "af66907df18639dcf4db56ca65490cabc4b27a97dbadd96f2926cca73298f016"
 dependencies = [
  "cfg_aliases",
  "libc",
