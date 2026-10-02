@@ -16,3 +16,17 @@ id = "RUSTSEC-2026-0235"
 # cannot be reached from any built artifact. Re-check if rust_decimal's
 # `rkyv` feature is ever turned on.
 reason = "optional rust_decimal feature, never enabled; not compiled into any artifact"
+
+[[IgnoredVulns]]
+id = "GHSA-vfj7-8cjw-p6xm"
+# braces 3.0.3 (no fixed release on 2026-10-02) is docs-site build tooling only: micromatch,
+# from starlight-llms-txt, expands the include/exclude/promote/demote patterns that
+# site/astro.config.ts sets. An attacker can't supply a pattern; the VEX statement says more.
+reason = "docs-site build tool; its glob patterns come only from site/astro.config.ts"
+
+[[IgnoredVulns]]
+id = "GHSA-ch52-4w7c-c8xp"
+# http-cache-semantics 4.2.0 (no fixed release on 2026-10-02) is used by astro's build-time
+# remote-image cache. The site is static, with no server and no shared cache answering users,
+# which the advisory needs; the VEX statement says more.
+reason = "astro build-time image cache only; the site is static and runs no shared cache"
