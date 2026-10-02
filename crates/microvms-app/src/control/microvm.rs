@@ -2163,6 +2163,45 @@ mod tests {
         );
     }
 
+    /// A page the service throttles is retried, not the end of the listing. The service
+    /// sent that throttle as HTTP 400 named only by the `x-amzn-ErrorType` header
+    /// (docs/PLATFORM.md, 2026-10-02), and a fleet of 140 VMs, fourteen pages read back to
+    /// back, met it on most listings, each of which then failed as a validation refusal.
+    ///
+    /// **Falsification** — run 2026-10-02. Guard the classifier's header arm with `false` and
+    /// the listing stops at the throttled page with the 400 as its error, so `expect` panics
+    /// (`guards:fire -- --only control-listing-stops-at-a-throttled-page`). Restored.
+    #[tokio::test]
+    async fn the_fleet_listing_retries_a_page_the_service_throttled_as_400() {
+        let (plane, fake, _) = planted();
+        fake.answer(
+            "ListMicrovms",
+            Answer::ok(fake::list_microvms_page(
+                &["mvm-page1-a"],
+                Some("fleet-page-2"),
+            )),
+        )
+        .answer("ListMicrovms", Answer::throttled_as_400())
+        .answer(
+            "ListMicrovms",
+            Answer::ok(fake::list_microvms_page(&["mvm-page2-a"], None)),
+        );
+
+        let fleet = plane
+            .list_microvms()
+            .await
+            .expect("lists past the throttle");
+        let ids: Vec<&str> = fleet.iter().map(|vm| vm.microvm_id.as_str()).collect();
+        assert_eq!(ids, ["mvm-page1-a", "mvm-page2-a"]);
+        assert_eq!(
+            fake.call_count("ListMicrovms"),
+            3,
+            "page two was asked for again after the throttle"
+        );
+        let paths = fake.paths();
+        assert_eq!(paths[1], paths[2], "the retry is the identical request");
+    }
+
     /// **Issue #23.** The fleet listing follows `nextToken`, so a fleet larger than one page
     /// is not silently truncated.
     ///

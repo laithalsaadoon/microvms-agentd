@@ -1,0 +1,35 @@
+# ── a throttle the service sends as HTTP 400 is retried (#514) ──────────────────────
+
+# The classifier goes back to reading the status alone, so the service's 400 throttle is a
+# validation refusal again: not retryable, and a listing that meets it fails.
+[[fault]]
+id = "control-throttle-classified-by-status"
+guard = "control::transport::tests::a_throttle_named_by_the_error_type_header_is_retryable_whatever_the_status"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::transport::tests::a_throttle_named_by_the_error_type_header_is_retryable_whatever_the_status"]
+expect = "test-failed"
+suite = "rust"
+message = "ListMicrovms failed with HTTP 400: the service sent no message. ValidationException"
+note = "crates/microvms-app/src/control/transport.rs::a_throttle_named_by_the_error_type_header_is_retryable_whatever_the_status"
+transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "        status if reply.error_type.as_deref() == Some(\"ThrottlingException\") => (\n", with = "        status if false && reply.error_type.as_deref() == Some(\"ThrottlingException\") => (\n" }
+
+[[fault]]
+id = "control-listing-stops-at-a-throttled-page"
+guard = "control::microvm::tests::the_fleet_listing_retries_a_page_the_service_throttled_as_400"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::microvm::tests::the_fleet_listing_retries_a_page_the_service_throttled_as_400"]
+expect = "test-failed"
+suite = "rust"
+message = "lists past the throttle"
+note = "crates/microvms-app/src/control/microvm.rs::the_fleet_listing_retries_a_page_the_service_throttled_as_400"
+transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "        status if reply.error_type.as_deref() == Some(\"ThrottlingException\") => (\n", with = "        status if false && reply.error_type.as_deref() == Some(\"ThrottlingException\") => (\n" }
+
+# The name keeps the header's URI suffix, so the service's throttle never compares equal to
+# `ThrottlingException`.
+[[fault]]
+id = "control-error-type-keeps-the-uri"
+guard = "control::transport::tests::the_error_type_name_drops_the_uri_suffix_and_the_namespace"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::transport::tests::the_error_type_name_drops_the_uri_suffix_and_the_namespace"]
+expect = "test-failed"
+suite = "rust"
+message = "ThrottlingException:http://internal.amazon.com/coral/com.amazon.coral.availability/"
+note = "crates/microvms-app/src/control/transport.rs::the_error_type_name_drops_the_uri_suffix_and_the_namespace"
+transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "    let name = header.split(':').next().unwrap_or(header);\n", with = "    let name = header;\n" }

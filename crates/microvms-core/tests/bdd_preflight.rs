@@ -110,6 +110,7 @@ async fn run(world: &mut Harness, resolved: Result<Region, Error>) {
             Answer {
                 status: 403,
                 body: r#"{"__type": "AccessDeniedException", "message": null}"#.to_string(),
+                error_type: None,
             }
         } else {
             Answer::ok(

@@ -306,6 +306,18 @@ succeeded; the otherwise identical raw `=` request returned HTTP 400 with a
 null message. Treat cursors as opaque and percent-encode query values before
 signing. The absence of `+` or `/` does not make encoding optional.
 
+## A throttle can arrive as HTTP 400, named only by `x-amzn-ErrorType`
+
+Measured 2026-10-02, us-east-1, API 2025-09-09, live, in an account listing 140 MicroVMs (14
+pages of 10). Read back to back, `ListMicrovms` pages were throttled with HTTP 400, header
+`x-amzn-ErrorType: ThrottlingException:http://internal.amazon.com/coral/com.amazon.coral.availability/`,
+and body `{"message":null,"throttlingReasons":null}`; the service model declares
+`ThrottlingException` as 429. Signed raw GETs of one page were throttled 3 times in 25. The
+same pagination tokens succeeded when sent again, and botocore, which reads the header,
+retried and finished every listing. Classify by the header's error name before the status:
+read by status alone this throttle is a validation refusal that nothing retries, which is
+what failed live run 37060855703 (#514).
+
 ## `maxResults` is applied before `nameFilter`, so a page can be empty while matches remain
 
 Measured 2026-08-15. With 22 images, ten matching `nameFilter=bonk`, and

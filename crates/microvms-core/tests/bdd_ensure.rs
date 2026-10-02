@@ -107,6 +107,7 @@ fn reply(status: u16, body: String) -> Result<Reply, Error> {
     Ok(Reply {
         status,
         body: body.into_bytes(),
+        error_type: None,
     })
 }
 
