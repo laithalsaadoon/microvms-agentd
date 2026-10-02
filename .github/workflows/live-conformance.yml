@@ -43,11 +43,34 @@ permissions:
   contents: read
 
 jobs:
+  # Only the repository's owner starts a live run. Dispatching needs write access, which a
+  # collaborator or an App granted `actions: write` would also hold. `triggering_actor` is
+  # whoever started this attempt, so a re-run someone else starts fails here too. This job
+  # fails before `live` reaches its environment, so nobody is asked to approve such a run.
+  # It guards only this file as reviewed on main: an edited copy on a branch or a tag can drop
+  # it, and the `live-aws` environment's reviewer and the AWS role's trust policy are what
+  # hold then.
+  owner:
+    name: started by the repository owner
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: refuse a run anyone else started
+        env:
+          ACTOR: ${{ github.triggering_actor }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          if [ "$ACTOR" != "$OWNER" ]; then
+            echo "::error::$ACTOR started this run; only $OWNER, the repository owner, starts live conformance."
+            exit 1
+          fi
+
   # On a tag only. A draft release is visible only with push access, so the download gets a job
   # of its own: this one holds `contents: write` and runs nothing from the repository, and the
   # job below, which builds and runs the suite with AWS credentials, keeps `contents: read`.
   draft:
     name: the tag's draft release
+    needs: owner
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
@@ -69,10 +92,11 @@ jobs:
 
   live:
     name: real AWS
-    needs: draft
+    needs: [owner, draft]
     # A branch run skips `draft` and runs this on its own build; a tag run runs it only once the
-    # draft downloaded.
-    if: ${{ !cancelled() && (needs.draft.result == 'success' || needs.draft.result == 'skipped') }}
+    # draft downloaded. `draft` also reads as skipped when `owner` failed, so `owner` is checked
+    # by name.
+    if: ${{ !cancelled() && needs.owner.result == 'success' && (needs.draft.result == 'success' || needs.draft.result == 'skipped') }}
     runs-on: ubuntu-latest
     environment: live-aws
     timeout-minutes: 60
