@@ -45,8 +45,8 @@ cargo test --test proptest_tar
 cargo test --test turmoil_transport
 cargo test --all
 ./conformance/run_rs.py --self-test
-uvx ruff check .
-uvx ruff format --check .
+mise exec -- ruff check .
+mise exec -- ruff format --check .
 ```
 
 Use `-p microvms-protocol` for the protocol package; its Rust import is
@@ -301,9 +301,9 @@ manages VPC connectors. Document the package's supported workflows and limits.
 To check implemented constraints against the latest SDK without creating AWS
 resources, run `uv run --upgrade --script tools/check-model-drift.py`.
 
-The `spec` and `spec:core` tasks are separate from `check`. They require
-compatible symspec tooling; `spec:core` currently names a local checkout and
-is not portable. A passing `check` does not verify those documents.
+The `spec` and `spec:core` tasks are separate from `check`. They need a
+symspec 1.0 or later CLI on PATH; `tools/check-spec.sh` refuses an absent or
+older one by name. A passing `check` does not verify those documents.
 `cargo test -p agentd-model` runs the portable state-machine checks, and
 `cargo test -p model-conformance` checks the app against them.
 

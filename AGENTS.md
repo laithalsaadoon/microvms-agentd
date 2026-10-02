@@ -19,8 +19,9 @@ mise run live:verify-clean
 
 `check` does not create AWS resources. Some tools need network access for
 installation or advisory/rule updates. It does not run the documentation,
-formal requirements, or live AWS tiers, and it doesn't build or test the Python
-and Node bindings. When a change reaches behavior a binding exposes, build each
+formal requirements, or live AWS tiers, and it doesn't run the Python and Node
+bindings' test suites: `stubs:check` and `dts:check` build each binding only to
+compare its declarations. When a change reaches behavior a binding exposes, build each
 binding and run its suite the way CI's `python and node bindings` job does
 (`pytest bindings/microvms-py/tests`, `node --test "bindings/microvms-js/__test__/*.mjs"`), or run
 `mise run ci:bindings`, which is that job.
@@ -91,8 +92,8 @@ first:
 - `microvms-app`: use cases (the control-plane client, `Sandbox`, `Session`,
   `ensure_image`, the agent recipes, the daemon release's verification policy),
   written only against ports it declares: `Transport`, `BuildServices`,
-  `HttpBackend`, `TokenMinter`, `NameStore`, `Clock`, `Entropy`, `Adapters`,
-  `ReleaseSource` and `AttestationVerifier`. It depends on no crate or tokio feature that
+  `HttpBackend`, `TokenMinter`, `NameStore`, `LocalTree`, `Clock`, `Entropy`,
+  `Adapters`, `ReleaseSource` and `AttestationVerifier`. It depends on no crate or tokio feature that
   does network, AWS, filesystem, subprocess or entropy I/O (ARCH-7), and its
   `clippy.toml` refuses the std and tokio I/O items under a crate-root `forbid`.
   The shared test doubles are its `testing` module, behind `test-support`.
@@ -211,8 +212,8 @@ capabilities, or `verify/parity/capabilities.toml` says why one doesn't.
   job needs the gate, which `release:check` in `check` holds.
 - Rebuild the release CLI before targeted live checks. Verify cleanup of VMs,
   images, and service-created log groups independently.
-- `spec:core` references a local symspec checkout; formal requirements are
-  separate from `check`. Portable state checks use `cargo test -p agentd-model`;
+- `spec` and `spec:core` need a symspec 1.0 or later CLI on PATH, which
+  `tools/check-spec.sh` checks by name; formal requirements are separate from `check`. Portable state checks use `cargo test -p agentd-model`;
   `cargo test -p model-conformance` ties those models to the app.
 
 Publishing and version changes are documented in CONTRIBUTING.md. Do not
