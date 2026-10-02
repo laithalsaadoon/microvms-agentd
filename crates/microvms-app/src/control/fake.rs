@@ -44,6 +44,8 @@ use crate::error::{Error, ErrorKind};
 pub struct Answer {
     pub status: u16,
     pub body: String,
+    /// What the `x-amzn-ErrorType` header would carry, already cut to the error name.
+    pub error_type: Option<String>,
 }
 
 impl Answer {
@@ -52,6 +54,7 @@ impl Answer {
         Self {
             status: 200,
             body: body.into(),
+            error_type: None,
         }
     }
 
@@ -60,6 +63,7 @@ impl Answer {
         Self {
             status: 201,
             body: body.into(),
+            error_type: None,
         }
     }
 
@@ -68,6 +72,17 @@ impl Answer {
         Self {
             status,
             body: format!(r#"{{"message": {}}}"#, json_string(message)),
+            error_type: None,
+        }
+    }
+
+    /// The throttle as the service sent it to `ListMicrovms` on 2026-10-02: HTTP 400, the
+    /// error named only by the header, and this body (docs/PLATFORM.md).
+    pub fn throttled_as_400() -> Self {
+        Self {
+            status: 400,
+            body: r#"{"message":null,"throttlingReasons":null}"#.to_string(),
+            error_type: Some("ThrottlingException".to_string()),
         }
     }
 }
@@ -278,6 +293,7 @@ impl Transport for FakeControlPlane {
                 Ok(Reply {
                     status: answer.status,
                     body: answer.body.into_bytes(),
+                    error_type: answer.error_type,
                 })
             }
         };

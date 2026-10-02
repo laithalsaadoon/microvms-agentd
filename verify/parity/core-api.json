@@ -660,6 +660,7 @@
     "microvms_core::control::transport::Transport::send": "method",
     "microvms_core::control::transport::classify_failure": "function",
     "microvms_core::control::transport::endpoint_for": "function",
+    "microvms_core::control::transport::error_type_name": "function",
     "microvms_core::control::transport::paths": "module",
     "microvms_core::control::transport::paths::auth_token": "function",
     "microvms_core::control::transport::paths::encode_segment": "function",

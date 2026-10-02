@@ -194,7 +194,8 @@ impl Call {
     }
 }
 
-/// What the control plane answered: a status and a raw body.
+/// What the control plane answered: a status, a raw body, and the error type the service
+/// named, if it named one.
 ///
 /// Raw bytes rather than a deserialized value because the error path has to read a body
 /// the success types cannot hold, and because TRAP-6's null `message` field is only
@@ -203,6 +204,10 @@ impl Call {
 pub struct Reply {
     pub status: u16,
     pub body: Vec<u8>,
+    /// The `x-amzn-ErrorType` header's error name, cut down by [`error_type_name`], or
+    /// `None` when the response carried no such header. [`classify_failure`] reads it
+    /// before the status, because the service has sent a throttle as HTTP 400.
+    pub error_type: Option<String>,
 }
 
 impl Reply {
@@ -372,6 +377,17 @@ pub fn classify_failure(operation: &str, reply: &Reply) -> Error {
     let detail = parsed.message.as_deref().unwrap_or("").trim().to_string();
 
     let (kind, explanation) = match reply.status {
+        // The error type outranks the status. A throttled `ListMicrovms` answered HTTP 400
+        // with `x-amzn-ErrorType: ThrottlingException`, where the model says 429
+        // (docs/PLATFORM.md, measured 2026-10-02), and read by status alone it was a
+        // validation refusal that nothing retried.
+        status if reply.error_type.as_deref() == Some("ThrottlingException") => (
+            ErrorKind::Retryable,
+            format!(
+                "ThrottlingException, named by the x-amzn-ErrorType header on an HTTP {status} \
+                 — retry the identical request."
+            ),
+        ),
         400 => (
             ErrorKind::Platform,
             "ValidationException — the service refused a value. Every constraint the pinned \
@@ -440,6 +456,17 @@ pub fn classify_failure(operation: &str, reply: &Reply) -> Error {
             reply.status
         ),
     )
+}
+
+/// The error name in an `x-amzn-ErrorType` header value: what precedes the first `:` and
+/// follows the first `#`.
+///
+/// That is the rest-json protocol's rule, and both parts occur here: the service's throttle
+/// arrived as `ThrottlingException:http://internal.amazon.com/coral/com.amazon.coral.availability/`,
+/// and other services send a `namespace#Name` form.
+pub fn error_type_name(header: &str) -> &str {
+    let name = header.split(':').next().unwrap_or(header);
+    name.split_once('#').map_or(name, |(_, after)| after).trim()
 }
 
 /// `https://lambda.<region>.amazonaws.com`, from the model's `endpointPrefix`.
@@ -1056,6 +1083,7 @@ mod tests {
         let reply = Reply {
             status: 403,
             body: br#"{"message": null}"#.to_vec(),
+            error_type: None,
         };
         let error = classify_failure("ListMicrovms", &reply);
         assert_eq!(error.kind(), ErrorKind::Credentials);
@@ -1077,6 +1105,7 @@ mod tests {
         let reply = Reply {
             status: 403,
             body: br#"{"message": "User: arn:aws:iam::1:user/u is not authorized"}"#.to_vec(),
+            error_type: None,
         };
         let error = classify_failure("RunMicrovm", &reply);
         assert_eq!(error.kind(), ErrorKind::Credentials);
@@ -1100,6 +1129,7 @@ mod tests {
         let reply = Reply {
             status: 400,
             body: br#"{"message": "1 validation error detected"}"#.to_vec(),
+            error_type: None,
         };
         let error = classify_failure("RunMicrovm", &reply);
         assert_eq!(error.kind(), ErrorKind::Platform);
@@ -1107,6 +1137,73 @@ mod tests {
         assert!(message.contains("ValidationException"), "{message}");
         assert!(message.contains("checked locally"), "{message}");
         assert!(!message.contains("unmodeled status"), "{message}");
+    }
+
+    /// The service's throttle as it arrived from `ListMicrovms` on 2026-10-02: HTTP 400,
+    /// named `ThrottlingException` only by the `x-amzn-ErrorType` header, with a null
+    /// message. Classified by status it read as a validation refusal and was never
+    /// retried, which failed every listing past the account's page rate.
+    ///
+    /// **Falsification** — run 2026-10-02. Guard the classifier's header arm with `false`, so
+    /// the status alone decides again, and this fails on the retryability assertion with the
+    /// `ValidationException` explanation (`guards:fire -- --only
+    /// control-throttle-classified-by-status`). Restored.
+    #[test]
+    fn a_throttle_named_by_the_error_type_header_is_retryable_whatever_the_status() {
+        let reply = Reply {
+            status: 400,
+            body: br#"{"message":null,"throttlingReasons":null}"#.to_vec(),
+            error_type: Some("ThrottlingException".to_string()),
+        };
+        let error = classify_failure("ListMicrovms", &reply);
+        assert!(error.retryable(), "{error}");
+        assert_eq!(error.kind(), ErrorKind::Retryable);
+        let message = error.to_string();
+        assert!(message.contains("ThrottlingException"), "{message}");
+        assert!(message.contains("HTTP 400"), "{message}");
+        assert!(!message.contains("ValidationException"), "{message}");
+    }
+
+    /// Another error name on a 400 leaves the status rule alone: the header decides only
+    /// for the throttle, so a genuine validation refusal still isn't retried.
+    #[test]
+    fn a_400_naming_another_error_type_is_still_a_validation_refusal() {
+        let reply = Reply {
+            status: 400,
+            body: br#"{"message": "1 validation error detected"}"#.to_vec(),
+            error_type: Some("ValidationException".to_string()),
+        };
+        let error = classify_failure("RunMicrovm", &reply);
+        assert!(!error.retryable(), "{error}");
+        assert!(error.to_string().contains("checked locally"), "{error}");
+    }
+
+    /// The header's name is what precedes the first `:` and follows the first `#`, the
+    /// rest-json rule, on the value the service sent and on the namespaced form.
+    ///
+    /// **Falsification** — run 2026-10-02. Keep the whole header instead of what precedes the
+    /// `:`, and the service's own value comes back with its URI suffix and fails the first
+    /// case (`guards:fire -- --only control-error-type-keeps-the-uri`). Restored.
+    #[test]
+    fn the_error_type_name_drops_the_uri_suffix_and_the_namespace() {
+        let cases = [
+            (
+                "ThrottlingException:http://internal.amazon.com/coral/com.amazon.coral.availability/",
+                "ThrottlingException",
+            ),
+            (
+                "aws.protocoltests.restjson#FooError:http://internal.amazon.com/coral/com.amazon.coral.validate/",
+                "FooError",
+            ),
+            (
+                "com.amazonaws.lambda#ResourceNotFoundException",
+                "ResourceNotFoundException",
+            ),
+            ("ConflictException", "ConflictException"),
+        ];
+        for (header, name) in cases {
+            assert_eq!(error_type_name(header), name, "{header}");
+        }
     }
 
     /// Only the throttle and the 5xx family are retryable. A retried 409 would spin
@@ -1129,6 +1226,7 @@ mod tests {
             let reply = Reply {
                 status,
                 body: br#"{"message": "detail"}"#.to_vec(),
+                error_type: None,
             };
             let error = classify_failure("GetMicrovm", &reply);
             assert_eq!(error.retryable(), retryable, "HTTP {status}");
@@ -1144,6 +1242,7 @@ mod tests {
             let reply = Reply {
                 status,
                 body: Vec::new(),
+                error_type: None,
             };
             assert_eq!(
                 classify_failure("GetMicrovm", &reply).wire_kind(),
@@ -1161,6 +1260,7 @@ mod tests {
         let reply = Reply {
             status: 429,
             body: b"<html>Too Many Requests</html>".to_vec(),
+            error_type: None,
         };
         let error = classify_failure("RunMicrovm", &reply);
         assert!(error.retryable(), "a throttle is a throttle");
@@ -1175,6 +1275,7 @@ mod tests {
         let reply = Reply {
             status: 200,
             body: br#"{"microvmId": 42}"#.to_vec(),
+            error_type: None,
         };
         let error = reply
             .json::<crate::control::ops::MicrovmResponseWire>("GetMicrovm")

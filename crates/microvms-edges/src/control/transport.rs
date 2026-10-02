@@ -7,7 +7,9 @@
 
 use std::time::SystemTime;
 
-use microvms_app::control::transport::{Call, Reply, SIGNING_NAME, Transport, endpoint_for};
+use microvms_app::control::transport::{
+    Call, Reply, SIGNING_NAME, Transport, endpoint_for, error_type_name,
+};
 use microvms_app::error::{Error, ErrorKind};
 use microvms_app::region::Region;
 
@@ -202,6 +204,14 @@ impl Transport for SignedTransport {
             })?;
 
             let status = response.status().as_u16();
+            // Read before the body consumes the response. The service names its error
+            // here, and the name decides what a status alone would get wrong: its
+            // throttle has arrived as HTTP 400.
+            let error_type = response
+                .headers()
+                .get("x-amzn-errortype")
+                .and_then(|value| value.to_str().ok())
+                .map(|value| error_type_name(value).to_string());
             let body = response
                 .bytes()
                 .await
@@ -217,7 +227,11 @@ impl Transport for SignedTransport {
                 })?
                 .to_vec();
 
-            Ok(Reply { status, body })
+            Ok(Reply {
+                status,
+                body,
+                error_type,
+            })
         })
     }
 }

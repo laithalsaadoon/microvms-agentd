@@ -394,6 +394,7 @@ impl Transport for ScriptedTransport {
             Ok(Reply {
                 status: answer.0,
                 body: answer.1.into_bytes(),
+                error_type: None,
             })
         })
     }
