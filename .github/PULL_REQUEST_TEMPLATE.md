@@ -18,7 +18,7 @@ product code, add a line that opens `Size:` and says why this is one change
 - [ ] `cargo run -p agentd --bin schema -- --check` (regenerated if the protocol changed)
 - [ ] `cargo build --release -p agentd --target aarch64-unknown-linux-musl`
 - [ ] `mise run spec` and `mise run spec:core` (if `verify/spec/` changed)
-- [ ] `./tools/check-lint-coverage.py && uvx ruff check . && uvx ruff format --check .` (if any Python changed)
+- [ ] `./tools/check-lint-coverage.py && mise exec -- ruff check . && mise exec -- ruff format --check .` (if any Python changed)
 - [ ] `mise exec -- cargo deny check` (if a `Cargo.toml`, `Cargo.lock`, or `.cargo/deny.toml` changed)
 - [ ] `mise exec -- actionlint` (if a workflow changed)
 - [ ] `./conformance/run_rs.py --self-test` (if `conformance/` changed; offline and free)
@@ -29,8 +29,8 @@ product code, add a line that opens `Size:` and says why this is one change
 
 - [ ] No public name changed on any surface (core, CLI commands, `microvms.pyi`, `index.d.ts`).
 - [ ] `verify/parity/capabilities.toml` updated: the other surfaces are implemented, or
-      exempted with a reason, and an issue number when a later change closes the gap.
-      `mise run parity:check` passes.
+      exempted with the reason the surface won't have it (an exemption that names an issue
+      is a parity gap, which `parity:check` refuses). `mise run parity:check` passes.
 
 ## Guards
 

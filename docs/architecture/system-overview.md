@@ -34,10 +34,11 @@ the endpoints are split into a Bearer-guarded `control` router and an `open` one
 `CMD` on a current-thread runtime sized for a 512 MiB guest (`crates/agentd/src/main.rs:4-6`,
 `crates/agentd/src/main.rs:24-27`).
 
-`microvms-core` is the client library and the largest crate; its own doc comment sorts most
-of its modules into a foundation and a product surface, with
-`agents` as the one layer above them and `provision` beside the surface
-(`crates/microvms-core/src/lib.rs:59-87`). `control` speaks
+`microvms-core` is the client library's composition root; its own doc comment sorts the
+modules it re-exports by the crate below it that holds them: the rules and values in
+`microvms-domain`, the use cases (`control`, `session`, `sandbox`, `agents`) and their ports in
+`microvms-app`, and the production port implementations in `microvms-edges`
+(`crates/microvms-core/src/lib.rs:61-75`). `control` speaks
 hand-signed SigV4 rest-json because `lambda-microvms` has no SDK crate
 (`crates/microvms-app/src/control/mod.rs:2-3`); `session` is
 the in-VM client, carrying proxy auth and the byte-offset cursor that makes an interrupted
@@ -67,7 +68,7 @@ the trap ladder.
 | Language | Rust, `edition = "2024"`, `resolver = "3"` | `Cargo.toml:23`, `Cargo.toml:11` |
 | Toolchain and targets | `channel = "1.99.0"`, `targets = ["aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl"]` | `rust-toolchain.toml:21-24` |
 | Shipping artifact | `lto`, `codegen-units = 1`, `panic = "unwind"`, `strip`, `opt-level = "z"` | `Cargo.toml:38-61` |
-| Daemon HTTP | `axum = "0.8.9"`; `tower-http` `"0.6"` with `limit` + `catch-panic` | `crates/agentd/Cargo.toml:16`, `crates/agentd/Cargo.toml:25` |
+| Daemon HTTP | `axum = "0.8.9"`; `tower-http` `"0.7"` with `limit` + `catch-panic` | `crates/agentd/Cargo.toml:25`, `crates/agentd/Cargo.toml:34` |
 | Async runtime | `tokio = "1.53"`, no `rt-multi-thread` in the daemon or the library | `crates/agentd/Cargo.toml:35-45`, `crates/microvms-app/Cargo.toml:33`, `crates/microvms-edges/Cargo.toml:88` |
 | AWS control plane | `reqwest = "0.13"` on `rustls`, `aws-sigv4 = "1.5"`, `aws-config = "1.10"` | `crates/microvms-edges/Cargo.toml:58-63`, `crates/microvms-edges/Cargo.toml:52`, `crates/microvms-edges/Cargo.toml:41-46` |
 | Wire schema | `schemars = "1.2.2"`, `default-features = false`, `derive` + `std` only | `crates/protocol/Cargo.toml:16` |
