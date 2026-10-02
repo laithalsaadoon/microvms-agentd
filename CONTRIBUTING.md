@@ -492,10 +492,14 @@ reviewer in the `release` environment. Then:
 
 The live workflow needs the `live-aws` environment, with the repository's owner
 as its required reviewer and `main` and `v*` tags as the refs it deploys from,
-and the `LIVE_CONFORMANCE_ROLE_ARN` secret naming the role the run assumes over
-OIDC. That role trusts only tokens for this repository in that environment. The
-repository was created after GitHub moved new repositories to immutable OIDC
-subjects (2026-07-15), so the trust policy's `sub` names the owner and the
+the `LIVE_CONFORMANCE_ROLE_ARN` secret naming the role the run assumes over
+OIDC, and the `LIVE_CONFORMANCE_PERMISSIONS_BOUNDARY` variable naming the managed
+policy the stack's build and execution roles get as their permissions boundary.
+The run's role may create those two roles only with that boundary attached, so
+it can't hand a MicroVM more than the boundary allows. The run's role trusts
+only tokens for this repository in that environment. The repository was created
+after GitHub moved new repositories to immutable OIDC subjects (2026-07-15), so
+the trust policy's `sub` names the owner and the
 repository by numeric ID as well as by name, with `:environment:live-aws` at the
 end. Reading the repository's OIDC subject customization through the Actions
 API returns that prefix. The workflow's first job, `owner`, fails a run anyone
