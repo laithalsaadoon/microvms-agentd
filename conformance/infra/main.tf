@@ -36,6 +36,19 @@ variable "name_prefix" {
   default     = "agentd-conformance"
 }
 
+# The live workflow's CI role may create the build and execution roles only with this boundary
+# attached (its policy conditions `iam:CreateRole` and `iam:PutRolePolicy` on
+# `iam:PermissionsBoundary`). Without it, that role could write any inline policy on a role it
+# can pass to a MicroVM and get those permissions back through the VM. The boundary is an
+# account resource made outside this stack, so the identity applying the stack can't widen it,
+# and it must allow everything the two inline policies below grant. Empty, the default, attaches
+# none, for a local run under an identity that can create roles freely.
+variable "permissions_boundary" {
+  description = "ARN of the managed policy attached as both roles' permissions boundary; empty for none."
+  type        = string
+  default     = ""
+}
+
 provider "aws" {
   region = var.region
 
@@ -54,7 +67,8 @@ resource "random_id" "suffix" {
 }
 
 locals {
-  bucket_name = "${var.name_prefix}-${data.aws_caller_identity.current.account_id}-${random_id.suffix.hex}"
+  bucket_name          = "${var.name_prefix}-${data.aws_caller_identity.current.account_id}-${random_id.suffix.hex}"
+  permissions_boundary = var.permissions_boundary == "" ? null : var.permissions_boundary
 }
 
 # ── artifact bucket ─────────────────────────────────────────────────────
@@ -140,8 +154,9 @@ data "aws_iam_policy_document" "microvm_trust" {
 # ── image build role ────────────────────────────────────────────────────
 
 resource "aws_iam_role" "build" {
-  name               = "${var.name_prefix}-build-${random_id.suffix.hex}"
-  assume_role_policy = data.aws_iam_policy_document.microvm_trust.json
+  name                 = "${var.name_prefix}-build-${random_id.suffix.hex}"
+  assume_role_policy   = data.aws_iam_policy_document.microvm_trust.json
+  permissions_boundary = local.permissions_boundary
 }
 
 data "aws_iam_policy_document" "build" {
@@ -199,8 +214,9 @@ resource "aws_iam_role_policy" "build" {
 # which is what makes the loopback-origin measurement possible.
 
 resource "aws_iam_role" "execution" {
-  name               = "${var.name_prefix}-exec-${random_id.suffix.hex}"
-  assume_role_policy = data.aws_iam_policy_document.microvm_trust.json
+  name                 = "${var.name_prefix}-exec-${random_id.suffix.hex}"
+  assume_role_policy   = data.aws_iam_policy_document.microvm_trust.json
+  permissions_boundary = local.permissions_boundary
 }
 
 data "aws_iam_policy_document" "execution" {

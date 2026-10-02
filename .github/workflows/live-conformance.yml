@@ -187,9 +187,14 @@ jobs:
             echo "MICROVM_RELEASE_DIR=$PWD/draft-release"
           } >> "$GITHUB_ENV"
 
+      # The `live-aws` environment's `LIVE_CONFORMANCE_PERMISSIONS_BOUNDARY` variable names the
+      # boundary the stack's two roles get (`conformance/infra/main.tf` says why). The role this
+      # job assumes may create those roles only with it attached, so an unset variable fails
+      # the apply with AccessDenied rather than creating unbounded roles.
       - name: apply the conformance stack
         env:
           AWS_REGION: ${{ inputs.region }}
+          TF_VAR_permissions_boundary: ${{ vars.LIVE_CONFORMANCE_PERMISSIONS_BOUNDARY }}
         run: |
           terraform -chdir=conformance/infra init -input=false
           terraform -chdir=conformance/infra apply -auto-approve -input=false
