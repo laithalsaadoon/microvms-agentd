@@ -490,10 +490,18 @@ reviewer in the `release` environment. Then:
    `github-release` checks that the draft still holds what the live run tested
    and publishes it, and `crates-io`, `pypi` and `npm` publish the packages.
 
-The live workflow needs the `live-aws` environment, with a required reviewer and
-`v*` tags allowed, and the `LIVE_CONFORMANCE_ROLE_ARN` secret its OIDC role
-comes from. A red live run publishes nothing, so the version isn't spent:
-delete the draft and its tag (`gh release delete vX.Y.Z --cleanup-tag`, then
+The live workflow needs the `live-aws` environment, with the repository's owner
+as its required reviewer and `main` and `v*` tags as the refs it deploys from,
+and the `LIVE_CONFORMANCE_ROLE_ARN` secret naming the role the run assumes over
+OIDC. That role trusts only tokens for this repository in that environment. The
+repository was created after GitHub moved new repositories to immutable OIDC
+subjects (2026-07-15), so the trust policy's `sub` names the owner and the
+repository by numeric ID as well as by name, with `:environment:live-aws` at the
+end. Reading the repository's OIDC subject customization through the Actions
+API returns that prefix. The workflow's first job, `owner`, fails a run anyone
+else started, before the run asks for a review. A red live run publishes
+nothing, so the version isn't spent: delete the draft and its tag
+(`gh release delete vX.Y.Z --cleanup-tag`, then
 `git tag -d vX.Y.Z`), land the fix, and tag again. The draft job refuses a tag
 that already has a release, draft or published, so rerunning the whole workflow
 after a failed draft needs the stale draft deleted first.
