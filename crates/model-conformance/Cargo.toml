@@ -19,7 +19,7 @@ publish = false
 agentd-model = { path = "../model", version = "0.1.0" }
 # `test-support` for the fake control plane the preflight rows and the lifecycle replay run
 # against.
-microvms-app = { path = "../microvms-app", version = "0.10.0", features = ["test-support"] }
+microvms-app = { path = "../microvms-app", version = "0.11.0", features = ["test-support"] }
 # The checker that walks the client lifecycle model for `tests/client_lifecycle.rs`:
 # `PathRecorder` and the BFS are stateright's, on the line the model is written against, so the
 # lockfile resolves one copy.
@@ -38,8 +38,8 @@ tokio = { version = "1.53", features = ["rt", "macros", "test-util", "net", "io-
 # `tests/tunnel_end_of_stream.rs`: the verified tunnel's end of stream is a contract between the
 # two, and a stand-in for either half would test the contract against itself.
 agentd = { path = "../agentd", version = "0.1.0" }
-microvms-edges = { path = "../microvms-edges", version = "0.10.0" }
-protocol = { package = "microvms-protocol", path = "../protocol", version = "0.10.0" }
+microvms-edges = { path = "../microvms-edges", version = "0.11.0" }
+protocol = { package = "microvms-protocol", path = "../protocol", version = "0.11.0" }
 # The on-path party the tunnel test puts between them, which terminates the WebSocket as the
 # endpoint proxy does. The same line the client and the daemon's tests use.
 tokio-tungstenite = "0.30"
