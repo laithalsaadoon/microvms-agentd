@@ -1,6 +1,6 @@
 [package]
 name = "microvms-app"
-version = "0.10.0"
+version = "0.11.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -19,9 +19,9 @@ categories = ["virtualization"]
 [dependencies]
 # The wire contract, shared with the daemon (ARCH-2). A field renamed in `crates/protocol/` must break
 # this crate's build.
-protocol = { package = "microvms-protocol", version = "0.10.0", path = "../protocol" }
+protocol = { package = "microvms-protocol", version = "0.11.0", path = "../protocol" }
 # The rules and values, which do no I/O (ARCH-6).
-microvms-domain = { version = "0.10.0", path = "../microvms-domain" }
+microvms-domain = { version = "0.11.0", path = "../microvms-domain" }
 # The control plane's rest-json bodies and the session's wire payloads.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -272,8 +272,9 @@ mise run model:check   # implemented constraints versus the installed boto3 mode
 The published crates' Rust API is compared with their last release on crates.io:
 `mise run semver:check` runs cargo-semver-checks, and CI's `semver` job runs the same
 commands. `microvms-protocol` is gated: a change its last release's users couldn't compile
-against fails, unless the version bumps with it or its `Cargo.toml` allows that lint with the
-reason (the one it allows now is `StartRequest`'s `#[non_exhaustive]`, which 0.11.0 ships).
+against fails unless its `Cargo.toml` allows that lint with the reason (the one it allows now is
+`StartRequest`'s `#[non_exhaustive]`, which 0.11.0 ships). A version bump doesn't open the gate:
+the check runs with `--release-type minor`, so a release PR is checked like any other.
 `microvms-core`'s comparison is printed and never fails until 0.11.0 is its baseline, since
 against 0.10.0 every item the layer split moved and re-exported reads as removed. The domain,
 the app and the edges join once their first release is on crates.io. It isn't in `check`: it
