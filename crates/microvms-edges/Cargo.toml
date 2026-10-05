@@ -76,7 +76,7 @@ sha2 = "0.11"
 # `sigstore-trust-root`, so verifying needs no network, and `tuf` brings in an MPL-2.0 crate
 # `.cargo/deny.toml` doesn't allow. A Sigstore key rotation reaches this crate as a version bump, and
 # `tests/release_bundle.rs`, run by `release.yml` before it publishes, is what says one is due.
-sigstore-verify = { version = "=0.13.0", default-features = false }
+sigstore-verify = { version = "=0.14.0", default-features = false }
 sigstore-trust-root = { version = "=0.13.0", default-features = false }
 sigstore-types = "=0.13.0"
 
