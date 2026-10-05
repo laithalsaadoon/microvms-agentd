@@ -78,7 +78,7 @@ sha2 = "0.11"
 # `tests/release_bundle.rs`, run by `release.yml` before it publishes, is what says one is due.
 sigstore-verify = { version = "=0.13.0", default-features = false }
 sigstore-trust-root = { version = "=0.13.0", default-features = false }
-sigstore-types = "=0.13.0"
+sigstore-types = "=0.14.0"
 
 # ── the in-VM session (T-W2-5) ──────────────────────────────────────────────
 # `net` is the port forwarder's listener (`session::forward`) and the tunnel's socket. It lives

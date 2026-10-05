@@ -2908,7 +2908,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "sigstore-trust-root",
- "sigstore-types",
+ "sigstore-types 0.14.0",
  "sigstore-verify",
  "snow",
  "tar",
@@ -4558,7 +4558,7 @@ checksum = "fdfc7d1d7153a66aa44e4186b94a5b885e913f1272f9f71f113650a3716db48c"
 dependencies = [
  "jiff",
  "serde_json",
- "sigstore-types",
+ "sigstore-types 0.13.0",
  "thiserror 2.0.21",
 ]
 
@@ -4574,7 +4574,7 @@ dependencies = [
  "der",
  "futures-io",
  "jiff",
- "sigstore-types",
+ "sigstore-types 0.13.0",
  "spki",
  "thiserror 2.0.21",
  "x509-cert",
@@ -4588,7 +4588,7 @@ checksum = "f6744fa0877cd2263da94bcb7bf379f9ea2b70d9c3c3807acfae21a00567d544"
 dependencies = [
  "base64 0.22.1",
  "sigstore-crypto",
- "sigstore-types",
+ "sigstore-types 0.13.0",
  "thiserror 2.0.21",
 ]
 
@@ -4603,7 +4603,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sigstore-merkle",
- "sigstore-types",
+ "sigstore-types 0.13.0",
  "thiserror 2.0.21",
 ]
 
@@ -4620,7 +4620,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sigstore-crypto",
- "sigstore-types",
+ "sigstore-types 0.13.0",
  "thiserror 2.0.21",
 ]
 
@@ -4641,7 +4641,7 @@ dependencies = [
  "rustls-pki-types",
  "rustls-webpki",
  "sigstore-crypto",
- "sigstore-types",
+ "sigstore-types 0.13.0",
  "thiserror 2.0.21",
  "tracing",
  "x509-cert",
@@ -4652,6 +4652,21 @@ name = "sigstore-types"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2d7923fbebe27bf733e5cc2d08e677a006790bd58fdaaa1e063bae9542078008"
+dependencies = [
+ "base64 0.22.1",
+ "hex",
+ "jiff",
+ "pem",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "sigstore-types"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d644275d2d22b52bc872214dc1618bcbb830f71064124f8e8b3cfc07c1020205"
 dependencies = [
  "base64 0.22.1",
  "hex",
@@ -4684,7 +4699,7 @@ dependencies = [
  "sigstore-rekor",
  "sigstore-trust-root",
  "sigstore-tsa",
- "sigstore-types",
+ "sigstore-types 0.13.0",
  "thiserror 2.0.21",
  "tls_codec",
  "tracing",
