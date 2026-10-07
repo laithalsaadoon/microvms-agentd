@@ -13,6 +13,632 @@ CONTRIBUTING.md, "Changelog", says how to write one.
 
 <!-- towncrier release notes start -->
 
+## [0.11.0] - 2026-10-02
+
+### Added
+
+- **`isRetryable(error)` in TypeScript, and `ErrorKind::retryable` in Rust (#256).** The
+  TypeScript spelling of Python's `.retryable`: it reads the `ERR_*` code off `err.cause` and
+  asks core, so the answer is the one a Python or Rust caller gets. It's `false` for a value
+  this library didn't raise. `microvms_core::ErrorKind::retryable` is the rule
+  `Error::retryable` reads.
+- **`run`'s envelope reports `artifactUri` (#258).** The `s3://` URI of the artifact the image was
+  built from: the caller's `--artifact-uri`, or the content-addressed key `run`'s build uploaded
+  to or found through `ensure_image`. It's null for `run --image`, and a failure envelope carries it
+  once it's known. A consumer reads the object from there rather than deriving the key, which
+  moved with #258 from `<name>.zip` to `<name>/artifact.zip`.
+- **`AgentVm.ensure_image` builds or reuses an agent VM's image in one call (#258).** In Rust,
+  Python and TypeScript it is `Sandbox.ensure_image` over the agents' request: the image is
+  returned at once when ready, waited on while building, rebuilt when failed, and the artifact
+  is uploaded to `s3://<bucket>/<prefix>/<name>/artifact.zip` only when a build is needed.
+  `EnsureImageRequest` also carries the create request's project files, pinned base version,
+  logging, identity repair, `inherit_workdir` and hook timeouts, and
+  `EnsureImageRequest::from_create` turns a create request into an ensure.
+- **`exec --timeout-sec`, `exec --complete`, and `posixExitCode`, `notes` and `synthesized` on
+  the exec envelope (#259).** `--timeout-sec SECONDS` sends the daemon's own deadline
+  (`timeout_sec`), which `--timeout`, this process's wait, never did: past it the daemon ends
+  the process group and the result reads `timedOut`, `posixExitCode: 124` and `ERR_TIMEOUT`.
+  `--complete` waits the way the SDKs' `run_to_completion` does, through core's
+  `CompletionPlan`: the client deadline is `--timeout-sec` plus `--client-grace` (core's
+  `DEFAULT_CLIENT_GRACE`, 60 seconds, when omitted), and past it the group is killed and the
+  result collected within the grace, or synthesized with `posixExitCode: 124`,
+  `synthesized: true` and a note naming both failures when that fails too; any deadline that
+  ended the command exits `ERR_TIMEOUT`. `--complete` conflicts with `--timeout`,
+  `--kill-on-timeout`, `--stream`, `--detach` and `--poll`. Every exec shape, and
+  `agent-prompt`, now reports core's `posixExitCode` (124 for a deadline, 128 plus the signal
+  for another signal death, the exit code otherwise), `notes` (one line per condition that
+  changes how the output reads, also printed in the human output) and `synthesized`.
+  `microvms_core::session::ExecResult::deadline_ended` is the condition `posix_exit_code` reads
+  for 124.
+- **Directory transfer in core: `microvms_core::workspace` (#260).** The manifest, the diff and
+  the incremental sync pass that `microvm sync` ran are core's now, over a `LocalTree` port the
+  edges implement on the real filesystem (`DiskTree`): `Session::sync_manifest`,
+  `Session::sync_dir(tree, dir, full, delete_timeout)` (one sync against the guest's manifest,
+  or with `full` against none), `Session::sync_pass(tree, dir, baseline, delete_timeout)`
+  (hash, diff, upload the changed
+  members, remove the vanished ones with one in-guest `rm`, rewrite the guest manifest) and
+  `Session::download_dir(tree, remote, globs, dir)`, which unpacks only the glob-selected
+  regular files of the daemon's archive, never under `.git` and never outside `dir`. A local
+  tree's failure is `ERR_INVALID_ARG` with a `WorkspaceError` source. `microvm sync`, `run
+  <DIR>`, `agent-up` and `doctor`'s glob check call it, and their results don't change: the
+  in-guest `rm`'s exec id is minted like any other, and `sync` prints what a pass did once it's
+  done rather than before each step. The CLI no longer depends on `tar`, `globset`, `sha2` or
+  `const-hex`.
+- **Directory transfer in both bindings: `download_dir` and `sync_dir` (#260).** Python's
+  `Session.download_dir(remote, local_dir, globs)` and Node's `downloadDir(remote, localDir,
+  globs)` bring the regular files of a directory in the VM back, the ones the globs select,
+  never under `.git` whatever the globs say and never outside the local directory; a symlink,
+  a special file or a `../` member is skipped. Python's `Session.sync_dir(local_dir, *,
+  full=False, delete_timeout=None)` and Node's `syncDir(localDir, { full, deleteTimeout })` sync
+  a directory into `/workspace` once, uploading only what changed since the last sync and
+  removing what's gone, and answer with a `SyncReport`. Both are core's `Session::download_dir`
+  and `Session::sync_dir`, the ones `run <DIR>` and `microvm sync` use. `docs/EMBEDDING.md`'s
+  harness sketch uses them where it pointed at the raw tar calls.
+- **`Session.spawn` in Python, over a stdout and stderr split in core (#261).** It returns an
+  `ExecProcess`: `stdout` and `stderr` iterate `bytes`, `wait()` reads the daemon's exec record,
+  `kill()` can run twice, and `gaps` and `exec_id` are there too. It takes `run`'s keyword
+  arguments and `ExecHandle.stream()`'s, plus `gap_policy`: by default a byte range the daemon
+  evicted raises `PlatformError` from both iterators naming the range, and `gap_policy="event"`
+  records it on `gaps` under the stream that followed it. The demultiplexing that was Node's
+  (`session.spawn()`'s routing, gap attribution and gap policy) is core's
+  `microvms_core::session::ExecHandle::split`, which both bindings read, with `GapPolicy`,
+  `OutputGap`, `GapLog`, `Split` and `SplitItem` beside it. Node's `ExecProcess` behaves as it
+  did; the gap error now ends "or read with the event gap policy" where it named
+  `gapPolicy: 'event'`.
+- **`Session.tunnel` and `Session.port_forward` (`portForward`) in Python and TypeScript, and
+  the tunnel identity on launch (#263).** Each returns a running handle over core's loop, with
+  `local_address`, `running` and `stop()`, which resolves with the report the CLI's envelope
+  carries plus each connection that didn't end clean. `stop()` waits for open connections;
+  given a timeout, it cuts the ones still open after it. Dropping a handle stops it and cuts its
+  connections. `Sandbox.run(identity=True)` (`{ identity: true }`) generates a tunnel identity,
+  `Sandbox.tunnel_identity` (`tunnelIdentity()`) returns it as the new `TunnelIdentity`, and
+  `Session.tunnel(port, verify_identity=...)` (the third argument in TypeScript) proves each
+  connection reaches that VM's daemon. `NameRecord.tunnel_identity` (`tunnelIdentity()`) reads a
+  record's pair, and neither class prints the host seed. `microvm manifest`'s
+  `clientDefaults.launch` carries `identity`, the default `run(identity=...)` restates.
+- **Core serves a tunnel and a port-forward itself, the loops `microvm tunnel` and
+  `microvm port-forward` now call (#263).** `microvms_core::session::serve::serve_tunnel` and
+  `serve_forward` accept local connections until a stop future resolves, a connection limit is
+  reached or the listener fails, serve each on a task of its own, hand each connection's end to
+  a callback, and return a report with the counts the CLI's envelopes carry. A connection that
+  fails never ends the loop. Both also serve a direct session: the tunnel goes through the
+  daemon's relay with no proxy credential, and the forward goes to the endpoint's host at the
+  guest port.
+- **`Sandbox.preflight` and `Sandbox.managed_base_versions` in Python and TypeScript (#264).**
+  `preflight` takes `build_image`'s arguments and raises the refusal `build_image` would, with
+  no AWS call, so a caller who uploads its own artifact can check the request before the
+  upload. `managed_base_versions` lists a managed base's versions (the new `ManagedBaseVersion`),
+  the values a base-version pin takes, given the base's full ARN.
+- **Image administration on the bindings' `ControlPlane` (#264).** Python and TypeScript can
+  list images (`list_images`), delete one on its own (`delete_image`, with the teardown's
+  retries and a `bool` answer), list a version's configuration and status
+  (`list_image_versions`), retire or restore a version (`set_image_version_status` with
+  `"ACTIVE"` or `"INACTIVE"`, checked against the readback), and inspect builds
+  (`list_image_builds`, and `get_image_build` with the snapshot sizes). The results are the new
+  `ImageSummary`, `ImageVersion` and `ImageBuild` types. A status other than the model's two
+  spellings is refused by core before the call.
+- **`base_image_version=` and `project_dir=` on the bindings' image calls (#264).** Python's
+  `build_image`, `preflight` and `ensure_image` take both, and `build_artifact` takes
+  `project_dir`; Node's `buildImage`, `preflight`, `buildArtifact` and `ensureImage` options take
+  `baseImageVersion` and `projectDir`. The project directory is read by core's rule
+  (`microvms_core::control::read_project_files`), the one `microvm build --project` now calls, so
+  every surface refuses a directory without exactly one manifest+lockfile pair the same way. The
+  CLI's refusals name a project directory instead of `--project`.
+- **`microvm build --tag`, `--base-image`, `--inherit-workdir`, `--run-hook-timeout-sec` and
+  `--build-hook-timeout-sec` (#264).** The CLI's `build` now takes the image options the
+  bindings' `build_image` already takes. Tags (`KEY=VALUE`, repeatable) and both hook timeouts
+  are checked by core's own rules at parse time. `--base-image` names the managed base and pairs
+  it with the `--dockerfile`'s `FROM`. `--inherit-workdir` is refused before the upload when
+  nothing declares a `WORKDIR`. `--reuse` carries them all.
+- **`microvm image-versions`, `image-set-status` and `image-builds` (#264).** The CLI can list
+  an image's versions with their status and configuration, retire a version (`INACTIVE`, which
+  `RunMicrovm` refuses while running VMs keep running) or restore it (`ACTIVE`), and list a
+  version's builds or read one with `--build-id` and its snapshot sizes. Each takes the image's
+  ARN or its name, and the envelopes carry the service's readback in its own spelling;
+  `image-set-status` fails when the readback doesn't carry the status asked for.
+- **Line-range file reads on every surface (#265).** `GET /v1/fs/file` has taken `start_line`
+  and `end_line` since v0.1.0, and no client sent them. Core's
+  `Session::download_file_lines(path, start_line, end_line)`, Python's
+  `Session.download_file(path, *, start_line=None, end_line=None)`, Node's
+  `downloadFile(path, { startLine, endLine })` and `microvm cp vm:/path ./local --lines START:END`
+  (either side may be empty) read lines 1-based and inclusive, sliced by the daemon, and an end
+  past the last line reads through EOF. Line 0 and an end before the start are refused with
+  `ERR_INVALID_ARG` before any request, by the rule the daemon applies
+  (`protocol::fs::FileReadQuery::line_window`), in its words. `--lines` is refused with `--tar`
+  and `--mode`, and on an upload. With no range, each read sends the request it always has.
+- **Both bindings publish core's wait defaults (#266).** `session_constants()` (Python) and
+  `sessionConstants()` (TypeScript) gain `defaultExecWaitSeconds`, `defaultReadyTimeoutSeconds`,
+  `defaultLifecycleTimeoutSeconds` and `lifecyclePollIntervalSeconds`, the figures a wait uses
+  when its caller leaves the timeout out. Python's stub prints a default named for a core
+  constant as `...`, so this is where it's readable.
+- **`prompt_sync` in core (#266).** `microvms_core::agents::prompt_sync(session, spec, task,
+  options)` and `AgentVm::prompt_sync(agent, task, options)` start one task, wait for it and ack
+  it, with `options.timeout` (core's `DEFAULT_PROMPT_TIMEOUT` when unset) as the daemon's budget
+  and the wait at once. Python's `AgentVm.prompt_sync` and TypeScript's `AgentVm.promptSync`
+  call it instead of composing the request and the wait themselves; they answer as before.
+- **`WaitOpts::for_lifecycle(timeout)` in core (#266).** A lifecycle wait (launch, suspend,
+  resume, terminate) with the caller's deadline, core's `LIFECYCLE_POLL_INTERVAL` and no stall
+  probe. The app's own waits, the CLI's `suspend`/`resume`/`terminate` and both bindings'
+  `wait_for_state` build their waits from it instead of restating those values, and
+  `WaitOpts::for_launch()` is it at `DEFAULT_LIFECYCLE_TIMEOUT`. No wait changes.
+- **An agent VM's default agents and its before-launch refusal come from core (#266).** Core's
+  `agents::default_specs()` is the list an `AgentVm` carries when its caller names none (Claude
+  Code alone), and `agents::launched_session` the refusal a call before `launch` meets; both
+  bindings use them instead of their own copies. `agent_constants()` publishes the list as
+  `default_agents` in Python and `defaultAgents` in TypeScript.
+- **Python's `ControlPlane` has a `region` property, as TypeScript's does (#267).** It answers
+  the `Region` the plane was built for.
+- **Run-to-completion takes `reap_group_on_exit` in both bindings (#267).** Python's
+  `Session.run_to_completion(reap_group_on_exit=)` and TypeScript's
+  `runToCompletion(command, { reapGroupOnExit })` send it on the start request, as `run` does:
+  the daemon signals the whole process group once the command's own child exits. It's off by
+  default. TypeScript used to drop the option without a word.
+- **A terminate can wait a given number of seconds for TERMINATED (#267).**
+  `microvm terminate --wait-sec SECONDS` waits at most that long, and implies `--wait`, which
+  keeps core's lifecycle default. Python's `terminate(wait_for_terminated=)` and TypeScript's
+  `terminate({ waitForTerminated })`, on `Sandbox` and `AgentVm`, take a number of seconds as
+  well as a boolean: `True` still waits core's default, and a number core can't read as a
+  duration is refused before the teardown.
+- **Every keepalive surface takes the count of retryable poll failures it tolerates (#267).**
+  Python's `Session.keep_awake(tolerated_errors=)`, TypeScript's `keepAwake({ toleratedErrors })`
+  and `microvm keepalive --tolerated-errors N` set core's `KeepAwake::tolerated_errors`: how many
+  failures in a row it retries, a second apart, before it ends with the error. Left out, it's
+  core's `DEFAULT_TOLERATED_ERRORS`, as before.
+- **`microvm names` lists the name registry, and `--delete NAME` clears a name (#267).** The CLI
+  registered names on `run --keep --vm-name` and released them only when a terminate was
+  accepted, so a name whose VM ended some other way refused its reuse with no way to clear it
+  but deleting a file. `names` lists each record without its agent token and identity seed, the
+  redaction core's new `NameRecord::redacted_json` does; `--delete`, repeatable, refuses a name
+  the registry doesn't hold before it deletes anything. Local files only, no AWS call.
+- **`AgentVm.launch` takes `launch_env`, `shell` and `ready_timeout` in both bindings (#267),** as
+  `Sandbox.run` does: the base environment for every exec, a shell-capable launch, and the wait
+  for RUNNING. The wait for the daemon after it stays core's.
+- **`microvm run --keep --no-wait` returns once the launch is accepted, and `microvm wait`
+  finishes it (#269).** The run's envelope carries the endpoint, agent token and MicroVM id
+  with the VM still PENDING, and `--vm-name` registers the name as usual. `wait`, given
+  `--name` or that triple, adopts the VM and waits through core's new
+  `Sandbox::wait_until_ready`: for RUNNING (up to `--timeout`, core's
+  `DEFAULT_RUNNING_TIMEOUT`) and then for the daemon from PENDING, for the daemon alone from
+  RUNNING, and it refuses a VM in any other state. `--no-wait` refuses an exec and sync mode,
+  which need the VM answering.
+- **`--cpus` and `--memory-mib` size a VM by its request on `run`, `build`, `cost` and
+  `agent-up` (#269).** In place of `--memory`'s closed set of classes, they go to core's
+  `SizeClass::from_request`, the SDKs' `SizeClass.from_request`, which picks the smallest
+  class whose baseline covers the request (`--memory-mib 1500` selects 2048). On `run` they
+  win over `memory` in microvm.toml as a typed `--memory` does, and a request no class
+  covers is refused before any AWS call.
+- **`microvm adopt` holds a `--name` record or a pasted triple to the service through core's
+  `Sandbox::adopt` (#269).** As the SDKs' `Sandbox.adopt` does, it reads the VM's lifecycle
+  from `GetMicrovm` and refuses a triple whose endpoint isn't the one the service reports for
+  its id, an empty agent token, or a state this client doesn't know. The envelope is the
+  adopted sandbox's view: the state, endpoint, image, state reason and idle window. It
+  writes nothing.
+- **`microvm egress-posture` answers the egress posture a launch would report, before it
+  (#269).** It takes `run`'s egress flags, microvm.toml and region, merges them through
+  `run`'s own merge, and answers core's `egress_posture_for`, as the SDKs'
+  `egress_posture_for` does: `open`, `unsealed`, `best-effort` or `sealed` in `data.posture`,
+  or the refusal the launch would raise. No AWS call and no credentials.
+- **`microvm exists PATH` says whether a path exists in a running VM (#269),** as the SDKs'
+  `Session.file_exists` does. Only the daemon's not-found answers `false`, any other refusal
+  fails the command with its own code, and it exits 0 either way: the answer is `data.exists`.
+- **`microvm dockerfile` prints core's other two Dockerfiles: `--wrap FILE` and `--agent AGENT`
+  (#269).** `--wrap` appends the agentd stanza to a task Dockerfile, as the SDKs'
+  `wrap_dockerfile` does, taking `--port`, `--workdir` and `--inherit-workdir`, and refusing
+  what core refuses (no `FROM`, an unfinished last instruction). `--agent`, repeatable, prints
+  the agent VM image's Dockerfile `agent-up` builds, as `AgentVm.dockerfile` does, with
+  `--claude-version` and `--codex-version` pins. Both answer with the default stanza's keys.
+- **The budget gate is core's, and both bindings have it (#270).** `microvms_core::cost::Budget`
+  (a ceiling and an `OnBreach` judgement, which has no default) checks a report into a
+  `BudgetVerdict`: whether the floor breaches the ceiling, whether that's a lower bound, the
+  overage, and its renderings. `microvm cost --max-cost --on-breach` applies it, and
+  Python's `check_budget(report, max_usd, on_breach)` and TypeScript's
+  `checkBudget(report, maxUsd, onBreach)` return the same verdict. The CLI's budget line
+  now reads ", and N line(s) are unpriced" where it had a dash.
+- **Registering a record another machine wrote is core's, and both bindings have it (#270).**
+  `microvms_core::names::import(store, record, session)` writes `record` only after the VM
+  has answered one authenticated request over `session`, which must be attached with the
+  record's own endpoint and token, and refuses a name another VM (or an unreadable file) holds
+  before any request. `names::probe` and `names::import_probed` are its two halves; the proof
+  one returns is what the other takes. `microvm attach` applies them, and Python's
+  `NameRegistry.import_record(record, session)` and TypeScript's
+  `NameRegistry.importRecord(record, session)` call `import`.
+- **`StartRequest::new` and its `with_*` setters (#273).** `protocol::exec::StartRequest` has a
+  builder: `StartRequest::new(exec_id, command)` sets every other field to the default the
+  daemon gives a body that omits it, and `with_shell`, `with_cwd`, `with_env`, `with_user`,
+  `with_group`, `with_timeout_sec`, `with_stdin`, `with_reap_group_on_exit` and
+  `with_inherit_image_env` set the rest. Core, the CLI and both bindings build every request
+  with it.
+- **The client defaults the bindings and the CLI used to retype (#273).**
+  `microvms_core::session::DEFAULT_EXEC_WAIT` (300 seconds, the wait for an exec and a
+  one-shot `run_sync` when the caller names none), `microvms_core::cost::DEFAULT_RESIDENCY_CYCLES`
+  (one) and `microvms_core::sandbox::LIFECYCLE_POLL_INTERVAL` (5 seconds, now public). The
+  TypeScript defaults read all three and the Python ones read `DEFAULT_EXEC_WAIT`, with the
+  same values as before.
+- **`microvms-domain`, the rules and values with no I/O (#282, ARCH-6).** Sizing, the cost
+  engine and its rate table, regions, the service constraints, name validation and the
+  name record, the error kinds, the preflight report, the ELF checks, and the tunnel
+  identity's derivation and pin moved out of `microvms-core` into a new published crate. Its
+  `clippy.toml` refuses the std file, process, network, environment and clock calls and the
+  clock and entropy calls of its own dependencies, and its dependency set and their features
+  are asserted exactly, so nothing in it can read ambient state. Core
+  re-exports every moved item at its old path (ARCH-1, amended), and
+  `crates/microvms-core/tests/public_paths.rs` names every v0.10.0 path to keep it that way. The
+  pure constructors are new: `CalendarDate::from_unix_secs` (it refuses a time past
+  9999-12-31, such as a millisecond count), `NameRecord::new_at`,
+  `LaunchIdentity::from_seeds` (public now, and it validates), and
+  `names::resolve_record`. No behavior changes, and no AWS call changed.
+- **`microvms_core::entropy`, the port every random value a launch mints comes from
+  (#283).** Client-token nonces, log-stream discriminators, agent tokens and identity seeds
+  are drawn from the control plane's `Entropy`, which is `OsEntropy` (the kernel pool)
+  unless `ControlPlane::with_entropy` swaps it. An unavailable pool now refuses the create or
+  the launch with an error instead of panicking. `control::token::create_token_with` and
+  `run_token_with` take the source; `create_token` and `run_token` keep drawing from the OS
+  pool. `session::exec_id_at` mints an exec id for a given wall time, and
+  `SessionBuilder::with_clock` sets the clock a session's exec ids and default proxy auth
+  read.
+- **`microvms_core::adapters`, and a port-taking constructor for each type (#283).**
+  `ControlPlane::from_ports` takes the transport, clock, entropy and an `Adapters`, the port a
+  sandbox builds its session backend and its STS and S3 client through; `SystemAdapters` is
+  the production one. `SessionBuilder::try_build` builds from exactly what was set and
+  refuses a builder with no backend or clock, and `SessionBuilder::build_with` fills those
+  from an `Adapters`. `ProxyAuth::with_clock` is the default refresh interval on a given
+  clock. `control::context::from_dir` is the directory read behind `BuildContext::from_dir`.
+  `sandbox::ControlPlaneMinter` is public, with `ControlPlaneMinter::new`, so an adapter that
+  builds its own session doesn't need a copy of it. A sandbox's session now reads the plane's
+  clock, which in production is the same tokio clock it read before.
+- **The `test-support` feature and `microvms_core::testing` (#283).** The test doubles
+  core's own tests use, for a dependent's `[dev-dependencies]`: `FakeControlPlane` and its
+  response bodies, `TestClock`, `YieldingClock`, `SequenceEntropy`, `CountingMinter`, the
+  recording HTTP backend `Recorder`, `TestAdapters`, and `testing::control_plane`.
+  `FakeControlPlane::fail_credentials` scripts a credential chain that resolves nothing. The
+  CLI's guards and core's integration tests use them in place of their own copies.
+- **`microvms-app` and `microvms-edges`, and core as the composition root (#283, ARCH-1,
+  ARCH-7, ARCH-8).** The use cases (the control-plane client, `Sandbox`, `Session`, the
+  agent helpers, preflight, names and the ports) moved into `microvms-app`, which depends
+  on no crate that performs network, AWS, filesystem, subprocess or entropy I/O. Its
+  `clippy.toml` forbids the std and tokio file, network, process and stream calls and types,
+  tokio's signals, the environment reads, the `SystemTime::now`, `SystemTime::elapsed` and
+  `Instant::now` clock reads, and `std::thread::sleep`. The production
+  port implementations (SigV4 over reqwest, the tunnel, the OS entropy pool, the tokio
+  clock, the name file, the environment lookup and provisioning) moved into
+  `microvms-edges`. `microvms-core` now holds only the prelude and re-exports, and every
+  v0.10.0 path still resolves. `verify/arch/placement.toml` and
+  `crates/microvms-cli/tests/dependency_direction.rs` pin each layer's dependencies and
+  features exactly. Both new crates join the release's publish set, and their first publish
+  is by hand, in dependency order after `microvms-domain`. No behavior changes.
+- **Accessors the split needed (#283).** `ControlPlane::entropy` is public.
+  `agents::prompt_request_with` takes the exec-id minter, `bedrock::BearerToken::new`
+  wraps a key, `BuildContext::with_warnings` and `IgnoreRules::has_exceptions` are new,
+  and `control::context::DAEMON_ENTRY`, `DOCKERFILE_ENTRY`, `IGNORE_FILES`,
+  `control::transport::SIGNING_NAME` and `Call::body_bytes` are public. `Adapters::warn`
+  reports a warning no caller is left to receive: a `Sandbox` dropped with its VM live warns
+  through it, and `SystemAdapters` writes that to stderr as before.
+- **The daemon release's verification policy and its ports (#284).**
+  `microvms_app::provision` holds `fetch_release`, the order a fetch is proven in, written
+  against a `ReleaseSource` (the asset, `SHA256SUMS`, and the attestation bundles for a
+  digest, as `Bundles`: published, absent, or unreachable) and an `AttestationVerifier`, with `Signer::release` naming who must have signed.
+  `microvms_core::provision` re-exports them beside the edges' implementations:
+  `GitHubRelease` (reqwest), `SigstoreVerifier` (`sigstore-verify` 0.13 with its embedded
+  public-good trusted root), `PolicyFetch`, which runs the policy over any source and
+  verifier, and `HttpsFetch`, the shipped fetch over those two.
+- **`microvms_core::env::process`, the process-environment lookup (#285).** The lookup
+  `Region::from_env`, `FileNameStore::default_location` and the other resolvers take, in
+  production. The CLI and both bindings pass it instead of each wrapping `std::env::var`,
+  which their `clippy.toml` now bans along with the other environment reads,
+  `std::process::Command` and `tokio::process::Command`. No behavior changes.
+- **Every surface default is held to core's (#300).** `microvms_core::defaults::client_defaults()`
+  names each default a surface can restate (the exec, readiness, lifecycle and prompt waits, the
+  launch windows, the size classes, the agent port, the request types' switches), read from
+  core's constants and request defaults, and `microvm manifest` publishes it as
+  `data.clientDefaults`. `parity:check` maps every numeric CLI default and every numeric, `True`,
+  `False` or named default in `microvms.pyi` to one of them through `[[default]]` rows in
+  `verify/parity/capabilities.toml`, and fails on a default no row holds or one that differs
+  from core's.
+- **`$MICROVM_RELEASE_DIR` provisions the daemon from a release on disk, proven by the same
+  attestation (#383).** With it set, a run with no binary reads release `<tag>`'s `agentd` and
+  `agentd.sigstore.json` from `<dir>/<tag>/`, where `gh release download <tag> --dir` puts
+  them, instead of downloading them from GitHub, and verifies the bundle against the release
+  workflow at that tag as a download is verified. A directory without the bundle is refused,
+  never checked against its `SHA256SUMS`, and a directory without the release is an error
+  rather than a fall-back to GitHub. It lets a machine that can't reach GitHub provision a
+  verified daemon, and it's how the live run that gates each release tests the draft release
+  before anything is published.
+
+### Changed
+
+- **`--artifact-uri` refuses the flags it makes meaningless (#249). A usage error where
+  these used to parse.** `build --reuse` with it: the reuse name is a hash of the local build
+  inputs only, so an image built from a caller's object under it would later be handed to a
+  plain `build --reuse` of the same binary as if it were that binary's image. `--dockerfile` on
+  `run` and `build`, and `--project` on `build`: they only shape an artifact the CLI builds, and
+  beside a caller's URI it builds none, so they were dropped with nothing said, and an unused
+  Dockerfile could still fail the build's local checks. To keep a command that passed them,
+  drop `--artifact-uri` and let the CLI build and upload, or drop the other flag and bake it
+  into your own artifact.
+- **A `--name` gets `Sandbox.from_name`'s answers for a disagreeing region and an illegal
+  name (#251).** A `--region` or `--unlisted-region` that disagrees with the name's record
+  used to win over the record; it's now refused with `ERR_INVALID_ARG` before any AWS call. A
+  `--name` that breaks the name grammar (`a/b`, `mvm-1`) is now `ERR_INVALID_ARG` with the
+  grammar's reason instead of `ERR_PRECONDITION` "no VM named"; the lifecycle commands still
+  pass such an identifier through to the service. A script that passes the region it launched
+  in beside `--name` is unaffected.
+- **`Sandbox.run` returns once the daemon answers, on every surface (#254).** Core's
+  `Sandbox::run`, and `wait_until_running` after a `run` that didn't wait, returned at RUNNING;
+  only the CLI's `run` and `AgentVm.launch` also waited for the daemon, each on its own. Now core
+  waits for RUNNING and then polls health until the daemon answers, so the first exec after a
+  launch doesn't meet the moment the endpoint's proxy path still refuses connections. `run`
+  returns later by that poll, and a daemon that never answers fails it with `ERR_TIMEOUT`, the
+  VM left RUNNING. `ready_timeout` still bounds the RUNNING wait; the daemon wait after it is
+  core's `DEFAULT_BOOTSTRAP_TIMEOUT`.
+- **A cost report's defaults and JSON shape are core's, so every surface answers a plan alike
+  (#255).** Python's and TypeScript's `estimate_run` label an estimate `"estimate"`, not
+  `"plan"`, as `microvm cost --estimate` does, and `run_report` and `estimate_run` infer
+  `launched` when it's left out (running time, or an image of non-zero size), where they
+  assumed a launch: a plan of suspended time alone no longer carries a launch snapshot-read
+  line. `CostReport.to_dict()` and `toJson()` now carry `size.headroomMib`, which only the CLI
+  emitted. An explicit `launched` or `label` still wins, and the CLI's output is unchanged.
+  In Rust, `microvms_core::cost` adds `DEFAULT_RUN_LABEL`, `DEFAULT_ESTIMATE_LABEL`,
+  `RunUsage::infer_launched`, `PlanUsage::infer_launched`, and `to_json` on `CostReport`,
+  `LineItem` and `ResidencyComparison`.
+- **A daemon 507 is `InsufficientStorage`, `ERR_PLATFORM` and not retryable, on every surface
+  (#256).** The daemon answers 507 when a write would take the VM's disk under its reserve, and
+  it picked 507 over 500 because a client retries a 500. Core read it as one more 5xx, a
+  retryable `ServerError`, so Python's `.retryable` was `True` for a full disk, and `microvm cp`
+  reported it as `ERR_RETRYABLE` while `sync` reported `ERR_PLATFORM` by matching the message.
+  Now `wire_kind` (Python), `err.cause.cause.message` (TypeScript) and `data.kind` (the CLI)
+  are `InsufficientStorage`, the code is `ERR_PLATFORM` and the exception `PlatformError`, and
+  it isn't retryable. Every CLI command that writes into the VM (`cp`, `sync`, `run <DIR>`,
+  `agent-up`) reports it with `data.diskUnderPressure: true` and the free-space remedy. Every
+  other 5xx but 503 is still a retryable `ServerError`. A Rust source break, part of 0.11.0:
+  `microvms_core::WireKind` isn't `#[non_exhaustive]`, so a `match` over it that names every
+  variant needs an arm for `InsufficientStorage`, and `WireKind::ALL` is a `[WireKind; 14]`.
+- **Every build refuses a daemon that isn't an aarch64 ELF before the upload (#257).** `run`,
+  `build` and `agent-up` with an explicit binary, and `build_artifact`, `build_image` and
+  `ensure_image` in Rust, Python and TypeScript, took the daemon's bytes as given, so an x86_64
+  binary or a file that isn't an ELF at all was uploaded and built and failed as a run-hook
+  timeout far into the build. Now they're refused with `ERR_PRECONDITION` (`PreconditionError`
+  in Python) before any AWS call, naming what the bytes are and the `cargo build` that makes an
+  aarch64 daemon. A build from `--artifact-uri` with no binary, whose artifact already holds its
+  daemon, checks nothing. Code that passed placeholder bytes to a build call to get as far as AWS gets the
+  refusal instead: pass a real aarch64 build.
+- **`build --reuse`, `run`'s build and `agent-up` build through core's `ensure_image`, and the
+  CLI no longer needs the AWS CLI to upload (#258).** The CLI kept its own reuse: a name hashed
+  over the daemon and the Dockerfile alone, an artifact at `s3://<bucket>/<name>.zip` uploaded
+  with `aws s3 cp`, and any image under the name returned as reused, a failed or still-building
+  one included. Now the name is the one the bindings' `ensure_image` gives (it covers the base
+  image, a pinned base version and the `--memory` size class too, so every `--reuse` and agent
+  image name changes once and builds again), the artifact goes to
+  `s3://<bucket>/[<--s3-key-prefix>/]<name>/artifact.zip` through core's signed, retried upload,
+  a ready image is reused, one building is waited on, and a failed one is deleted and rebuilt.
+  `build --reuse` gains `--s3-key-prefix` and `--force`, and `build`'s envelope reports
+  `artifactUri`. A plain `build` keeps its name and its `s3://<bucket>/<name>.zip` key and
+  uploads through core as well. `run --name X` now reuses `X-<hash12>` when its inputs are
+  unchanged and reports `imageReused`; it deletes at teardown only an image it built. Old
+  images and objects under the old names are left where they are.
+- **An agent VM's image name covers its size class (#258).** `AgentVm.image_name`,
+  `find_image` and `build_image` name the image the way `Sandbox.ensure_image` does: the
+  artifact's content hash, the base image and the size class, so an image built at one size is
+  no longer found for another. Every agent image name changes once: an image built before is
+  not found under the new name and is built again, and the old one stays until you delete it. A
+  pinned base version is now part of an ensured image's name too; an unpinned name is unchanged.
+- **`microvm port-forward` serves connections concurrently (#263).** It served one connection
+  at a time, so a slow request (a long poll, a first compile) held the browser's next one
+  behind it. Each connection now has a task of its own, as `microvm tunnel`'s always did, and
+  the envelope is the same.
+- **`StartRequest` is `#[non_exhaustive]` (#273). A Rust source break in the published
+  `microvms-protocol`, part of the same 0.11.0.** A struct expression outside the crate no longer
+  builds (E0639), so a client can't pick its own default for a field it didn't mean to set,
+  and a field the daemon adds reaches every client as its wire default. Build requests with
+  `StartRequest::new(exec_id, command)` and the `with_*` setters. Reading the fields is
+  unchanged, and so is the JSON on the wire. The Python and TypeScript APIs don't change.
+- **Four methods moved to `microvms_core::prelude` (#282). A Rust source break, so the next
+  release is 0.11.0.** `CalendarDate::today_utc`, `NameRecord::new`,
+  `LaunchIdentity::generate` and `TunnelIdentity::initiator` read the clock or the OS
+  random pool, which the domain crate can't do, so they're extension traits in core now:
+  `CalendarDateExt`, `NameRecordExt`, `LaunchIdentityExt` and `TunnelIdentityExt`. Add
+  `use microvms_core::prelude::*;` and the calls compile unchanged. The Python and
+  TypeScript APIs don't change.
+- **One `Clock` trait (#283). A Rust source break for anyone who implements it.** The
+  control plane's `Clock` and the session's `Clock` are one trait, `microvms_core::clock::Clock`,
+  still reachable at `control::Clock` and `session::Clock`. It carries `elapsed`, `sleep`,
+  `unix_now` and a provided `today_utc`, and requires `Debug`. `control::SystemClock` is now
+  a name for `session::TokioClock`, so the control plane's waits measure their deadlines on
+  tokio's clock: the same monotonic time in production, and the simulated time under a
+  deterministic simulator, where a wait over `std::time::Instant` never reached its deadline.
+  `NameRecord` stamps and the prelude's `CalendarDate::today_utc` read the same clock.
+- **The constructors that wire production I/O moved to `microvms_core::prelude` (#283). A
+  Rust source break, part of the same 0.11.0.** `ControlPlane::new` and
+  `ControlPlane::with_transport` (`ControlPlaneExt`), `Sandbox::new`, `Sandbox::adopt_in` and
+  `Sandbox::from_name` (`SandboxExt`), `AgentVm::from_name` and `AgentVm::adopt_in`
+  (`AgentVmExt`), `Session::connect`, `Session::attach` and `Session::direct`
+  (`SessionExt`), `SessionBuilder::build` (`SessionBuilderExt`), `ProxyAuth::new`
+  (`ProxyAuthExt`) and `BuildContext::from_dir` (`BuildContextExt`). Each wires the
+  production transport, backend, clock, entropy or filesystem read into the type's
+  port-taking constructor, with the same behavior as before. The async ones still return
+  `Send` futures. `use microvms_core::prelude::*;` keeps every call compiling, and
+  `crates/microvms-core/tests/public_paths.rs` checks each still resolves. The Python and
+  TypeScript APIs don't change.
+- **The daemon fetch no longer runs `gh` or `curl` (#284).** When `run`, `build`,
+  `quickstart`, `agent-up` or a binding provisions `agentd`, it downloads the release asset
+  over HTTPS and checks the release workflow's Sigstore attestation in-process: the
+  certificate chain, the transparency log evidence, the signature over the asset's digest,
+  the workflow identity at exactly the requested tag, and the SLSA provenance predicate. A
+  machine without a `gh` login used to get only the checksum; it gets `attestation` now.
+  The bundle comes from the release's `agentd.sigstore.json` asset, and from GitHub's
+  attestations API when that asset can't be fetched, with `GITHUB_TOKEN` sent to the API
+  when it's set. A bundle that doesn't verify still stops the fetch, and so does a release
+  that answers it has none for the downloaded bytes (the bundle asset is a 404 and the API
+  has no bundle, or the API says it has no attestation for the digest): every release that
+  ships `SHA256SUMS` ships its bundle too, so a missing one means a replaced asset.
+  `SHA256SUMS` is the proof only when no answer can be had at all (a connection failure, a
+  rate limit, a server error). The release workflow now verifies the bundle it produced with
+  the same verifier before it publishes the release, so a Sigstore change the embedded
+  trusted root doesn't know stops the release rather than every client. v0.5.0 and v0.6.0
+  are refused without `gh` too now: their attestations name the repository's former owner,
+  which `gh attestation verify --repo` refuses as well.
+- **`provision::ReleaseFetch`, `Runner`, `Subprocess` and `SubprocessFetch` are gone (#284).
+  A Rust source break, part of the same 0.11.0.** They were the `gh` and `curl` fetch. Use
+  `HttpsFetch` for the shipped fetch, or `PolicyFetch` over your own `ReleaseSource` and
+  `AttestationVerifier` where a test scripted a `Runner`. `crates/microvms-core/tests/public_paths.rs`
+  stops naming the four, and `tools/generate-public-paths.py` lists them as removed. The
+  Python and TypeScript APIs don't change.
+
+### Deprecated
+
+- **The two constants named `DEFAULT_READY_TIMEOUT` are renamed (#254).** They named different
+  waits: `sandbox::DEFAULT_READY_TIMEOUT` (300 s, for RUNNING) is now
+  `sandbox::DEFAULT_RUNNING_TIMEOUT`, and `session::DEFAULT_READY_TIMEOUT` (120 s, for the daemon)
+  is now `session::DEFAULT_BOOTSTRAP_TIMEOUT`. The old names stay for one release as deprecated
+  aliases. Both bindings' `session_constants()` also publish `defaultRunningTimeoutSeconds`
+  beside `defaultReadyTimeoutSeconds`, the daemon wait.
+
+### Fixed
+
+- **`run` and `build` no longer upload over a caller's `--artifact-uri` (#249).** With a bucket
+  also set, by `--bucket` or `$MICROVM_BUCKET`, both commands built their own artifact and
+  uploaded it to the caller's URI, replacing the object there, so the image was built from the
+  CLI's bytes and not the caller's. A caller-supplied URI now means no upload whatever the
+  bucket says, and a progress line names the bucket that went unused. With no binary given, no
+  daemon is provisioned beside it either, so the build doesn't fetch a release asset it won't
+  use, and `build`'s envelope reports `agentd: null` rather than a daemon the image doesn't
+  hold. A build with a bucket and no `--artifact-uri` still uploads to `s3://<bucket>/<name>.zip`.
+  A script that passed `--artifact-uri` with a bucket and never uploaded there itself relied on
+  the bug: drop `--artifact-uri` to have the CLI upload, or upload first. The live suite checks
+  that the caller's object is unchanged after such a build.
+- **`doctor --region` and `--unlisted-region` reach the credentials and managed-base checks
+  (#250).** Those two checks resolved the region again from `$AWS_REGION` alone, so
+  `doctor --region us-west-2` listed another region's managed bases and named that region on
+  those lines. The region is now resolved once, and every line reports on the one the region
+  line names. When it doesn't resolve, the credentials check still runs, against us-east-1 as
+  before, and now says us-east-1 stood in, and `managed-bases` says it wasn't read instead of
+  listing us-east-1's bases.
+- **Every `--name` lookup follows core's name rule (#251).** The attached commands, `shell`,
+  `tunnel`, `keepalive`, `agent-up`'s refresh, `attach --from`, and `suspend`, `resume` and
+  `terminate` by name read a name through `microvms_core::names::resolve_record`, the rule
+  `Sandbox.from_name` uses. The VM's region comes from its record, so `terminate <name>` and
+  `keepalive --name` reach the VM from a shell whose `AWS_REGION` names another region, and
+  `keepalive` reads the idle window there. A torn record is refused with `ERR_PRECONDITION`
+  naming the file, instead of an attach with empty fields. `tunnel --verify-identity`
+  answers a free name with "no VM named" instead of "carries no identity material". The
+  exit-code changes this brings are under Changed.
+- **`session.spawn()` stream errors carry the error code chain (#252).** When a spawned
+  process's `stdout` or `stderr` rejected, on a gap under the default `gapPolicy: 'error'` or
+  on a drive error such as a spent reconnect budget or a refused reconnect, `err.cause` was
+  `undefined`. It's the documented chain now: `err.cause.message` is the `ERR_*` code and
+  `err.cause.cause.message` the wire kind. A spawn gap reports `ERR_PLATFORM` and
+  `OutputGap`, the same as `ExecHandle.stream({ errorOnGap: true })`. Both streams get their
+  rejection at once, so a caller reading `stderr` to the end before `stdout` no longer waits
+  forever when an unread `stdout` chunk is buffered. The messages don't change, and no AWS
+  request changes.
+- **`Sandbox.run` and `AgentVm.launch` launch by bare image name, as `run --image NAME` does
+  (#253).** The Python and TypeScript launches, and core's `Sandbox::run`, sent a name verbatim
+  in `RunMicrovm`, and the service answered HTTP 400 "Malformed ARN". Core's `run` now resolves
+  a name to its ARN with one `ListMicrovmImages` read after the launch's local refusals, so a
+  launch this client refuses still costs no call, and a name no image carries fails with
+  `ERR_PRECONDITION` before anything launches. An ARN passes through with no extra call. The
+  CLI's `run --image` launches through the same resolution, and `Sandbox::launch_image_arn`
+  reports the ARN a launch sent, a refused one included.
+- **`for await` over `ExecHandle.stream()` type-checks in TypeScript (#262).** `index.d.ts`
+  declared `ExecStream` with no `[Symbol.asyncIterator]()` member, because the binding's
+  `AsyncGenerator` impl lacked the `#[napi]` attribute napi-rs reads the yield type from, so
+  `tsc` rejected the loop the method's docs show. Each event is now typed `StreamEvent`. A
+  type-level probe (`bindings/microvms-js/__test__/types/`) compiled with `tsc --strict` against the
+  declarations runs in `dts:check` and in CI's bindings job.
+- **A VM named or adopted through a record keeps its tunnel identity (#263).**
+  `Sandbox.name_record` wrote no identity and `Sandbox.adopt_record` dropped the record's, so a
+  VM launched with an identity and named through the SDKs lost what `tunnel --verify-identity`
+  needs to check it. Both now carry the pair, and a record holding one half of it is refused
+  before any AWS call.
+- **A seconds flag that isn't a duration is refused before anything runs (#268).**
+  `exec --timeout`, `run --timeout`, `suspend --timeout`, `resume --timeout`,
+  `sync --timeout`, `cost --compare --hold-sec`, `agent-prompt --timeout` and keepalive's
+  `--interval`, `--for` and `--idle-window` parse through core's `duration_of_secs_f64`, so
+  `inf`, `NaN`, a negative value or one too large for a duration is refused with
+  `ERR_INVALID_ARG` before any call. Before, `inf` panicked after the exec had started, the
+  VM had launched, or the suspend or resume had been sent, and a `run` that panicked left its
+  VM running with no teardown; `NaN` and a negative value meant zero.
+  `ls --watch --interval-sec 1e300` is refused instead of panicking. `0` still parses; `sync`
+  sends it to the daemon, which refuses a zero budget after the upload, as before. A `sync`
+  whose budget is under a second now waits that budget plus 30 s, not 31 s. The CLI's and
+  both bindings' `clippy.toml` ban `Duration::from_secs_f64` and `from_secs_f32`. No AWS call
+  changed.
+- **A wait longer than the clock can hold waits instead of panicking (#268).** Core's exec,
+  readiness and completion deadlines saturate thirty years out when `now + timeout` would
+  overflow, which it did past about 9.2e18 seconds, after the exec had started. That reached
+  every surface: `exec --timeout 1e19` on the CLI, and each binding's exec wait, which hands
+  core the same `Duration`.
+- **The seconds refusal names the figure as typed (#268).** Core's message is now
+  `1e300 seconds is not a duration: it must be finite, non-negative and below 2^64, ...` on
+  every surface, where `1e300` used to print as 301 digits and `inf` as `infs`.
+  `ls --watch --interval-sec` prints its refused figure the same way.
+- **`ensure_image` no longer stalls the caller's runtime while it hashes and zips the
+  artifact (#309).** The hash and the zip ran on the task that called it, about a second of
+  CPU for the 2 MB daemon in a debug build, so no other task on that worker ran in between. On
+  EC2, ECS or Lambda credentials, a second `ensure_image` running at the same time could have
+  its credential fetch time out behind the first and fail with `could not resolve credentials
+  for GetCallerIdentity`, while the first went on to create its image. The work now runs on the
+  runtime's blocking pool, in Rust and through both bindings.
+- **The guards fire reads a command's restored runs in worker order.** With `--jobs`, the
+  restored check read each command's runs in the order the workers finished, so the seeded
+  fault that holds it to every worker fired or didn't by timing, and turned main's
+  `seeded faults fire` red at 8ebc766. It reads them by worker now, and that fault fires every
+  time.
+- **A huge `timeout_sec` no longer breaks the daemon's exec, and a huge service timestamp no
+  longer panics the parser (#335).** agentd converted `timeout_sec` with the panicking
+  conversion, so a figure past what a `Duration` holds, such as `1e300`, panicked in the start
+  handler and came back as a 500, which clients retry; it's now a 400 `malformed_request`. A
+  figure a `Duration` holds but the clock can't add to now, such as `1e19`, started the child
+  and then panicked in the task that waits on it, so the exec never reported a result and a
+  wait on it hung; that budget is now no deadline, and the exec reports its exit. The
+  control-plane client read `startedAt` and `terminatedAt` the same way, so such a figure in a
+  `GetMicrovm` reply panicked; it now reads as absent, as a negative one does.
+- **`doctor` checks the region a `microvm.toml` pins, as `run` does (#336).** `run` resolves its
+  region from `--region` or `--unlisted-region`, then the file's `region`, then `$AWS_REGION` or
+  `$AWS_DEFAULT_REGION`. `doctor` skipped the file, so in a project pinning `us-west-2` with
+  `AWS_REGION=us-east-1` it checked credentials and listed managed bases in us-east-1 while `run`
+  launched in us-west-2. Both commands now resolve the region through one function, and
+  `doctor`'s region line says what set it: the flag, the file's path, the environment, or the
+  built-in default.
+- **Python stream events are typed, and TypeScript tells the two hook-timeout classes apart
+  (#337).** `microvms.pyi` typed `ExecStream.__next__` as `Any | None`, so a checker saw every
+  event of `for event in handle.stream()` as `Any`. It's now `OutputChunk | Gap | Exit`, and
+  `isinstance` narrows each event to its class. The iterator's end is still `StopIteration`. In
+  `index.d.ts`, `RunHookTimeout` and `BuildHookTimeout` had the same members, and `tsc` compares
+  classes by structure, so it accepted either where the other was wanted. Their `maxSecs` getters
+  are now typed as the literals `60` and `3600`, the values they return, and `tsc` refuses the
+  swap. The TypeScript reference on the docs site shows `ExecStream`'s member as
+  `[Symbol.asyncIterator]()` instead of a property named `asyncIterator`.
+- **A wait's refusal no longer claims a credit on a cost report (#338).** A seconds figure that
+  isn't a duration on a wait, a window, an interval or a lifetime (the CLI's `--timeout`s and
+  keepalive's flags, and every binding wait such as `wait_until_ready(timeout=-1)`) is refused
+  by core's new `microvms_core::duration::of_secs_f64`, whose message says what a duration must
+  be and nothing about a report. A figure a report prices (`Duration.measured`, the residency
+  comparison's hold, `cost --compare --hold-sec`) still goes through
+  `cost::duration_of_secs_f64`, whose refusal keeps the reason. The values refused, the code
+  (`ERR_INVALID_ARG`) and the exit code are unchanged.
+- **A throttled control-plane call is retried even when the service sends it as HTTP 400
+  (#514).** Lambda MicroVMs has answered a throttled `ListMicrovms` with HTTP 400 and
+  `x-amzn-ErrorType: ThrottlingException`, where its model says 429, and the client read every
+  400 as a validation refusal: a fleet listing long enough to meet the throttle failed with
+  `ERR_PLATFORM` instead of retrying the page. The control-plane `Reply` now carries the
+  header's error name (`Reply::error_type`, cut down by `error_type_name`), and a
+  `ThrottlingException` it names is retryable whatever the status.
+
+### Security
+
+- **A verified tunnel's end is proved inside its Noise session, so a stream cut short no
+  longer reads as complete (#342).** A `--verify-identity` tunnel ended with a plaintext
+  WebSocket close, and the client read a close frame, a transport error and a hangup alike as
+  a clean end, so anything on the path could cut a transfer short and have it look finished.
+  Each side now sends an end of stream, an empty Noise message, before its close, and offers
+  it in the handshake. When the daemon offered one and the tunnel ends without it,
+  `TunnelEnd::Truncated` replaces `TunnelEnd::Closed`, and `microvm tunnel` warns and counts it
+  in `connectionsTruncated`; when the caller offered one and the tunnel ends without it, the
+  daemon resets the guest connection instead of closing it. A daemon from before this release
+  sends none: its tunnels end `TunnelEnd::ClosedUnproven`, which `microvm tunnel` warns about
+  and counts in `connectionsUnproven`, and an older client's close still closes the guest
+  connection as before. A Rust caller matching `TunnelEnd` adds arms for the two new variants.
+
 ## [0.10.0] — 2026-09-25
 
 ### Added
