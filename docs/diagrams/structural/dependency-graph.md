@@ -80,11 +80,11 @@ manifest lines that declare it.
 | aws-config 1.10 | `crates/microvms-edges/Cargo.toml:41-46` |
 | aws-credential-types 1.3 | `crates/microvms-edges/Cargo.toml:47` |
 | backon 1.6 | `crates/microvms-app/Cargo.toml:37`, `crates/microvms-edges/Cargo.toml:66` |
-| base64 0.23 | `crates/agentd/Cargo.toml:69`, `crates/microvms-app/Cargo.toml:46`, `crates/microvms-domain/Cargo.toml:48`, `crates/microvms-edges/Cargo.toml:102` |
+| base64 0.23 | `crates/agentd/Cargo.toml:69`, `crates/microvms-app/Cargo.toml:46`, `crates/microvms-domain/Cargo.toml:48`, `crates/microvms-edges/Cargo.toml:106` |
 | bytes 1 | `crates/agentd/Cargo.toml:47` |
-| const-hex 1.19 | `crates/agentd/Cargo.toml:72`, `crates/microvms-app/Cargo.toml:48`, `crates/microvms-cli/Cargo.toml:99`, `crates/microvms-domain/Cargo.toml:50`, `crates/microvms-edges/Cargo.toml:103` |
-| futures-util 0.3 | `crates/agentd/Cargo.toml:63`, `crates/microvms-app/Cargo.toml:34`, `crates/microvms-edges/Cargo.toml:89` |
-| getrandom 0.4 | `crates/agentd/Cargo.toml:76`, `crates/microvms-edges/Cargo.toml:107` |
+| const-hex 1.19 | `crates/agentd/Cargo.toml:72`, `crates/microvms-app/Cargo.toml:48`, `crates/microvms-cli/Cargo.toml:99`, `crates/microvms-domain/Cargo.toml:50`, `crates/microvms-edges/Cargo.toml:107` |
+| futures-util 0.3 | `crates/agentd/Cargo.toml:63`, `crates/microvms-app/Cargo.toml:34`, `crates/microvms-edges/Cargo.toml:93` |
+| getrandom 0.4 | `crates/agentd/Cargo.toml:76`, `crates/microvms-edges/Cargo.toml:111` |
 | globset 0.4 | `crates/microvms-cli/Cargo.toml:81` |
 | http 1.5 | `crates/microvms-edges/Cargo.toml:64` |
 | http-body-util 0.1 | `crates/agentd/Cargo.toml:46` |
@@ -96,12 +96,12 @@ manifest lines that declare it.
 | rust_decimal 1.42 | `crates/microvms-domain/Cargo.toml:38` |
 | rust_decimal_macros 1.40 | `crates/microvms-domain/Cargo.toml:42` |
 | sha2 0.11 | `crates/microvms-app/Cargo.toml:43`, `crates/microvms-cli/Cargo.toml:98`, `crates/microvms-edges/Cargo.toml:68` |
-| snow 0.10 | `crates/agentd/Cargo.toml:100-107`, `crates/microvms-edges/Cargo.toml:114-121` |
+| snow 0.10 | `crates/agentd/Cargo.toml:100-107`, `crates/microvms-edges/Cargo.toml:118-125` |
 | subtle 2.6 | `crates/agentd/Cargo.toml:53` |
 | tar 0.4.46 | `crates/agentd/Cargo.toml:52`, `crates/microvms-cli/Cargo.toml:87` |
 | tempfile 3 | `crates/agentd/Cargo.toml:60` |
 | thiserror 2.0.19 | `crates/microvms-domain/Cargo.toml:24` |
-| tokio-tungstenite 0.30 | `crates/microvms-edges/Cargo.toml:97-101` |
+| tokio-tungstenite 0.30 | `crates/microvms-edges/Cargo.toml:101-105` |
 | tokio-util 0.7 | `crates/agentd/Cargo.toml:64` |
 | toml 1 | `crates/microvms-cli/Cargo.toml:76` |
 | tower-http 0.7 | `crates/agentd/Cargo.toml:34` |
@@ -215,7 +215,7 @@ The feature sets differ where the role differs, and the manifests say why. `micr
 runtime; `microvms-app` takes `rt` only to spawn its keep-awake task onto the caller's runtime
 and never builds one, and `microvms-edges` takes no runtime feature at all, because a library
 does not choose its caller's (`crates/microvms-cli/Cargo.toml:64-70`, `crates/microvms-app/Cargo.toml:28-33`,
-`crates/microvms-edges/Cargo.toml:88`).
+`crates/microvms-edges/Cargo.toml:92`).
 `microvms-js` takes only `time` and `sync` because napi owns the runtime
 (`bindings/microvms-js/Cargo.toml:50-53`), while `microvms-py` takes `rt-multi-thread` for one runtime
 blocked on with the GIL released (`bindings/microvms-py/Cargo.toml:39-42`).

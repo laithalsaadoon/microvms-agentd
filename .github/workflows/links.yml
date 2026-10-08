@@ -47,6 +47,12 @@ jobs:
           cache: pnpm
           cache-dependency-path: site/pnpm-lock.yaml
 
+      # `gen-reference.mjs` spawns uv for Griffe and the drift page, just as in `docs.yml`.
+      # Keep its setup and pin together with that job's so the weekly report builds the same site.
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
       - name: install
         working-directory: site
         run: pnpm install --frozen-lockfile

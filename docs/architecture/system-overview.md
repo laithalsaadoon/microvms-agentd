@@ -69,7 +69,7 @@ the trap ladder.
 | Toolchain and targets | `channel = "1.99.0"`, `targets = ["aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl"]` | `rust-toolchain.toml:21-24` |
 | Shipping artifact | `lto`, `codegen-units = 1`, `panic = "unwind"`, `strip`, `opt-level = "z"` | `Cargo.toml:38-61` |
 | Daemon HTTP | `axum = "0.8.9"`; `tower-http` `"0.7"` with `limit` + `catch-panic` | `crates/agentd/Cargo.toml:25`, `crates/agentd/Cargo.toml:34` |
-| Async runtime | `tokio = "1.53"`, no `rt-multi-thread` in the daemon or the library | `crates/agentd/Cargo.toml:35-45`, `crates/microvms-app/Cargo.toml:33`, `crates/microvms-edges/Cargo.toml:88` |
+| Async runtime | `tokio = "1.53"`, no `rt-multi-thread` in the daemon or the library | `crates/agentd/Cargo.toml:35-45`, `crates/microvms-app/Cargo.toml:33`, `crates/microvms-edges/Cargo.toml:92` |
 | AWS control plane | `reqwest = "0.13"` on `rustls`, `aws-sigv4 = "1.5"`, `aws-config = "1.10"` | `crates/microvms-edges/Cargo.toml:58-63`, `crates/microvms-edges/Cargo.toml:52`, `crates/microvms-edges/Cargo.toml:41-46` |
 | Wire schema | `schemars = "1.2.2"`, `default-features = false`, `derive` + `std` only | `crates/protocol/Cargo.toml:16` |
 | Money | `rust_decimal = "1.42"` with `serde-with-str` | `crates/microvms-domain/Cargo.toml:38` |
@@ -77,7 +77,7 @@ the trap ladder.
 | Bindings | `pyo3 = "0.29"` with `abi3-py39`; `napi = "3"` with `napi5` + `async` + `web_stream` | `bindings/microvms-py/Cargo.toml:38`, `bindings/microvms-js/Cargo.toml:44-48` |
 | Verification tiers | `stateright = "0.31"`, `turmoil = "0.7.2"`, `proptest = "1.11"` | `crates/model/Cargo.toml:10`, `crates/agentd/Cargo.toml:76`, `crates/agentd/Cargo.toml:73` |
 | Live suite | PEP 723 inline script under `uv`, `boto3` + `httpx` | `conformance/run_rs.py:1-5` |
-| Build gate | `mise run check` — lint, security, tests, schema, manifest, Python stubs, TypeScript declarations, model drift, publishability, live wiring, build, background example, traceability | `.config/mise/tasks/check.toml:4-32` |
+| Build gate | `mise run check` — lint, security, tests, schema, manifest, Python stubs, TypeScript declarations, model drift, publishability, live wiring, build, background example, traceability | `.config/mise/tasks/check.toml:11-42` |
 
 ## Module map
 

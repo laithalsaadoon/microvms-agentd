@@ -41,7 +41,7 @@ constants at `crates/protocol/src/lib.rs:58` (`PROTOCOL_VERSION`) and `:66` (`VE
 Gate: a shape change is a **compile error in every crate that declares the dependency, by design** (`crates/microvms-core/Cargo.toml:29`
 states that a field renamed in `crates/protocol/` must break core's build), and the generated document is
 byte-compared by `crates/agentd/tests/schema_artifact.rs:39`, wired into the unconditional local gate as
-`.config/mise/tasks/contracts.toml:51 ["schema:check"]`.
+`.config/mise/tasks/contracts.toml:54 ["schema:check"]`.
 
 The crates that declare the dependency:
 `crates/agentd/Cargo.toml:15`, `crates/microvms-core/Cargo.toml:29`, `bindings/microvms-js/Cargo.toml:25`,
@@ -91,8 +91,8 @@ Defined at: `crates/microvms-domain/src/error.rs:43` (`Error`), `:127` (`ErrorKi
 Gate: `crates/microvms-domain/src/error.rs:433 every_kind_carries_its_python_err_code` — every kind must carry
 an `ERR_*` code — plus `:459 no_two_kinds_share_a_code` and, across the crate boundary,
 `crates/microvms-cli/src/exit.rs:486 the_exit_table_and_cores_error_kinds_are_the_same_thirteen_classes`.
-The Python side is gated by `.config/mise/tasks/contracts.toml:188 ["stubs:check"]` and the Node side by
-`.config/mise/tasks/contracts.toml:248 ["dts:check"]`, which diffs the committed `bindings/microvms-js/index.d.ts` against a
+The Python side is gated by `.config/mise/tasks/contracts.toml:218 ["stubs:check"]` and the Node side by
+`.config/mise/tasks/contracts.toml:277 ["dts:check"]`, which diffs the committed `bindings/microvms-js/index.d.ts` against a
 fresh napi build.
 
 The two types are two contracts serving two different consumers: `ErrorKind` answers which exit code
@@ -189,7 +189,7 @@ agent reading the `--json` envelope's `code`, and the conformance oracle reading
 Defined at: `crates/microvms-domain/src/constants.rs:57`-`:455` (the constants, from `MODEL_API_VERSION` to
 `DEAD_STATES`) and `:589` (`as_json`).
 
-Gate: `.config/mise/tasks/contracts.toml:286 ["model:check"]`, which runs `./tools/check-model-drift.py` (`:257`) and
+Gate: `.config/mise/tasks/contracts.toml:315 ["model:check"]`, which runs `./tools/check-model-drift.py` (`:257`) and
 compares every emitted key against the pinned botocore service model. It sits in `check` rather than
 `live` because the model is a file inside botocore — no network, no credentials. Inside the crate,
 `:693 as_json_carries_every_key_the_drift_gate_reads` and
@@ -238,7 +238,7 @@ Defined at: `crates/microvms-domain/src/sizing.rs:68` (`SIZE_CLASSES`, 5 rows / 
 (`SizeClass`).
 
 Gate: `tools/check-model-drift.py:279 PINNED_SIZE_CLASSES` is a deliberate literal twin compared
-against the emitted table, reached through `.config/mise/tasks/contracts.toml:286 ["model:check"]`. `.config/mise/tasks/contracts.toml:304`
+against the emitted table, reached through `.config/mise/tasks/contracts.toml:315 ["model:check"]`. `.config/mise/tasks/contracts.toml:333`
 records why a twin is the only possible check here: the sizing table is measurement-backed, so the
 service model can say nothing about it and client-versus-client is the only comparison available.
 In-crate, `crates/microvms-domain/src/sizing.rs:273 the_documented_table_carries_the_measured_rows` pins the
@@ -290,7 +290,7 @@ rows.
 Defined at: `crates/microvms-domain/src/region.rs:45` (`Region`) and `:73` (`MICROVM_REGIONS: [Region; 5]`).
 
 Gate: `tools/check-model-drift.py:267 PINNED_REGIONS` is the literal twin, compared through
-`.config/mise/tasks/contracts.toml:286 ["model:check"]`; in-crate,
+`.config/mise/tasks/contracts.toml:315 ["model:check"]`; in-crate,
 `crates/microvms-domain/src/region.rs:176 the_five_supported_regions_are_the_measured_ones` and
 `crates/microvms-cli/src/cli.rs:1061 the_region_domain_is_exactly_the_five_measured_regions_and_excludes_eu_central_one`
 hold both ends. No service model states the set — this list is maintained by hand, and the two
@@ -337,31 +337,31 @@ botocore calls that look like substitutes disagree with each other (`crates/micr
 
 ## The pinned cost rate table
 
-Defined at: `crates/microvms-domain/src/cost.rs:1018` (`pinned_rates`), returning the `RateTable` declared at
-`:849`, with the decimal literals at `:1016`-`:1023`.
+Defined at: `crates/microvms-domain/src/cost.rs:1007` (`pinned_rates`), returning the `RateTable` declared at
+`:845`, with the decimal literals at `:1012`-`:1019`.
 
 Gate: an offline check and a live one, running at different times.
-`crates/microvms-domain/src/cost.rs:2227 every_rate_byte_matches_the_python_literal` compares each field
+`crates/microvms-domain/src/cost.rs:2635 every_rate_byte_matches_the_python_literal` compares each field
 against a literal in the offline tier, and `./tools/check-live-rates.py --twin-only` cross-checks
 the script's own pinned copy against the Rust source — offline and free, per `.config/mise/tasks/live.toml:137`. The
-billable half, `.config/mise/tasks/live.toml:120 ["live:rates"]`, compares both against the live AWS Pricing API;
-it sits in `live` rather than `check` because it needs network and credentials (`:402`).
+live half, `.config/mise/tasks/live.toml:120 ["live:rates"]`, compares both against the live AWS Pricing API, which is free and creates no resources;
+it sits in `live` rather than `check` because it needs network and credentials (`:127`).
 
 The figures were read from the Lambda pricing page on 2026-08-07 in us-east-1
-(`crates/microvms-domain/src/cost.rs:999`). One of them, `storage_gb_month`, is derived rather than read.
+(`crates/microvms-domain/src/cost.rs:988`). One of them, `storage_gb_month`, is derived rather than read.
 
 | Downstream | Type | Touch on change | Citation |
 | --- | --- | --- | --- |
 | `tools/check-live-rates.py` | config | yes | `:121 PINNED` restates every figure; `:133 TWIN_PATH` and `:134 TWIN_FN` point at `pinned_rates`, and `:148 verify_twin` parses the `dec!()` literals out of the Rust source |
 | `crates/microvms-cli/src/commands/cost.rs` | direct import | yes | the `cost` command's table |
-| `bindings/microvms-py/src/cost.rs` | direct import | yes | `:576 PyRateTable` and `:590 pinned()` — the only pinned door, with deliberately no rates-taking constructor |
-| `bindings/microvms-js/src/cost.rs` | direct import | yes | `:501 RateTable`, `:514 pinned()`; `:908`, `:960`, `:982` default to `cost::pinned_rates` when no table is passed |
-| `crates/microvms-cli/src/commands/lifecycle.rs` | direct import | likely | `:449` imports `pinned_rates` and `run_report`; `:470`-`:473` price a completed run |
-| `crates/microvms-cli/src/render.rs` | direct import | likely | `:399` reads `retrieved()` (`crates/microvms-domain/src/cost.rs:885`) for the report header; the remaining uses are under `#[cfg(test)]` from `:404` |
-| `crates/microvms-domain/src/cost.rs` (own tests) | test | yes | `:2180` pins every figure as a literal; `:2205` asserts the GB-month derivation as `dec!(0.0001111111) * dec!(730)` |
-| `conformance/run_rs.py` | test | likely | asserts the `cost` command and the run envelope each report a labelled estimate |
-| `docs/PLATFORM.md` | config | yes | `:293`, `:295`, and `:299` carry the same figures; `:304`-`:306` carry the GB-hour → GB-month derivation. `crates/microvms-domain/src/cost.rs:57` and `:1002` both point here, so the two change in one commit |
-| `mise.toml` | config | no | `:395` wires `live:rates` to the script; `:411` records that `--twin-only` runs first on that path |
+| `bindings/microvms-py/src/cost.rs` | direct import | yes | `:567 PyRateTable` and `:581 pinned()` — the only pinned door, with deliberately no rates-taking constructor |
+| `bindings/microvms-js/src/cost.rs` | direct import | yes | `:466 RateTable`, `:479 pinned()`; `:834`, `:896`, `:1026` default to `cost::pinned_rates` when no table is passed |
+| `crates/microvms-cli/src/commands/lifecycle.rs` | direct import | likely | `:1397` imports `pinned_rates` and `run_report`; `:1419`-`:1422` price a completed run |
+| `crates/microvms-cli/src/render.rs` | test | likely | outside its tests it imports only `Amount` and `CostReport` (`:17`); the report's `retrieved` date is read in core, where `CostReport::to_json` calls `retrieved()` (`crates/microvms-domain/src/cost.rs:874`) at `crates/microvms-domain/src/cost.rs:2461`. Its tests, under `#[cfg(test)]` from `:304`, build reports from `pinned_rates` (`:312`, `:324`) |
+| `crates/microvms-domain/src/cost.rs` (own tests) | test | yes | `:2635` pins every figure as a literal; `:2660` asserts the GB-month derivation as `dec!(0.0001111111) * dec!(730)` |
+| `conformance/lanes/local.py`, `conformance/lanes/lifecycle.py` | test | likely | `conformance/lanes/local.py:52` asserts the `cost` command reports a labelled estimate, and `conformance/lanes/lifecycle.py:113` asserts the run envelope carries a labelled cost report |
+| `docs/PLATFORM.md` | config | yes | `:166`, `:167`, and `:170` carry the same figures; `:180`-`:181` carry the GB-hour → GB-month derivation. `crates/microvms-domain/src/cost.rs:57` and `:988` both point here, so the two change in one commit |
+| `.config/mise/tasks/live.toml` | config | no | `:139` wires `live:rates` to the script; `:137` records that `--twin-only` runs first on that path |
 
 ### Blast-radius notes
 
@@ -371,15 +371,15 @@ The figures were read from the Lambda pricing page on 2026-08-07 in us-east-1
   instructs the reader to repoint `TWIN_FN` rather than delete the check. The script's pinned figures
   are a deliberate second copy (`.config/mise/tasks/live.toml:135`), because a drift check that imported the values it
   checks would compare a table against itself.
-- **Money is always a `Decimal`, and the pinned figures carry ten significant digits.**
-  The literals at `crates/microvms-domain/src/cost.rs:1023`-`:1033` are `dec!()` values, not floats. Summing a
+- **Money is always a `Decimal`, and the pinned figures carry at most ten decimal places.**
+  The literals at `crates/microvms-domain/src/cost.rs:1012`-`:1019` are `dec!()` values, not floats. Summing a
   few thousand per-second ARM rates in binary floating point drifts toward a bill nobody can
   reproduce, and `docs/PLATFORM.md:164-170` lists the dated Pricing API rates to ten decimal places.
 - **`storage_gb_month` is derived, and the code and the platform doc both record the earlier wrong
-  value.** `crates/microvms-domain/src/cost.rs:2255` holds `dec!(0.08)` in the test that proves the current
+  value.** `crates/microvms-domain/src/cost.rs:2663` holds `dec!(0.08)` in the test that proves the current
   figure is not it, and `docs/PLATFORM.md:180`-`:181` records that $0.08 per GB-month was rounded
   low against the API rate, which gives $0.081111103 at a 730-hour month.
-  `CatalogLine` (`:1038`) checks the unit the API reports for exactly this reason: if AWS restated
+  `CatalogLine` (`crates/microvms-domain/src/cost.rs:1034`) checks the unit the API reports (`:1087`) for exactly this reason: if AWS restated
   storage per GB-month, the number would change by 730x and every downstream arithmetic check would
   still pass, because they all read the same table.
 
