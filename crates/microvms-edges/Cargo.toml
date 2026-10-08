@@ -68,17 +68,21 @@ backon = { version = "1.6", features = ["tokio-sleep"] }
 sha2 = "0.11"
 
 # ── the daemon release's attestation (#284) ─────────────────────────────────
-# `sigstore-verify` rather than `sigstore` 0.14, measured 2026-09-25: 0.14's bundle verifier
-# never checks the Rekor inclusion proof, checkpoint or SET, so it accepted eight tampered
-# bundles `gh attestation verify` refuses, and it brings in `rsa` with RUSTSEC-2023-0071. This
-# crate refused every one. Pinned exactly: it's pre-1.0 and ships minors often, so each bump is a
-# reviewed change. Default features off and never `tuf`: the trusted root is the one embedded in
-# `sigstore-trust-root`, so verifying needs no network, and `tuf` brings in an MPL-2.0 crate
-# `.cargo/deny.toml` doesn't allow. A Sigstore key rotation reaches this crate as a version bump, and
-# `tests/release_bundle.rs`, run by `release.yml` before it publishes, is what says one is due.
-sigstore-verify = { version = "=0.13.0", default-features = false }
-sigstore-trust-root = { version = "=0.13.0", default-features = false }
-sigstore-types = "=0.13.0"
+# `sigstore-verify` rather than the `sigstore` crate. `sigstore` 0.14.0, still its latest release,
+# never checks the Rekor inclusion proof, checkpoint or SET (both steps are TODOs in its bundle
+# verifier), so it accepted all seven tampered bundles `gh attestation verify` refuses, and its
+# `verify` feature brings in `rsa` 0.9.10 through `openidconnect`, with RUSTSEC-2023-0071 and no
+# patched release. `sigstore-verify` refused all seven at 0.13.0 and at 0.14.0 (measured
+# 2026-10-08; eight bundles on 2026-09-25). Pinned exactly: it's pre-1.0 and ships breaking minors
+# often, so each bump is a reviewed change, and the three move together because `sigstore-verify`
+# takes the other two's types. Default features off and never `tuf`: the trusted root is the one
+# embedded in `sigstore-trust-root`, so verifying needs no network, and at 0.14.0 `tuf` still
+# brings in `option-ext` (MPL-2.0, through `directories`), which `.cargo/deny.toml` doesn't allow.
+# A Sigstore key rotation reaches this crate as a version bump, and `tests/release_bundle.rs`, run
+# by `release.yml` before it publishes, is what says one is due.
+sigstore-verify = { version = "=0.14.0", default-features = false }
+sigstore-trust-root = { version = "=0.14.0", default-features = false }
+sigstore-types = "=0.14.0"
 
 # ── the in-VM session (T-W2-5) ──────────────────────────────────────────────
 # `net` is the port forwarder's listener (`session::forward`) and the tunnel's socket. It lives
