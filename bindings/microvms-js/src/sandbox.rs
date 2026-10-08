@@ -821,6 +821,20 @@ impl Sandbox {
             .map(|vm| vm.endpoint.clone())
     }
 
+    /// The image ARN `run` sent in `RunMicrovm`: the caller's identifier with a bare name
+    /// resolved, or the built image's.
+    ///
+    /// Recorded before the call, so a launch the service refused still names the image it
+    /// asked for. `null` until `run` has resolved an image, and on an adopted sandbox.
+    #[napi]
+    pub async fn launch_image_arn(&self) -> Option<String> {
+        self.inner
+            .lock()
+            .await
+            .launch_image_arn()
+            .map(str::to_owned)
+    }
+
     /// Why the VM is in its current state, when the service said.
     ///
     /// The absence is information: TRAP-8's message distinguishes "no stateReason" from an

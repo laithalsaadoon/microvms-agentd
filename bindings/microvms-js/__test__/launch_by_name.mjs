@@ -93,3 +93,25 @@ test('identity on run reaches the launch request', async () => {
   });
   assert.equal(await plain.tunnelIdentity(), null);
 });
+
+test('launchImageArn names the image the launch sent', async () => {
+  // #280: core's `Sandbox::launch_image_arn`. Null before a launch; an ARN is recorded as the
+  // launch sends it, before the call, so a launch the service refuses still names it; a bare
+  // name the listing never resolved records nothing.
+  const arn = 'arn:aws:lambda:us-east-1:123456789012:microvm-image:wanted-image';
+  const sandbox = await Sandbox.create(Region.usEast1());
+  assert.equal(await sandbox.launchImageArn(), null);
+  await assert.rejects(sandbox.run({ imageIdentifier: arn }), (error) => {
+    assert.equal(codeOf(error), 'ERR_CREDENTIALS', error.message);
+    assert.match(error.message, /for RunMicrovm/);
+    return true;
+  });
+  assert.equal(await sandbox.launchImageArn(), arn);
+
+  const unresolved = await Sandbox.create(Region.usEast1());
+  await assert.rejects(unresolved.run({ imageIdentifier: 'wanted-image' }), (error) => {
+    assert.match(error.message, /for ListMicrovmImages/);
+    return true;
+  });
+  assert.equal(await unresolved.launchImageArn(), null);
+});
