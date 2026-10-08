@@ -409,7 +409,9 @@ well under the ceiling — this repo's clients refresh at half of it, thirty
 minutes, so a request in flight across the rollover still holds a token with
 about thirty minutes of life (`crates/microvms-app/src/session/proxy.rs:29-37`). A
 mint failure is retryable; treat it that way, because a control-plane throttle
-at minute thirty must not kill a healthy run.
+at minute thirty must not kill a healthy run. A credential failure during a mint
+is the exception: it stays `ERR_CREDENTIALS`, because the identical request is
+refused again until the identity is fixed.
 
 Token rotation costs nothing on the daemon side. All exec state — the records,
 the buffered output, the stream cursors — lives in the daemon, keyed by
