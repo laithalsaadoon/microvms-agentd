@@ -165,7 +165,7 @@ run = "./tools/check-mutants.py"
 ["ci:semver"]
 description = "CI's `semver` job: the published crates' Rust API against their last release on crates.io"
 # `semver:check` fetches each baseline from crates.io, which is why it's a job of its own and not
-# in `check`, which is offline. Its comment says which crate is gated and which is reported.
+# in `check`, which is offline. Its comment says which crates are gated, and why.
 run = [{ task = "semver:check" }]
 
 ["ci:mutmut"]

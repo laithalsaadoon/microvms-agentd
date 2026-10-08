@@ -166,7 +166,7 @@ jobs:
       - run: mise run ci:drift
 
   # The published crates' Rust API against their last release on crates.io (#298).
-  # `semver:check`'s comment says which crate is gated and which is only reported.
+  # `semver:check`'s comment says which crates are gated and why each is checked as itself.
   semver:
     name: published crates keep their API
     runs-on: ubuntu-latest

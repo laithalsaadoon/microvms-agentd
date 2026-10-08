@@ -271,14 +271,14 @@ mise run model:check   # implemented constraints versus the installed boto3 mode
 
 The published crates' Rust API is compared with their last release on crates.io:
 `mise run semver:check` runs cargo-semver-checks, and CI's `semver` job runs the same
-commands. `microvms-protocol` is gated: a change its last release's users couldn't compile
-against fails unless its `Cargo.toml` allows that lint with the reason (it allows none: 0.11.0,
-its baseline, ships `StartRequest`'s `#[non_exhaustive]`). A version bump doesn't open the gate:
-the check runs with `--release-type minor`, so a release PR is checked like any other.
-`microvms-core`'s comparison is printed and never fails until 0.11.0 is its baseline, since
-against 0.10.0 every item the layer split moved and re-exported reads as removed. The domain,
-the app and the edges join once their first release is on crates.io. It isn't in `check`: it
-fetches each baseline and builds two rustdocs per crate.
+commands. `microvms-protocol`, `microvms-domain`, `microvms-app`, `microvms-edges` and
+`microvms-core` are each gated against their own release: a change its users couldn't compile
+against fails unless the crate's `Cargo.toml` allows that lint with the reason (none allows
+one). A version bump doesn't open the gate: the check runs with `--release-type minor`, so a
+release PR is checked like any other. The domain, the app and the edges are checked as
+themselves because core's check doesn't see a change to an item it re-exports from them: it
+passes with their faults in `verify/guards/faults/semver.toml` seeded (2026-10-08). It isn't
+in `check`: it fetches each baseline and builds two rustdocs per crate.
 
 A wire change also has to work with the previous release in both directions.
 `schema:compat` in `check` compares `docs/schema.json` with the copy at the
