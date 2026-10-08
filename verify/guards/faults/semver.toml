@@ -4,8 +4,8 @@
 # every build and test here still passes, and a user of the last release who does stops
 # compiling. Only the comparison with that release sees it.
 [[family]]
-guard = "cargo semver-checks -p microvms-protocol"
-run = ["cargo", "semver-checks", "-p", "microvms-protocol"]
+guard = "cargo semver-checks -p microvms-protocol --release-type minor"
+run = ["cargo", "semver-checks", "-p", "microvms-protocol", "--release-type", "minor"]
 expect = "exit-nonzero"
 suite = "script"
 
