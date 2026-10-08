@@ -13,10 +13,3 @@ suite = "script"
 id = "semver-protocol-const-removed"
 message = "Phase::as_str"
 transform = { file = "crates/protocol/src/exec.rs", replace = "keeps this one equal to serde's.\n    pub const fn as_str(self) -> &'static str {", with = "keeps this one equal to serde's.\n    pub fn as_str(self) -> &'static str {" }
-
-# The one allowed lint dropped: the check fails on `StartRequest`'s `#[non_exhaustive]`, which
-# shows it compares with the release on crates.io rather than with the tree itself.
-[[family.fault]]
-id = "semver-protocol-allowance-dropped"
-message = "struct StartRequest in "
-transform = { file = "crates/protocol/Cargo.toml", replace = "struct_marked_non_exhaustive = \"allow\"\n", with = "" }
