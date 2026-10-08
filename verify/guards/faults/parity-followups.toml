@@ -1,0 +1,61 @@
+# ── parity-followups: FAIL_TO_PASS entries tools/fail-to-pass.py emitted ──
+
+# FAIL_TO_PASS: fails on cae2ec73845c with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-a-created-image-carries-every-field-of-the-request"
+guard = "control::ensure::tests::a_created_image_carries_every_field_of_the_request"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::ensure::tests::a_created_image_carries_every_field_of_the_request"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-a-created-image-carries-every-field-of-the-request.patch"
+
+# FAIL_TO_PASS: fails on cae2ec73845c with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-each-create-only-field-names-a-different-image"
+guard = "control::ensure::tests::each_create_only_field_names_a_different_image"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::ensure::tests::each_create_only_field_names_a_different_image"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-each-create-only-field-names-a-different-image.patch"
+
+# FAIL_TO_PASS: fails on cae2ec73845c with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-a-vm-the-fleet-listing-meets-on-two-pages-is-listed-once"
+guard = "control::microvm::tests::a_vm_the_fleet_listing_meets_on_two_pages_is_listed_once"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::microvm::tests::a_vm_the_fleet_listing_meets_on_two_pages_is_listed_once"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-a-vm-the-fleet-listing-meets-on-two-pages-is-listed-once.patch"
+
+# FAIL_TO_PASS: fails on cae2ec73845c with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-a-credential-failure-during-a-mint-is-err-credentials"
+guard = "session::proxy::tests::a_credential_failure_during_a_mint_is_err_credentials_not_retryable"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::proxy::tests::a_credential_failure_during_a_mint_is_err_credentials_not_retryable"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-a-credential-failure-during-a-mint-is-err-credentials.patch"
+
+# FAIL_TO_PASS: fails on cae2ec73845c with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-test-launch-image-arn-names-the-image-the-launch-sent"
+guard = "bindings/microvms-py/tests/test_launch_by_name.py::test_launch_image_arn_names_the_image_the_launch_sent"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_launch_by_name.py::test_launch_image_arn_names_the_image_the_launch_sent"],
+]
+expect = "test-failed"
+suite = "bindings"
+patch = "verify/guards/faults/f2p-test-launch-image-arn-names-the-image-the-launch-sent.patch"
+
+# FAIL_TO_PASS: fails on cae2ec73845c with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-launchimagearn-names-the-image-the-launch-sent"
+guard = "launchImageArn names the image the launch sent"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/launch_by_name.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+patch = "verify/guards/faults/f2p-launchimagearn-names-the-image-the-launch-sent.patch"
