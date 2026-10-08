@@ -25,7 +25,7 @@ defended against rather than narration. The sources above are the history.
 Two operational facts before you start. `mise run check` is the free offline gate — lint,
 security, every Rust tier, schema, manifest, Python stub and TypeScript declaration
 freshness, model drift, publishability, live wiring, the release cross-compile, the background
-example, and the requirement traceability matrix (`.config/mise/tasks/check.toml:4-32`). `mise run live` is
+example, and the requirement traceability matrix (`.config/mise/tasks/check.toml:11-42`). `mise run live` is
 BILLABLE, takes about fifteen minutes against real AWS, and is never a first debugging step
 (`.config/mise/tasks/live.toml:153-154`); after any live run, teardown is verified separately by
 `mise run live:verify-clean` (`.config/mise/tasks/live.toml:141-151`), because the service creates log groups
@@ -128,7 +128,7 @@ money.
    `background:check`, and `trace:check`. A drifted generated artifact — the served schema,
    the CLI manifest, the Python stub, the TypeScript declarations, the traceability matrix, a
    hardcoded API constraint against botocore's model — fails here rather than in production.
-   `.config/mise/tasks/check.toml:4-32`
+   `.config/mise/tasks/check.toml:11-42`
 7. **If the VM is reachable: `GET /v1/health`.** One call answers several questions.
    `bootstrapped` false plus 503s everywhere means the run hook has not landed;
    `disk.under_pressure` means writes are about to be refused with 507; `identity_degraded`
