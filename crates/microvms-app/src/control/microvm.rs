@@ -738,6 +738,9 @@ impl ControlPlane {
     /// looks complete, and a VM absent from it is a VM nothing here will terminate. That is
     /// the same argument [`ops::ListImagesResponseWire`] makes for the image listing, and a
     /// fleet listing is the one a teardown reads.
+    ///
+    /// Each VM is listed once (#280): a VM the service returns on two pages keeps the place it
+    /// was first listed and the entry read last, the newer reading of its state.
     pub async fn list_microvms(&self) -> Result<Vec<ops::MicrovmItemWire>, Error> {
         self.list_microvms_matching(&MicrovmFilter::default()).await
     }
@@ -753,7 +756,12 @@ impl ControlPlane {
         if let Some(version) = filter.image_version.as_deref() {
             super::require_valid_version("imageVersion", version)?;
         }
-        let mut items = Vec::new();
+        let mut items: Vec<ops::MicrovmItemWire> = Vec::new();
+        // Where each id sits in `items`. The service can return one VM on two pages while VMs
+        // change state (docs/PLATFORM.md, "A paginated `ListMicrovms` can return one VM on two
+        // of its pages"), so a repeat replaces the earlier entry, the older reading, in place.
+        let mut position: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
         let mut next_token: Option<String> = None;
         loop {
             let call = Call::get(
@@ -766,7 +774,15 @@ impl ControlPlane {
             );
             let reply = send_with_retry(self.transport(), call).await?;
             let page: ops::ListMicrovmsResponseWire = reply.json("ListMicrovms")?;
-            items.extend(page.items);
+            for item in page.items {
+                match position.get(&item.microvm_id) {
+                    Some(&at) => items[at] = item,
+                    None => {
+                        position.insert(item.microvm_id.clone(), items.len());
+                        items.push(item);
+                    }
+                }
+            }
             match page.next_token {
                 Some(token) => next_token = Some(token),
                 None => return Ok(items),
@@ -2252,6 +2268,49 @@ mod tests {
             "the first request carries no cursor: {}",
             paths[0]
         );
+    }
+
+    /// **A VM the service lists on two pages is listed once (#280).**
+    ///
+    /// Measured 2026-10-01 (docs/PLATFORM.md, "A paginated `ListMicrovms` can return one VM on
+    /// two of its pages"): while VMs change state, a `nextToken` walk can meet one VM twice.
+    /// A listing that concatenated the pages counted it twice, so `ls --remote` listed it
+    /// twice and a teardown would terminate it twice. The later page's entry is the newer
+    /// reading, so it is the one kept, at the place the VM was first listed.
+    #[tokio::test]
+    async fn a_vm_the_fleet_listing_meets_on_two_pages_is_listed_once() {
+        let (plane, fake, _) = planted();
+        fake.answer(
+            "ListMicrovms",
+            Answer::ok(fake::list_microvms_page(
+                &["mvm-a", "mvm-moved"],
+                Some("fleet-page-2"),
+            )),
+        )
+        .answer(
+            "ListMicrovms",
+            Answer::ok(
+                fake::list_microvms_page(&["mvm-moved", "mvm-b"], None).replacen(
+                    "RUNNING",
+                    "SUSPENDED",
+                    1,
+                ),
+            ),
+        );
+
+        let fleet = plane.list_microvms().await.expect("lists");
+        let ids: Vec<&str> = fleet.iter().map(|vm| vm.microvm_id.as_str()).collect();
+        assert_eq!(
+            ids,
+            ["mvm-a", "mvm-moved", "mvm-b"],
+            "each VM once, in the order first listed"
+        );
+        assert_eq!(
+            fleet[1].state, "SUSPENDED",
+            "the page read later is the newer reading of the VM"
+        );
+        assert_eq!(fleet[0].state, "RUNNING");
+        assert_eq!(fake.call_count("ListMicrovms"), 2, "both pages were read");
     }
 
     /// **Issue #25.** The `idlePolicy` the service reports is carried rather than dropped.
