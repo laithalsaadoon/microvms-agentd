@@ -98,12 +98,12 @@ description = "microvms-protocol keeps the API of its last release on crates.io;
 # cargo-semver-checks builds each crate's rustdoc and the rustdoc of the release on crates.io its
 # version resolves to, and fails on a change that release's users couldn't compile against (#298).
 # The protocol crate is gated: it's the wire types both the daemon and every client compile
-# against. Its one allowed lint, and why, is in `crates/protocol/Cargo.toml`.
+# against. It allows no lint: an allowed one, and why, goes in `crates/protocol/Cargo.toml`.
 #
 # `--release-type minor` holds the protocol to additive changes whatever its version says.
 # Derived from the version, a release PR's bump (0.10.0 to 0.11.0 is a major change before 1.0)
 # switches off every breaking lint, so the PR that ships a release would be the one PR the gate
-# doesn't check (the two seeded faults in `verify/guards/faults/semver.toml` passed on the 0.11.0
+# doesn't check (the faults seeded in `verify/guards/faults/semver.toml` passed on the 0.11.0
 # bump, 2026-10-02). A break the protocol means to ship is allowed in its `Cargo.toml`, by lint,
 # with the reason.
 #

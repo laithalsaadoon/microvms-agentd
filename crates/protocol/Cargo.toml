@@ -37,9 +37,6 @@ serde_json = "1"
 unsafe_code = "forbid"
 
 # `mise run semver:check` and CI's `semver` job hold this crate's API to its last release on
-# crates.io (#298). `StartRequest` became `#[non_exhaustive]` after v0.10.0 (#314), so every start
-# request is built through `StartRequest::new`: a break 0.11.0 ships on purpose. This allows the one
-# lint it trips until that release is the baseline, when the entry goes. Any other break still
-# fails.
-[package.metadata.cargo-semver-checks.lints]
-struct_marked_non_exhaustive = "allow"
+# crates.io (#298). A break the crate means to ship is allowed here, in
+# `[package.metadata.cargo-semver-checks.lints]`, by lint and with the reason; none is allowed,
+# so any break fails.
