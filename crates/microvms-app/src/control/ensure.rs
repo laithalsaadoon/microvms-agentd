@@ -7,9 +7,12 @@
 //!
 //! 1. **Name** (IMAGE-6). `<prefix>-<hash12>`, the hash over the artifact's inputs (the
 //!    daemon, the Dockerfile, the build context — [`artifact_content_hash_with_context`])
-//!    plus the base image and the size class, because an image is created on one base at one
-//!    size. Equal inputs name one image; any changed input names a fresh one, which is what
-//!    keeps a stale snapshot from being served under a reused name.
+//!    plus the base image, the size class and every field the service sets only when it
+//!    creates the image (identity repair, `inherit_workdir`, the hook timeouts, the log
+//!    destination), because an image is created on one base at one size with those fixed.
+//!    Equal inputs name one image; any changed input names a fresh one, which is what keeps a
+//!    stale snapshot, or one built without a field the caller asked for, from being served
+//!    under a reused name.
 //! 2. **Artifact** (IMAGE-7). The Dockerfile, the daemon, and the context, zipped with fixed
 //!    dates and modes, so equal inputs are one object at one content-addressed key.
 //! 3. **ARN and upload** (IMAGE-8). The service takes image ARNs, not names, so the ARN is
@@ -161,7 +164,8 @@ pub fn ensured_image_name(prefix: &str, identity_hash: &str) -> Result<String, E
 }
 
 /// The identity an ensured image is named for (IMAGE-6): the artifact's content hash, the
-/// base image's name (what `baseImageArn` names), and the size class's baseline.
+/// base image's name (what `baseImageArn` names), and the size class's baseline, for an image
+/// created with [`CreateImageRequest::new`]'s create-only fields.
 ///
 /// Length-prefixed and tagged, so no two field boundaries can collide.
 pub fn image_identity_hash(artifact_hash: &str, base: &BaseImage, size: SizeClass) -> String {
@@ -171,32 +175,120 @@ pub fn image_identity_hash(artifact_hash: &str, base: &BaseImage, size: SizeClas
 /// [`image_identity_hash`] with the base version a build pins (#258): a pinned base builds
 /// on that version whatever the service's default later becomes, so the pin is identity.
 ///
-/// `None` is [`image_identity_hash`]'s stream exactly, so an unpinned image keeps the name it
-/// always had; a pin adds one tagged, length-prefixed field after the size.
+/// The create-only fields are [`CreateImageRequest::new`]'s defaults; an ensure whose request
+/// sets others names its image for those (#280).
 pub fn pinned_identity_hash(
     artifact_hash: &str,
     base: &BaseImage,
     base_version: Option<&str>,
     size: SizeClass,
 ) -> String {
+    let defaults = CreateImageRequest::new("", Vec::new(), "", "");
+    identity_hash(
+        artifact_hash,
+        base,
+        base_version,
+        size,
+        &CreateOnly::of(&defaults),
+    )
+}
+
+/// The identity of the image `create` would create, over the artifact `artifact_hash` names:
+/// what [`prepare`] names an ensured image for, and what the agent recipe's two-step path
+/// names the same image for.
+pub(crate) fn create_identity_hash(artifact_hash: &str, create: &CreateImageRequest) -> String {
+    identity_hash(
+        artifact_hash,
+        &create.base_image,
+        create.base_image_version.as_deref(),
+        create.size,
+        &CreateOnly::of(create),
+    )
+}
+
+/// The fields of a created image the service sets at `CreateMicrovmImage` and no later call
+/// changes (#280). They are identity because a reuse returns the image as it was created: an
+/// ensure that left them out of the name could hand a caller asking for identity repair an
+/// image built without it. Tags are not here, because a reused image keeps its own.
+struct CreateOnly<'a> {
+    repair_guest_identity: bool,
+    inherit_workdir: bool,
+    run_hook_timeout: u32,
+    build_hook_timeout: u32,
+    log_group: Option<&'a str>,
+    log_stream: Option<&'a str>,
+}
+
+impl<'a> CreateOnly<'a> {
+    fn of(create: &'a CreateImageRequest) -> Self {
+        Self {
+            repair_guest_identity: create.repair_guest_identity,
+            inherit_workdir: create.inherit_workdir,
+            run_hook_timeout: create.run_hook_timeout.as_secs(),
+            build_hook_timeout: create.build_hook_timeout.as_secs(),
+            log_group: create.log_group.as_deref(),
+            log_stream: create.log_stream.as_deref(),
+        }
+    }
+}
+
+/// The one identity stream. Every field is length-prefixed and each optional or create-only
+/// one is tagged, so no two field boundaries can collide and an absent value never reads as an
+/// empty one.
+///
+/// The domain tag is `microvms-ensure-image/2`: adding the create-only fields renames every
+/// ensured image once (#280), and the version says which stream a name came from. An image
+/// named by `/1` is never reused, which is the point: it may have been created without a field
+/// its next caller asks for.
+fn identity_hash(
+    artifact_hash: &str,
+    base: &BaseImage,
+    base_version: Option<&str>,
+    size: SizeClass,
+    create: &CreateOnly<'_>,
+) -> String {
     use sha2::{Digest as _, Sha256};
 
-    let mut hasher = Sha256::new();
-    for field in [
-        b"microvms-ensure-image/1".as_slice(),
-        artifact_hash.as_bytes(),
-        base.name.as_bytes(),
-    ] {
+    fn put(hasher: &mut Sha256, field: &[u8]) {
         hasher.update((field.len() as u64).to_be_bytes());
         hasher.update(field);
     }
-    hasher.update(size.baseline_mib().to_be_bytes());
-    if let Some(version) = base_version {
-        for field in [b"baseImageVersion".as_slice(), version.as_bytes()] {
-            hasher.update((field.len() as u64).to_be_bytes());
-            hasher.update(field);
+    fn put_optional(hasher: &mut Sha256, tag: &[u8], value: Option<&str>) {
+        put(hasher, tag);
+        match value {
+            None => put(hasher, &[0]),
+            Some(value) => {
+                put(hasher, &[1]);
+                put(hasher, value.as_bytes());
+            }
         }
     }
+
+    let mut hasher = Sha256::new();
+    put(&mut hasher, b"microvms-ensure-image/2");
+    put(&mut hasher, artifact_hash.as_bytes());
+    put(&mut hasher, base.name.as_bytes());
+    put(&mut hasher, &size.baseline_mib().to_be_bytes());
+    put_optional(&mut hasher, b"baseImageVersion", base_version);
+    for (tag, on) in [
+        (
+            b"repairGuestIdentity".as_slice(),
+            create.repair_guest_identity,
+        ),
+        (b"inheritWorkdir".as_slice(), create.inherit_workdir),
+    ] {
+        put(&mut hasher, tag);
+        put(&mut hasher, &[u8::from(on)]);
+    }
+    for (tag, secs) in [
+        (b"microvmHooks".as_slice(), create.run_hook_timeout),
+        (b"microvmImageHooks".as_slice(), create.build_hook_timeout),
+    ] {
+        put(&mut hasher, tag);
+        put(&mut hasher, &secs.to_be_bytes());
+    }
+    put_optional(&mut hasher, b"logGroup", create.log_group);
+    put_optional(&mut hasher, b"logStream", create.log_stream);
     const_hex::encode(hasher.finalize())
 }
 
@@ -300,7 +392,8 @@ pub struct EnsureImageRequest {
     pub base_image: Option<BaseImage>,
     /// Delete what exists under the name and build afresh.
     pub force: bool,
-    /// Tags for a created image. Not part of the name: a reused image keeps its own.
+    /// Tags for a created image. Not part of the name: a reused image keeps its own, and
+    /// tags are not fixed at create.
     pub tags: BTreeMap<String, String>,
     /// The build wait's deadline, or `None` for [`DEFAULT_BUILD_TIMEOUT`].
     pub wait_timeout: Option<Duration>,
@@ -309,19 +402,21 @@ pub struct EnsureImageRequest {
     pub project_files: Option<super::artifact::ProjectFiles>,
     /// `baseImageVersion`, or `None` for the service's default. Part of the name when set.
     pub base_image_version: Option<String>,
-    /// `logging.cloudWatch.logGroup` for a created image. Not part of the name: logging
-    /// doesn't change what is built, and a reused image keeps its own.
+    /// `logging.cloudWatch.logGroup` for a created image. Part of the name (#280): the
+    /// service sets an image's logging when it creates it, so a reused image logs where its
+    /// creator asked.
     pub log_group: Option<String>,
     /// The log-stream prefix for a created image; see [`CreateImageRequest::log_stream`].
+    /// Part of the name, as `log_group` is.
     pub log_stream: Option<String>,
-    /// [`CreateImageRequest::repair_guest_identity`] for a created image. Not part of the
-    /// name, as `build --reuse`'s name never held it: a reused image keeps its own.
+    /// [`CreateImageRequest::repair_guest_identity`] for a created image. Part of the name
+    /// (#280): a reused image built without the repair would answer a caller who asked for it.
     pub repair_guest_identity: bool,
-    /// [`CreateImageRequest::inherit_workdir`] for a created image.
+    /// [`CreateImageRequest::inherit_workdir`] for a created image. Part of the name.
     pub inherit_workdir: bool,
-    /// The run-family hook timeouts for a created image.
+    /// The run-family hook timeouts for a created image. Part of the name.
     pub run_hook_timeout: crate::hooks::RunHookTimeout,
-    /// The build-family hook timeouts for a created image.
+    /// The build-family hook timeouts for a created image. Part of the name.
     pub build_hook_timeout: crate::hooks::BuildHookTimeout,
 }
 
@@ -449,29 +544,18 @@ pub fn prepare(control: &ControlPlane, request: EnsureImageRequest) -> Result<Pr
         request.project_files.as_ref(),
         request.context.as_ref(),
     );
-    let name = ensured_image_name(
-        &request.name_prefix,
-        &pinned_identity_hash(
-            &artifact_hash,
-            &base,
-            request.base_image_version.as_deref(),
-            request.size,
-        ),
-    )?;
-    require_valid_key_prefix(request.s3_key_prefix.as_deref(), &name)?;
-    let key = artifact_key(request.s3_key_prefix.as_deref(), &name);
-
+    // The create request first, unnamed, so the name is the identity of exactly the image it
+    // creates (#280): every field it carries is read from it rather than restated.
     let mut create = CreateImageRequest::new(
-        name.clone(),
+        String::new(),
         request.binary,
-        format!("s3://{}/{key}", request.s3_bucket),
+        String::new(),
         request.build_role_arn,
     );
     create.base_image = base;
     create.dockerfile = Some(request.dockerfile);
     create.size = request.size;
     create.tags = request.tags;
-    create.token_scope = Some(name.clone());
     create.project_files = request.project_files;
     create.base_image_version = request.base_image_version;
     create.log_group = request.log_group;
@@ -480,6 +564,16 @@ pub fn prepare(control: &ControlPlane, request: EnsureImageRequest) -> Result<Pr
     create.inherit_workdir = request.inherit_workdir;
     create.run_hook_timeout = request.run_hook_timeout;
     create.build_hook_timeout = request.build_hook_timeout;
+
+    let name = ensured_image_name(
+        &request.name_prefix,
+        &create_identity_hash(&artifact_hash, &create),
+    )?;
+    require_valid_key_prefix(request.s3_key_prefix.as_deref(), &name)?;
+    let key = artifact_key(request.s3_key_prefix.as_deref(), &name);
+    create.code_artifact_uri = format!("s3://{}/{key}", request.s3_bucket);
+    create.token_scope = Some(name.clone());
+    create.name = name.clone();
     control.preflight(&create)?;
 
     let artifact = build_artifact_with_context(
@@ -988,9 +1082,9 @@ mod tests {
         );
     }
 
-    /// **The create fields an ensure carries (#258).** Project files and a pinned base name a
-    /// different image; logging, identity repair, `inherit_workdir` and the hook timeouts
-    /// don't, and all of them reach the create request a build sends.
+    /// **The create fields an ensure carries (#258).** Project files, a pinned base, logging,
+    /// identity repair, `inherit_workdir` and the hook timeouts name a different image (#280),
+    /// and all of them reach the create request a build sends.
     #[test]
     fn a_created_image_carries_every_field_of_the_request() {
         use crate::control::artifact::{Ecosystem, ProjectFiles};
@@ -1041,12 +1135,74 @@ mod tests {
         configured.run_hook_timeout =
             crate::hooks::RunHookTimeout::try_new(7).expect("a legal timeout");
         let configured = prepare(&plane, configured).expect("prepares");
-        assert_eq!(configured.name, plain.name, "configuration isn't identity");
+        assert_ne!(
+            configured.name, plain.name,
+            "the create-only fields are identity (#280)"
+        );
         assert_eq!(configured.create.log_group.as_deref(), Some("/team/builds"));
         assert_eq!(configured.create.log_stream.as_deref(), Some("task"));
         assert!(configured.create.repair_guest_identity);
         assert!(configured.create.inherit_workdir);
         assert_eq!(configured.create.run_hook_timeout.as_secs(), 7);
+    }
+
+    /// **Each create-only field names a different image (#280).** The service sets identity
+    /// repair, `inherit_workdir`, the hook timeouts and the log destination when it creates
+    /// an image, and no later call changes them, so an image reused under a name that left
+    /// them out can be one built without them. Each one changed alone renames the image, and
+    /// the same values name the same image again.
+    #[test]
+    fn each_create_only_field_names_a_different_image() {
+        let plane = crate::testing::control_plane(
+            Arc::new(FakeControlPlane::new()),
+            Region::UsEast1,
+            Arc::new(TestClock::new()),
+        );
+        let plain = prepare(&plane, request()).expect("prepares").name;
+        assert_eq!(
+            prepare(&plane, request()).expect("prepares").name,
+            plain,
+            "equal inputs name one image"
+        );
+
+        type Change = fn(&mut EnsureImageRequest);
+        let changes: [(&str, Change); 7] = [
+            ("repair_guest_identity", |r| r.repair_guest_identity = true),
+            ("inherit_workdir", |r| r.inherit_workdir = true),
+            ("run_hook_timeout", |r| {
+                r.run_hook_timeout = crate::hooks::RunHookTimeout::try_new(7).expect("legal");
+            }),
+            ("build_hook_timeout", |r| {
+                r.build_hook_timeout = crate::hooks::BuildHookTimeout::try_new(901).expect("legal");
+            }),
+            ("log_group", |r| {
+                r.log_group = Some("/team/builds".to_string());
+            }),
+            ("another log_group", |r| {
+                r.log_group = Some("/team/other".to_string());
+            }),
+            ("log_stream", |r| {
+                r.log_group = Some("/team/builds".to_string());
+                r.log_stream = Some("task".to_string());
+            }),
+        ];
+        let mut names = vec![plain.clone()];
+        for (field, change) in changes {
+            let mut changed = request();
+            change(&mut changed);
+            let name = prepare(&plane, changed).expect("prepares").name;
+            assert_ne!(name, plain, "{field} is create-only, so it is identity");
+            assert!(
+                !names.contains(&name),
+                "{field} names an image another field already names: {name}"
+            );
+            names.push(name);
+        }
+
+        // Tags are not: a reused image keeps its own.
+        let mut tagged = request();
+        tagged.tags.insert("team".to_string(), "x".to_string());
+        assert_eq!(prepare(&plane, tagged).expect("prepares").name, plain);
     }
 
     /// `from_create` hands an ensure every field a create request carries, and names the
@@ -1070,6 +1226,8 @@ mod tests {
 
         let mut direct = request();
         direct.base_image_version = Some("1".to_string());
+        direct.log_group = Some("/g".to_string());
+        direct.repair_guest_identity = true;
         direct.s3_key_prefix = None;
         let plane = crate::testing::control_plane(
             Arc::new(FakeControlPlane::new()),

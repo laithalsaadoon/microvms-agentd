@@ -179,8 +179,10 @@ s3KeyPrefix, buildRoleArn }, size)`, answering `{ image, reused, artifactUri, up
 warnings }`.
 
 - **The name** is `<name_prefix>-<hash12>`. The hash covers the daemon bytes, the
-  Dockerfile, every build-context file's path, mode and bytes, the base image, and the
-  size class, because an image is created on one base at one size. Equal inputs name one
+  Dockerfile, every build-context file's path, mode and bytes, the base image, the size
+  class, and the fields the service fixes at create (identity repair, `inherit_workdir`,
+  the hook timeouts, the log destination; #280), because an image is created on one base
+  at one size with those set. Equal inputs name one
   image and any changed input names a fresh one, so a stale snapshot is never served
   under a reused name. The prefix is reduced to the characters the service's image
   names admit. The artifact hash without a context is unchanged, so `microvm build
