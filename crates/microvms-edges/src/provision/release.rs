@@ -481,7 +481,7 @@ impl AttestationVerifier for SigstoreVerifier {
             return Err("the bundle signs a message, not an in-toto attestation".to_string());
         };
         let statement: sigstore_types::Statement =
-            serde_json::from_slice(&envelope.decode_payload())
+            serde_json::from_slice(envelope.payload.as_bytes())
                 .map_err(|error| format!("the attested statement doesn't parse: {error}"))?;
         if statement.predicate_type != signer.predicate_type {
             return Err(format!(
@@ -703,11 +703,11 @@ mod tests {
         assert!(refusal.contains("predicate type mismatch"), "{refusal}");
     }
 
-    /// **Tampered transparency log evidence is refused.** The reason this crate and not
-    /// `sigstore` 0.14, which accepted each of these (measured 2026-09-25). The first three
-    /// cases are the ones only the inclusion proof check sees, so they're what fails if the
-    /// policy ever turns on `skip_tlog_unsafe`; the SET and the integrated time it signs are
-    /// checked either way.
+    /// **Tampered transparency log evidence is refused.** The reason this crate and not the
+    /// `sigstore` crate, whose 0.14.0 accepted each of these (measured 2026-09-25 and again
+    /// 2026-10-08; `Cargo.toml` has the rest). The first three cases are the ones only the
+    /// inclusion proof check sees, so they're what fails if the policy ever turns on
+    /// `skip_tlog_unsafe`; the SET and the integrated time it signs are checked either way.
     #[test]
     fn tampered_transparency_evidence_is_refused() {
         let cases = [
