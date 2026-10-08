@@ -13,3 +13,56 @@ suite = "script"
 id = "semver-protocol-const-removed"
 message = "Phase::as_str"
 transform = { file = "crates/protocol/src/exec.rs", replace = "keeps this one equal to serde's.\n    pub const fn as_str(self) -> &'static str {", with = "keeps this one equal to serde's.\n    pub fn as_str(self) -> &'static str {" }
+
+# The domain, the app and the edges each go through their own comparison: core's doesn't see a
+# change to an item it re-exports from them, so each crate's fault is one only its own check
+# catches. `require_hook_port` gains a parameter: a caller of the last release stops compiling.
+[[family]]
+guard = "cargo semver-checks -p microvms-domain --release-type minor"
+run = ["cargo", "semver-checks", "-p", "microvms-domain", "--release-type", "minor"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "semver-domain-param-added"
+message = "microvms_domain::hooks::require_hook_port now takes 2 parameters instead of 1"
+transform = { file = "crates/microvms-domain/src/hooks.rs", replace = "pub fn require_hook_port(port: u32) -> Result<u16, Error> {", with = "pub fn require_hook_port(port: u32, _floor: u16) -> Result<u16, Error> {" }
+
+# `GapPolicy::as_str` loses its `const`, as the protocol's `Phase::as_str` does above: nothing in
+# the workspace calls it in a const context, so only the comparison with the release sees it.
+[[family]]
+guard = "cargo semver-checks -p microvms-app --release-type minor"
+run = ["cargo", "semver-checks", "-p", "microvms-app", "--release-type", "minor"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "semver-app-const-removed"
+message = "GapPolicy::as_str"
+transform = { file = "crates/microvms-app/src/session/split.rs", replace = "`\"error\"` or `\"event\"`.\n    pub const fn as_str(self) -> &'static str {", with = "`\"error\"` or `\"event\"`.\n    pub fn as_str(self) -> &'static str {" }
+
+# `direct_url` goes `pub(crate)`: its only callers are in the edges, so every build here still
+# passes, and a user of the last release who calls it stops compiling.
+[[family]]
+guard = "cargo semver-checks -p microvms-edges --release-type minor"
+run = ["cargo", "semver-checks", "-p", "microvms-edges", "--release-type", "minor"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "semver-edges-fn-hidden"
+message = "function microvms_edges::session::forward::direct_url, previously in file"
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "pub fn direct_url(endpoint: &str, guest_port: u16, target: &str)", with = "pub(crate) fn direct_url(endpoint: &str, guest_port: u16, target: &str)" }
+
+# Core's own items: the composition root's free functions. `run_token` gains a parameter, and a
+# caller of the last release stops compiling (core's own token test and the live suite call it).
+[[family]]
+guard = "cargo semver-checks -p microvms-core --release-type minor"
+run = ["cargo", "semver-checks", "-p", "microvms-core", "--release-type", "minor"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "semver-core-param-added"
+message = "microvms_core::control::token::run_token now takes 2 parameters instead of 1"
+transform = { file = "crates/microvms-core/src/lib.rs", replace = "        pub fn run_token(scope: &str) -> String {", with = "        pub fn run_token(scope: &str, _attempt: u32) -> String {" }

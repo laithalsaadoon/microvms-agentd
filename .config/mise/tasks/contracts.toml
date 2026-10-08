@@ -94,30 +94,30 @@ run = [
 ]
 
 ["semver:check"]
-description = "microvms-protocol keeps the API of its last release on crates.io; microvms-core's comparison with its own is printed, not gated"
+description = "Every published library crate keeps the API of its last release on crates.io"
 # cargo-semver-checks builds each crate's rustdoc and the rustdoc of the release on crates.io its
 # version resolves to, and fails on a change that release's users couldn't compile against (#298).
-# The protocol crate is gated: it's the wire types both the daemon and every client compile
-# against. It allows no lint: an allowed one, and why, goes in `crates/protocol/Cargo.toml`.
+# The protocol is the wire types the daemon and every client compile against; core is the
+# library the CLI and the bindings depend on; the domain, the app and the edges are on crates.io
+# from 0.11.0. Each is checked as itself: core's comparison doesn't see a change to an item it
+# re-exports from the crates below it (measured 2026-10-08: their seeded faults all pass `-p
+# microvms-core`). None allows a lint: an allowed one, and why, goes in that crate's `Cargo.toml`.
 #
-# `--release-type minor` holds the protocol to additive changes whatever its version says.
+# `--release-type minor` holds each crate to additive changes whatever its version says.
 # Derived from the version, a release PR's bump (0.10.0 to 0.11.0 is a major change before 1.0)
 # switches off every breaking lint, so the PR that ships a release would be the one PR the gate
 # doesn't check (the faults seeded in `verify/guards/faults/semver.toml` passed on the 0.11.0
-# bump, 2026-10-02). A break the protocol means to ship is allowed in its `Cargo.toml`, by lint,
-# with the reason.
-#
-# microvms-core is printed and never fails, until 0.11.0 is on crates.io: against 0.10.0, every
-# item #283 moved into the domain, the app and the edges and re-exported reads as removed
-# (cargo-semver-checks#355, measured 2026-09-30: six lints over the moved paths). The domain, the
-# app and the edges have no release on crates.io to compare with before their manual first
-# publish (CONTRIBUTING.md, Releases). CI's `semver` job runs both.
+# bump, 2026-10-02). A break a crate means to ship is allowed in its `Cargo.toml`, by lint, with
+# the reason.
 #
 # Not in `check`: it fetches each baseline from crates.io and builds two rustdocs per crate,
 # about 20 s for the protocol crate and 100 s for core on four cores.
 run = [
   "cargo semver-checks -p microvms-protocol --release-type minor",
-  "cargo semver-checks -p microvms-core || echo 'semver: microvms-core is reported, not gated, until 0.11.0 is on crates.io (#298)'",
+  "cargo semver-checks -p microvms-domain --release-type minor",
+  "cargo semver-checks -p microvms-app --release-type minor",
+  "cargo semver-checks -p microvms-edges --release-type minor",
+  "cargo semver-checks -p microvms-core --release-type minor",
 ]
 
 [manifest]
