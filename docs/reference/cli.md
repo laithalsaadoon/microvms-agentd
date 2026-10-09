@@ -180,7 +180,7 @@ Egress is always requested, because neither agent reaches Bedrock without it. Th
 
 A failure after the launch and before the registration (token mint, project upload, credential install, or an interrupt) tears the VM down, because a VM with no name and no credentials is one nobody can use; the failure envelope carries `microvmId`, `imageIdentifier`, `leaked`, and `terminateAccepted`. The image stays, as the durable artifact. The name is registered last, over a VM every step succeeded on; a registry write failure is `ERR_PRECONDITION` with the identifier triple in `data`. No new exit row: every failure maps onto the existing table.
 
-The success envelope's type is `microvm.agent`; its keys are `vmName`, `microvmId`, `endpoint`, `agentToken`, `imageIdentifier`, `imageName`, `imageReused`, `vmReused`, `agents` (`[{agent, model, cliVersion, headlessCommand}]`), `credentialExpiresAt` (epoch seconds), `workdir`, `project` (`{workdir, uploadedBytes, uploadedMembers}` or `null`), and `agentd`. On the refresh path `imageIdentifier`, `imageName`, and `imageReused` are `null`, because no image was built or looked up. `agents[].headlessCommand` is the exact template `agent-prompt` runs with `<TASK>` where the quoted task goes, so a caller who wants `exec --stream --user 1000 --group 1000` over it can spell the command without knowing the profile. `crates/microvms-cli/src/commands/mod.rs`, the `agent-up` row.
+The success envelope's type is `microvm.agent`; its keys are `vmName`, `microvmId`, `endpoint`, `agentToken`, `imageIdentifier`, `imageName`, `imageReused`, `vmReused`, `agents` (`[{agent, model, cliVersion, headlessCommand}]`), `credentialExpiresAt` (epoch seconds), `workdir`, `project` (`{workdir, uploadedBytes, uploadedMembers}` or `null`), `egressPosture`, and `agentd`. On the refresh path `imageIdentifier`, `imageName`, and `imageReused` are `null`, because no image was built or looked up. `egressPosture` reports what the VM has: `open` for a VM this command launched, since it launches with the egress connector, and on the refresh path the posture the name record carries, or `unsealed` when the record names none, as for a VM `attach` registered (`posture_of` in `crates/microvms-cli/src/commands/agent.rs`). `agents[].headlessCommand` is the exact template `agent-prompt` runs with `<TASK>` where the quoted task goes, so a caller who wants `exec --stream --user 1000 --group 1000` over it can spell the command without knowing the profile. `crates/microvms-cli/src/commands/mod.rs`, the `agent-up` row.
 
 ## agent-prompt
 
@@ -204,7 +204,7 @@ Flags:
 - `--exec-id <ID>`: use this exec id instead of a fresh one, making a retry idempotent. `crates/microvms-cli/src/cli.rs`, `AgentPromptArgs::exec_id`.
 - Plus `AttachFlags` and `RegionFlags`; `--name <NAME>` is the usual spelling, the name `agent-up --vm-name` registered.
 
-The success envelope's type is `microvm.agent.prompt`, under its own discriminant because a consumer that learned `microvm.exec` is reading a command it chose and this one ran a template it did not. Its keys are `exec`'s plus which agent ran: `execId`, `agent`, `model`, `phase`, `exitCode`, `stdout`, `stderr`, `truncated`. A non-zero agent exit earns `ERR_EXEC_FAILED` on a success envelope, as `exec` does. `crates/microvms-cli/src/commands/mod.rs`, the `agent-prompt` row; `crates/microvms-cli/src/commands/attached.rs`, `render_exec_as`.
+The success envelope's type is `microvm.agent.prompt`, under its own discriminant because a consumer that learned `microvm.exec` is reading a command it chose and this one ran a template it did not. Its keys are `exec`'s (`execId`, `phase`, `exitCode`, `stdout`, `stderr`, `truncated`, `outcome`, `signal`, `timedOut`, `posixExitCode`, `notes`, `synthesized`) plus what ran and how: `agent`, `model`, `agentVersion`, `permissionMode`, `uid`, `executionTimeoutSec`, and `reapGroupOnExit`. A non-zero agent exit earns `ERR_EXEC_FAILED` on a success envelope, as `exec` does. `crates/microvms-cli/src/commands/mod.rs`, the `agent-prompt` row; `crates/microvms-cli/src/commands/attached.rs`, `render_exec_as`; `crates/microvms-cli/src/commands/agent.rs:828-847`.
 
 ## exec
 
@@ -265,7 +265,7 @@ Flags:
 microvm keepalive [OPTIONS] --endpoint <ENDPOINT> --agent-token <AGENT_TOKEN> --microvm-id <MICROVM_ID>
 ```
 
-Holds a VM awake from outside while an exec works inside it. The platform counts only inbound requests through the endpoint as activity, so a long exec with no client traffic is suspended when `maxIdleDurationSeconds` passes (measured 2026-09-23 in us-east-1: a CPU-busy exec was suspended 60 to 70 seconds after the last request under a 60-second window). This polls the unauthenticated `/v1/health` until `--while-busy` sees no running exec, `--for` passes, or ctrl-c, then reports `end` (`idle`, `elapsed`, `stopped`), `polls`, `lastBusy`, `elapsedSec`, `intervalSec`, and `idleWindowSec`. The poll policy is the core's `KeepAwake`, shared with the bindings' `Session.keep_awake` / `session.keepAwake`.
+Holds a VM awake from outside while an exec works inside it. The platform counts only inbound requests through the endpoint as activity, so a long exec with no client traffic is suspended when `maxIdleDurationSeconds` passes (measured 2026-09-23 in us-east-1: a CPU-busy exec was suspended 60 to 70 seconds after the last request under a 60-second window). This polls the unauthenticated `/v1/health` until `--while-busy` sees no running exec, `--for` passes, or ctrl-c, then reports `microvmId`, `end` (`idle`, `elapsed`, `stopped`), `polls`, `lastBusy`, `elapsedSec`, `intervalSec`, and `idleWindowSec`. The poll policy is the core's `KeepAwake`, shared with the bindings' `Session.keep_awake` / `session.keepAwake`.
 
 The interval may be at most half the idle window, so one missed poll cannot let the VM suspend. The window is read from `GetMicrovm` unless `--idle-window` names it, in the region the session attached in: the record's region for `--name`, whatever `$AWS_REGION` says. When the lookup fails the command assumes the platform's 60-second minimum and says so on stderr.
 
@@ -636,23 +636,28 @@ Flags:
 - `--claude-version <VERSION>`: with `--agent`, pin the Claude Code npm package to this version; requires `--agent`. `crates/microvms-cli/src/cli.rs:2376-2378`.
 - `--codex-version <VERSION>`: with `--agent`, pin the Codex npm package to this version; requires `--agent`. `crates/microvms-cli/src/cli.rs:2380-2382`.
 
-The JSON envelope carries the stanza text plus the base image pair — `baseImageName` for deriving `baseImageArn` and `baseImageDockerRef` for the `FROM` — so a consumer holds both halves of the agreement the platform enforces. `crates/microvms-cli/src/commands/mod.rs:473-483`.
+The JSON envelope carries the stanza text plus the base image pair — `baseImageName` for deriving `baseImageArn` and `baseImageDockerRef` for the `FROM` — so a consumer holds both halves of the agreement the platform enforces. It also carries `port` and `workdir`: the `--workdir` given, the agent image's own under `--agent`, or `null`. `crates/microvms-cli/src/commands/mod.rs:542-552`, built in `dockerfile_rendered` (`crates/microvms-cli/src/commands/local.rs`).
 
 For the full recipe — appending tool layers, building, and driving the daemon from your own harness — see [docs/EMBEDDING.md](../EMBEDDING.md).
 
 ## Project config: microvm.toml
 
-`run` and `doctor` read an optional `./microvm.toml` beside the invocation (or the file `--config <PATH>` names). Every key in it already exists as a `run` flag; the file adds no capability, only persistence — `microvm run` in a configured project needs zero flags. `crates/microvms-cli/src/config.rs`.
+`run`, `doctor`, and `egress-posture` read an optional `./microvm.toml` beside the invocation (or the file `--config <PATH>` names). Every key except `artifacts` already exists as a `run` flag, so for those keys the file adds no capability, only persistence: `microvm run` in a configured project needs zero flags. `artifacts` has no flag spelling, so the file is the only place `run <DIR>`'s artifact globs are declared. `crates/microvms-cli/src/config.rs`, with the artifact merge at `crates/microvms-cli/src/commands/lifecycle.rs:406-416`.
 
 ```toml
 image = "coding-agents"       # run --image
 binary = "target/agentd"     # run [BINARY]
 exec = "make test"           # run --exec
 memory = 4096                # run --memory; same closed set as the flag
-region = "us-west-2"         # any region string, resolved where the flag's is
+region = "us-west-2"         # run --region; the flag's closed set. An unlisted region is
+                             #   refused at load: pass --unlisted-region on the command line
 egress = true                # run --egress
 # deny-egress = true         # run --deny-egress; advisory. Refused beside egress = true,
                              #   so this line and the one above are alternatives, never both
+# egress-network-connectors = ["arn:aws:lambda:us-east-1:123456789012:network-connector:isolated-vpc"]
+                             # run --egress-network-connector, as a list; a typed flag
+                             #   replaces the list. Refused beside egress = true
+shell = true                 # run --shell
 auto-resume = true           # run --auto-resume
 max-idle-sec = 600           # run --max-idle-sec
 suspended-sec = 600          # run --suspended-sec
@@ -664,13 +669,15 @@ log-stream = "ci-image"      # run --log-stream; a PREFIX — the client appends
 CI = "1"
 ```
 
-Key names are the flag names with `-` for `_`, so the file reads like the command line it replaces. All keys are optional; an absent key means the flag or the built-in default decides. A relative `binary` path resolves against the config file's own directory, not the process cwd — `--config /repo/microvm.toml` exists precisely for the invoke-from-elsewhere case, and `target/agentd` must mean the same binary from anywhere. An unknown key is refused by name rather than silently ignored — `memroy = 4096` launching a 2 GB VM is the failure that closes. A value outside its flag's domain (`memory = 1500`, an artifact glob that will not compile) is refused with the same closed-set reasoning the parser enforces, so the file cannot be a side door past the flag domains.
+Key names are the flag names, so the file reads like the command line it replaces. The exceptions are `binary` (the positional), `env` (`--launch-env` as a table), `egress-network-connectors` (the repeatable `--egress-network-connector` as a list), and `artifacts` (no flag). All keys are optional; an absent key means the flag or the built-in default decides. A relative `binary` path resolves against the config file's own directory, not the process cwd — `--config /repo/microvm.toml` exists precisely for the invoke-from-elsewhere case, and `target/agentd` must mean the same binary from anywhere. An unknown key is refused by name rather than silently ignored — `memroy = 4096` launching a 2 GB VM is the failure that closes. A value outside its flag's domain (`memory = 1500`, an artifact glob that will not compile) is refused with the same closed-set reasoning the parser enforces, so the file cannot be a side door past the flag domains.
 
 On Windows, two `binary` shapes are refused at load because they mean two things at once (issue #87): a rooted path with no drive (`/opt/agentd` — Windows parses it as relative, so the file-directory join would silently re-anchor it onto the config file's drive) and a drive with no root (`C:agentd` — resolves against that drive's current directory at spawn time). The remedy differs per intent — write the drive letter, or write a genuinely relative path — so the loader refuses rather than guesses. On Unix neither shape exists and `/opt/agentd` is simply absolute.
 
 `--timeout` is deliberately not a config key: it is a client-side wait, not a property of the VM the project wants to pin.
 
-A file that cannot be used is `ERR_CONFIG` (exit 15), refused locally before any billable call. The remedy differs from `ERR_INVALID_ARG`'s — edit (or `--no-config` bypass) a file the invocation may never have named, rather than edit the command line — which is why it has its own row.
+A file that cannot be loaded (missing under `--config`, unparseable, an unknown key, or a value outside its flag's domain) is `ERR_CONFIG` (exit 15), refused locally before any billable call. The remedy differs from `ERR_INVALID_ARG`'s — edit (or `--no-config` bypass) a file the invocation may never have named, rather than edit the command line — which is why it has its own row. `crates/microvms-cli/src/config.rs:118-130`.
+
+A file that loads but asks for opposite things, `egress = true` beside `deny-egress = true` or beside `egress-network-connectors`, is refused by `run`'s merge as `ERR_INVALID_ARG` (exit 2), also before any billable call, by the same rule the flags follow. `crates/microvms-cli/src/commands/lifecycle.rs:299-331`.
 
 ## The JSON envelope
 
@@ -712,7 +719,7 @@ A request rejected locally reports no `data.kind`, because nothing reached the d
 
 ### Response types
 
-Each command declares its `type` discriminant and the `data` keys its success envelope carries. `crates/microvms-cli/src/commands/mod.rs:102-484`.
+Each command declares its `type` discriminant and the `data` keys its success envelope carries. `crates/microvms-cli/src/commands/mod.rs:103-553`.
 
 | Command | `type` |
 | --- | --- |
@@ -722,6 +729,7 @@ Each command declares its `type` discriminant and the `data` keys its success en
 | `agent-up` | `microvm.agent` |
 | `agent-prompt` | `microvm.agent.prompt` |
 | `exec` | `microvm.exec` |
+| `wait` | `microvm.wait` |
 | `health` | `microvm.health` |
 | `keepalive` | `microvm.keepalive` |
 | `ack` | `microvm.exec` |
@@ -729,8 +737,10 @@ Each command declares its `type` discriminant and the `data` keys its success en
 | `ps` | `microvm.procs` |
 | `stdin` | `microvm.stdin` |
 | `cp` | `microvm.copy` |
+| `exists` | `microvm.exists` |
 | `sync` | `microvm.sync` |
 | `attach` | `microvm.attach` |
+| `adopt` | `microvm.adopt` |
 | `tunnel` | `microvm.tunnel` |
 | `port-forward` | `microvm.port-forward` |
 | `shell` | `microvm.shell` |
@@ -739,8 +749,13 @@ Each command declares its `type` discriminant and the `data` keys its success en
 | `terminate` | `microvm.teardown` |
 | `ls` | `microvm.runs` |
 | `history` | `microvm.history` |
+| `names` | `microvm.names` |
+| `image-versions` | `microvm.image.versions` |
+| `image-set-status` | `microvm.image.status` |
+| `image-builds` | `microvm.image.builds` |
 | `logs` | `microvm.logs` |
 | `cost` | `microvm.cost` |
+| `egress-posture` | `microvm.egress-posture` |
 | `doctor` | `microvm.doctor` |
 | `manifest` | `microvm.manifest` |
 | `constants` | `microvm.constants` |
