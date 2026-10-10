@@ -173,18 +173,17 @@ pub fn spec_for(specs: &[AgentSpec], agent: Agent) -> Result<&AgentSpec, Error> 
 /// the bindings, whose sandbox sits behind a lock shared with every session they hand out.
 ///
 /// The name [`ensure_request_for`]'s ensure gives the image (#258): the stem, then ensure's
-/// identity over the artifact's inputs, the base and the size class, so the two-step path
-/// (`image_request`, the caller's upload, `build`) and the ensure name one image.
+/// identity over the artifact's inputs, the base, the size class and the create-only fields
+/// (#280), so the two-step path (`image_request`, the caller's upload, `build`) and the ensure
+/// name one image.
 pub fn image_name_for(
     sandbox: &Sandbox,
     specs: &[AgentSpec],
     request: &CreateImageRequest,
 ) -> String {
-    let identity = crate::control::ensure::pinned_identity_hash(
+    let identity = crate::control::ensure::create_identity_hash(
         &sandbox.artifact_content_hash_for(request),
-        &request.base_image,
-        request.base_image_version.as_deref(),
-        request.size,
+        request,
     );
     let stem = image_stem(specs);
     // The stem is `agent-vm-` and profile names, all of them characters the ImageName

@@ -6,7 +6,7 @@
     "size_mib": 2048
   },
   "expect": {
-    "name": "parity-task-17b6047ddff1"
+    "name": "parity-task-178447f17502"
   },
   "skip": {
     "py": "`ensure_image` computes the name in core's local half and hands it back only with a built image, so no offline call answers it (IMAGE-12)",

@@ -1,0 +1,444 @@
+diff --git a/bindings/microvms-js/src/sandbox.rs b/bindings/microvms-js/src/sandbox.rs
+index 230c5f8..bc0c722 100644
+--- a/bindings/microvms-js/src/sandbox.rs
++++ b/bindings/microvms-js/src/sandbox.rs
+@@ -821,20 +821,6 @@ impl Sandbox {
+             .map(|vm| vm.endpoint.clone())
+     }
+ 
+-    /// The image ARN `run` sent in `RunMicrovm`: the caller's identifier with a bare name
+-    /// resolved, or the built image's.
+-    ///
+-    /// Recorded before the call, so a launch the service refused still names the image it
+-    /// asked for. `null` until `run` has resolved an image, and on an adopted sandbox.
+-    #[napi]
+-    pub async fn launch_image_arn(&self) -> Option<String> {
+-        self.inner
+-            .lock()
+-            .await
+-            .launch_image_arn()
+-            .map(str::to_owned)
+-    }
+-
+     /// Why the VM is in its current state, when the service said.
+     ///
+     /// The absence is information: TRAP-8's message distinguishes "no stateReason" from an
+diff --git a/bindings/microvms-py/src/sandbox.rs b/bindings/microvms-py/src/sandbox.rs
+index 5ef2669..ab75e4e 100644
+--- a/bindings/microvms-py/src/sandbox.rs
++++ b/bindings/microvms-py/src/sandbox.rs
+@@ -782,16 +782,6 @@ impl PySandbox {
+         self.read(|sandbox| sandbox.microvm().map(|vm| vm.endpoint.clone()))
+     }
+ 
+-    /// The image ARN `run` sent in `RunMicrovm`: the caller's identifier with a bare name
+-    /// resolved, or the built image's.
+-    ///
+-    /// Recorded before the call, so a launch the service refused still names the image it
+-    /// asked for. `None` until `run` has resolved an image, and on an adopted sandbox.
+-    #[getter]
+-    fn launch_image_arn(&self) -> Option<String> {
+-        self.read(|sandbox| sandbox.launch_image_arn().map(str::to_owned))
+-    }
+-
+     /// Why the VM is in its current state, when the service said.
+     ///
+     /// The absence is information: TRAP-8's message distinguishes "no stateReason" from an
+diff --git a/crates/microvms-app/src/agents/mod.rs b/crates/microvms-app/src/agents/mod.rs
+index ab0bd71..b45003c 100644
+--- a/crates/microvms-app/src/agents/mod.rs
++++ b/crates/microvms-app/src/agents/mod.rs
+@@ -173,17 +173,18 @@ pub fn spec_for(specs: &[AgentSpec], agent: Agent) -> Result<&AgentSpec, Error>
+ /// the bindings, whose sandbox sits behind a lock shared with every session they hand out.
+ ///
+ /// The name [`ensure_request_for`]'s ensure gives the image (#258): the stem, then ensure's
+-/// identity over the artifact's inputs, the base, the size class and the create-only fields
+-/// (#280), so the two-step path (`image_request`, the caller's upload, `build`) and the ensure
+-/// name one image.
++/// identity over the artifact's inputs, the base and the size class, so the two-step path
++/// (`image_request`, the caller's upload, `build`) and the ensure name one image.
+ pub fn image_name_for(
+     sandbox: &Sandbox,
+     specs: &[AgentSpec],
+     request: &CreateImageRequest,
+ ) -> String {
+-    let identity = crate::control::ensure::create_identity_hash(
++    let identity = crate::control::ensure::pinned_identity_hash(
+         &sandbox.artifact_content_hash_for(request),
+-        request,
++        &request.base_image,
++        request.base_image_version.as_deref(),
++        request.size,
+     );
+     let stem = image_stem(specs);
+     // The stem is `agent-vm-` and profile names, all of them characters the ImageName
+diff --git a/crates/microvms-app/src/control/ensure.rs b/crates/microvms-app/src/control/ensure.rs
+index dee9db4..92500a7 100644
+--- a/crates/microvms-app/src/control/ensure.rs
++++ b/crates/microvms-app/src/control/ensure.rs
+@@ -7,12 +7,9 @@
+ //!
+ //! 1. **Name** (IMAGE-6). `<prefix>-<hash12>`, the hash over the artifact's inputs (the
+ //!    daemon, the Dockerfile, the build context — [`artifact_content_hash_with_context`])
+-//!    plus the base image, the size class and every field the service sets only when it
+-//!    creates the image (identity repair, `inherit_workdir`, the hook timeouts, the log
+-//!    destination), because an image is created on one base at one size with those fixed.
+-//!    Equal inputs name one image; any changed input names a fresh one, which is what keeps a
+-//!    stale snapshot, or one built without a field the caller asked for, from being served
+-//!    under a reused name.
++//!    plus the base image and the size class, because an image is created on one base at one
++//!    size. Equal inputs name one image; any changed input names a fresh one, which is what
++//!    keeps a stale snapshot from being served under a reused name.
+ //! 2. **Artifact** (IMAGE-7). The Dockerfile, the daemon, and the context, zipped with fixed
+ //!    dates and modes, so equal inputs are one object at one content-addressed key.
+ //! 3. **ARN and upload** (IMAGE-8). The service takes image ARNs, not names, so the ARN is
+@@ -164,8 +161,7 @@ pub fn ensured_image_name(prefix: &str, identity_hash: &str) -> Result<String, E
+ }
+ 
+ /// The identity an ensured image is named for (IMAGE-6): the artifact's content hash, the
+-/// base image's name (what `baseImageArn` names), and the size class's baseline, for an image
+-/// created with [`CreateImageRequest::new`]'s create-only fields.
++/// base image's name (what `baseImageArn` names), and the size class's baseline.
+ ///
+ /// Length-prefixed and tagged, so no two field boundaries can collide.
+ pub fn image_identity_hash(artifact_hash: &str, base: &BaseImage, size: SizeClass) -> String {
+@@ -175,120 +171,32 @@ pub fn image_identity_hash(artifact_hash: &str, base: &BaseImage, size: SizeClas
+ /// [`image_identity_hash`] with the base version a build pins (#258): a pinned base builds
+ /// on that version whatever the service's default later becomes, so the pin is identity.
+ ///
+-/// The create-only fields are [`CreateImageRequest::new`]'s defaults; an ensure whose request
+-/// sets others names its image for those (#280).
++/// `None` is [`image_identity_hash`]'s stream exactly, so an unpinned image keeps the name it
++/// always had; a pin adds one tagged, length-prefixed field after the size.
+ pub fn pinned_identity_hash(
+     artifact_hash: &str,
+     base: &BaseImage,
+     base_version: Option<&str>,
+     size: SizeClass,
+-) -> String {
+-    let defaults = CreateImageRequest::new("", Vec::new(), "", "");
+-    identity_hash(
+-        artifact_hash,
+-        base,
+-        base_version,
+-        size,
+-        &CreateOnly::of(&defaults),
+-    )
+-}
+-
+-/// The identity of the image `create` would create, over the artifact `artifact_hash` names:
+-/// what [`prepare`] names an ensured image for, and what the agent recipe's two-step path
+-/// names the same image for.
+-pub(crate) fn create_identity_hash(artifact_hash: &str, create: &CreateImageRequest) -> String {
+-    identity_hash(
+-        artifact_hash,
+-        &create.base_image,
+-        create.base_image_version.as_deref(),
+-        create.size,
+-        &CreateOnly::of(create),
+-    )
+-}
+-
+-/// The fields of a created image the service sets at `CreateMicrovmImage` and no later call
+-/// changes (#280). They are identity because a reuse returns the image as it was created: an
+-/// ensure that left them out of the name could hand a caller asking for identity repair an
+-/// image built without it. Tags are not here, because a reused image keeps its own.
+-struct CreateOnly<'a> {
+-    repair_guest_identity: bool,
+-    inherit_workdir: bool,
+-    run_hook_timeout: u32,
+-    build_hook_timeout: u32,
+-    log_group: Option<&'a str>,
+-    log_stream: Option<&'a str>,
+-}
+-
+-impl<'a> CreateOnly<'a> {
+-    fn of(create: &'a CreateImageRequest) -> Self {
+-        Self {
+-            repair_guest_identity: create.repair_guest_identity,
+-            inherit_workdir: create.inherit_workdir,
+-            run_hook_timeout: create.run_hook_timeout.as_secs(),
+-            build_hook_timeout: create.build_hook_timeout.as_secs(),
+-            log_group: create.log_group.as_deref(),
+-            log_stream: create.log_stream.as_deref(),
+-        }
+-    }
+-}
+-
+-/// The one identity stream. Every field is length-prefixed and each optional or create-only
+-/// one is tagged, so no two field boundaries can collide and an absent value never reads as an
+-/// empty one.
+-///
+-/// The domain tag is `microvms-ensure-image/2`: adding the create-only fields renames every
+-/// ensured image once (#280), and the version says which stream a name came from. An image
+-/// named by `/1` is never reused, which is the point: it may have been created without a field
+-/// its next caller asks for.
+-fn identity_hash(
+-    artifact_hash: &str,
+-    base: &BaseImage,
+-    base_version: Option<&str>,
+-    size: SizeClass,
+-    create: &CreateOnly<'_>,
+ ) -> String {
+     use sha2::{Digest as _, Sha256};
+ 
+-    fn put(hasher: &mut Sha256, field: &[u8]) {
++    let mut hasher = Sha256::new();
++    for field in [
++        b"microvms-ensure-image/1".as_slice(),
++        artifact_hash.as_bytes(),
++        base.name.as_bytes(),
++    ] {
+         hasher.update((field.len() as u64).to_be_bytes());
+         hasher.update(field);
+     }
+-    fn put_optional(hasher: &mut Sha256, tag: &[u8], value: Option<&str>) {
+-        put(hasher, tag);
+-        match value {
+-            None => put(hasher, &[0]),
+-            Some(value) => {
+-                put(hasher, &[1]);
+-                put(hasher, value.as_bytes());
+-            }
++    hasher.update(size.baseline_mib().to_be_bytes());
++    if let Some(version) = base_version {
++        for field in [b"baseImageVersion".as_slice(), version.as_bytes()] {
++            hasher.update((field.len() as u64).to_be_bytes());
++            hasher.update(field);
+         }
+     }
+-
+-    let mut hasher = Sha256::new();
+-    put(&mut hasher, b"microvms-ensure-image/2");
+-    put(&mut hasher, artifact_hash.as_bytes());
+-    put(&mut hasher, base.name.as_bytes());
+-    put(&mut hasher, &size.baseline_mib().to_be_bytes());
+-    put_optional(&mut hasher, b"baseImageVersion", base_version);
+-    for (tag, on) in [
+-        (
+-            b"repairGuestIdentity".as_slice(),
+-            create.repair_guest_identity,
+-        ),
+-        (b"inheritWorkdir".as_slice(), create.inherit_workdir),
+-    ] {
+-        put(&mut hasher, tag);
+-        put(&mut hasher, &[u8::from(on)]);
+-    }
+-    for (tag, secs) in [
+-        (b"microvmHooks".as_slice(), create.run_hook_timeout),
+-        (b"microvmImageHooks".as_slice(), create.build_hook_timeout),
+-    ] {
+-        put(&mut hasher, tag);
+-        put(&mut hasher, &secs.to_be_bytes());
+-    }
+-    put_optional(&mut hasher, b"logGroup", create.log_group);
+-    put_optional(&mut hasher, b"logStream", create.log_stream);
+     const_hex::encode(hasher.finalize())
+ }
+ 
+@@ -392,8 +300,7 @@ pub struct EnsureImageRequest {
+     pub base_image: Option<BaseImage>,
+     /// Delete what exists under the name and build afresh.
+     pub force: bool,
+-    /// Tags for a created image. Not part of the name: a reused image keeps its own, and
+-    /// tags are not fixed at create.
++    /// Tags for a created image. Not part of the name: a reused image keeps its own.
+     pub tags: BTreeMap<String, String>,
+     /// The build wait's deadline, or `None` for [`DEFAULT_BUILD_TIMEOUT`].
+     pub wait_timeout: Option<Duration>,
+@@ -402,21 +309,19 @@ pub struct EnsureImageRequest {
+     pub project_files: Option<super::artifact::ProjectFiles>,
+     /// `baseImageVersion`, or `None` for the service's default. Part of the name when set.
+     pub base_image_version: Option<String>,
+-    /// `logging.cloudWatch.logGroup` for a created image. Part of the name (#280): the
+-    /// service sets an image's logging when it creates it, so a reused image logs where its
+-    /// creator asked.
++    /// `logging.cloudWatch.logGroup` for a created image. Not part of the name: logging
++    /// doesn't change what is built, and a reused image keeps its own.
+     pub log_group: Option<String>,
+     /// The log-stream prefix for a created image; see [`CreateImageRequest::log_stream`].
+-    /// Part of the name, as `log_group` is.
+     pub log_stream: Option<String>,
+-    /// [`CreateImageRequest::repair_guest_identity`] for a created image. Part of the name
+-    /// (#280): a reused image built without the repair would answer a caller who asked for it.
++    /// [`CreateImageRequest::repair_guest_identity`] for a created image. Not part of the
++    /// name, as `build --reuse`'s name never held it: a reused image keeps its own.
+     pub repair_guest_identity: bool,
+-    /// [`CreateImageRequest::inherit_workdir`] for a created image. Part of the name.
++    /// [`CreateImageRequest::inherit_workdir`] for a created image.
+     pub inherit_workdir: bool,
+-    /// The run-family hook timeouts for a created image. Part of the name.
++    /// The run-family hook timeouts for a created image.
+     pub run_hook_timeout: crate::hooks::RunHookTimeout,
+-    /// The build-family hook timeouts for a created image. Part of the name.
++    /// The build-family hook timeouts for a created image.
+     pub build_hook_timeout: crate::hooks::BuildHookTimeout,
+ }
+ 
+@@ -544,18 +449,29 @@ pub fn prepare(control: &ControlPlane, request: EnsureImageRequest) -> Result<Pr
+         request.project_files.as_ref(),
+         request.context.as_ref(),
+     );
+-    // The create request first, unnamed, so the name is the identity of exactly the image it
+-    // creates (#280): every field it carries is read from it rather than restated.
++    let name = ensured_image_name(
++        &request.name_prefix,
++        &pinned_identity_hash(
++            &artifact_hash,
++            &base,
++            request.base_image_version.as_deref(),
++            request.size,
++        ),
++    )?;
++    require_valid_key_prefix(request.s3_key_prefix.as_deref(), &name)?;
++    let key = artifact_key(request.s3_key_prefix.as_deref(), &name);
++
+     let mut create = CreateImageRequest::new(
+-        String::new(),
++        name.clone(),
+         request.binary,
+-        String::new(),
++        format!("s3://{}/{key}", request.s3_bucket),
+         request.build_role_arn,
+     );
+     create.base_image = base;
+     create.dockerfile = Some(request.dockerfile);
+     create.size = request.size;
+     create.tags = request.tags;
++    create.token_scope = Some(name.clone());
+     create.project_files = request.project_files;
+     create.base_image_version = request.base_image_version;
+     create.log_group = request.log_group;
+@@ -564,16 +480,6 @@ pub fn prepare(control: &ControlPlane, request: EnsureImageRequest) -> Result<Pr
+     create.inherit_workdir = request.inherit_workdir;
+     create.run_hook_timeout = request.run_hook_timeout;
+     create.build_hook_timeout = request.build_hook_timeout;
+-
+-    let name = ensured_image_name(
+-        &request.name_prefix,
+-        &create_identity_hash(&artifact_hash, &create),
+-    )?;
+-    require_valid_key_prefix(request.s3_key_prefix.as_deref(), &name)?;
+-    let key = artifact_key(request.s3_key_prefix.as_deref(), &name);
+-    create.code_artifact_uri = format!("s3://{}/{key}", request.s3_bucket);
+-    create.token_scope = Some(name.clone());
+-    create.name = name.clone();
+     control.preflight(&create)?;
+ 
+     let artifact = build_artifact_with_context(
+diff --git a/crates/microvms-app/src/control/microvm.rs b/crates/microvms-app/src/control/microvm.rs
+index 6681286..38d8daa 100644
+--- a/crates/microvms-app/src/control/microvm.rs
++++ b/crates/microvms-app/src/control/microvm.rs
+@@ -738,9 +738,6 @@ impl ControlPlane {
+     /// looks complete, and a VM absent from it is a VM nothing here will terminate. That is
+     /// the same argument [`ops::ListImagesResponseWire`] makes for the image listing, and a
+     /// fleet listing is the one a teardown reads.
+-    ///
+-    /// Each VM is listed once (#280): a VM the service returns on two pages keeps the place it
+-    /// was first listed and the entry read last, the newer reading of its state.
+     pub async fn list_microvms(&self) -> Result<Vec<ops::MicrovmItemWire>, Error> {
+         self.list_microvms_matching(&MicrovmFilter::default()).await
+     }
+@@ -756,12 +753,7 @@ impl ControlPlane {
+         if let Some(version) = filter.image_version.as_deref() {
+             super::require_valid_version("imageVersion", version)?;
+         }
+-        let mut items: Vec<ops::MicrovmItemWire> = Vec::new();
+-        // Where each id sits in `items`. The service can return one VM on two pages while VMs
+-        // change state (docs/PLATFORM.md, "A paginated `ListMicrovms` can return one VM on two
+-        // of its pages"), so a repeat replaces the earlier entry, the older reading, in place.
+-        let mut position: std::collections::HashMap<String, usize> =
+-            std::collections::HashMap::new();
++        let mut items = Vec::new();
+         let mut next_token: Option<String> = None;
+         loop {
+             let call = Call::get(
+@@ -774,15 +766,7 @@ impl ControlPlane {
+             );
+             let reply = send_with_retry(self.transport(), call).await?;
+             let page: ops::ListMicrovmsResponseWire = reply.json("ListMicrovms")?;
+-            for item in page.items {
+-                match position.get(&item.microvm_id) {
+-                    Some(&at) => items[at] = item,
+-                    None => {
+-                        position.insert(item.microvm_id.clone(), items.len());
+-                        items.push(item);
+-                    }
+-                }
+-            }
++            items.extend(page.items);
+             match page.next_token {
+                 Some(token) => next_token = Some(token),
+                 None => return Ok(items),
+diff --git a/crates/microvms-app/src/session/proxy.rs b/crates/microvms-app/src/session/proxy.rs
+index fede460..49a11eb 100644
+--- a/crates/microvms-app/src/session/proxy.rs
++++ b/crates/microvms-app/src/session/proxy.rs
+@@ -34,9 +34,7 @@
+ //!
+ //! A mint failure is [`WireKind::AuthTokenMint`], which is retryable, and that is
+ //! load-bearing rather than optimistic: a control-plane throttle at minute thirty must
+-//! not kill a trial that is otherwise healthy. The one exception is a credential failure,
+-//! which keeps [`ErrorKind::Credentials`]: an identity the control plane refuses is refused
+-//! again on the identical request.
++//! not kill a trial that is otherwise healthy.
+ //!
+ //! # A WebSocket carries the same two facts as subprotocols, not as headers
+ //!
+@@ -69,7 +67,7 @@ use std::time::Duration;
+ 
+ use futures_util::future::BoxFuture;
+ 
+-use crate::error::{Error, ErrorKind, WireKind};
++use crate::error::{Error, WireKind};
+ 
+ /// The header carrying the minted JWE. One of the two keys read out of the
+ /// `authToken` map.
+@@ -527,26 +525,14 @@ impl ProxyAuth {
+         let ports: Vec<u16> = wanted.iter().copied().collect();
+ 
+         let token = self.minter.mint_for_ports(&ports).await.map_err(|err| {
++            // Reclassified rather than passed through: whatever the minter's own
++            // failure was, from a caller's point of view this is a mint failure and
++            // it is retryable. A minter that reported, say, a throttle as
++            // `ServerError` would still be retryable, but one that reported it as a
++            // protocol error would abort a healthy trial.
+             // Names every port the mint asked for, not just the session's, because a
+             // rejection on a widened mint is about the widening and a message naming one
+             // port would send the reader to the wrong place.
+-            //
+-            // A credential failure keeps its class (#280). The control plane refusing the
+-            // mint (a 403, or a chain that resolved no identity) fails the identical request
+-            // the same way until the caller fixes the identity, so calling it retryable
+-            // would send a harness into a retry loop nothing on the platform ends.
+-            if err.kind() == ErrorKind::Credentials {
+-                let message = format!(
+-                    "could not mint a proxy auth token for port(s) {ports:?}: {err}; the \
+-                     identity was refused, so the identical request fails the same way until \
+-                     the credential is fixed"
+-                );
+-                return Error::new(ErrorKind::Credentials, message).with_source(err);
+-            }
+-            // Every other failure is reclassified rather than passed through: from a
+-            // caller's point of view it is a mint failure and it is retryable. A minter
+-            // that reported, say, a throttle as `ServerError` would still be retryable, but
+-            // one that reported it as a protocol error would abort a healthy trial.
+             let message = format!(
+                 "could not mint a proxy auth token for port(s) {ports:?}: {err}; minting is \
+                  inside the request path, so the identical request may succeed"
+diff --git a/crates/microvms-cli/src/cli.rs b/crates/microvms-cli/src/cli.rs
+index ee4dea9..c1277d9 100644
+--- a/crates/microvms-cli/src/cli.rs
++++ b/crates/microvms-cli/src/cli.rs
+@@ -1248,9 +1248,7 @@ pub struct BuildArgs {
+     ///
+     /// Core's `ensure_image` (#258): the image is named `<name>-<hash12>`, the hash over the
+     /// daemon, the Dockerfile, the --project pair, the base image, a pinned
+-    /// --base-image-version, the --memory size class, and what the service fixes at create:
+-    /// --repair-identity, --inherit-workdir, the hook timeouts and the log destination
+-    /// (#280). The tags are not in it. A ready image under that name is
++    /// --base-image-version and the --memory size class. A ready image under that name is
+     /// reused with `reused: true` and nothing uploaded; one still building is waited on; a
+     /// failed one is deleted and rebuilt; otherwise the artifact is uploaded to
+     /// `s3://<bucket>/[<--s3-key-prefix>/]<name>/artifact.zip` and the image built.

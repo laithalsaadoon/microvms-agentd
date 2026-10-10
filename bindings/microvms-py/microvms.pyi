@@ -2362,6 +2362,15 @@ class Sandbox:
         Whether `detach()` handed this sandbox's VM to another process.
         """
     @property
+    def launch_image_arn(self, /) -> str |None:
+        """
+        The image ARN `run` sent in `RunMicrovm`: the caller's identifier with a bare name
+        resolved, or the built image's.
+        
+        Recorded before the call, so a launch the service refused still names the image it
+        asked for. `None` until `run` has resolved an image, and on an adopted sandbox.
+        """
+    @property
     def lifecycle(self, /) -> str:
         """
         The lifecycle state: `"PENDING"`, `"RUNNING"`, `"SUSPENDING"`, `"SUSPENDED"`,

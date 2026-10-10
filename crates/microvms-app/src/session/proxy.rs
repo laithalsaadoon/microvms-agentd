@@ -34,7 +34,9 @@
 //!
 //! A mint failure is [`WireKind::AuthTokenMint`], which is retryable, and that is
 //! load-bearing rather than optimistic: a control-plane throttle at minute thirty must
-//! not kill a trial that is otherwise healthy.
+//! not kill a trial that is otherwise healthy. The one exception is a credential failure,
+//! which keeps [`ErrorKind::Credentials`]: an identity the control plane refuses is refused
+//! again on the identical request.
 //!
 //! # A WebSocket carries the same two facts as subprotocols, not as headers
 //!
@@ -67,7 +69,7 @@ use std::time::Duration;
 
 use futures_util::future::BoxFuture;
 
-use crate::error::{Error, WireKind};
+use crate::error::{Error, ErrorKind, WireKind};
 
 /// The header carrying the minted JWE. One of the two keys read out of the
 /// `authToken` map.
@@ -525,14 +527,26 @@ impl ProxyAuth {
         let ports: Vec<u16> = wanted.iter().copied().collect();
 
         let token = self.minter.mint_for_ports(&ports).await.map_err(|err| {
-            // Reclassified rather than passed through: whatever the minter's own
-            // failure was, from a caller's point of view this is a mint failure and
-            // it is retryable. A minter that reported, say, a throttle as
-            // `ServerError` would still be retryable, but one that reported it as a
-            // protocol error would abort a healthy trial.
             // Names every port the mint asked for, not just the session's, because a
             // rejection on a widened mint is about the widening and a message naming one
             // port would send the reader to the wrong place.
+            //
+            // A credential failure keeps its class (#280). The control plane refusing the
+            // mint (a 403, or a chain that resolved no identity) fails the identical request
+            // the same way until the caller fixes the identity, so calling it retryable
+            // would send a harness into a retry loop nothing on the platform ends.
+            if err.kind() == ErrorKind::Credentials {
+                let message = format!(
+                    "could not mint a proxy auth token for port(s) {ports:?}: {err}; the \
+                     identity was refused, so the identical request fails the same way until \
+                     the credential is fixed"
+                );
+                return Error::new(ErrorKind::Credentials, message).with_source(err);
+            }
+            // Every other failure is reclassified rather than passed through: from a
+            // caller's point of view it is a mint failure and it is retryable. A minter
+            // that reported, say, a throttle as `ServerError` would still be retryable, but
+            // one that reported it as a protocol error would abort a healthy trial.
             let message = format!(
                 "could not mint a proxy auth token for port(s) {ports:?}: {err}; minting is \
                  inside the request path, so the identical request may succeed"
@@ -1020,6 +1034,54 @@ mod tests {
         let headers = auth.headers().await.expect("the second mint succeeds");
         assert_eq!(auth.mint_count(), 1);
         assert!(value_of(&headers, PROXY_AUTH_HEADER).is_some());
+    }
+
+    /// **A credential failure during a mint is `ERR_CREDENTIALS`, not `ERR_RETRYABLE` (#280).**
+    ///
+    /// The control plane refusing the mint with a 403 is an identity problem: the identical
+    /// request fails the same way until the caller fixes the credential, so a retryable class
+    /// sends a harness into a retry loop the platform can't end. The throttle case above stays
+    /// retryable; only the minter's own credential verdict passes through.
+    #[tokio::test]
+    async fn a_credential_failure_during_a_mint_is_err_credentials_not_retryable() {
+        struct DeniedMinter;
+        impl TokenMinter for DeniedMinter {
+            fn mint(&self) -> BoxFuture<'_, Result<ProxyToken, Error>> {
+                Box::pin(async move {
+                    Err(Error::new(
+                        ErrorKind::Credentials,
+                        "AccessDeniedException from CreateMicrovmAuthToken",
+                    ))
+                })
+            }
+        }
+
+        let auth = ProxyAuth::with_refresh_after(
+            Arc::new(DeniedMinter),
+            DEFAULT_AGENT_PORT,
+            DEFAULT_REFRESH_AFTER,
+            Arc::new(TestClock::default()),
+        )
+        .expect("interval accepted");
+
+        let err = auth.headers().await.expect_err("the mint is refused");
+        assert_eq!(err.kind(), ErrorKind::Credentials, "{err}");
+        assert_eq!(err.code(), "ERR_CREDENTIALS");
+        assert!(
+            !err.retryable(),
+            "a credential failure was called retryable: {err}"
+        );
+        assert_eq!(err.wire_kind(), None, "{err}");
+        let message = err.to_string();
+        assert!(
+            message.contains("AccessDeniedException"),
+            "the minter's own reason is lost: {message}"
+        );
+        assert!(
+            !message.contains("may succeed"),
+            "the message still promises a retry: {message}"
+        );
+        assert_eq!(auth.mint_count(), 0, "a refused mint was counted");
     }
 
     /// Concurrent requests on a cold cache mint once, not once each.

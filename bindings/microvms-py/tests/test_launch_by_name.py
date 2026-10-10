@@ -83,3 +83,23 @@ def test_identity_on_run_reaches_the_launch_request() -> None:
         sandbox.run(identity=True, **stable)
     with pytest.raises(microvms.CredentialsError, match="for RunMicrovm"):
         microvms.Sandbox(microvms.Region.us_east_1()).run(identity=False, **stable)
+
+
+def test_launch_image_arn_names_the_image_the_launch_sent() -> None:
+    """`Sandbox.launch_image_arn` is core's `Sandbox::launch_image_arn` (#280).
+
+    `None` before a launch. An ARN is recorded as the launch sends it, before the call, so a
+    launch the service refuses still names it; a bare name the listing never resolved
+    records nothing.
+    """
+    arn = "arn:aws:lambda:us-east-1:123456789012:microvm-image:wanted-image"
+    sandbox = microvms.Sandbox(microvms.Region.us_east_1())
+    assert sandbox.launch_image_arn is None
+    with pytest.raises(microvms.CredentialsError, match="for RunMicrovm"):
+        sandbox.run(image_identifier=arn)
+    assert sandbox.launch_image_arn == arn
+
+    unresolved = microvms.Sandbox(microvms.Region.us_east_1())
+    with pytest.raises(microvms.CredentialsError, match="for ListMicrovmImages"):
+        unresolved.run(image_identifier="wanted-image")
+    assert unresolved.launch_image_arn is None

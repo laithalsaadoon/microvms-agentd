@@ -462,7 +462,8 @@ be March-based, which puts February's variable length last; `719468` is the day 
   indistinguishable from a dead daemon. Refresh is at **half** the ceiling rather than just under
   it, because refreshing at fifty-nine minutes puts the expiry inside the window between building
   the headers and the proxy validating them. A control-plane throttle at minute thirty must not
-  kill a trial that is otherwise healthy. `crates/microvms-app/src/session/proxy.rs:21-37`, `:107-111`,
+  kill a trial that is otherwise healthy. A credential failure during a mint keeps
+  `ERR_CREDENTIALS` (#280). `crates/microvms-app/src/session/proxy.rs:21-37`, `:107-111`,
   `:520-533`.
 
 - **Credentials never reach a log line, by construction rather than by care.** `RunHookPayload`

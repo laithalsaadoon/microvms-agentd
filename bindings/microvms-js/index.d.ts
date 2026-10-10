@@ -878,6 +878,14 @@ export declare class Sandbox {
   /** The proxy endpoint, once launched. */
   endpoint(): Promise<string | null>
   /**
+   * The image ARN `run` sent in `RunMicrovm`: the caller's identifier with a bare name
+   * resolved, or the built image's.
+   *
+   * Recorded before the call, so a launch the service refused still names the image it
+   * asked for. `null` until `run` has resolved an image, and on an adopted sandbox.
+   */
+  launchImageArn(): Promise<string | null>
+  /**
    * Why the VM is in its current state, when the service said.
    *
    * The absence is information: TRAP-8's message distinguishes "no stateReason" from an

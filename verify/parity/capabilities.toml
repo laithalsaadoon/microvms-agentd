@@ -57,6 +57,13 @@ py = "Sandbox.ensure_image"
 ts = "Sandbox.ensureImage"
 
 [[capability]]
+id = "launch-image-arn"
+core = "microvms_core::sandbox::Sandbox::launch_image_arn"
+cli = "run --image"
+py = "Sandbox.launch_image_arn"
+ts = "Sandbox.launchImageArn"
+
+[[capability]]
 id = "image-exists"
 core = "microvms_core::sandbox::Sandbox::image_exists"
 cli = { exempt = "`ls --remote` lists images; no command asks about one" }

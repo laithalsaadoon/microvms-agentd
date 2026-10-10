@@ -1248,7 +1248,9 @@ pub struct BuildArgs {
     ///
     /// Core's `ensure_image` (#258): the image is named `<name>-<hash12>`, the hash over the
     /// daemon, the Dockerfile, the --project pair, the base image, a pinned
-    /// --base-image-version and the --memory size class. A ready image under that name is
+    /// --base-image-version, the --memory size class, and what the service fixes at create:
+    /// --repair-identity, --inherit-workdir, the hook timeouts and the log destination
+    /// (#280). The tags are not in it. A ready image under that name is
     /// reused with `reused: true` and nothing uploaded; one still building is waited on; a
     /// failed one is deleted and rebuilt; otherwise the artifact is uploaded to
     /// `s3://<bucket>/[<--s3-key-prefix>/]<name>/artifact.zip` and the image built.

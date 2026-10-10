@@ -179,8 +179,10 @@ s3KeyPrefix, buildRoleArn }, size)`, answering `{ image, reused, artifactUri, up
 warnings }`.
 
 - **The name** is `<name_prefix>-<hash12>`. The hash covers the daemon bytes, the
-  Dockerfile, every build-context file's path, mode and bytes, the base image, and the
-  size class, because an image is created on one base at one size. Equal inputs name one
+  Dockerfile, every build-context file's path, mode and bytes, the base image, the size
+  class, and the fields the service fixes at create (identity repair, `inherit_workdir`,
+  the hook timeouts, the log destination; #280), because an image is created on one base
+  at one size with those set. Equal inputs name one
   image and any changed input names a fresh one, so a stale snapshot is never served
   under a reused name. The prefix is reduced to the characters the service's image
   names admit. The artifact hash without a context is unchanged, so `microvm build
@@ -409,7 +411,9 @@ well under the ceiling — this repo's clients refresh at half of it, thirty
 minutes, so a request in flight across the rollover still holds a token with
 about thirty minutes of life (`crates/microvms-app/src/session/proxy.rs:29-37`). A
 mint failure is retryable; treat it that way, because a control-plane throttle
-at minute thirty must not kill a healthy run.
+at minute thirty must not kill a healthy run. A credential failure during a mint
+is the exception: it stays `ERR_CREDENTIALS`, because the identical request is
+refused again until the identity is fixed.
 
 Token rotation costs nothing on the daemon side. All exec state — the records,
 the buffered output, the stream cursors — lives in the daemon, keyed by
