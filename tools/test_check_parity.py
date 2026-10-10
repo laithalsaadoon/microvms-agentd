@@ -511,6 +511,17 @@ class RuleTests(FixtureCase):
         members.append(function("create_async"))
         self.assertProblem("type Sandbox: ts: create is exempt but has a Python twin")
 
+    def test_an_exempt_awaitable_twin_with_a_typescript_twin_fails(self):
+        """An exemption for `run_async` is stale: it pairs with TypeScript's `run`."""
+        self.griffe["members"][0]["members"].append(function("run_async"))
+        self.table = self.table.replace(
+            'name = "Sandbox"\n',
+            'name = "Sandbox"\nexempt_members.py = { run_async = "stale" }\n',
+        )
+        self.assertProblem(
+            "type Sandbox: py: run_async is exempt but has a TypeScript twin"
+        )
+
     def test_only_a_python_name_drops_the_async_suffix(self):
         """The suffix rule is Python's: a TypeScript member spelled `run_async` keeps its whole
         name, so it doesn't pair with Python's `run` the way Python's `run_async` would."""

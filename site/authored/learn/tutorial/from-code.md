@@ -79,7 +79,7 @@ python hello.py
 Expected output: `hello from a sandbox`.
 
 Each method that contacts AWS or the VM blocks until it finishes, and has an
-awaitable twin with the same arguments for asyncio code: `await
+awaitable twin with the same arguments for `async` code: `await
 Sandbox.create_async(region)`, `await vm.run_async(...)`, `await
 session.run_sync_async([...])`. `session.run_sync()` starts a command, waits for
 completion, returns stdout/stderr and an exit code, and acknowledges the
