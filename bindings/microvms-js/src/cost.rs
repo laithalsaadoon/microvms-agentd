@@ -41,8 +41,9 @@
 use microvms_core::SizeClass as CoreSizeClass;
 use microvms_core::cost::{
     self, Amount as CoreAmount, BillingLine, CalendarDate, CostPhase, CostReport as CoreReport,
-    DEFAULT_RESIDENCY_CYCLES, DurationP, EstimatedUsd as CoreUsd, LineItem as CoreLineItem,
-    PlanUsage, Provenance, RateTable as CoreRates, RunUsage, Total as CoreTotal,
+    DEFAULT_REPORT_CYCLES, DEFAULT_RESIDENCY_CYCLES, DurationP, EstimatedUsd as CoreUsd,
+    LineItem as CoreLineItem, PlanUsage, Provenance, RateTable as CoreRates, RunUsage,
+    Total as CoreTotal,
 };
 use microvms_core::prelude::*;
 use napi::bindgen_prelude::ClassInstance;
@@ -792,7 +793,9 @@ pub struct RunUsageOptions<'a> {
     /// How long the image was retained. Defaults to the documented one-week minimum, marked
     /// projected — nobody timed that week either.
     pub image_retained: Option<ClassInstance<'a, Duration>>,
-    /// Each cycle pays a snapshot write plus a read.
+    /// Each cycle pays a snapshot write plus a read. Left out, the report counts none, so it has
+    /// no suspend or resume line: a report claims only what the caller says happened, as
+    /// `microvm cost` does.
     pub suspend_resume_cycles: Option<f64>,
     /// The suspend snapshot's size. Defaults to the baseline memory footprint.
     pub snapshot_gb: Option<f64>,
@@ -826,7 +829,7 @@ pub fn run_report(
             "suspendResumeCycles",
         )
         .map_err(js)?
-        .unwrap_or(0),
+        .unwrap_or(DEFAULT_REPORT_CYCLES),
         snapshot_gb: options.snapshot_gb,
         launched: false,
     };
@@ -856,6 +859,8 @@ pub struct PlanUsageOptions {
     pub suspended_seconds: Option<f64>,
     pub image_gb: Option<f64>,
     pub image_retained_seconds: Option<f64>,
+    /// Each cycle pays a snapshot write plus a read. Left out, the plan counts none, as
+    /// `microvm cost --estimate` does.
     pub suspend_resume_cycles: Option<f64>,
     pub snapshot_gb: Option<f64>,
     /// Whether the plan launches, which reads a snapshot. Left out, the core infers it: running
@@ -888,7 +893,7 @@ pub fn estimate_run(
             "suspendResumeCycles",
         )
         .map_err(js)?
-        .unwrap_or(0),
+        .unwrap_or(DEFAULT_REPORT_CYCLES),
         snapshot_gb: options.snapshot_gb,
         launched: false,
     };
@@ -1015,6 +1020,10 @@ pub fn check_budget(
 }
 
 /// The warm-pool argument, with its own counter-argument attached.
+///
+/// Leave `cycles` out and the comparison prices one suspend/resume cycle, the core's default
+/// and the one `microvm cost --compare` applies: the per-cycle figure is what keeps the
+/// argument honest. A report's `suspendResumeCycles` defaults to none instead.
 #[napi]
 pub fn compare_residency(
     size: &SizeClass,

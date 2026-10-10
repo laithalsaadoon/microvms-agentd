@@ -76,13 +76,17 @@ refusal regresses the case fails on a connection error rather than a signed requ
   same inputs (`ensure-image`), and the name `AgentVm.image_name` gives an agent image
   (`agent-image-name`). The binary is `binary_hex`, built from the default Dockerfile on AL2023
   at the default agent port.
-- `cost`: estimate reports as JSON, core's `CostReport::to_json` shape, which the CLI's
-  `cost --json`, Python's `to_dict` and TypeScript's `toJson` all emit. Every surface leaves
+- `cost`: reports (`run-report`, with `input.running_seconds` measured) and estimates
+  (`estimate`) as JSON, core's `CostReport::to_json` shape, which the CLI's `cost --json`,
+  Python's `to_dict` and TypeScript's `toJson` all emit; and comparisons (`compare-residency`)
+  as `cycles`, `ratio` and `render`, the accessors every surface has. Every surface leaves
   `launched` and the label out, so each case holds core's defaults (#255): the launch core
-  infers from the plan, and `DEFAULT_ESTIMATE_LABEL`, which core's runner passes since core
-  takes no optional arguments. Every case passes `suspend_resume_cycles` to every surface: the
-  CLI's `--cycles` defaults to 1 and the bindings' `suspend_resume_cycles` to 0, so no case
-  leans on either default (#300, surface defaults).
+  infers from the plan, and `DEFAULT_RUN_LABEL` or `DEFAULT_ESTIMATE_LABEL`, which core's runner
+  passes since core takes no optional arguments. A case that leaves out
+  `suspend_resume_cycles` (a report) or `cycles` (a comparison) asks about each surface's
+  default: the CLI leaves `--cycles` off, the bindings leave the argument out, and core's
+  runner passes `DEFAULT_REPORT_CYCLES` or `DEFAULT_RESIDENCY_CYCLES`. A report then counts no
+  cycle and a comparison prices one (#280).
 - `error`: a daemon status answered to one call, as the error's code, wire kind and
   retryability.
 - `egress`: a launch's egress options, refused or classified.

@@ -20,7 +20,9 @@ use microvms_core::control::artifact::{
 use microvms_core::control::ensure::{EnsureImageRequest, prepare};
 use microvms_core::control::{ControlPlane, DEFAULT_AGENT_PORT, SystemClock, egress_posture_for};
 use microvms_core::cost::{
-    CalendarDate, DEFAULT_ESTIMATE_LABEL, PlanUsage, estimate_run, pinned_rates,
+    CalendarDate, DEFAULT_ESTIMATE_LABEL, DEFAULT_REPORT_CYCLES, DEFAULT_RESIDENCY_CYCLES,
+    DEFAULT_RUN_LABEL, DurationP, PlanUsage, RunUsage, compare_residency, estimate_run,
+    pinned_rates, run_report,
 };
 use microvms_core::names::FileNameStore;
 use microvms_core::prelude::*;
@@ -128,28 +130,63 @@ fn image_name(case: &Case) -> Value {
     }
 }
 
+/// The case's cycle count, or `default` when it leaves one out: core has no optional arguments,
+/// so its runner passes the constant a surface's caller gets by leaving the count out.
+fn cycles(case: &Case, key: &str, default: u32) -> u32 {
+    case.input.get(key).map_or(default, |_| {
+        u32::try_from(case.input_u64(key)).expect("a cycle count in range")
+    })
+}
+
 fn cost(case: &Case) -> Value {
-    assert_eq!(case.capability, "estimate", "{}: an estimate case", case.id);
-    let mut plan = PlanUsage {
-        running_seconds: case.input_f64("running_seconds"),
-        suspended_seconds: case.input_f64("suspended_seconds"),
-        suspend_resume_cycles: u32::try_from(case.input_u64("suspend_resume_cycles"))
-            .expect("a cycle count in range"),
-        ..PlanUsage::default()
+    let (rates, today) = (pinned_rates(), CalendarDate::today_utc());
+    let answer = match case.capability.as_str() {
+        "estimate" => {
+            let mut plan = PlanUsage {
+                running_seconds: case.input_f64("running_seconds"),
+                suspended_seconds: case.input_f64("suspended_seconds"),
+                suspend_resume_cycles: cycles(case, "suspend_resume_cycles", DEFAULT_REPORT_CYCLES),
+                ..PlanUsage::default()
+            };
+            // Core has no optional arguments, so its runner applies the defaults every
+            // surface's caller gets by leaving `launched` and the label out: core's inference
+            // and core's label.
+            plan.launched = plan.infer_launched();
+            estimate_run(size(case), &plan, &rates, today, DEFAULT_ESTIMATE_LABEL)
+                .map(|report| report.to_json())
+        }
+        "run-report" => DurationP::measured_secs_f64(case.input_f64("running_seconds"))
+            .and_then(|running| {
+                let mut usage = RunUsage {
+                    running: Some(running),
+                    suspend_resume_cycles: cycles(
+                        case,
+                        "suspend_resume_cycles",
+                        DEFAULT_REPORT_CYCLES,
+                    ),
+                    ..RunUsage::default()
+                };
+                usage.launched = usage.infer_launched();
+                run_report(size(case), &usage, &rates, today, DEFAULT_RUN_LABEL)
+            })
+            .map(|report| report.to_json()),
+        "compare-residency" => compare_residency(
+            size(case),
+            std::time::Duration::from_secs(case.input_u64("hold_seconds")),
+            cycles(case, "cycles", DEFAULT_RESIDENCY_CYCLES),
+            &rates,
+            today,
+        )
+        .and_then(|comparison| {
+            Ok(json!({
+                "cycles": comparison.cycles(),
+                "ratio": comparison.ratio().to_string(),
+                "render": comparison.render()?,
+            }))
+        }),
+        other => panic!("{}: no core handler for {other:?} in cost", case.id),
     };
-    // Core has no optional arguments, so its runner applies the defaults every surface's caller
-    // gets by leaving `launched` and the label out: core's inference and core's label.
-    plan.launched = plan.infer_launched();
-    match estimate_run(
-        size(case),
-        &plan,
-        &pinned_rates(),
-        CalendarDate::today_utc(),
-        DEFAULT_ESTIMATE_LABEL,
-    ) {
-        Ok(report) => report.to_json(),
-        Err(error) => refusal(&error),
-    }
+    answer.unwrap_or_else(|error| refusal(&error))
 }
 
 /// A daemon that answers every request with the case's status and body.

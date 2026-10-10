@@ -925,11 +925,18 @@ id = "agent-port"
 core = "agentPort"
 cli = "dockerfile --port"
 
+# `cost --cycles` states no default: left off, the report takes `reportCycles` and `--compare`
+# takes `residencyCycles`, one flag with two defaults, which the cost cases in
+# `verify/parity/cases/` hold on every surface (#280).
 [[default]]
 id = "residency-cycles"
 core = "residencyCycles"
-cli = "cost --cycles"
 py = "compare_residency(cycles)"
+
+[[default]]
+id = "report-cycles"
+core = "reportCycles"
+py = ["run_report(suspend_resume_cycles)", "estimate_run(suspend_resume_cycles)"]
 
 [[default]]
 id = "keepalive-tolerated-errors"

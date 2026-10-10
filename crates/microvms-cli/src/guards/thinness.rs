@@ -652,7 +652,7 @@ async fn no_local_command_touches_a_seam_door() {
             suspended_sec: 0.0,
             build_sec: 0.0,
             image_gb: None,
-            cycles: 1,
+            cycles: Some(1),
             hold_sec: Duration::from_secs(3600),
             // The budget gate is arithmetic over the same local report, so a gated
             // invocation is exercised here too: still no seam door.

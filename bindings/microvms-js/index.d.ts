@@ -1579,7 +1579,13 @@ export declare function buildUnpricedReason(): string
  */
 export declare function checkBudget(report: CostReport, maxUsd: string, onBreach: string): BudgetVerdict
 
-/** The warm-pool argument, with its own counter-argument attached. */
+/**
+ * The warm-pool argument, with its own counter-argument attached.
+ *
+ * Leave `cycles` out and the comparison prices one suspend/resume cycle, the core's default
+ * and the one `microvm cost --compare` applies: the per-cycle figure is what keeps the
+ * argument honest. A report's `suspendResumeCycles` defaults to none instead.
+ */
 export declare function compareResidency(size: SizeClass, holdSeconds: number, cycles?: number | undefined | null, rates?: RateTable | undefined | null): ResidencyComparison
 
 /**
@@ -2323,6 +2329,10 @@ export interface PlanUsageOptions {
   suspendedSeconds?: number
   imageGb?: number
   imageRetainedSeconds?: number
+  /**
+   * Each cycle pays a snapshot write plus a read. Left out, the plan counts none, as
+   * `microvm cost --estimate` does.
+   */
   suspendResumeCycles?: number
   snapshotGb?: number
   /**
@@ -2643,7 +2653,11 @@ export interface RunUsageOptions {
    * projected — nobody timed that week either.
    */
   imageRetained?: Duration
-  /** Each cycle pays a snapshot write plus a read. */
+  /**
+   * Each cycle pays a snapshot write plus a read. Left out, the report counts none, so it has
+   * no suspend or resume line: a report claims only what the caller says happened, as
+   * `microvm cost` does.
+   */
   suspendResumeCycles?: number
   /** The suspend snapshot's size. Defaults to the baseline memory footprint. */
   snapshotGb?: number

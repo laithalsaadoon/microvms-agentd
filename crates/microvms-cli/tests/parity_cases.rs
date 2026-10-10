@@ -71,27 +71,57 @@ fn number(case: &Case, key: &str) -> String {
     value.to_string()
 }
 
+/// `cost --json`, `cost --estimate` or `cost --compare` over the case's input. A cycle count the
+/// case leaves out is a `--cycles` left off, so the case asks about the CLI's own default.
 fn cost(case: &Case) -> Value {
-    assert_eq!(case.capability, "estimate", "{}: an estimate case", case.id);
     // `input.defaults` stays out: the CLI's own defaults for `launched` and the label are
     // what the case asks about.
-    let args = [
+    let mut args = vec![
         "--json".to_string(),
         "cost".to_string(),
-        "--estimate".to_string(),
         "--memory".to_string(),
         number(case, "size_mib"),
-        "--running-sec".to_string(),
-        number(case, "running_seconds"),
-        "--suspended-sec".to_string(),
-        number(case, "suspended_seconds"),
-        "--cycles".to_string(),
-        number(case, "suspend_resume_cycles"),
     ];
+    let cycles = match case.capability.as_str() {
+        "estimate" => {
+            args.extend([
+                "--estimate".to_string(),
+                "--running-sec".to_string(),
+                number(case, "running_seconds"),
+                "--suspended-sec".to_string(),
+                number(case, "suspended_seconds"),
+            ]);
+            "suspend_resume_cycles"
+        }
+        "run-report" => {
+            args.extend(["--running-sec".to_string(), number(case, "running_seconds")]);
+            "suspend_resume_cycles"
+        }
+        "compare-residency" => {
+            args.extend([
+                "--compare".to_string(),
+                "--hold-sec".to_string(),
+                number(case, "hold_seconds"),
+            ]);
+            "cycles"
+        }
+        other => panic!("{}: the CLI has no cost case for {other:?}", case.id),
+    };
+    if case.input.get(cycles).is_some() {
+        args.extend(["--cycles".to_string(), number(case, cycles)]);
+    }
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let (answer, envelope) = answer_of(&args);
     if answer.get("error").is_some() {
         return answer;
+    }
+    if case.capability == "compare-residency" {
+        let comparison = &answer["comparison"];
+        return json!({
+            "cycles": comparison["cycles"],
+            "ratio": comparison["ratio"],
+            "render": comparison["render"],
+        });
     }
     answer
         .get("report")
