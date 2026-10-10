@@ -70,5 +70,5 @@ none. -->
 
 ## Scope
 
-- [ ] This is not an orchestrator, a fork implementation, or AgentCore parity work
+- [ ] This is not an orchestrator or a fork implementation
       (see `docs/STRATEGY.md`).
