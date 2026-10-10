@@ -11,9 +11,12 @@ consumed by two of the three scanners in CI's `sbom` job:
   step (trivy's local-VEX-file support is marked experimental; if an upgrade
   changes the interface, the CI validation step still gates the document's
   shape and this README is the pointer to re-wire).
-- **osv-scanner** does not consume VEX documents; its overrides stay in
-  `osv-scanner.toml` at the repo root. Any vulnerability suppressed there must
-  also carry a statement here, so this document remains the complete record.
+- **osv-scanner** does not consume VEX documents; its overrides live in an
+  `osv-scanner.toml` beside the lockfile they govern (the repo root for
+  `Cargo.lock`, `site/` for the docs site), because osv-scanner and OpenSSF
+  Scorecard apply a config file only to the lockfiles in its directory. Any
+  vulnerability suppressed there must also carry a statement here, so this
+  document remains the complete record.
 
 What VEX deliberately does **not** cover:
 

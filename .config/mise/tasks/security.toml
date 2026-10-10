@@ -70,11 +70,14 @@ depends = ["sbom"]
 run = [
   "grype sbom:sbom/microvms-agentd.cdx.json --fail-on high -q --vex .vex/microvms-agentd.openvex.json",
   "TRIVY_VEX=.vex/microvms-agentd.openvex.json trivy fs --scanners vuln,misconfig,secret --skip-dirs conformance/infra/.terraform --skip-dirs target --skip-dirs site/node_modules --skip-dirs site/dist --skip-dirs bindings/microvms-js/node_modules --exit-code 1 --severity HIGH,CRITICAL --ignorefile .config/trivyignore.yaml -q .",
-  # `--config` is required, not decorative: osv-scanner applies a config file only to the
-  # lockfiles in its own directory, so without it the root file governs Cargo.lock and
-  # nothing governs site/pnpm-lock.yaml (measured 2026-09-05: the extract-zip ignore was
-  # reported as unused while the finding it names failed the scan).
-  "osv-scanner scan source -r . --config osv-scanner.toml",
+  # No `--config`: osv-scanner applies a config file only to the lockfiles in its own directory
+  # (measured 2026-09-05: with the site's ignores in the root file and no flag, they were
+  # reported as unused while the finding they name failed the scan), so each lockfile's
+  # acceptances live beside it, `osv-scanner.toml` for Cargo.lock and `site/osv-scanner.toml`
+  # for the docs site. That is also how OpenSSF Scorecard's Vulnerabilities check reads them,
+  # so this scan and Scorecard report the same findings; one `--config` for the whole tree
+  # passed here while Scorecard counted the site's accepted advisories as open.
+  "osv-scanner scan source -r .",
 ]
 
 ["vex:check"]

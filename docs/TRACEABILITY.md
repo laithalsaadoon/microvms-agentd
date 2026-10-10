@@ -950,7 +950,7 @@ The cost engine shall mark each duration in a plan estimate as projected, so tha
 The microvms-core shall emit the agentd stanza of a wrapped task Dockerfile and of the default Dockerfile from one source.
 
 - **model:** `crates/model/src/wrap.rs`
-- **gherkin:** `crates/microvms-core/tests/features/wrap_dockerfile.feature`
+- **gherkin:** `crates/microvms-core/tests/features/wrap_task_image.feature`
 - **fuzz:** `crates/microvms-core/tests/wrap_fuzz.rs`
 - **test:** `crates/microvms-app/src/control/artifact.rs`, `crates/model-conformance/tests/tables.rs`
 - **impl:** `crates/microvms-app/src/control/artifact.rs`
@@ -961,7 +961,7 @@ The microvms-core shall emit the agentd stanza of a wrapped task Dockerfile and 
 When a caller wraps a task Dockerfile, the microvms-core shall end the result with the agentd stanza carrying the client's AGENTD_PORT, preceded by USER root when the task sets another user.
 
 - **model:** `crates/model/src/wrap.rs`
-- **gherkin:** `crates/microvms-core/tests/features/wrap_dockerfile.feature`
+- **gherkin:** `crates/microvms-core/tests/features/wrap_task_image.feature`
 - **fuzz:** `crates/microvms-core/tests/wrap_fuzz.rs`
 - **test:** `crates/microvms-app/src/control/artifact.rs`, `crates/model-conformance/tests/tables.rs`
 - **impl:** `crates/microvms-app/src/control/artifact.rs`, `crates/microvms-cli/src/commands/local.rs`
@@ -972,7 +972,7 @@ When a caller wraps a task Dockerfile, the microvms-core shall end the result wi
 If a task Dockerfile has no FROM, ends inside an unfinished instruction, or sets a keepalive not under the stream idle timeout, or the wrap options name an invalid port or workdir or ask to inherit a workdir that nothing declares, then the microvms-core shall refuse to wrap the task Dockerfile with an invalid-argument error naming the cause.
 
 - **model:** `crates/model/src/wrap.rs`
-- **gherkin:** `crates/microvms-core/tests/features/wrap_dockerfile.feature`
+- **gherkin:** `crates/microvms-core/tests/features/wrap_task_image.feature`
 - **fuzz:** `crates/microvms-core/tests/wrap_fuzz.rs`
 - **test:** `crates/microvms-app/src/control/artifact.rs`, `crates/model-conformance/tests/tables.rs`
 - **impl:** `crates/microvms-app/src/control/artifact.rs`, `crates/microvms-cli/src/commands/local.rs`
@@ -983,7 +983,7 @@ If a task Dockerfile has no FROM, ends inside an unfinished instruction, or sets
 When a caller derives a base image from a Dockerfile, the microvms-core shall take the docker_ref from the first FROM, keep the managed base image name, and refuse a Dockerfile with no FROM.
 
 - **model:** `crates/model/src/wrap.rs`
-- **gherkin:** `crates/microvms-core/tests/features/wrap_dockerfile.feature`
+- **gherkin:** `crates/microvms-core/tests/features/wrap_task_image.feature`
 - **fuzz:** `crates/microvms-core/tests/wrap_fuzz.rs`
 - **test:** `crates/microvms-app/src/control/artifact.rs`
 - **impl:** `crates/microvms-app/src/control/artifact.rs`, `crates/microvms-cli/src/commands/local.rs`

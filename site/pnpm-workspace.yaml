@@ -8,3 +8,9 @@ allowBuilds:
 minimumReleaseAgeExclude:
   - '@astrojs/starlight@0.41.9'
   - astro@7.2.7
+# @expressive-code/core 0.44.2 asks for postcss-nested ^6.0.1, whose postcss-selector-parser ^6.1.1
+# can't reach the GHSA-rj75-hqrm-r3gf fix (7.1.6). postcss-nested 7 changed only its Node floor
+# and that parser's major, so this pins the one dependent to 7.0.2 rather than accepting the
+# advisory. Drop it when @expressive-code/core asks for postcss-nested 7 or later itself.
+overrides:
+  '@expressive-code/core>postcss-nested': 7.0.2
