@@ -355,7 +355,7 @@ run = [
 expect = "test-failed"
 suite = "bindings"
 message = "assert 301.0 == 300.0"
-transform = { file = "bindings/microvms-py/src/control.rs", replace = "timeout=300.0, poll_interval=5.0))]", with = "timeout=301.0, poll_interval=5.0))]" }
+transform = { file = "bindings/microvms-py/src/control.rs", replace = "timeout=300.0, poll_interval=5.0))]\n    fn wait_for_state(\n", with = "timeout=301.0, poll_interval=5.0))]\n    fn wait_for_state(\n" }
 
 [[fault]]
 id = "py-session-constants-exec-wait"

@@ -13,12 +13,12 @@ note = "bindings/microvms-py/tests/test_control.py::test_an_agent_vm_takes_its_d
 
 [[family.fault]]
 id = "py-agent-vm-restates-the-default-agents"
-transform = { file = "bindings/microvms-py/src/agents.rs", replace = "            .unwrap_or_else(agents::default_specs);\n        agents::require_specs(&specs).map_err(CoreError)?;\n", with = "            .unwrap_or_else(|| vec![AgentSpec::new(Agent::Codex)]);\n        agents::require_specs(&specs).map_err(CoreError)?;\n" }
+transform = { file = "bindings/microvms-py/src/agents.rs", replace = "        .unwrap_or_else(agents::default_specs)\n}\n", with = "        .unwrap_or_else(|| vec![AgentSpec::new(Agent::Codex)])\n}\n" }
 
 # Each binding refuses a call before `launch` with a message of its own.
 [[family.fault]]
 id = "py-agent-vm-restates-the-launch-refusal"
-transform = { file = "bindings/microvms-py/src/agents.rs", replace = "        body(agents::launched_session(sandbox)?)\n", with = "        body(sandbox.session().ok_or_else(|| {\n            Error::new(microvms_core::ErrorKind::Precondition, \"the agent VM is not running\")\n        })?)\n" }
+transform = { file = "bindings/microvms-py/src/agents.rs", replace = "    agents::launched_session(sandbox)\n}\n", with = "    sandbox.session().ok_or_else(|| {\n        Error::new(microvms_core::ErrorKind::Precondition, \"the agent VM is not running\")\n    })\n}\n" }
 
 [[family]]
 guard = "an agent VM takes its default agents and its refusal from core"

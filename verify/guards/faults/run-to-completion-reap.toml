@@ -12,7 +12,7 @@ run = [
 expect = "test-failed"
 suite = "bindings"
 note = "bindings/microvms-py/tests/test_run_to_completion.py::test_reap_group_on_exit_reaches_the_start"
-transform = { file = "bindings/microvms-py/src/session.rs", replace = "        .with_timeout_sec(timeout_sec)\n        .with_reap_group_on_exit(reap_group_on_exit)\n        .with_inherit_image_env(inherit_image_env);\n        let options = CompletionOptions {\n", with = "        .with_timeout_sec(timeout_sec)\n        .with_inherit_image_env(inherit_image_env);\n        let _ = reap_group_on_exit;\n        let options = CompletionOptions {\n" }
+transform = { file = "bindings/microvms-py/src/session.rs", replace = "            false,\n            exec_id,\n            reap_group_on_exit,\n            inherit_image_env,\n        );\n        let plan = completion_plan(&request, client_grace_sec)?;\n        // Started under the sandbox lock", with = "            false,\n            exec_id,\n            false,\n            inherit_image_env,\n        );\n        let plan = completion_plan(&request, client_grace_sec)?;\n        // Started under the sandbox lock" }
 
 [[fault]]
 id = "js-run-to-completion-drops-reap"

@@ -12,7 +12,7 @@ run = [
 expect = "test-failed"
 suite = "bindings"
 note = "bindings/microvms-py/tests/test_control.py::test_an_agent_vm_launch_takes_the_launch_env_and_the_ready_timeout"
-transform = { file = "bindings/microvms-py/src/agents.rs", replace = "        if let Some(env) = launch_env {\n            request.launch_env = env;\n        }\n", with = "        let _ = launch_env;\n" }
+transform = { file = "bindings/microvms-py/src/agents.rs", replace = "    if let Some(env) = args.launch_env {\n        request.launch_env = env;\n    }\n", with = "    let _ = args.launch_env;\n" }
 
 [[fault]]
 id = "js-agent-vm-launch-drops-launch-env"

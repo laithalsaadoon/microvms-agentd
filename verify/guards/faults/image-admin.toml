@@ -13,7 +13,7 @@ run = [
 ]
 expect = "test-failed"
 suite = "bindings"
-transform = { file = "bindings/microvms-py/src/control.rs", replace = "        let status: ops::VersionStatus = status.parse()?;\n", with = "        let status: ops::VersionStatus = status.to_ascii_uppercase().parse()?;\n" }
+transform = { file = "bindings/microvms-py/src/control.rs", replace = "        let status: ops::VersionStatus = status.parse()?;\n        Ok(runtime::block_on(\n", with = "        let status: ops::VersionStatus = status.to_ascii_uppercase().parse()?;\n        Ok(runtime::block_on(\n" }
 
 [[fault]]
 id = "js-version-status-unparsed"

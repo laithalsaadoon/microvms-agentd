@@ -23,7 +23,7 @@ run = [
 expect = "test-failed"
 suite = "bindings"
 note = "bindings/microvms-py/tests/test_control.py::test_terminate_waits_for_a_bool_or_a_number_of_seconds"
-transform = { file = "bindings/microvms-py/src/sandbox.rs", replace = "            WaitForTerminated::Seconds(timeout) => {\n                opts.wait_for_terminated = Some(seconds(timeout)?);\n            }\n", with = "            WaitForTerminated::Seconds(_) => opts = opts.waiting_for_terminated(),\n" }
+transform = { file = "bindings/microvms-py/src/sandbox.rs", replace = "        WaitForTerminated::Seconds(timeout) => {\n            opts.wait_for_terminated = Some(seconds(timeout)?);\n        }\n", with = "        WaitForTerminated::Seconds(_) => opts = opts.waiting_for_terminated(),\n" }
 
 [[fault]]
 id = "js-terminate-ignores-wait-seconds"

@@ -528,7 +528,7 @@ ts = "defaultBaseImage"
 id = "provision-agentd"
 core = "microvms_core::provision::agentd"
 cli = { exempt = "implicit in run, build, quickstart and agent-up" }
-py = ["provision_agentd", "provision_agentd_report"]
+py = ["provision_agentd", "provision_agentd_report", "provision_agentd_async", "provision_agentd_report_async"]
 ts = ["provisionAgentd", "provisionAgentdReport"]
 
 # ── agents ───────────────────────────────────────────────────────────────────

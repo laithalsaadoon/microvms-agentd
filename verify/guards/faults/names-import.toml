@@ -48,7 +48,7 @@ run = [
 expect = "test-failed"
 suite = "bindings"
 message = "DID NOT RAISE"
-transform = { file = "bindings/microvms-py/src/names.rs", replace = "            crate::runtime::block_on_detached(microvms_core::names::import(\n                &store, &record, session,\n            ))\n", with = "            let _ = session;\n            store.put(&record).map(|()| microvms_core::names::Imported { replaced: false })\n" }
+transform = { file = "bindings/microvms-py/src/names.rs", replace = "            let imported = microvms_core::names::import(&store, &record, lease.session()?).await?;\n            Ok(imported.replaced)\n", with = "            let _ = lease;\n            store.put(&record)?;\n            Ok(false)\n" }
 
 [[fault]]
 id = "ts-import-record-skips-the-probe"

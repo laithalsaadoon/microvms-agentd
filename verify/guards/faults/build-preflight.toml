@@ -12,7 +12,7 @@ run = [
 ]
 expect = "test-failed"
 suite = "bindings"
-transform = { file = "bindings/microvms-py/src/sandbox.rs", replace = "        Ok(self.read(|sandbox| sandbox.preflight(&request))?)\n", with = "        let _ = request;\n        Ok(())\n" }
+transform = { file = "bindings/microvms-py/src/sandbox.rs", replace = "        Ok(self.read(py, |sandbox| sandbox.preflight(&request))?)\n", with = "        let _ = request;\n        Ok(())\n" }
 
 [[fault]]
 id = "js-sandbox-preflight-unchecked"

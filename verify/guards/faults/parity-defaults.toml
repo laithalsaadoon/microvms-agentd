@@ -12,7 +12,7 @@ suite = "script"
 [[family.fault]]
 id = "parity-default-undeclared"
 message = "py: ExecHandle.write_stdin(eof) = False belongs to no [[default]] row"
-transform = { file = "verify/parity/capabilities.toml", replace = "[[default]]\nid = \"stdin-eof\"\nexempt = \"whether this one write closes stdin: an argument of the call, with no default anywhere else\"\npy = \"ExecHandle.write_stdin(eof)\"\n", with = "" }
+transform = { file = "verify/parity/capabilities.toml", replace = "[[default]]\nid = \"stdin-eof\"\nexempt = \"whether this one write closes stdin: an argument of the call, with no default anywhere else\"\npy = [\"ExecHandle.write_stdin(eof)\", \"ExecHandle.write_stdin_async(eof)\"]\n", with = "" }
 
 [[family.fault]]
 id = "parity-default-core-changed"

@@ -467,6 +467,11 @@ pub struct PyAgentVm {
     region: Region,
 }
 
+/// The VM's session, or the core's refusal, the one its own `AgentVm` makes before a launch.
+fn launched(sandbox: &Sandbox) -> Result<&microvms_core::session::Session, Error> {
+    agents::launched_session(sandbox)
+}
+
 /// `agents`, or the core's default list when the caller names none.
 fn specs_or_default(agents: Option<Vec<PyAgentSpec>>) -> Vec<AgentSpec> {
     agents
@@ -647,8 +652,7 @@ impl PyAgentVm {
             };
             let access = token.access();
             let sandbox = inner.lock().await;
-            // The core's refusal, the one its own `AgentVm` makes before a launch.
-            let session = agents::launched_session(&sandbox)?;
+            let session = launched(&sandbox)?;
             agents::install_access(session, &specs, &access).await?;
             Ok(token)
         })
@@ -665,7 +669,7 @@ impl PyAgentVm {
         let inner = Arc::clone(&self.sandbox);
         Ok(async move {
             let sandbox = inner.lock().await;
-            let session = agents::launched_session(&sandbox)?;
+            let session = launched(&sandbox)?;
             agents::prompt(session, &spec, &task, &options)
                 .await
                 .map(PyExecHandle::wrap)
@@ -683,7 +687,7 @@ impl PyAgentVm {
         let inner = Arc::clone(&self.sandbox);
         Ok(async move {
             let sandbox = inner.lock().await;
-            let session = agents::launched_session(&sandbox)?;
+            let session = launched(&sandbox)?;
             agents::prompt_sync(session, &spec, &task, &options)
                 .await
                 .map(PyExecResult::wrap)
