@@ -26,7 +26,9 @@
 //! that tears down — `Drop` cannot await, so a teardown there would deadlock inside a
 //! runtime or race the process exit. Python's `with` is not `Drop`: `__exit__` runs
 //! synchronously on the calling thread, which is exactly where a blocking teardown belongs,
-//! so the context manager is available here and is not a loosening.
+//! so the context manager is available here and is not a loosening. `async with` is the same
+//! teardown awaited: `__aexit__` runs it as a task on the shared runtime that finishes even
+//! when the task awaiting it is cancelled.
 //!
 //! # `terminate` returns a report and never raises
 //!
@@ -35,14 +37,18 @@
 //! including the build log group, which this client **cannot** delete — CloudWatch is not in
 //! the core's dependency set — so asking names it rather than removing it.
 
-use std::sync::{Arc, Mutex, PoisonError};
+use std::future::Future;
+use std::sync::Arc;
+use std::time::Duration;
 
 use microvms_core::SizeClass;
 use microvms_core::control::{BaseImage, CreateImageRequest};
 use microvms_core::prelude::*;
 use microvms_core::sandbox::{Detached, RunRequest, Sandbox, TeardownOpts, TeardownReport};
+use microvms_core::{Error, ErrorKind, Region};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
+use tokio::sync::Mutex;
 
 use crate::cost::PySizeClass;
 use crate::errors::{CoreError, PyCoreResult};
@@ -488,51 +494,221 @@ pub(crate) fn logging_for(
     microvms_core::control::ops::Logging::from_parts(log_group, log_stream, disable_logging)
 }
 
+/// The lock every [`PySandbox`], [`crate::session::PySession`] and
+/// [`crate::agents::PyAgentVm`] over one VM shares.
+///
+/// tokio's rather than std's because an awaitable twin holds it across `.await` on a runtime
+/// worker, which a `std::sync::MutexGuard` cannot do (it is not `Send`); the JS binding holds
+/// its sandbox the same way. A blocking method takes it inside the future it blocks on, and a
+/// property takes it with [`runtime::lock_now`].
+pub(crate) type SharedSandbox = Arc<Mutex<Sandbox>>;
+
 /// One MicroVM's whole life.
 ///
 /// The five transitions are `build_image`, `run`, `suspend`, `resume`, and `terminate`, and
-/// every state guard lives in the core — see the module docs.
+/// every state guard lives in the core — see the module docs. Each has an awaitable twin
+/// (`run_async` and so on) that drives the same future; [`crate::runtime`] says how.
 #[pyclass(frozen, name = "Sandbox", module = "microvms")]
 pub struct PySandbox {
     /// Shared with every [`crate::session::PySession`] this sandbox hands out, so a
     /// `terminate()` and a session call cannot interleave. `frozen` on the pyclass plus the
     /// `Mutex` is what gives `&mut Sandbox` from a `&self` method — which the core's
     /// transitions require.
-    inner: Arc<Mutex<Sandbox>>,
+    inner: SharedSandbox,
 }
 
 impl PySandbox {
     /// A sandbox wrapper over an `Arc` another object already holds: how
     /// [`crate::agents::PyAgentVm`] hands out the sandbox it drives.
-    pub(crate) fn from_arc(inner: Arc<Mutex<Sandbox>>) -> Self {
+    pub(crate) fn from_arc(inner: SharedSandbox) -> Self {
         Self { inner }
     }
 
-    /// Runs `body` against the sandbox with the GIL released.
-    ///
-    /// One shape for every transition: release the GIL, take the lock, run, drop both
-    /// before returning into Python. Nothing here holds the lock across a Python callback,
-    /// so it cannot deadlock against the GIL.
-    ///
-    /// `body` is **synchronous** and calls [`runtime::block_on_detached`] itself. A closure
-    /// answering a future that borrows its `&mut Sandbox` argument needs a higher-ranked
-    /// bound plus a boxed future at every call site, and the boxing would exist only to
-    /// satisfy the signature; blocking inside keeps the borrow local.
-    fn detached<T>(&self, py: Python<'_>, body: impl FnOnce(&mut Sandbox) -> T + Send) -> T
-    where
-        T: Send,
-    {
-        py.detach(|| {
-            let mut guard = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
-            body(&mut guard)
-        })
+    fn own(sandbox: Sandbox) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(sandbox)),
+        }
     }
 
-    /// Reads something off the sandbox under the lock.
-    pub(crate) fn read<T>(&self, body: impl FnOnce(&Sandbox) -> T) -> T {
-        let guard = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
-        body(&guard)
+    /// Reads something off the sandbox under the lock: every property, and the checks that
+    /// make no call.
+    pub(crate) fn read<T>(&self, py: Python<'_>, body: impl FnOnce(&Sandbox) -> T) -> T {
+        body(&runtime::lock_now(py, &self.inner))
     }
+
+    /// The future both spellings of `build_image` drive.
+    fn build_image_op(
+        &self,
+        request: CreateImageRequest,
+    ) -> impl Future<Output = Result<PyImage, Error>> + Send + 'static {
+        let inner = Arc::clone(&self.inner);
+        async move {
+            inner
+                .lock()
+                .await
+                .build_image(request)
+                .await
+                .map(PyImage::wrap)
+        }
+    }
+
+    /// The future both spellings of `ensure_image` drive. The build context and the project
+    /// files are read here rather than before it, so the awaitable twin reads them on the
+    /// runtime's blocking pool and not on the event loop.
+    fn ensure_image_op(
+        &self,
+        mut request: microvms_core::control::EnsureImageRequest,
+        context_dir: Option<std::path::PathBuf>,
+        project_dir: Option<std::path::PathBuf>,
+    ) -> impl Future<Output = Result<PyEnsuredImage, Error>> + Send + 'static {
+        let inner = Arc::clone(&self.inner);
+        async move {
+            let (context, project) = tokio::task::spawn_blocking(move || {
+                let context = context_dir
+                    .map(microvms_core::control::BuildContext::from_dir)
+                    .transpose()?;
+                let project = project_dir
+                    .map(microvms_core::control::read_project_files)
+                    .transpose()?;
+                Ok::<_, Error>((context, project))
+            })
+            .await
+            .map_err(|joined| {
+                Error::new(
+                    ErrorKind::Unexpected,
+                    format!("reading the build context failed: {joined}"),
+                )
+            })??;
+            if context.is_some() {
+                request.context = context;
+            }
+            if project.is_some() {
+                request.project_files = project;
+            }
+            inner
+                .lock()
+                .await
+                .ensure_image(request)
+                .await
+                .map(PyEnsuredImage::from)
+        }
+    }
+
+    /// The future both spellings of `managed_base_versions` drive.
+    fn managed_base_versions_op(
+        &self,
+        base_image_arn: String,
+    ) -> impl Future<Output = Result<Vec<PyManagedBaseVersion>, Error>> + Send + 'static {
+        let inner = Arc::clone(&self.inner);
+        async move {
+            let versions = inner
+                .lock()
+                .await
+                .managed_base_versions(&base_image_arn)
+                .await?;
+            Ok(versions
+                .into_iter()
+                .map(|inner| PyManagedBaseVersion { inner })
+                .collect())
+        }
+    }
+
+    /// The future both spellings of `run` drive. It answers the session as the sandbox's own,
+    /// because `Sandbox::run`'s `&mut Session` can't cross into Python; see `run`.
+    fn run_op(
+        &self,
+        request: RunRequest,
+    ) -> impl Future<Output = Result<PySession, Error>> + Send + 'static {
+        let inner = Arc::clone(&self.inner);
+        async move {
+            inner.lock().await.run(request).await?;
+            Ok(PySession::in_sandbox(inner))
+        }
+    }
+
+    /// The future both spellings of `wait_until_running` drive.
+    fn wait_until_running_op(
+        &self,
+        timeout: Duration,
+    ) -> impl Future<Output = Result<PySession, Error>> + Send + 'static {
+        let inner = Arc::clone(&self.inner);
+        async move {
+            inner.lock().await.wait_until_running(timeout).await?;
+            Ok(PySession::in_sandbox(inner))
+        }
+    }
+
+    /// The future both spellings of `suspend` drive: the state reached, as `suspend` says.
+    fn suspend_op(&self) -> impl Future<Output = Result<String, Error>> + Send + 'static {
+        let inner = Arc::clone(&self.inner);
+        async move {
+            let mut sandbox = inner.lock().await;
+            sandbox.suspend().await?;
+            Ok(sandbox.lifecycle().as_str().to_string())
+        }
+    }
+
+    /// The future both spellings of `resume` drive.
+    fn resume_op(&self) -> impl Future<Output = Result<PySession, Error>> + Send + 'static {
+        let inner = Arc::clone(&self.inner);
+        async move {
+            inner.lock().await.resume().await?;
+            Ok(PySession::in_sandbox(inner))
+        }
+    }
+
+    /// The future every teardown drives: both spellings of `terminate`, and both context
+    /// managers' exits.
+    pub(crate) fn terminate_op(
+        &self,
+        opts: TeardownOpts,
+    ) -> impl Future<Output = PyTeardownReport> + Send + 'static {
+        let inner = Arc::clone(&self.inner);
+        async move {
+            PyTeardownReport {
+                inner: inner.lock().await.terminate(opts).await,
+            }
+        }
+    }
+}
+
+/// `terminate`'s keywords as core's options, the one place both spellings and
+/// [`crate::agents::PyAgentVm`] read them.
+///
+/// The two retry knobs default to the core's own figures rather than to numbers written here:
+/// twenty attempts fifteen seconds apart is the difference between a clean account and a
+/// billed leak, and restating them would put a second copy of that measurement in a binding.
+pub(crate) fn teardown_opts(
+    delete_image: bool,
+    delete_log_group: bool,
+    delete_attempts: Option<u32>,
+    delete_backoff: Option<f64>,
+    wait_for_terminated: WaitForTerminated,
+) -> Result<TeardownOpts, Error> {
+    let defaults = TeardownOpts::default();
+    let mut opts = TeardownOpts {
+        delete_image,
+        delete_log_group,
+        delete_attempts: delete_attempts.unwrap_or(defaults.delete_attempts),
+        delete_backoff: match delete_backoff {
+            Some(backoff) => seconds(backoff)?,
+            None => defaults.delete_backoff,
+        },
+        wait_for_terminated: defaults.wait_for_terminated,
+    };
+    match wait_for_terminated {
+        WaitForTerminated::Flag(false) => {}
+        WaitForTerminated::Flag(true) => opts = opts.waiting_for_terminated(),
+        WaitForTerminated::Seconds(timeout) => {
+            opts.wait_for_terminated = Some(seconds(timeout)?);
+        }
+    }
+    Ok(opts)
+}
+
+/// Opens a sandbox for `region`: both spellings of the constructor.
+async fn open(region: Region) -> Result<PySandbox, Error> {
+    Sandbox::new(region).await.map(PySandbox::own)
 }
 
 /// `build_image`'s keywords, which `preflight` takes too, so the request a caller checks is
@@ -605,6 +781,117 @@ fn create_image_request(args: ImageRequestArgs<'_>) -> CreateImageRequest {
     request
 }
 
+/// The core request for `ensure_image`'s keywords, both spellings'. IMAGE-12: a pass-through;
+/// the name, the context, the decisions and the race are core's.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one parameter per EnsureImageRequest field `ensure_image` takes"
+)]
+fn ensure_request(
+    name_prefix: String,
+    binary: Vec<u8>,
+    dockerfile: String,
+    s3_bucket: String,
+    build_role_arn: String,
+    s3_key_prefix: Option<String>,
+    size: Option<PySizeClass>,
+    base_image: Option<PyBaseImage>,
+    base_image_version: Option<String>,
+    force: bool,
+    tags: Option<std::collections::BTreeMap<String, String>>,
+    wait_timeout: Option<f64>,
+) -> Result<microvms_core::control::EnsureImageRequest, Error> {
+    let mut request = microvms_core::control::EnsureImageRequest::new(
+        name_prefix,
+        binary,
+        dockerfile,
+        s3_bucket,
+        build_role_arn,
+    );
+    request.s3_key_prefix = s3_key_prefix;
+    if let Some(size) = size {
+        request.size = size.inner;
+    }
+    request.base_image = base_image.map(|base| base.inner);
+    request.base_image_version = base_image_version;
+    request.force = force;
+    if let Some(tags) = tags {
+        request.tags = tags;
+    }
+    if let Some(timeout) = wait_timeout {
+        request.wait_timeout = Some(seconds(timeout)?);
+    }
+    Ok(request)
+}
+
+/// `run`'s keywords, both spellings', as one value for [`run_request`].
+struct RunArgs {
+    image_identifier: Option<String>,
+    image_version: Option<String>,
+    execution_role_arn: Option<String>,
+    agent_token: Option<String>,
+    client_token: Option<String>,
+    launch_env: Option<std::collections::HashMap<String, String>>,
+    identity: bool,
+    egress: bool,
+    egress_network_connectors: Option<Vec<String>>,
+    deny_egress: bool,
+    shell: bool,
+    max_idle_sec: Option<u32>,
+    suspended_sec: Option<u32>,
+    auto_resume: bool,
+    max_duration_sec: Option<u32>,
+    ready_timeout: Option<f64>,
+    token_scope: Option<String>,
+    wait: bool,
+    log_group: Option<String>,
+    log_stream: Option<String>,
+    disable_logging: bool,
+}
+
+/// The core request for `run`'s keywords.
+///
+/// Every unset window falls back to the core's own default rather than to a number written
+/// here: ten-minute idle and suspended windows, a one-hour ceiling, and the five-minute ready
+/// wait are measured figures, and a second copy of them in a binding is a second thing to keep
+/// in step (the JS binding defers the same way).
+fn run_request(args: RunArgs) -> Result<RunRequest, Error> {
+    let logging = logging_for(args.log_group, args.log_stream, args.disable_logging)?;
+    let defaults = RunRequest::new();
+    Ok(RunRequest {
+        image_identifier: args.image_identifier,
+        image_version: args.image_version,
+        execution_role_arn: args.execution_role_arn,
+        agent_token: args.agent_token,
+        client_token: args.client_token,
+        launch_env: args.launch_env.unwrap_or(defaults.launch_env),
+        identity: args.identity,
+        egress: args.egress,
+        egress_network_connectors: args.egress_network_connectors.unwrap_or_default(),
+        deny_egress: args.deny_egress,
+        shell: args.shell,
+        max_idle_sec: args.max_idle_sec.unwrap_or(defaults.max_idle_sec),
+        suspended_sec: args.suspended_sec.unwrap_or(defaults.suspended_sec),
+        auto_resume: args.auto_resume,
+        max_duration_sec: args.max_duration_sec.unwrap_or(defaults.max_duration_sec),
+        ready_timeout: match args.ready_timeout {
+            Some(timeout) => seconds(timeout)?,
+            None => defaults.ready_timeout,
+        },
+        token_scope: args.token_scope,
+        logging,
+        wait: args.wait,
+    })
+}
+
+/// `wait_until_running`'s timeout, defaulting to the launch's own ready wait.
+fn running_timeout(timeout: Option<f64>) -> Result<Duration, Error> {
+    match timeout {
+        Some(timeout) => seconds(timeout),
+        None => Ok(RunRequest::new().ready_timeout),
+    }
+}
+
 /// One version of a managed base image, from `ListManagedMicrovmImageVersions`.
 #[pyclass(frozen, name = "ManagedBaseVersion", module = "microvms")]
 pub struct PyManagedBaseVersion {
@@ -654,10 +941,13 @@ impl PySandbox {
     /// `Region.parse` (refused) or `Region.unlisted` (opted into, at the call site).
     #[new]
     fn new(py: Python<'_>, region: PyRegion) -> PyCoreResult<PySandbox> {
-        let sandbox = runtime::block_on(py, Sandbox::new(region.inner))?;
-        Ok(PySandbox {
-            inner: Arc::new(Mutex::new(sandbox)),
-        })
+        Ok(runtime::block_on(py, open(region.inner))?)
+    }
+
+    /// The awaitable twin of `Sandbox(region)`: resolves credentials on the shared runtime.
+    #[staticmethod]
+    async fn create_async(region: PyRegion) -> PyCoreResult<PySandbox> {
+        Ok(runtime::spawn(open(region.inner)).await?)
     }
 
     /// The lifecycle state: `"PENDING"`, `"RUNNING"`, `"SUSPENDING"`, `"SUSPENDED"`,
@@ -666,8 +956,8 @@ impl PySandbox {
     /// Spelled as the service spells it, because a reader compares it against a
     /// `GetMicrovm` response and `Suspended` beside `SUSPENDED` reads like two facts.
     #[getter]
-    fn lifecycle(&self) -> String {
-        self.read(|sandbox| sandbox.lifecycle().as_str().to_string())
+    fn lifecycle(&self, py: Python<'_>) -> String {
+        self.read(py, |sandbox| sandbox.lifecycle().as_str().to_string())
     }
 
     /// Whether the agent token has been installed (STATE-2).
@@ -675,26 +965,26 @@ impl PySandbox {
     /// Set by the platform reporting RUNNING, not by the launch call: the run hook is what
     /// delivers the token, and a launch that died during startup delivered nothing.
     #[getter]
-    fn token_installed(&self) -> bool {
-        self.read(Sandbox::token_installed)
+    fn token_installed(&self, py: Python<'_>) -> bool {
+        self.read(py, Sandbox::token_installed)
     }
 
     /// Whether an image is recorded as existing (STATE-1).
     #[getter]
-    fn image_exists(&self) -> bool {
-        self.read(Sandbox::image_exists)
+    fn image_exists(&self, py: Python<'_>) -> bool {
+        self.read(py, Sandbox::image_exists)
     }
 
     /// Whether this VM was ever terminated (STATE-11).
     #[getter]
-    fn was_terminated(&self) -> bool {
-        self.read(Sandbox::was_terminated)
+    fn was_terminated(&self, py: Python<'_>) -> bool {
+        self.read(py, Sandbox::was_terminated)
     }
 
     /// How many times the token has been installed. Never above one (STATE-3).
     #[getter]
-    fn bootstrap_count(&self) -> u32 {
-        self.read(Sandbox::bootstrap_count)
+    fn bootstrap_count(&self, py: Python<'_>) -> u32 {
+        self.read(py, Sandbox::bootstrap_count)
     }
 
     /// A sandbox for a VM another process launched, from its private record.
@@ -717,9 +1007,28 @@ impl PySandbox {
             py,
             Sandbox::adopt_in(region.inner, microvm_id, endpoint, agent_token, port),
         )?;
-        Ok(PySandbox {
-            inner: Arc::new(Mutex::new(sandbox)),
-        })
+        Ok(PySandbox::own(sandbox))
+    }
+
+    /// The awaitable twin of `Sandbox.adopt`.
+    #[staticmethod]
+    #[pyo3(signature = (region, microvm_id, endpoint, agent_token, *, port=None))]
+    async fn adopt_async(
+        region: PyRegion,
+        microvm_id: String,
+        endpoint: String,
+        agent_token: String,
+        port: Option<u16>,
+    ) -> PyCoreResult<PySandbox> {
+        let adopted = runtime::spawn(Sandbox::adopt_in(
+            region.inner,
+            microvm_id,
+            endpoint,
+            agent_token,
+            port,
+        ))
+        .await?;
+        Ok(PySandbox::own(adopted))
     }
 
     /// Adopts the VM registered as `name` in `registry`; see `Sandbox.adopt`.
@@ -738,15 +1047,30 @@ impl PySandbox {
         let sandbox = runtime::block_on(py, async move {
             Sandbox::from_name(&store, &name, Some(region.inner), port).await
         })?;
-        Ok(PySandbox {
-            inner: Arc::new(Mutex::new(sandbox)),
+        Ok(PySandbox::own(sandbox))
+    }
+
+    /// The awaitable twin of `Sandbox.from_name`.
+    #[staticmethod]
+    #[pyo3(signature = (region, name, registry, *, port=None))]
+    async fn from_name_async(
+        region: PyRegion,
+        name: String,
+        registry: Py<crate::names::PyNameRegistry>,
+        port: Option<u16>,
+    ) -> PyCoreResult<PySandbox> {
+        let store = registry.get().store.clone();
+        let sandbox = runtime::spawn(async move {
+            Sandbox::from_name(&store, &name, Some(region.inner), port).await
         })
+        .await?;
+        Ok(PySandbox::own(sandbox))
     }
 
     /// Whether this sandbox was built by `adopt` rather than by its own launch.
     #[getter]
-    fn adopted(&self) -> bool {
-        self.read(Sandbox::adopted)
+    fn adopted(&self, py: Python<'_>) -> bool {
+        self.read(py, Sandbox::adopted)
     }
 
     /// Hands the VM off to another process and returns what that process adopts it with.
@@ -758,28 +1082,30 @@ impl PySandbox {
     /// is gone and `run`, `wait_until_running`, `suspend`, `resume`, and `terminate` are
     /// refused. Raises `PreconditionError` without a live VM or when already detached.
     fn detach(&self, py: Python<'_>) -> PyCoreResult<PyDetached> {
-        let inner = self
-            .detached(py, |sandbox| sandbox.detach())
+        let inner = runtime::lock_now(py, &self.inner)
+            .detach()
             .map_err(CoreError)?;
         Ok(PyDetached { inner })
     }
 
     /// Whether `detach()` handed this sandbox's VM to another process.
     #[getter]
-    fn is_detached(&self) -> bool {
-        self.read(Sandbox::detached)
+    fn is_detached(&self, py: Python<'_>) -> bool {
+        self.read(py, Sandbox::detached)
     }
 
     /// The VM id, once launched.
     #[getter]
-    fn microvm_id(&self) -> Option<String> {
-        self.read(|sandbox| sandbox.microvm().map(|vm| vm.id.clone()))
+    fn microvm_id(&self, py: Python<'_>) -> Option<String> {
+        self.read(py, |sandbox| sandbox.microvm().map(|vm| vm.id.clone()))
     }
 
     /// The proxy endpoint, once launched.
     #[getter]
-    fn endpoint(&self) -> Option<String> {
-        self.read(|sandbox| sandbox.microvm().map(|vm| vm.endpoint.clone()))
+    fn endpoint(&self, py: Python<'_>) -> Option<String> {
+        self.read(py, |sandbox| {
+            sandbox.microvm().map(|vm| vm.endpoint.clone())
+        })
     }
 
     /// The image ARN `run` sent in `RunMicrovm`: the caller's identifier with a bare name
@@ -788,8 +1114,8 @@ impl PySandbox {
     /// Recorded before the call, so a launch the service refused still names the image it
     /// asked for. `None` until `run` has resolved an image, and on an adopted sandbox.
     #[getter]
-    fn launch_image_arn(&self) -> Option<String> {
-        self.read(|sandbox| sandbox.launch_image_arn().map(str::to_owned))
+    fn launch_image_arn(&self, py: Python<'_>) -> Option<String> {
+        self.read(py, |sandbox| sandbox.launch_image_arn().map(str::to_owned))
     }
 
     /// Why the VM is in its current state, when the service said.
@@ -797,14 +1123,16 @@ impl PySandbox {
     /// The absence is information: TRAP-8's message distinguishes "no stateReason" from an
     /// empty one.
     #[getter]
-    fn state_reason(&self) -> Option<String> {
-        self.read(|sandbox| sandbox.microvm().and_then(|vm| vm.state_reason.clone()))
+    fn state_reason(&self, py: Python<'_>) -> Option<String> {
+        self.read(py, |sandbox| {
+            sandbox.microvm().and_then(|vm| vm.state_reason.clone())
+        })
     }
 
     /// The image, once built.
     #[getter]
-    fn image(&self) -> Option<PyImage> {
-        self.read(|sandbox| {
+    fn image(&self, py: Python<'_>) -> Option<PyImage> {
+        self.read(py, |sandbox| {
             sandbox.image().map(|image| PyImage {
                 identifier: image.identifier.clone(),
                 name: image.name.clone(),
@@ -822,8 +1150,8 @@ impl PySandbox {
     /// `None` before this sandbox launches a VM. This accessor reports the requested
     /// window; `GetMicrovm` also returns the service's idle policy.
     #[getter]
-    fn suspended_window_seconds(&self) -> Option<f64> {
-        self.read(|sandbox| {
+    fn suspended_window_seconds(&self, py: Python<'_>) -> Option<f64> {
+        self.read(py, |sandbox| {
             sandbox
                 .suspended_window()
                 .map(|window| window.as_secs_f64())
@@ -836,8 +1164,8 @@ impl PySandbox {
     /// Holds the host's secret half: pass it to `Session.tunnel(verify_identity=...)`, and
     /// store it only where the agent token goes.
     #[getter]
-    fn tunnel_identity(&self) -> Option<crate::serve::PyTunnelIdentity> {
-        self.read(|sandbox| {
+    fn tunnel_identity(&self, py: Python<'_>) -> Option<crate::serve::PyTunnelIdentity> {
+        self.read(py, |sandbox| {
             sandbox
                 .tunnel_identity()
                 .cloned()
@@ -852,8 +1180,8 @@ impl PySandbox {
     /// VM it addresses, and the `Held::InSandbox` indirection exists precisely so a
     /// post-terminate call reports the lifecycle rather than a dangling handle.
     #[getter]
-    fn session(&self) -> Option<PySession> {
-        let has_session = self.read(|sandbox| sandbox.session().is_some());
+    fn session(&self, py: Python<'_>) -> Option<PySession> {
+        let has_session = self.read(py, |sandbox| sandbox.session().is_some());
         has_session.then(|| PySession::in_sandbox(Arc::clone(&self.inner)))
     }
 
@@ -954,18 +1282,75 @@ impl PySandbox {
             log_stream,
             token_scope,
         });
-        let built = self.detached(py, move |sandbox| {
-            runtime::block_on_detached(sandbox.build_image(request)).map(|image| PyImage {
-                identifier: image.identifier.clone(),
-                name: image.name.clone(),
-                version: image.version.clone(),
-                state: image.state.clone(),
-                size: image.size,
-                build_log_group: image.build_log_group(),
-                log_stream: image.log_stream.clone(),
-            })
-        })?;
-        Ok(built)
+        Ok(runtime::block_on(py, self.build_image_op(request))?)
+    }
+
+    /// The awaitable twin of `build_image`, with its keywords. A lifecycle transition:
+    /// cancelling the awaitable leaves the build running to completion on this sandbox.
+    #[pyo3(signature = (
+        *,
+        name,
+        binary,
+        code_artifact_uri,
+        build_role_arn,
+        size=None,
+        base_image=None,
+        base_image_version=None,
+        dockerfile=None,
+        project_dir=None,
+        repair_guest_identity=false,
+        inherit_workdir=false,
+        run_hook_timeout=None,
+        build_hook_timeout=None,
+        tags=None,
+        log_group=None,
+        log_stream=None,
+        token_scope=None,
+    ))]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "`build_image`'s keywords, one per CreateImageRequest field"
+    )]
+    async fn build_image_async(
+        &self,
+        name: String,
+        binary: Vec<u8>,
+        code_artifact_uri: String,
+        build_role_arn: String,
+        size: Option<PySizeClass>,
+        base_image: Option<PyBaseImage>,
+        base_image_version: Option<String>,
+        dockerfile: Option<String>,
+        project_dir: Option<std::path::PathBuf>,
+        repair_guest_identity: bool,
+        inherit_workdir: bool,
+        run_hook_timeout: Option<PyRunHookTimeout>,
+        build_hook_timeout: Option<PyBuildHookTimeout>,
+        tags: Option<std::collections::BTreeMap<String, String>>,
+        log_group: Option<String>,
+        log_stream: Option<String>,
+        token_scope: Option<String>,
+    ) -> PyCoreResult<PyImage> {
+        let request = create_image_request(ImageRequestArgs {
+            name: &name,
+            binary,
+            code_artifact_uri: &code_artifact_uri,
+            build_role_arn: &build_role_arn,
+            size,
+            base_image,
+            base_image_version,
+            dockerfile,
+            project_files: project_files(project_dir)?,
+            repair_guest_identity,
+            inherit_workdir,
+            run_hook_timeout,
+            build_hook_timeout,
+            tags,
+            log_group,
+            log_stream,
+            token_scope,
+        });
+        Ok(runtime::spawn_shielded(self.build_image_op(request)).await?)
     }
 
     /// Builds or reuses the content-addressed image for a task: one call from build inputs
@@ -1031,38 +1416,84 @@ impl PySandbox {
         tags: Option<std::collections::BTreeMap<String, String>>,
         wait_timeout: Option<f64>,
     ) -> PyCoreResult<PyEnsuredImage> {
-        // IMAGE-12: a pass-through; the name, the context, the decisions and the race are
-        // core's.
-        let mut request = microvms_core::control::EnsureImageRequest::new(
+        let request = ensure_request(
             name_prefix,
             binary,
             dockerfile,
             s3_bucket,
             build_role_arn,
-        );
-        request.s3_key_prefix = s3_key_prefix;
-        if let Some(size) = size {
-            request.size = size.inner;
-        }
-        request.base_image = base_image.map(|base| base.inner);
-        request.base_image_version = base_image_version;
-        request.force = force;
-        if let Some(tags) = tags {
-            request.tags = tags;
-        }
-        if let Some(timeout) = wait_timeout {
-            request.wait_timeout = Some(seconds(timeout)?);
-        }
-        let ensured = self.detached(py, move |sandbox| {
-            if let Some(dir) = context_dir {
-                request.context = Some(microvms_core::control::BuildContext::from_dir(dir)?);
-            }
-            if let Some(dir) = project_dir {
-                request.project_files = Some(microvms_core::control::read_project_files(dir)?);
-            }
-            runtime::block_on_detached(sandbox.ensure_image(request))
-        })?;
-        Ok(PyEnsuredImage::from(ensured))
+            s3_key_prefix,
+            size,
+            base_image,
+            base_image_version,
+            force,
+            tags,
+            wait_timeout,
+        )?;
+        Ok(runtime::block_on(
+            py,
+            self.ensure_image_op(request, context_dir, project_dir),
+        )?)
+    }
+
+    /// The awaitable twin of `ensure_image`, with its keywords. A lifecycle transition:
+    /// cancelling the awaitable leaves the build or reuse running to completion.
+    #[pyo3(signature = (
+        *,
+        name_prefix,
+        binary,
+        dockerfile,
+        s3_bucket,
+        build_role_arn,
+        context_dir=None,
+        s3_key_prefix=None,
+        size=None,
+        base_image=None,
+        base_image_version=None,
+        project_dir=None,
+        force=false,
+        tags=None,
+        wait_timeout=None,
+    ))]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "`ensure_image`'s keywords, one per EnsureImageRequest field"
+    )]
+    async fn ensure_image_async(
+        &self,
+        name_prefix: String,
+        binary: Vec<u8>,
+        dockerfile: String,
+        s3_bucket: String,
+        build_role_arn: String,
+        context_dir: Option<std::path::PathBuf>,
+        s3_key_prefix: Option<String>,
+        size: Option<PySizeClass>,
+        base_image: Option<PyBaseImage>,
+        base_image_version: Option<String>,
+        project_dir: Option<std::path::PathBuf>,
+        force: bool,
+        tags: Option<std::collections::BTreeMap<String, String>>,
+        wait_timeout: Option<f64>,
+    ) -> PyCoreResult<PyEnsuredImage> {
+        let request = ensure_request(
+            name_prefix,
+            binary,
+            dockerfile,
+            s3_bucket,
+            build_role_arn,
+            s3_key_prefix,
+            size,
+            base_image,
+            base_image_version,
+            force,
+            tags,
+            wait_timeout,
+        )?;
+        Ok(
+            runtime::spawn_shielded(self.ensure_image_op(request, context_dir, project_dir))
+                .await?,
+        )
     }
 
     /// Every local guard `build_image` runs, with zero calls: raises the refusal `build_image`
@@ -1095,6 +1526,7 @@ impl PySandbox {
     )]
     fn preflight(
         &self,
+        py: Python<'_>,
         name: &str,
         binary: Vec<u8>,
         code_artifact_uri: &str,
@@ -1132,7 +1564,7 @@ impl PySandbox {
             log_stream,
             token_scope,
         });
-        Ok(self.read(|sandbox| sandbox.preflight(&request))?)
+        Ok(self.read(py, |sandbox| sandbox.preflight(&request))?)
     }
 
     /// `ListManagedMicrovmImageVersions`, every page: the versions of a managed base, the
@@ -1145,13 +1577,18 @@ impl PySandbox {
         py: Python<'_>,
         base_image_arn: String,
     ) -> PyCoreResult<Vec<PyManagedBaseVersion>> {
-        let versions = self.detached(py, move |sandbox| {
-            runtime::block_on_detached(sandbox.managed_base_versions(&base_image_arn))
-        })?;
-        Ok(versions
-            .into_iter()
-            .map(|inner| PyManagedBaseVersion { inner })
-            .collect())
+        Ok(runtime::block_on(
+            py,
+            self.managed_base_versions_op(base_image_arn),
+        )?)
+    }
+
+    /// The awaitable twin of `managed_base_versions`.
+    async fn managed_base_versions_async(
+        &self,
+        base_image_arn: String,
+    ) -> PyCoreResult<Vec<PyManagedBaseVersion>> {
+        Ok(runtime::spawn(self.managed_base_versions_op(base_image_arn)).await?)
     }
 
     /// The artifact bytes to upload to `code_artifact_uri`.
@@ -1195,7 +1632,7 @@ impl PySandbox {
         request.dockerfile = dockerfile;
         request.project_files = project_files(project_dir)?;
         request.inherit_workdir = inherit_workdir;
-        let bytes = self.read(|sandbox| sandbox.build_artifact_for(&request));
+        let bytes = self.read(py, |sandbox| sandbox.build_artifact_for(&request));
         Ok(PyBytes::new(py, &bytes.map_err(crate::errors::CoreError)?))
     }
 
@@ -1306,44 +1743,115 @@ impl PySandbox {
         log_stream: Option<String>,
         disable_logging: bool,
     ) -> PyCoreResult<PySession> {
-        let logging = logging_for(log_group, log_stream, disable_logging)?;
-        // Every unset window falls back to the core's own default rather than to a number
-        // written here: ten-minute idle and suspended windows, a one-hour ceiling, and the
-        // five-minute ready wait are measured figures, and a second copy of them in a
-        // binding is a second thing to keep in step (the JS binding defers the same way).
-        let defaults = RunRequest::new();
-        let request = RunRequest {
+        let request = run_request(RunArgs {
             image_identifier,
             image_version,
             execution_role_arn,
             agent_token,
             client_token,
-            launch_env: launch_env.unwrap_or(defaults.launch_env),
+            launch_env,
             identity,
             egress,
-            egress_network_connectors: egress_network_connectors.unwrap_or_default(),
+            egress_network_connectors,
             deny_egress,
             shell,
-            max_idle_sec: max_idle_sec.unwrap_or(defaults.max_idle_sec),
-            suspended_sec: suspended_sec.unwrap_or(defaults.suspended_sec),
+            max_idle_sec,
+            suspended_sec,
             auto_resume,
-            max_duration_sec: max_duration_sec.unwrap_or(defaults.max_duration_sec),
-            ready_timeout: match ready_timeout {
-                Some(timeout) => seconds(timeout)?,
-                None => defaults.ready_timeout,
-            },
+            max_duration_sec,
+            ready_timeout,
             token_scope,
-            logging,
             wait,
-        };
+            log_group,
+            log_stream,
+            disable_logging,
+        })?;
         // `run` answers `&mut Session`, which cannot cross back into Python — so the
         // return value is discarded and the session is reached through the sandbox. That
         // is not a workaround: it is what makes a post-terminate session call report the
         // lifecycle instead of addressing a VM that is gone.
-        self.detached(py, move |sandbox| {
-            runtime::block_on_detached(sandbox.run(request)).map(|_| ())
+        Ok(runtime::block_on(py, self.run_op(request))?)
+    }
+
+    /// The awaitable twin of `run`, with its keywords. A lifecycle transition: cancelling the
+    /// awaitable leaves the launch running to completion, so the VM it starts is still this
+    /// sandbox's to terminate.
+    #[pyo3(signature = (
+        *,
+        image_identifier=None,
+        image_version=None,
+        execution_role_arn=None,
+        agent_token=None,
+        client_token=None,
+        launch_env=None,
+        identity=false,
+        egress=false,
+        egress_network_connectors=None,
+        deny_egress=false,
+        shell=false,
+        max_idle_sec=None,
+        suspended_sec=None,
+        auto_resume=false,
+        max_duration_sec=None,
+        ready_timeout=None,
+        token_scope=None,
+        wait=true,
+        log_group=None,
+        log_stream=None,
+        disable_logging=false,
+    ))]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "`run`'s keywords, one per RunRequest field"
+    )]
+    async fn run_async(
+        &self,
+        image_identifier: Option<String>,
+        image_version: Option<String>,
+        execution_role_arn: Option<String>,
+        agent_token: Option<String>,
+        client_token: Option<String>,
+        launch_env: Option<std::collections::HashMap<String, String>>,
+        identity: bool,
+        egress: bool,
+        egress_network_connectors: Option<Vec<String>>,
+        deny_egress: bool,
+        shell: bool,
+        max_idle_sec: Option<u32>,
+        suspended_sec: Option<u32>,
+        auto_resume: bool,
+        max_duration_sec: Option<u32>,
+        ready_timeout: Option<f64>,
+        token_scope: Option<String>,
+        wait: bool,
+        log_group: Option<String>,
+        log_stream: Option<String>,
+        disable_logging: bool,
+    ) -> PyCoreResult<PySession> {
+        let request = run_request(RunArgs {
+            image_identifier,
+            image_version,
+            execution_role_arn,
+            agent_token,
+            client_token,
+            launch_env,
+            identity,
+            egress,
+            egress_network_connectors,
+            deny_egress,
+            shell,
+            max_idle_sec,
+            suspended_sec,
+            auto_resume,
+            max_duration_sec,
+            ready_timeout,
+            token_scope,
+            wait,
+            log_group,
+            log_stream,
+            disable_logging,
         })?;
-        Ok(PySession::in_sandbox(Arc::clone(&self.inner)))
+        Ok(runtime::spawn_shielded(self.run_op(request)).await?)
     }
 
     /// Finishes a `run(wait=False)`: waits for RUNNING and for the daemon to answer, and
@@ -1354,14 +1862,16 @@ impl PySandbox {
     /// the service's `stateReason`. Refused unless the launch is still PENDING.
     #[pyo3(signature = (*, timeout=None))]
     fn wait_until_running(&self, py: Python<'_>, timeout: Option<f64>) -> PyCoreResult<PySession> {
-        let timeout = match timeout {
-            Some(timeout) => seconds(timeout)?,
-            None => RunRequest::new().ready_timeout,
-        };
-        self.detached(py, move |sandbox| {
-            runtime::block_on_detached(sandbox.wait_until_running(timeout)).map(|_| ())
-        })?;
-        Ok(PySession::in_sandbox(Arc::clone(&self.inner)))
+        let timeout = running_timeout(timeout)?;
+        Ok(runtime::block_on(py, self.wait_until_running_op(timeout))?)
+    }
+
+    /// The awaitable twin of `wait_until_running`. Cancelling it stops the wait, not the
+    /// launch: the VM keeps starting, and a later `wait_until_running` picks it up.
+    #[pyo3(signature = (*, timeout=None))]
+    async fn wait_until_running_async(&self, timeout: Option<f64>) -> PyCoreResult<PySession> {
+        let timeout = running_timeout(timeout)?;
+        Ok(runtime::spawn(self.wait_until_running_op(timeout)).await?)
     }
 
     /// Freezes the VM and waits for the platform to report it.
@@ -1377,11 +1887,13 @@ impl PySandbox {
     /// dies while suspending is a state to report rather than an exception out of the
     /// middle of a teardown.
     fn suspend(&self, py: Python<'_>) -> PyCoreResult<String> {
-        self.detached(py, |sandbox| {
-            runtime::block_on_detached(sandbox.suspend())?;
-            Ok(sandbox.lifecycle().as_str().to_string())
-        })
-        .map_err(crate::errors::CoreError)
+        Ok(runtime::block_on(py, self.suspend_op())?)
+    }
+
+    /// The awaitable twin of `suspend`. A lifecycle transition: cancelling the awaitable
+    /// leaves the suspend running to completion.
+    async fn suspend_async(&self) -> PyCoreResult<String> {
+        Ok(runtime::spawn_shielded(self.suspend_op()).await?)
     }
 
     /// Thaws the VM and returns a usable session.
@@ -1399,10 +1911,13 @@ impl PySandbox {
     /// token survived the freeze, and re-delivering it would hit the daemon's one-shot
     /// bootstrap and be refused — a 409 that reads like a broken VM.
     fn resume(&self, py: Python<'_>) -> PyCoreResult<PySession> {
-        self.detached(py, |sandbox| {
-            runtime::block_on_detached(sandbox.resume()).map(|_| ())
-        })?;
-        Ok(PySession::in_sandbox(Arc::clone(&self.inner)))
+        Ok(runtime::block_on(py, self.resume_op())?)
+    }
+
+    /// The awaitable twin of `resume`. A lifecycle transition: cancelling the awaitable leaves
+    /// the resume running to completion.
+    async fn resume_async(&self) -> PyCoreResult<PySession> {
+        Ok(runtime::spawn_shielded(self.resume_op()).await?)
     }
 
     /// Tears down, best-effort, **never raising**.
@@ -1437,35 +1952,46 @@ impl PySandbox {
         delete_backoff: Option<f64>,
         wait_for_terminated: WaitForTerminated,
     ) -> PyCoreResult<PyTeardownReport> {
-        // The two retry knobs default to the core's own figures rather than to numbers
-        // written here: twenty attempts fifteen seconds apart is the difference between a
-        // clean account and a billed leak, and restating them would put a second copy of
-        // that measurement in a binding.
-        let defaults = TeardownOpts::default();
-        let mut opts = TeardownOpts {
+        let opts = teardown_opts(
             delete_image,
             delete_log_group,
-            delete_attempts: delete_attempts.unwrap_or(defaults.delete_attempts),
-            delete_backoff: match delete_backoff {
-                Some(backoff) => seconds(backoff)?,
-                None => defaults.delete_backoff,
-            },
-            wait_for_terminated: defaults.wait_for_terminated,
-        };
-        match wait_for_terminated {
-            WaitForTerminated::Flag(false) => {}
-            WaitForTerminated::Flag(true) => opts = opts.waiting_for_terminated(),
-            WaitForTerminated::Seconds(timeout) => {
-                opts.wait_for_terminated = Some(seconds(timeout)?);
-            }
-        }
+            delete_attempts,
+            delete_backoff,
+            wait_for_terminated,
+        )?;
         // `terminate` answers a report rather than a `Result`, so the `Ok` here is this
         // wrapper's and never the core's — a teardown cannot raise, which is the whole
         // point of the report.
-        let report = self.detached(py, move |sandbox| {
-            runtime::block_on_detached(sandbox.terminate(opts))
-        });
-        Ok(PyTeardownReport { inner: report })
+        Ok(runtime::block_on(py, self.terminate_op(opts)))
+    }
+
+    /// The awaitable twin of `terminate`, with its keywords; it never raises either. A
+    /// lifecycle transition: cancelling the awaitable leaves the teardown running to
+    /// completion, since a teardown abandoned halfway is a leak.
+    #[pyo3(signature = (
+        *,
+        delete_image=false,
+        delete_log_group=false,
+        delete_attempts=None,
+        delete_backoff=None,
+        wait_for_terminated=WaitForTerminated::Flag(false),
+    ))]
+    pub(crate) async fn terminate_async(
+        &self,
+        delete_image: bool,
+        delete_log_group: bool,
+        delete_attempts: Option<u32>,
+        delete_backoff: Option<f64>,
+        wait_for_terminated: WaitForTerminated,
+    ) -> PyCoreResult<PyTeardownReport> {
+        let opts = teardown_opts(
+            delete_image,
+            delete_log_group,
+            delete_attempts,
+            delete_backoff,
+            wait_for_terminated,
+        )?;
+        Ok(runtime::spawn_shielded(self.terminate_op(opts)).await)
     }
 
     /// `with sandbox as s:` — returns the sandbox itself.
@@ -1487,18 +2013,34 @@ impl PySandbox {
         traceback: Option<Py<PyAny>>,
     ) -> bool {
         let _ = (exc_type, exc_value, traceback);
-        let opts = TeardownOpts::default();
         // The report is discarded here on purpose. `__exit__` runs where a `finally`
         // would, and there is nowhere to return a value to; a caller who needs the report
         // calls `terminate()` explicitly, which is the documented path.
-        let _ = self.detached(py, move |sandbox| {
-            runtime::block_on_detached(sandbox.terminate(opts))
-        });
+        let _ = runtime::block_on(py, self.terminate_op(TeardownOpts::default()));
         false
     }
 
-    fn __repr__(&self) -> String {
-        self.read(|sandbox| {
+    /// `async with sandbox as s:` — returns the sandbox itself.
+    async fn __aenter__(slf: Py<Self>) -> Py<Self> {
+        slf
+    }
+
+    /// `__exit__`'s teardown, awaited: discards the report, returns `False`, and, a lifecycle
+    /// transition, runs to completion even when the task awaiting it is cancelled.
+    #[pyo3(signature = (exc_type=None, exc_value=None, traceback=None))]
+    async fn __aexit__(
+        &self,
+        exc_type: Option<Py<PyAny>>,
+        exc_value: Option<Py<PyAny>>,
+        traceback: Option<Py<PyAny>>,
+    ) -> bool {
+        let _ = (exc_type, exc_value, traceback);
+        let _ = runtime::spawn_shielded(self.terminate_op(TeardownOpts::default())).await;
+        false
+    }
+
+    fn __repr__(&self, py: Python<'_>) -> String {
+        self.read(py, |sandbox| {
             format!(
                 "Sandbox(lifecycle={:?}, microvm_id={:?}, bootstrap_count={})",
                 sandbox.lifecycle().as_str(),

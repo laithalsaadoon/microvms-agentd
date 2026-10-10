@@ -140,8 +140,9 @@ For a `Sandbox` named `vm` and its `session`:
 | Move a tar archive as bytes | `session.upload_tar(path, tar_bytes)`, `session.download_tar(path)` |
 | Freeze and restore a workspace | `vm.suspend()`, `vm.resume()` |
 
-Methods are synchronous. `run_sync` starts a command, waits, and acknowledges
-its saved output. A nonzero exit is a result, so check `result.ok` or
+Each method that calls AWS or the VM blocks, and has an awaitable twin with the
+same arguments and an `_async` suffix for asyncio code (see below). `run_sync`
+starts a command, waits, and acknowledges its saved output. A nonzero exit is a result, so check `result.ok` or
 `result.exit_code`. Use `shell=True` when passing a shell script string.
 Library exceptions expose `code`, `kind`, `wire_kind`, and `retryable`.
 
@@ -149,6 +150,52 @@ Omitting `egress` does not block outbound traffic. For no egress, use
 `egress_network_connectors=[vpc_connector_arn]` with a VPC without an internet
 gateway, NAT gateway, or other internet route. `deny_egress` sets advisory proxy variables that
 workloads can bypass. Keep the guest execution role limited to the task's needs.
+
+## Use it from asyncio
+
+Every method that calls AWS or the VM has an awaitable twin named with an
+`_async` suffix, and the constructors have `create_async`. A twin takes the same
+arguments and returns the same result, and its work runs on the library's own
+runtime, so the event loop keeps running and many calls overlap:
+
+```python
+import asyncio
+import os
+from microvms import Region, Sandbox, Session
+
+
+async def main() -> None:
+    region = Region.parse(os.environ.get("AWS_REGION", "us-east-1"))
+    async with await Sandbox.create_async(region) as vm:
+        session = await vm.run_async(
+            image_identifier=os.environ["MICROVM_IMAGE"],
+            execution_role_arn=os.environ["MICROVM_EXECUTION_ROLE_ARN"],
+        )
+        proc = await session.spawn_async(["sh", "-c", "echo out; echo err >&2"])
+        async for chunk in proc.stdout:
+            print(chunk.decode(), end="")
+        # An attached session has a transport of its own, so its calls overlap.
+        worker = await Session.attach_async(
+            region, vm.microvm_id, vm.endpoint, session.agent_token
+        )
+        results = await asyncio.gather(
+            *(worker.run_sync_async(["echo", str(n)]) for n in range(3))
+        )
+        print([result.stdout.strip() for result in results])
+
+
+asyncio.run(main())
+```
+
+`async with` terminates the VM on the way out, as `with` does. Cancelling a
+read, wait, transfer or command start stops it. Cancelling `run_async`,
+`build_image_async`, `ensure_image_async`, `suspend_async`, `resume_async` or
+`terminate_async` lets the call finish, so a VM a cancelled launch started is
+still the sandbox's to terminate. Calls through the sandbox's own session take
+turns on the sandbox, as the blocking methods do, so a lifecycle call never
+interleaves with them; `Session.attach_async` gives a session whose calls run at
+once. A property such as `vm.lifecycle` waits for a transition
+in flight, so read it before or after awaiting one.
 
 [SDK tutorial](https://laithalsaadoon.github.io/microvms-agentd/learn/tutorial/from-code/)
 · [API reference](https://laithalsaadoon.github.io/microvms-agentd/reference/public-api/)

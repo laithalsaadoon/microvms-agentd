@@ -10,7 +10,7 @@
 The MicroVMs client, as Python sees it.
 """
 
-from collections.abc import Sequence
+from collections.abc import Awaitable, Sequence
 from os import PathLike
 from typing import Any, Final, final
 
@@ -65,8 +65,18 @@ class AgentVm:
     The sequence is the CLI's `agent-up` and `agent-prompt`, one method per step:
     `find_image` or `build_artifact` + your upload + `build_image`; `launch`;
     `install_access`; `prompt` or `prompt_sync`; `terminate`. `sandbox` and `session` reach
-    the same VM for suspend, resume, `cp`-shaped transfers, and any other exec.
+    the same VM for suspend, resume, `cp`-shaped transfers, and any other exec. Each step that
+    calls AWS or the VM has an awaitable `_async` twin that drives the same future.
     """
+    async def __aenter__(self, /) -> AgentVm:
+        """
+        `async with AgentVm(...)`: returns the VM itself.
+        """
+    async def __aexit__(self, /, exc_type: Any |None = None, exc_value: Any |None = None, traceback: Any |None = None) -> bool:
+        """
+        `__exit__`'s teardown, awaited; it runs to completion even when the task awaiting it
+        is cancelled.
+        """
     def __enter__(self, /) -> AgentVm: ...
     def __exit__(self, /, exc_type: Any |None = None, exc_value: Any |None = None, traceback: Any |None = None) -> bool:
         """
@@ -89,6 +99,11 @@ class AgentVm:
         `agents` states what the VM carries and defaults to Claude Code alone; read
         `installed_agents(session)` first when the adopting process does not know.
         """
+    @staticmethod
+    async def adopt_async(region: Region, microvm_id: str, endpoint: str, agent_token: str, agents: Sequence[AgentSpec] |None = None, *, port: int |None = None) -> AgentVm:
+        """
+        The awaitable twin of `AgentVm.adopt`.
+        """
     @property
     def agents(self, /) -> list[AgentSpec]:
         """
@@ -102,6 +117,16 @@ class AgentVm:
         """
         Builds the image and waits for it to become usable. `code_artifact_uri` is where
         you uploaded `build_artifact`'s bytes. Several minutes, server-side.
+        """
+    async def build_image_async(self, /, *, binary: Sequence[int], code_artifact_uri: str, build_role_arn: str, size: SizeClass |None = None) -> Image:
+        """
+        The awaitable twin of `build_image`. A lifecycle transition: cancelling the awaitable
+        leaves the build running to completion.
+        """
+    @staticmethod
+    async def create_async(region: Region, agents: Sequence[AgentSpec] |None = None) -> AgentVm:
+        """
+        The awaitable twin of `AgentVm(region, agents)`.
         """
     def detach(self, /) -> Detached:
         """
@@ -119,14 +144,28 @@ class AgentVm:
         waited on while building, deleted and rebuilt when failed, and uploaded to
         `s3://<s3_bucket>/<s3_key_prefix>/<name>/artifact.zip` only when a build is needed.
         """
+    async def ensure_image_async(self, /, *, binary: Sequence[int], build_role_arn: str, s3_bucket: str, size: SizeClass |None = None, s3_key_prefix: str |None = None) -> EnsuredImage:
+        """
+        The awaitable twin of `ensure_image`. A lifecycle transition: cancelling the awaitable
+        leaves the build or reuse running to completion.
+        """
     def find_image(self, /, *, binary: Sequence[int], build_role_arn: str, size: SizeClass |None = None) -> str |None:
         """
         The ARN of an existing image named per `image_name`, or `None` when there is none.
+        """
+    async def find_image_async(self, /, *, binary: Sequence[int], build_role_arn: str, size: SizeClass |None = None) -> str |None:
+        """
+        The awaitable twin of `find_image`.
         """
     @staticmethod
     def from_name(region: Region, name: str, registry: NameRegistry, agents: Sequence[AgentSpec] |None = None, *, port: int |None = None) -> AgentVm:
         """
         Adopts the agent VM registered as `name` in `registry`; see `Sandbox.from_name`.
+        """
+    @staticmethod
+    async def from_name_async(region: Region, name: str, registry: NameRegistry, agents: Sequence[AgentSpec] |None = None, *, port: int |None = None) -> AgentVm:
+        """
+        The awaitable twin of `AgentVm.from_name`.
         """
     def image_name(self, /, *, binary: Sequence[int], build_role_arn: str, size: SizeClass |None = None) -> str:
         """
@@ -141,6 +180,10 @@ class AgentVm:
         
         Returns the token used, so `expires_at` says when to call this again. Re-runnable
         on a running VM: that call is the credential refresh.
+        """
+    async def install_access_async(self, /, *, token: BearerToken |None = None, ttl_seconds: float |None = None) -> BearerToken:
+        """
+        The awaitable twin of `install_access`.
         """
     def launch(self, /, *, image_identifier: str, execution_role_arn: str |None = None, agent_token: str |None = None, client_token: str |None = None, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None, image_version: str |None = None, egress_network_connectors: Sequence[str] |None = None, log_group: str |None = None, log_stream: str |None = None, disable_logging: bool = False, launch_env: dict[str, str] |None = None, shell: bool = False, ready_timeout: float |None = None) -> Session:
         """
@@ -160,14 +203,30 @@ class AgentVm:
         `ready_timeout` bounds the wait for RUNNING, and the wait for the daemon after it is
         `session_constants()["defaultReadyTimeoutSeconds"]`.
         """
+    async def launch_async(self, /, *, image_identifier: str, execution_role_arn: str |None = None, agent_token: str |None = None, client_token: str |None = None, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None, image_version: str |None = None, egress_network_connectors: Sequence[str] |None = None, log_group: str |None = None, log_stream: str |None = None, disable_logging: bool = False, launch_env: dict[str, str] |None = None, shell: bool = False, ready_timeout: float |None = None) -> Session:
+        """
+        The awaitable twin of `launch`, with its keywords. A lifecycle transition: cancelling
+        the awaitable leaves the launch running to completion, so the VM it starts is still
+        this object's to terminate.
+        """
     def prompt(self, /, agent: str, task: str, *, timeout_sec: float |None = None, exec_id: str |None = None, permission_mode: str = "agent-default", reap_group_on_exit: bool = False) -> ExecHandle:
         """
         Starts one task for `agent` and returns its handle. Does not wait.
+        """
+    async def prompt_async(self, /, agent: str, task: str, *, timeout_sec: float |None = None, exec_id: str |None = None, permission_mode: str = "agent-default", reap_group_on_exit: bool = False) -> ExecHandle:
+        """
+        The awaitable twin of `prompt`. Cancelling it before the daemon answers may leave the
+        task started; pass an `exec_id` to reach it with `session.exec(exec_id)`.
         """
     def prompt_sync(self, /, agent: str, task: str, *, timeout: float = ..., exec_id: str |None = None, permission_mode: str = "agent-default", reap_group_on_exit: bool = False) -> ExecResult:
         """
         Start, wait, ack: one task's whole result. `timeout` defaults to 900 seconds,
         because agent tasks run minutes, and is also the daemon-side budget.
+        """
+    async def prompt_sync_async(self, /, agent: str, task: str, *, timeout: float = ..., exec_id: str |None = None, permission_mode: str = "agent-default", reap_group_on_exit: bool = False) -> ExecResult:
+        """
+        The awaitable twin of `prompt_sync`. Cancelling it stops the wait; the task keeps
+        running in the VM until its own timeout.
         """
     @property
     def region(self, /) -> Region: ...
@@ -185,6 +244,10 @@ class AgentVm:
     def terminate(self, /, *, delete_image: bool = False, delete_log_group: bool = False, delete_attempts: int |None = None, delete_backoff: float |None = None, wait_for_terminated: bool |float = ...) -> TeardownReport:
         """
         Tears down, best-effort, never raising; see `Sandbox.terminate`.
+        """
+    async def terminate_async(self, /, *, delete_image: bool = False, delete_log_group: bool = False, delete_attempts: int |None = None, delete_backoff: float |None = None, wait_for_terminated: bool |float = ...) -> TeardownReport:
+        """
+        The awaitable twin of `terminate`; see `Sandbox.terminate_async`.
         """
 
 @final
@@ -384,6 +447,12 @@ class ByteStream:
     through. The `receiver` is behind a `Mutex` for the reason `ExecStream`'s is: `recv` needs
     `&mut`, and the lock is held only across one `recv`, never across a Python callback.
     """
+    def __aiter__(self, /) -> ByteStream: ...
+    def __anext__(self, /) -> Awaitable[bytes]:
+        """
+        The next chunk, awaited, or `StopAsyncIteration` when the side ends: `async for`.
+        Cancelling the await leaves the chunk unread, as `ExecStream.__anext__` does.
+        """
     def __iter__(self, /) -> ByteStream: ...
     def __next__(self, /) -> bytes:
         """
@@ -437,6 +506,11 @@ class ControlPlane:
         Resolves credentials for `region` from the default chain.
         """
     def __repr__(self, /) -> str: ...
+    @staticmethod
+    async def create_async(region: Region) -> ControlPlane:
+        """
+        The awaitable twin of `ControlPlane(region)`.
+        """
     def delete_image(self, /, identifier: str, *, attempts: int |None = None, backoff: float |None = None) -> bool:
         """
         Deletes the image, its extra versions first, retrying while it refuses (an image still
@@ -446,31 +520,60 @@ class ControlPlane:
         or `identifier` is not one the service accepts. It doesn't raise, as a teardown's delete
         shouldn't. `attempts` and `backoff` (seconds) default to the core's teardown figures.
         """
+    async def delete_image_async(self, /, identifier: str, *, attempts: int |None = None, backoff: float |None = None) -> bool:
+        """
+        The awaitable twin of `delete_image`. A lifecycle call: cancelling the awaitable leaves
+        the deletion and its retries running to their answer.
+        """
     def get(self, /, microvm_id: str) -> Microvm:
         """
         `GetMicrovm`.
+        """
+    async def get_async(self, /, microvm_id: str) -> Microvm:
+        """
+        The awaitable twin of `get`.
         """
     def get_image_build(self, /, identifier: str, version: str, build_id: str) -> ImageBuild:
         """
         `GetMicrovmImageBuild`: one build, with the snapshot sizes the listing doesn't carry.
         """
+    async def get_image_build_async(self, /, identifier: str, version: str, build_id: str) -> ImageBuild:
+        """
+        The awaitable twin of `get_image_build`.
+        """
     def list(self, /, *, image_identifier: str |None = None, image_version: str |None = None) -> list[MicrovmSummary]:
         """
         `ListMicrovms`, every page, optionally narrowed to one image and version.
+        """
+    async def list_async(self, /, *, image_identifier: str |None = None, image_version: str |None = None) -> list[MicrovmSummary]:
+        """
+        The awaitable twin of `list`.
         """
     def list_image_builds(self, /, identifier: str, version: str) -> list[ImageBuild]:
         """
         `ListMicrovmImageBuilds` for one version, every page: one build per Graviton
         generation. Each `build_id` is what `get_image_build` takes.
         """
+    async def list_image_builds_async(self, /, identifier: str, version: str) -> list[ImageBuild]:
+        """
+        The awaitable twin of `list_image_builds`.
+        """
     def list_image_versions(self, /, identifier: str) -> list[ImageVersion]:
         """
         `ListMicrovmImageVersions`, every page: each version, its status, and its build
         configuration.
         """
+    async def list_image_versions_async(self, /, identifier: str) -> list[ImageVersion]:
+        """
+        The awaitable twin of `list_image_versions`.
+        """
     def list_images(self, /) -> list[ImageSummary]:
         """
         `ListMicrovmImages`, every page: every image in the account and region.
+        """
+    async def list_images_async(self, /) -> list[ImageSummary]:
+        """
+        The awaitable twin of `list_images`.
         """
     @property
     def region(self, /) -> Region:
@@ -481,6 +584,10 @@ class ControlPlane:
         """
         `ResumeMicrovm`. Returns once accepted; `wait_for_state` for RUNNING.
         """
+    async def resume_async(self, /, microvm_id: str) -> None:
+        """
+        The awaitable twin of `resume`. A lifecycle call, as `suspend_async` is.
+        """
     def set_image_version_status(self, /, identifier: str, version: str, status: str) -> ImageVersion:
         """
         `UpdateMicrovmImageVersion`: `status` is `"ACTIVE"` or `"INACTIVE"`.
@@ -489,13 +596,27 @@ class ControlPlane:
         keep running, and the version's readback stays. Returns the readback, and raises when it
         doesn't carry the status asked for, so a 200 that didn't take isn't a rollback.
         """
+    async def set_image_version_status_async(self, /, identifier: str, version: str, status: str) -> ImageVersion:
+        """
+        The awaitable twin of `set_image_version_status`. A lifecycle call: cancelling the
+        awaitable leaves the update running to its readback.
+        """
     def suspend(self, /, microvm_id: str) -> None:
         """
         `SuspendMicrovm`. Returns once accepted; `wait_for_state` for SUSPENDED.
         """
+    async def suspend_async(self, /, microvm_id: str) -> None:
+        """
+        The awaitable twin of `suspend`. A lifecycle call: cancelling the awaitable leaves the
+        request running to its answer.
+        """
     def terminate(self, /, microvm_id: str) -> None:
         """
         `TerminateMicrovm`. Returns once accepted; `wait_for_state` for TERMINATED.
+        """
+    async def terminate_async(self, /, microvm_id: str) -> None:
+        """
+        The awaitable twin of `terminate`. A lifecycle call, as `suspend_async` is.
         """
     def wait_for_state(self, /, microvm_id: str, wanted: Sequence[str], *, fail_on: Sequence[str] |None = None, timeout: float = 300.0, poll_interval: float = 5.0) -> Microvm:
         """
@@ -503,6 +624,11 @@ class ControlPlane:
         
         Reaching one of `fail_on` first raises `LaunchDiedError` naming the state and
         `stateReason`; running past `timeout` raises `TimeoutError`.
+        """
+    async def wait_for_state_async(self, /, microvm_id: str, wanted: Sequence[str], *, fail_on: Sequence[str] |None = None, timeout: float = 300.0, poll_interval: float = 5.0) -> Microvm:
+        """
+        The awaitable twin of `wait_for_state`. Cancelling it stops the polling and touches no
+        VM.
         """
 
 @final
@@ -761,10 +887,18 @@ class ExecHandle:
         """
         Releases the buffered output and starts the TTL clock.
         """
+    async def ack_async(self, /) -> ExecResult:
+        """
+        The awaitable twin of `ack`.
+        """
     def close_stdin(self, /) -> StdinAck:
         """
         Sends EOF. Nothing else closes stdin: the daemon's copy of the pipe outlives the
         child's wait, so a child blocked reading stdin hangs until its timeout otherwise.
+        """
+    async def close_stdin_async(self, /) -> StdinAck:
+        """
+        The awaitable twin of `close_stdin`.
         """
     @property
     def exec_id(self, /) -> str: ...
@@ -773,9 +907,17 @@ class ExecHandle:
         Signals the whole process group. `False` means nothing was signalled because the
         child had already been reaped — which is the outcome a kill wanted.
         """
+    async def kill_async(self, /) -> bool:
+        """
+        The awaitable twin of `kill`.
+        """
     def poll(self, /) -> ExecResult:
         """
         Reads current status and output. Read-only server-side; safe to spin on.
+        """
+    async def poll_async(self, /) -> ExecResult:
+        """
+        The awaitable twin of `poll`.
         """
     def stream(self, /, *, offset: int = 0, reconnect: bool = True, max_reconnects: int |None = None, error_on_gap: bool = False, idle_timeout: float |None = None) -> ExecStream:
         """
@@ -801,6 +943,16 @@ class ExecHandle:
         a poll issued after the ack reports `acked` with none, so returning the wrong one
         is a silent empty-output bug. The core sequences it.
         """
+    async def wait_and_ack_async(self, /, timeout: float = ...) -> ExecResult:
+        """
+        The awaitable twin of `wait_and_ack`. Cancelled during the wait it leaves the exec
+        untouched; cancelled during the ack, the ack may have landed.
+        """
+    async def wait_async(self, /, timeout: float = ...) -> ExecResult:
+        """
+        The awaitable twin of `wait`. Cancelling it is giving up as a timeout does: the exec
+        is untouched.
+        """
     def write_stdin(self, /, data: bytes, *, eof: bool = False) -> StdinAck:
         """
         Writes to the child's stdin. Requires the exec to have been started with
@@ -809,6 +961,10 @@ class ExecHandle:
         `eof` in the same call is the common case for feeding a prompt: two round trips
         would leave a window where the child has the bytes but not the EOF that says the
         input is complete.
+        """
+    async def write_stdin_async(self, /, data: bytes, *, eof: bool = False) -> StdinAck:
+        """
+        The awaitable twin of `write_stdin`.
         """
 
 @final
@@ -837,6 +993,10 @@ class ExecProcess:
         because the group was already gone, which is the outcome a kill wanted, so a caller
         can call this in a `finally` without guarding it.
         """
+    async def kill_async(self, /) -> bool:
+        """
+        The awaitable twin of `kill`.
+        """
     @property
     def stderr(self, /) -> ByteStream:
         """
@@ -856,6 +1016,10 @@ class ExecProcess:
         From the record, not from the iterators ending: a stream that stopped carrying bytes
         is the same observation for a cut connection and a finished command. A timeout hasn't
         touched the exec, so a caller can wait again. `timeout` defaults to `ExecHandle.wait`'s.
+        """
+    async def wait_async(self, /, timeout: float |None = None) -> ExecResult:
+        """
+        The awaitable twin of `wait`. Cancelling it leaves the exec untouched.
         """
 
 @final
@@ -944,13 +1108,22 @@ class ExecResult:
 @final
 class ExecStream:
     """
-    A Python iterator over an exec's output.
+    A Python iterator, and async iterator, over an exec's output.
     
     See the module docs for why this is a task and a bounded channel rather than a stored
     future. `receiver` is behind a `Mutex` because `#[pyclass]` methods take `&self` when
     the class is shared, and `recv` needs `&mut`; the lock is held only across one `recv`
-    and never across a Python callback, so it cannot deadlock against the GIL.
+    and never across a Python callback, so it cannot deadlock against the GIL. tokio's, so a
+    coroutine can hold it across the `recv` it awaits.
     """
+    def __aiter__(self, /) -> ExecStream: ...
+    def __anext__(self, /) -> Awaitable[OutputChunk |Gap |Exit]:
+        """
+        The next event, awaited, or `StopAsyncIteration` when the stream ends: `async for`.
+        
+        Cancelling the await leaves the event unread rather than lost: the channel keeps it
+        until the next `__anext__` or `__next__`.
+        """
     def __iter__(self, /) -> ExecStream: ...
     def __next__(self, /) -> OutputChunk |Gap |Exit:
         """
@@ -1410,6 +1583,14 @@ class KeepAwake:
     
     Keep a reference: dropping this object stops the keepalive.
     """
+    async def __aenter__(self, /) -> KeepAwake:
+        """
+        `async with session.keep_awake() as k:`.
+        """
+    async def __aexit__(self, /, exc_type: Any |None = None, exc_value: Any |None = None, traceback: Any |None = None) -> bool:
+        """
+        `__exit__`, awaited.
+        """
     def __enter__(self, /) -> KeepAwake: ...
     def __exit__(self, /, exc_type: Any |None = None, exc_value: Any |None = None, traceback: Any |None = None) -> bool:
         """
@@ -1425,11 +1606,20 @@ class KeepAwake:
         """
         Stops polling and returns the report. Raises the poll's error if one ended it.
         """
+    async def stop_async(self, /) -> KeepAwakeReport:
+        """
+        The awaitable twin of `stop`. The stop is asked for before the first await, so
+        cancelling this still stops the keepalive; only the wait for its report is given up.
+        """
     def wait(self, /, timeout: float |None = None) -> KeepAwakeReport |None:
         """
         Waits for the keepalive to end on its own (`while_busy` or `max_duration`).
         
         Returns `None` if it is still running when `timeout` seconds pass.
+        """
+    async def wait_async(self, /, timeout: float |None = None) -> KeepAwakeReport |None:
+        """
+        The awaitable twin of `wait`.
         """
 
 @final
@@ -1699,6 +1889,10 @@ class NameRegistry:
         request, and a probe the daemon refuses writes nothing. Core's `names::import`, the rule
         `microvm attach` applies.
         """
+    async def import_record_async(self, /, record: NameRecord, session: Session) -> bool:
+        """
+        The awaitable twin of `import_record`.
+        """
     def list(self, /) -> list[NameRecord]:
         """
         Every readable record, sorted by name.
@@ -1781,6 +1975,14 @@ class PortForward:
     
     Keep a reference: dropping this object stops the forward and cuts its open connections.
     """
+    async def __aenter__(self, /) -> PortForward:
+        """
+        `async with session.port_forward(...) as t:`.
+        """
+    async def __aexit__(self, /, exc_type: Any |None = None, exc_value: Any |None = None, traceback: Any |None = None) -> bool:
+        """
+        `__exit__`, awaited.
+        """
     def __enter__(self, /) -> PortForward: ...
     def __exit__(self, /, exc_type: Any |None = None, exc_value: Any |None = None, traceback: Any |None = None) -> bool:
         """
@@ -1805,6 +2007,10 @@ class PortForward:
         With `timeout`, connections still open after that many seconds are cut and listed as
         `"failed"`. Without it, a client that keeps its connection open keeps this waiting.
         Callable again, with the same report.
+        """
+    async def stop_async(self, /, timeout: float |None = None) -> PortForwardReport:
+        """
+        The awaitable twin of `stop`.
         """
 
 @final
@@ -2211,8 +2417,18 @@ class Sandbox:
     One MicroVM's whole life.
     
     The five transitions are `build_image`, `run`, `suspend`, `resume`, and `terminate`, and
-    every state guard lives in the core — see the module docs.
+    every state guard lives in the core — see the module docs. Each has an awaitable twin
+    (`run_async` and so on) that drives the same future; [`crate::runtime`] says how.
     """
+    async def __aenter__(self, /) -> Sandbox:
+        """
+        `async with sandbox as s:` — returns the sandbox itself.
+        """
+    async def __aexit__(self, /, exc_type: Any |None = None, exc_value: Any |None = None, traceback: Any |None = None) -> bool:
+        """
+        `__exit__`'s teardown, awaited: discards the report, returns `False`, and, a lifecycle
+        transition, runs to completion even when the task awaiting it is cancelled.
+        """
     def __enter__(self, /) -> Sandbox:
         """
         `with sandbox as s:` — returns the sandbox itself.
@@ -2243,6 +2459,11 @@ class Sandbox:
         from the service's state and keep every guard. The VM was bootstrapped by its own
         launch, so `run` is refused and no run-hook payload is ever sent. Keep `agent_token`
         in private encrypted storage; it never appears in repr or an error.
+        """
+    @staticmethod
+    async def adopt_async(region: Region, microvm_id: str, endpoint: str, agent_token: str, *, port: int |None = None) -> Sandbox:
+        """
+        The awaitable twin of `Sandbox.adopt`.
         """
     @property
     def adopted(self, /) -> bool:
@@ -2296,6 +2517,16 @@ class Sandbox:
         of fresh randomness per build attempt, and the resolved exact name comes back on
         `Image.log_stream`. `log_stream` requires `log_group`.
         """
+    async def build_image_async(self, /, *, name: str, binary: Sequence[int], code_artifact_uri: str, build_role_arn: str, size: SizeClass |None = None, base_image: BaseImage |None = None, base_image_version: str |None = None, dockerfile: str |None = None, project_dir: str |PathLike[str] |None = None, repair_guest_identity: bool = False, inherit_workdir: bool = False, run_hook_timeout: RunHookTimeout |None = None, build_hook_timeout: BuildHookTimeout |None = None, tags: dict[str, str] |None = None, log_group: str |None = None, log_stream: str |None = None, token_scope: str |None = None) -> Image:
+        """
+        The awaitable twin of `build_image`, with its keywords. A lifecycle transition:
+        cancelling the awaitable leaves the build running to completion on this sandbox.
+        """
+    @staticmethod
+    async def create_async(region: Region) -> Sandbox:
+        """
+        The awaitable twin of `Sandbox(region)`: resolves credentials on the shared runtime.
+        """
     def detach(self, /) -> Detached:
         """
         Hands the VM off to another process and returns what that process adopts it with.
@@ -2339,12 +2570,22 @@ class Sandbox:
         `build_image`'s, and both join the name's hash. `wait_timeout` is the build wait in seconds
         (45 minutes by default). Every local check runs before the first AWS call.
         """
+    async def ensure_image_async(self, /, *, name_prefix: str, binary: Sequence[int], dockerfile: str, s3_bucket: str, build_role_arn: str, context_dir: str |PathLike[str] |None = None, s3_key_prefix: str |None = None, size: SizeClass |None = None, base_image: BaseImage |None = None, base_image_version: str |None = None, project_dir: str |PathLike[str] |None = None, force: bool = False, tags: dict[str, str] |None = None, wait_timeout: float |None = None) -> EnsuredImage:
+        """
+        The awaitable twin of `ensure_image`, with its keywords. A lifecycle transition:
+        cancelling the awaitable leaves the build or reuse running to completion.
+        """
     @staticmethod
     def from_name(region: Region, name: str, registry: NameRegistry, *, port: int |None = None) -> Sandbox:
         """
         Adopts the VM registered as `name` in `registry`; see `Sandbox.adopt`.
         
         `region` must match the record's: an id from another region addresses nothing here.
+        """
+    @staticmethod
+    async def from_name_async(region: Region, name: str, registry: NameRegistry, *, port: int |None = None) -> Sandbox:
+        """
+        The awaitable twin of `Sandbox.from_name`.
         """
     @property
     def image(self, /) -> Image |None:
@@ -2387,6 +2628,10 @@ class Sandbox:
         `base_image_arn` is the base's full ARN, such as
         `arn:aws:lambda:us-east-1:aws:microvm-image:al2023-1`; a bare name is refused.
         """
+    async def managed_base_versions_async(self, /, base_image_arn: str) -> list[ManagedBaseVersion]:
+        """
+        The awaitable twin of `managed_base_versions`.
+        """
     @property
     def microvm_id(self, /) -> str |None:
         """
@@ -2414,6 +2659,11 @@ class Sandbox:
         Nothing is re-delivered: no run-hook payload, no token, no bootstrap. The in-memory
         token survived the freeze, and re-delivering it would hit the daemon's one-shot
         bootstrap and be refused — a 409 that reads like a broken VM.
+        """
+    async def resume_async(self, /) -> Session:
+        """
+        The awaitable twin of `resume`. A lifecycle transition: cancelling the awaitable leaves
+        the resume running to completion.
         """
     def run(self, /, *, image_identifier: str |None = None, image_version: str |None = None, execution_role_arn: str |None = None, agent_token: str |None = None, client_token: str |None = None, launch_env: dict[str, str] |None = None, identity: bool = False, egress: bool = False, egress_network_connectors: Sequence[str] |None = None, deny_egress: bool = False, shell: bool = False, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None, ready_timeout: float |None = None, token_scope: str |None = None, wait: bool = True, log_group: str |None = None, log_stream: str |None = None, disable_logging: bool = False) -> Session:
         """
@@ -2450,6 +2700,12 @@ class Sandbox:
         reuse the first attempt's — passes it. It rides in `runHookPayload`, which is what
         keeps it out of the shared image snapshot.
         """
+    async def run_async(self, /, *, image_identifier: str |None = None, image_version: str |None = None, execution_role_arn: str |None = None, agent_token: str |None = None, client_token: str |None = None, launch_env: dict[str, str] |None = None, identity: bool = False, egress: bool = False, egress_network_connectors: Sequence[str] |None = None, deny_egress: bool = False, shell: bool = False, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None, ready_timeout: float |None = None, token_scope: str |None = None, wait: bool = True, log_group: str |None = None, log_stream: str |None = None, disable_logging: bool = False) -> Session:
+        """
+        The awaitable twin of `run`, with its keywords. A lifecycle transition: cancelling the
+        awaitable leaves the launch running to completion, so the VM it starts is still this
+        sandbox's to terminate.
+        """
     @property
     def session(self, /) -> Session |None:
         """
@@ -2483,6 +2739,11 @@ class Sandbox:
         dies while suspending is a state to report rather than an exception out of the
         middle of a teardown.
         """
+    async def suspend_async(self, /) -> str:
+        """
+        The awaitable twin of `suspend`. A lifecycle transition: cancelling the awaitable
+        leaves the suspend running to completion.
+        """
     @property
     def suspended_window_seconds(self, /) -> float |None:
         """
@@ -2508,6 +2769,12 @@ class Sandbox:
         that blocked five minutes on a state nobody reads is five minutes of a CI job. The
         report then honestly ends in `"TERMINATING"`. `True` waits for TERMINATED up to the
         core's lifecycle default; a number of seconds waits up to that instead.
+        """
+    async def terminate_async(self, /, *, delete_image: bool = False, delete_log_group: bool = False, delete_attempts: int |None = None, delete_backoff: float |None = None, wait_for_terminated: bool |float = ...) -> TeardownReport:
+        """
+        The awaitable twin of `terminate`, with its keywords; it never raises either. A
+        lifecycle transition: cancelling the awaitable leaves the teardown running to
+        completion, since a teardown abandoned halfway is a leak.
         """
     @property
     def token_installed(self, /) -> bool:
@@ -2535,6 +2802,11 @@ class Sandbox:
         a fresh launch that reaches a terminal state first raises `LaunchDiedError` with
         the service's `stateReason`. Refused unless the launch is still PENDING.
         """
+    async def wait_until_running_async(self, /, *, timeout: float |None = None) -> Session:
+        """
+        The awaitable twin of `wait_until_running`. Cancelling it stops the wait, not the
+        launch: the VM keeps starting, and a later `wait_until_running` picks it up.
+        """
     @property
     def was_terminated(self, /) -> bool:
         """
@@ -2561,6 +2833,11 @@ class Session:
         shares no sandbox lock; supervisors should attach separately for keepalives,
         with a short `request_timeout`. Never publish or log `agent_token`.
         """
+    @staticmethod
+    async def attach_async(region: Region, microvm_id: str, endpoint: str, agent_token: str, *, port: int |None = None, request_timeout: float |None = None) -> Session:
+        """
+        The awaitable twin of `Session.attach`.
+        """
     def connect_headers(self, /, port: int) -> dict[str, str]:
         """
         Both proxy headers for `port`, so a caller can open its **own** connection.
@@ -2577,6 +2854,10 @@ class Session:
         stores it, and no method *takes* a header map — so a caller cannot feed a forged or
         expired one back in.
         """
+    async def connect_headers_async(self, /, port: int) -> dict[str, str]:
+        """
+        The awaitable twin of `connect_headers`.
+        """
     def connect_subprotocols(self, /, port: int) -> list[str] |None:
         """
         The three WebSocket subprotocols for `port`, in the order a handshake offers them.
@@ -2592,6 +2873,10 @@ class Session:
         token nor the port.
         
         The middle string carries the credential. Same rule as `connect_headers`.
+        """
+    async def connect_subprotocols_async(self, /, port: int) -> list[str] |None:
+        """
+        The awaitable twin of `connect_subprotocols`.
         """
     @staticmethod
     def direct(endpoint: str, agent_token: str) -> Session:
@@ -2615,6 +2900,11 @@ class Session:
         Returns what was written. A local directory that can't be written to raises
         `InvalidArgError`.
         """
+    async def download_dir_async(self, /, remote: str, local_dir: str |PathLike[str], globs: Sequence[str]) -> list[DownloadedFile]:
+        """
+        The awaitable twin of `download_dir`. The local writes run on the shared runtime, not
+        on the event loop.
+        """
     def download_file(self, /, path: str, *, start_line: int |None = None, end_line: int |None = None) -> bytes:
         """
         Reads one file, or lines `start_line` through `end_line` of it.
@@ -2624,9 +2914,17 @@ class Session:
         through EOF), and an `end_line` past the last line reads through EOF. Line 0 and an end
         before the start raise `InvalidArgError` before any request.
         """
+    async def download_file_async(self, /, path: str, *, start_line: int |None = None, end_line: int |None = None) -> bytes:
+        """
+        The awaitable twin of `download_file`.
+        """
     def download_tar(self, /, remote: str) -> bytes:
         """
         The raw tar bytes of a remote tree.
+        """
+    async def download_tar_async(self, /, remote: str) -> bytes:
+        """
+        The awaitable twin of `download_tar`.
         """
     @property
     def egress_posture(self, /) -> str:
@@ -2657,9 +2955,17 @@ class Session:
         """
         Whether a path exists, distinguishing absence from every other refusal.
         """
+    async def file_exists_async(self, /, path: str) -> bool:
+        """
+        The awaitable twin of `file_exists`.
+        """
     def health(self, /) -> Health:
         """
         Unauthenticated liveness.
+        """
+    async def health_async(self, /) -> Health:
+        """
+        The awaitable twin of `health`.
         """
     def keep_awake(self, /, interval: float |None = None, *, while_busy: bool = False, max_duration: float |None = None, idle_window: float |None = None, tolerated_errors: int |None = None) -> KeepAwake:
         """
@@ -2684,6 +2990,10 @@ class Session:
         """
         Signals an exec's whole process group. Returns whether anything was signalled.
         """
+    async def kill_async(self, /, exec_id: str) -> bool:
+        """
+        The awaitable twin of `kill`.
+        """
     @property
     def port(self, /) -> int:
         """
@@ -2699,6 +3009,10 @@ class Session:
         with its status while the forward keeps serving. `bind` and `max_connections` are
         `tunnel`'s. Dropping the handle stops the forward.
         """
+    async def port_forward_async(self, /, guest_port: int, *, bind: str |None = None, max_connections: int |None = None) -> PortForward:
+        """
+        The awaitable twin of `port_forward`, for `tunnel_async`'s reason.
+        """
     def procs(self, /) -> list[ProcGroup]:
         """
         Process accounting: every registered exec with its group's live pids.
@@ -2706,6 +3020,10 @@ class Session:
         The daemon reads `/proc` itself, so this needs no `ps` in the guest. A `ProcGroup`
         with `child_exited` and a non-empty `pids` is a command that finished while
         something it backgrounded did not; pass its `exec_id` to `kill`.
+        """
+    async def procs_async(self, /) -> list[ProcGroup]:
+        """
+        The awaitable twin of `procs`.
         """
     @property
     def proxy_mint_count(self, /) -> int |None:
@@ -2741,9 +3059,20 @@ class Session:
         command's own child exits, so nothing it backgrounded outlives it; off by default,
         which keeps the backgrounded-grandchild-output guarantee for callers who rely on it.
         """
+    async def run_async(self, /, command: Sequence[str] |str, *, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, inherit_image_env: bool = False) -> ExecHandle:
+        """
+        The awaitable twin of `run`, with its keywords. Cancelling it before the daemon
+        answers may leave the exec started, under the `exec_id` the call was given or minted;
+        `Session.exec(exec_id)` reaches it, which is why a caller that cancels passes one.
+        """
     def run_sync(self, /, command: Sequence[str] |str, *, timeout: float = ..., shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, inherit_image_env: bool = False) -> ExecResult:
         """
         Start, wait, ack. The one-shot shape, for when output is all you want.
+        """
+    async def run_sync_async(self, /, command: Sequence[str] |str, *, timeout: float = ..., shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, inherit_image_env: bool = False) -> ExecResult:
+        """
+        The awaitable twin of `run_sync`, with its keywords. Cancelling it stops the wait,
+        as a `timeout` would: the exec keeps running and its output stays until acked.
         """
     def run_to_completion(self, /, command: Sequence[str] |str, *, on_output: Any |None = None, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, exec_id: str |None = None, reap_group_on_exit: bool = False, inherit_image_env: bool = False, client_grace_sec: float = ...) -> ExecResult:
         """
@@ -2763,6 +3092,17 @@ class Session:
         `shell="bash"` with a script string runs it under bash, which dash-based images need for
         `pipefail`.
         """
+    async def run_to_completion_async(self, /, command: Sequence[str] |str, *, on_output: Any |None = None, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, exec_id: str |None = None, reap_group_on_exit: bool = False, inherit_image_env: bool = False, client_grace_sec: float = ...) -> ExecResult:
+        """
+        The awaitable twin of `run_to_completion`, with its keywords.
+        
+        `on_output` is a plain function, called on the event loop's thread between the
+        coroutine's steps, one chunk at a time: the drive on the shared runtime waits for each
+        call to return before it reads on, so a slow callback slows the stream rather than
+        buffering it. An exception from it stops delivery and is re-raised once the exec is
+        waited for and acked, as in `run_to_completion`. Cancelling the call stops the drive and
+        leaves the exec running in the VM.
+        """
     def spawn(self, /, command: Sequence[str] |str, *, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, inherit_image_env: bool = False, offset: int = 0, reconnect: bool = True, max_reconnects: int |None = None, idle_timeout: float |None = None, gap_policy: str |None = None) -> ExecProcess:
         """
         Starts a command and returns it as two byte iterators, a `wait()`, and a `kill()`.
@@ -2780,6 +3120,11 @@ class Session:
         `proc.gaps` and keeps both going. `offset`, `reconnect`, `max_reconnects` and
         `idle_timeout` are `ExecHandle.stream()`'s.
         """
+    async def spawn_async(self, /, command: Sequence[str] |str, *, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, inherit_image_env: bool = False, offset: int = 0, reconnect: bool = True, max_reconnects: int |None = None, idle_timeout: float |None = None, gap_policy: str |None = None) -> ExecProcess:
+        """
+        The awaitable twin of `spawn`, with its keywords. The process it answers iterates
+        with `async for` as well as `for`; cancelling the call is `run_async`'s.
+        """
     def sync_dir(self, /, local_dir: str |PathLike[str], *, full: bool = False, delete_timeout: float |None = None) -> SyncReport:
         """
         Syncs `local_dir` into the VM's `/workspace` once, uploading only what changed.
@@ -2791,6 +3136,11 @@ class Session:
         ignores the manifest and uploads everything. `.git`, `target`, `node_modules` and
         `.venv` never travel. A tree over the daemon's budgets raises `InvalidArgError` before
         anything is sent.
+        """
+    async def sync_dir_async(self, /, local_dir: str |PathLike[str], *, full: bool = False, delete_timeout: float |None = None) -> SyncReport:
+        """
+        The awaitable twin of `sync_dir`. The hashing and the local reads run on the shared
+        runtime, not on the event loop.
         """
     def tunnel(self, /, guest_port: int, *, bind: str |None = None, verify_identity: TunnelIdentity |None = None, max_connections: int |None = None) -> Tunnel:
         """
@@ -2808,10 +3158,19 @@ class Session:
         The tunnel carries this session's credentials to whoever connects, so bind beyond
         loopback only on a network you trust. Dropping the handle stops the tunnel.
         """
+    async def tunnel_async(self, /, guest_port: int, *, bind: str |None = None, verify_identity: TunnelIdentity |None = None, max_connections: int |None = None) -> Tunnel:
+        """
+        The awaitable twin of `tunnel`: binds the listener on the shared runtime and answers
+        the same handle, whose loop runs there either way.
+        """
     def upload_file(self, /, path: str, data: bytes, *, mode: str |None = None) -> None:
         """
         Writes one file, creating parents. `mode` is an **octal string** (`"0755"`), which
         is the daemon's shape — an integer here would be ambiguous between 0o755 and 755.
+        """
+    async def upload_file_async(self, /, path: str, data: bytes, *, mode: str |None = None) -> None:
+        """
+        The awaitable twin of `upload_file`.
         """
     def upload_tar(self, /, remote: str, archive: bytes) -> None:
         """
@@ -2821,6 +3180,10 @@ class Session:
         symlink and permission decisions in a pack belong to whoever knows what the tree
         means.
         """
+    async def upload_tar_async(self, /, remote: str, archive: bytes) -> None:
+        """
+        The awaitable twin of `upload_tar`.
+        """
     def wait_until_ready(self, /, timeout: float = ...) -> Health:
         """
         Polls health until the daemon reports bootstrapped.
@@ -2829,6 +3192,10 @@ class Session:
         just reached RUNNING commonly refuses a connection or two before the proxy path is
         wired up. A *fatal* error ends the wait at once, because retrying a 401 until the
         deadline is the mistake the retryable split exists to prevent.
+        """
+    async def wait_until_ready_async(self, /, timeout: float = ...) -> Health:
+        """
+        The awaitable twin of `wait_until_ready`.
         """
 
 @final
@@ -3043,6 +3410,14 @@ class Tunnel:
     
     Keep a reference: dropping this object stops the tunnel and cuts its open connections.
     """
+    async def __aenter__(self, /) -> Tunnel:
+        """
+        `async with session.tunnel(...) as t:`.
+        """
+    async def __aexit__(self, /, exc_type: Any |None = None, exc_value: Any |None = None, traceback: Any |None = None) -> bool:
+        """
+        `__exit__`, awaited.
+        """
     def __enter__(self, /) -> Tunnel: ...
     def __exit__(self, /, exc_type: Any |None = None, exc_value: Any |None = None, traceback: Any |None = None) -> bool:
         """
@@ -3067,6 +3442,10 @@ class Tunnel:
         With `timeout`, connections still open after that many seconds are cut and listed as
         `"failed"`. Without it, a client that keeps its connection open keeps this waiting.
         Callable again, with the same report.
+        """
+    async def stop_async(self, /, timeout: float |None = None) -> TunnelReport:
+        """
+        The awaitable twin of `stop`.
         """
 
 @final
@@ -3236,6 +3615,11 @@ def install_agent_access(session: Session, agents: Sequence[AgentSpec], token: B
     token overwrites the same files, which is how a twelve-hour token is refreshed.
     """
 
+async def install_agent_access_async(session: Session, agents: Sequence[AgentSpec], token: BearerToken) -> None:
+    """
+    The awaitable twin of `install_agent_access`.
+    """
+
 def installed_agents(session: Session) -> list[AgentSpec]:
     """
     The agents a running VM was provisioned with, read from its guest marker.
@@ -3245,6 +3629,11 @@ def installed_agents(session: Session) -> list[AgentSpec]:
     with no marker is refused as a precondition, naming `agent-up`.
     """
 
+async def installed_agents_async(session: Session) -> list[AgentSpec]:
+    """
+    The awaitable twin of `installed_agents`.
+    """
+
 def mint_bedrock_token(region: Region, *, ttl_seconds: float |None = None) -> BearerToken:
     """
     Mints a Bedrock bearer token from the default credential chain.
@@ -3252,6 +3641,11 @@ def mint_bedrock_token(region: Region, *, ttl_seconds: float |None = None) -> Be
     A SigV4 presign of `POST https://bedrock.amazonaws.com/?Action=CallWithBearerToken`,
     base64, prefixed `bedrock-api-key-` — the reference generator's recipe, in process.
     `ttl_seconds` defaults to the ceiling, twelve hours; more is refused by the core.
+    """
+
+async def mint_bedrock_token_async(region: Region, *, ttl_seconds: float |None = None) -> BearerToken:
+    """
+    The awaitable twin of `mint_bedrock_token`.
     """
 
 def mint_bedrock_token_with_credentials(region: Region, *, access_key_id: str, secret_access_key: str, session_token: str |None = None, credentials_expires_at: float, ttl_seconds: float |None = None) -> BearerToken:
@@ -3274,6 +3668,11 @@ def preflight(region: Region |None = None) -> PreflightReport:
     evidence the endpoint accepts it. Never raises; read `report.ok`.
     """
 
+async def preflight_async(region: Region |None = None) -> PreflightReport:
+    """
+    The awaitable twin of `preflight`. Never raises either; read `report.ok`.
+    """
+
 def prompt_agent(session: Session, agent: AgentSpec, task: str, *, timeout_sec: float |None = None, exec_id: str |None = None, permission_mode: str = "agent-default", reap_group_on_exit: bool = False) -> ExecHandle:
     """
     Starts one task for `agent` over `session` and returns its handle. Does not wait.
@@ -3283,6 +3682,11 @@ def prompt_agent(session: Session, agent: AgentSpec, task: str, *, timeout_sec: 
     `exec_id` is the idempotency key for a retry that must not spawn twice.
     `permission_mode` is agent-default or unrestricted. `reap_group_on_exit` stops
     residual children after the main agent exits. Neither option grants guest root.
+    """
+
+async def prompt_agent_async(session: Session, agent: AgentSpec, task: str, *, timeout_sec: float |None = None, exec_id: str |None = None, permission_mode: str = "agent-default", reap_group_on_exit: bool = False) -> ExecHandle:
+    """
+    The awaitable twin of `prompt_agent`.
     """
 
 def provision_agentd(version: str |None = None, state_dir: str |PathLike[str] |None = None, binary: str |PathLike[str] |None = None) -> bytes:
@@ -3299,10 +3703,20 @@ def provision_agentd(version: str |None = None, state_dir: str |PathLike[str] |N
     few MiB and can take seconds.
     """
 
+async def provision_agentd_async(version: str |None = None, state_dir: str |PathLike[str] |None = None, binary: str |PathLike[str] |None = None) -> bytes:
+    """
+    The awaitable twin of `provision_agentd`.
+    """
+
 def provision_agentd_report(version: str |None = None, state_dir: str |PathLike[str] |None = None, binary: str |PathLike[str] |None = None) -> ProvisionedAgentd:
     """
     `provision_agentd`, answering with the bytes and how they got here: the source, the
     verification, the path, the version, and the digest.
+    """
+
+async def provision_agentd_report_async(version: str |None = None, state_dir: str |PathLike[str] |None = None, binary: str |PathLike[str] |None = None) -> ProvisionedAgentd:
+    """
+    The awaitable twin of `provision_agentd_report`.
     """
 
 def run_report(size: SizeClass, *, running: Duration |None = None, suspended: Duration |None = None, image_build: Duration |None = None, image_gb: float |None = None, image_retained: Duration |None = None, suspend_resume_cycles: int = 0, snapshot_gb: float |None = None, launched: bool |None = None, label: str |None = None, rates: RateTable |None = None) -> CostReport:

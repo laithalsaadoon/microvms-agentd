@@ -106,3 +106,24 @@ waive.gherkin = "no Gherkin tier drives the tunnel: its tests speak the WebSocke
 issue = "#297"
 waive.gherkin = "no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate"
 waive.live = "a live daemon and the endpoint proxy neither replay nor forge a frame, so a live run can't present one; the stand-in tests send both to the client's real relay"
+
+[BIND-25]
+issue = "#544"
+waive.model = "one future behind two spellings has no state of its own to explore; the future's states are core's, which its models hold"
+waive.gherkin = "no Gherkin tier drives the bindings; the Python suite calls each twin beside its blocking spelling and compares the answers"
+waive.fuzz = "the surface is a fixed set of signatures, not an input stream; the census test enumerates it twin by twin"
+waive.live = "a twin makes the AWS calls its blocking spelling makes and no other; the live suite drives those through the CLI and core"
+
+[BIND-26]
+issue = "#544"
+waive.model = "cancellation is the runtime's abort of one task, not a protocol state; the core's own models hold the states a dropped request leaves"
+waive.gherkin = "no Gherkin tier drives the bindings; the Python suite cancels a twin against a loopback daemon and a stalling proxy"
+waive.fuzz = "there is no input stream; the rule is over which spawn a twin calls"
+waive.live = "a cancelled read makes no AWS call a live run could observe that the loopback tests don't; the proxy test watches the connection itself"
+
+[BIND-27]
+issue = "#544"
+waive.model = "cancellation is the runtime's choice not to abort one task; the transitions it lets finish are core's, which its models hold"
+waive.gherkin = "no Gherkin tier drives the bindings; the Python suite cancels a lifecycle twin through a stalling proxy"
+waive.fuzz = "there is no input stream; the rule is over which spawn a twin calls"
+waive.live = "launching a VM to cancel its launch costs a billable VM per run for what the proxy test shows offline: the request stays open after the awaitable is gone"

@@ -37,10 +37,16 @@ serde_json = "1"
 # `cargo test` and `cargo build -p microvms-py` with undefined `_PyExc_*`
 # symbols. maturin >= 1.9.4 sets PYO3_BUILD_EXTENSION_MODULE itself for a wheel
 # build (research-bindings.yaml, extension_module_feature_note).
-pyo3 = { version = "0.29", features = ["abi3-py39"] }
+#
+# `experimental-async` is what lets a `#[pymethods]` `async fn` return a Python coroutine
+# (pyo3's `Coroutine`): each `*_async` twin is one, awaiting a task spawned on the shared
+# runtime below. "Experimental" is pyo3's word for its API, not for the coroutine protocol it
+# implements; the feature adds no dependency, and asyncio is the one event loop it supports.
+pyo3 = { version = "0.29", features = ["abi3-py39", "experimental-async"] }
 # One multi-thread runtime for the whole process, blocked on with the GIL
-# released. `sync` is the bounded channel the stream iterator hands events
-# across; `time` is what the core's poll loops sleep on.
+# released, or awaited from a coroutine. `sync` is the bounded channel the stream
+# iterator hands events across and the sandbox's lock; `time` is what the core's
+# poll loops sleep on.
 tokio = { version = "1.53", features = ["rt-multi-thread", "sync", "time"] }
 
 # No `futures-util`, and its absence is the point. It was here to name the

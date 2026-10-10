@@ -52,9 +52,9 @@ impl PyNameRecord {
 
     /// A record naming the VM `sandbox` addresses — launched or adopted.
     #[staticmethod]
-    fn for_sandbox(name: &str, sandbox: &PySandbox) -> PyCoreResult<Self> {
+    fn for_sandbox(py: Python<'_>, name: &str, sandbox: &PySandbox) -> PyCoreResult<Self> {
         let inner = sandbox
-            .read(|sandbox| sandbox.name_record(name))
+            .read(py, |sandbox| sandbox.name_record(name))
             .map_err(CoreError)?;
         Ok(Self { inner })
     }
@@ -165,6 +165,24 @@ pub struct PyNameRegistry {
     pub(crate) store: FileNameStore,
 }
 
+impl PyNameRegistry {
+    /// The probe and the write both spellings of `import_record` drive.
+    fn import_op(
+        &self,
+        record: NameRecord,
+        session: &crate::session::PySession,
+    ) -> impl std::future::Future<Output = Result<bool, microvms_core::Error>> + Send + 'static
+    {
+        let store = self.store.clone();
+        let held = session.held();
+        async move {
+            let lease = held.lease().await;
+            let imported = microvms_core::names::import(&store, &record, lease.session()?).await?;
+            Ok(imported.replaced)
+        }
+    }
+}
+
 #[pymethods]
 impl PyNameRegistry {
     #[new]
@@ -205,8 +223,13 @@ impl PyNameRegistry {
     }
 
     /// Names the VM `sandbox` addresses and writes the record; returns it.
-    fn register(&self, name: &str, sandbox: &PySandbox) -> PyCoreResult<PyNameRecord> {
-        let record = PyNameRecord::for_sandbox(name, sandbox)?;
+    fn register(
+        &self,
+        py: Python<'_>,
+        name: &str,
+        sandbox: &PySandbox,
+    ) -> PyCoreResult<PyNameRecord> {
+        let record = PyNameRecord::for_sandbox(py, name, sandbox)?;
         self.put(&record)?;
         Ok(record)
     }
@@ -247,14 +270,20 @@ impl PyNameRegistry {
         record: &PyNameRecord,
         session: &crate::session::PySession,
     ) -> PyCoreResult<bool> {
-        let store = self.store.clone();
-        let record = record.inner.clone();
-        let imported = session.detached(py, move |session| {
-            crate::runtime::block_on_detached(microvms_core::names::import(
-                &store, &record, session,
-            ))
-        })?;
-        Ok(imported.replaced)
+        Ok(crate::runtime::block_on(
+            py,
+            self.import_op(record.inner.clone(), session),
+        )?)
+    }
+
+    /// The awaitable twin of `import_record`.
+    async fn import_record_async(
+        &self,
+        record: Py<PyNameRecord>,
+        session: Py<crate::session::PySession>,
+    ) -> PyCoreResult<bool> {
+        let op = self.import_op(record.get().inner.clone(), session.get());
+        Ok(crate::runtime::spawn(op).await?)
     }
 
     fn __repr__(&self) -> String {

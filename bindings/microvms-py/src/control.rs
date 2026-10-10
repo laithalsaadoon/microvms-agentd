@@ -7,6 +7,7 @@
 //! the STATE guards a `Sandbox` does — it answers what the service says. A durable workflow
 //! replaying in a fresh process, or a reaper sweeping a fleet, is the caller this is for.
 
+use std::future::Future;
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
@@ -451,15 +452,197 @@ pub struct PyControlPlane {
     inner: Arc<ControlPlane>,
 }
 
+/// Opens a control plane for `region`: both spellings of the constructor.
+async fn open(region: microvms_core::Region) -> Result<PyControlPlane, microvms_core::Error> {
+    ControlPlane::new(region).await.map(|plane| PyControlPlane {
+        inner: Arc::new(plane),
+    })
+}
+
+/// The future a method's two spellings drive: `$body` with `$plane` bound to an owned
+/// `Arc<ControlPlane>`, as a block that owns everything it touches.
+macro_rules! plane_op {
+    ($self:ident, |$plane:ident| $body:expr) => {{
+        let $plane = Arc::clone(&$self.inner);
+        async move { $body }
+    }};
+}
+
+impl PyControlPlane {
+    fn get_op(
+        &self,
+        microvm_id: String,
+    ) -> impl Future<Output = Result<PyMicrovm, microvms_core::Error>> + Send + 'static {
+        plane_op!(self, |plane| plane
+            .get_microvm(&microvm_id)
+            .await
+            .map(|inner| PyMicrovm { inner }))
+    }
+
+    fn list_op(
+        &self,
+        filter: MicrovmFilter,
+    ) -> impl Future<Output = Result<Vec<PyMicrovmSummary>, microvms_core::Error>> + Send + 'static
+    {
+        plane_op!(self, |plane| Ok(plane
+            .list_microvms_matching(&filter)
+            .await?
+            .into_iter()
+            .map(|item| PyMicrovmSummary {
+                id: item.microvm_id,
+                state: item.state,
+                image_arn: item.image_arn,
+                image_version: item.image_version,
+            })
+            .collect()))
+    }
+
+    fn suspend_op(
+        &self,
+        microvm_id: String,
+    ) -> impl Future<Output = Result<(), microvms_core::Error>> + Send + 'static {
+        plane_op!(self, |plane| plane.suspend(&microvm_id).await)
+    }
+
+    fn resume_op(
+        &self,
+        microvm_id: String,
+    ) -> impl Future<Output = Result<(), microvms_core::Error>> + Send + 'static {
+        plane_op!(self, |plane| plane.resume(&microvm_id).await)
+    }
+
+    fn terminate_op(
+        &self,
+        microvm_id: String,
+    ) -> impl Future<Output = Result<(), microvms_core::Error>> + Send + 'static {
+        plane_op!(self, |plane| plane.terminate(&microvm_id).await)
+    }
+
+    fn wait_for_state_op(
+        &self,
+        microvm_id: String,
+        wanted: Vec<String>,
+        fail_on: Vec<String>,
+        opts: WaitOpts,
+    ) -> impl Future<Output = Result<PyMicrovm, microvms_core::Error>> + Send + 'static {
+        plane_op!(self, |plane| {
+            let wanted: Vec<&str> = wanted.iter().map(String::as_str).collect();
+            let fail_on: Vec<&str> = fail_on.iter().map(String::as_str).collect();
+            plane
+                .wait_for_state(&microvm_id, &wanted, &fail_on, opts)
+                .await
+                .map(|inner| PyMicrovm { inner })
+        })
+    }
+
+    fn list_images_op(
+        &self,
+    ) -> impl Future<Output = Result<Vec<PyImageSummary>, microvms_core::Error>> + Send + 'static
+    {
+        plane_op!(self, |plane| Ok(plane
+            .list_images()
+            .await?
+            .into_iter()
+            .map(|inner| PyImageSummary { inner })
+            .collect()))
+    }
+
+    fn delete_image_op(
+        &self,
+        identifier: String,
+        attempts: u32,
+        backoff: std::time::Duration,
+    ) -> impl Future<Output = bool> + Send + 'static {
+        plane_op!(self, |plane| plane
+            .delete_image(&identifier, attempts, backoff)
+            .await)
+    }
+
+    fn list_image_versions_op(
+        &self,
+        identifier: String,
+    ) -> impl Future<Output = Result<Vec<PyImageVersion>, microvms_core::Error>> + Send + 'static
+    {
+        plane_op!(self, |plane| Ok(plane
+            .list_image_versions(&identifier)
+            .await?
+            .into_iter()
+            .map(|inner| PyImageVersion { inner })
+            .collect()))
+    }
+
+    fn set_image_version_status_op(
+        &self,
+        identifier: String,
+        version: String,
+        status: ops::VersionStatus,
+    ) -> impl Future<Output = Result<PyImageVersion, microvms_core::Error>> + Send + 'static {
+        plane_op!(self, |plane| plane
+            .set_image_version_status(&identifier, &version, status)
+            .await
+            .map(|inner| PyImageVersion { inner }))
+    }
+
+    fn list_image_builds_op(
+        &self,
+        identifier: String,
+        version: String,
+    ) -> impl Future<Output = Result<Vec<PyImageBuild>, microvms_core::Error>> + Send + 'static
+    {
+        plane_op!(self, |plane| Ok(plane
+            .list_image_builds(&identifier, &version)
+            .await?
+            .into_iter()
+            .map(PyImageBuild::from)
+            .collect()))
+    }
+
+    fn get_image_build_op(
+        &self,
+        identifier: String,
+        version: String,
+        build_id: String,
+    ) -> impl Future<Output = Result<PyImageBuild, microvms_core::Error>> + Send + 'static {
+        plane_op!(self, |plane| plane
+            .get_image_build(&identifier, &version, &build_id)
+            .await
+            .map(|inner| PyImageBuild { inner }))
+    }
+}
+
+/// `wait_for_state`'s poll options, both spellings'.
+fn state_wait_opts(timeout: f64, poll_interval: f64) -> Result<WaitOpts, microvms_core::Error> {
+    Ok(WaitOpts {
+        poll_interval: seconds(poll_interval)?,
+        ..WaitOpts::for_lifecycle(seconds(timeout)?)
+    })
+}
+
+/// `delete_image`'s retry budget, core's teardown figures when unset.
+fn delete_budget(
+    attempts: Option<u32>,
+    backoff: Option<f64>,
+) -> Result<(u32, std::time::Duration), microvms_core::Error> {
+    let attempts = attempts.unwrap_or(DEFAULT_DELETE_ATTEMPTS);
+    let backoff = match backoff {
+        Some(backoff) => seconds(backoff)?,
+        None => DEFAULT_DELETE_BACKOFF,
+    };
+    Ok((attempts, backoff))
+}
+
 #[pymethods]
 impl PyControlPlane {
     /// Resolves credentials for `region` from the default chain.
     #[new]
     fn new(py: Python<'_>, region: PyRegion) -> PyCoreResult<PyControlPlane> {
-        let plane = runtime::block_on(py, ControlPlane::new(region.inner))?;
-        Ok(PyControlPlane {
-            inner: Arc::new(plane),
-        })
+        Ok(runtime::block_on(py, open(region.inner))?)
+    }
+
+    /// The awaitable twin of `ControlPlane(region)`.
+    #[staticmethod]
+    async fn create_async(region: PyRegion) -> PyCoreResult<PyControlPlane> {
+        Ok(runtime::spawn(open(region.inner)).await?)
     }
 
     /// The region this plane addresses.
@@ -472,9 +655,12 @@ impl PyControlPlane {
 
     /// `GetMicrovm`.
     fn get(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<PyMicrovm> {
-        let plane = Arc::clone(&self.inner);
-        let inner = runtime::block_on(py, async move { plane.get_microvm(&microvm_id).await })?;
-        Ok(PyMicrovm { inner })
+        Ok(runtime::block_on(py, self.get_op(microvm_id))?)
+    }
+
+    /// The awaitable twin of `get`.
+    async fn get_async(&self, microvm_id: String) -> PyCoreResult<PyMicrovm> {
+        Ok(runtime::spawn(self.get_op(microvm_id)).await?)
     }
 
     /// `ListMicrovms`, every page, optionally narrowed to one image and version.
@@ -485,48 +671,56 @@ impl PyControlPlane {
         image_identifier: Option<String>,
         image_version: Option<String>,
     ) -> PyCoreResult<Vec<PyMicrovmSummary>> {
-        let plane = Arc::clone(&self.inner);
         let filter = MicrovmFilter {
             image_identifier,
             image_version,
         };
-        let items = runtime::block_on(
-            py,
-            async move { plane.list_microvms_matching(&filter).await },
-        )?;
-        Ok(items
-            .into_iter()
-            .map(|item| PyMicrovmSummary {
-                id: item.microvm_id,
-                state: item.state,
-                image_arn: item.image_arn,
-                image_version: item.image_version,
-            })
-            .collect())
+        Ok(runtime::block_on(py, self.list_op(filter))?)
+    }
+
+    /// The awaitable twin of `list`.
+    #[pyo3(signature = (*, image_identifier=None, image_version=None))]
+    async fn list_async(
+        &self,
+        image_identifier: Option<String>,
+        image_version: Option<String>,
+    ) -> PyCoreResult<Vec<PyMicrovmSummary>> {
+        let filter = MicrovmFilter {
+            image_identifier,
+            image_version,
+        };
+        Ok(runtime::spawn(self.list_op(filter)).await?)
     }
 
     /// `SuspendMicrovm`. Returns once accepted; `wait_for_state` for SUSPENDED.
     fn suspend(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {
-        let plane = Arc::clone(&self.inner);
-        Ok(runtime::block_on(py, async move {
-            plane.suspend(&microvm_id).await
-        })?)
+        Ok(runtime::block_on(py, self.suspend_op(microvm_id))?)
+    }
+
+    /// The awaitable twin of `suspend`. A lifecycle call: cancelling the awaitable leaves the
+    /// request running to its answer.
+    async fn suspend_async(&self, microvm_id: String) -> PyCoreResult<()> {
+        Ok(runtime::spawn_shielded(self.suspend_op(microvm_id)).await?)
     }
 
     /// `ResumeMicrovm`. Returns once accepted; `wait_for_state` for RUNNING.
     fn resume(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {
-        let plane = Arc::clone(&self.inner);
-        Ok(runtime::block_on(py, async move {
-            plane.resume(&microvm_id).await
-        })?)
+        Ok(runtime::block_on(py, self.resume_op(microvm_id))?)
+    }
+
+    /// The awaitable twin of `resume`. A lifecycle call, as `suspend_async` is.
+    async fn resume_async(&self, microvm_id: String) -> PyCoreResult<()> {
+        Ok(runtime::spawn_shielded(self.resume_op(microvm_id)).await?)
     }
 
     /// `TerminateMicrovm`. Returns once accepted; `wait_for_state` for TERMINATED.
     fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {
-        let plane = Arc::clone(&self.inner);
-        Ok(runtime::block_on(py, async move {
-            plane.terminate(&microvm_id).await
-        })?)
+        Ok(runtime::block_on(py, self.terminate_op(microvm_id))?)
+    }
+
+    /// The awaitable twin of `terminate`. A lifecycle call, as `suspend_async` is.
+    async fn terminate_async(&self, microvm_id: String) -> PyCoreResult<()> {
+        Ok(runtime::spawn_shielded(self.terminate_op(microvm_id)).await?)
     }
 
     /// Polls `GetMicrovm` until the state is one of `wanted`.
@@ -546,30 +740,38 @@ impl PyControlPlane {
         timeout: f64,
         poll_interval: f64,
     ) -> PyCoreResult<PyMicrovm> {
-        let opts = WaitOpts {
-            poll_interval: seconds(poll_interval)?,
-            ..WaitOpts::for_lifecycle(seconds(timeout)?)
-        };
-        let plane = Arc::clone(&self.inner);
-        let fail_on = fail_on.unwrap_or_default();
-        let inner = runtime::block_on(py, async move {
-            let wanted: Vec<&str> = wanted.iter().map(String::as_str).collect();
-            let fail_on: Vec<&str> = fail_on.iter().map(String::as_str).collect();
-            plane
-                .wait_for_state(&microvm_id, &wanted, &fail_on, opts)
-                .await
-        })?;
-        Ok(PyMicrovm { inner })
+        let opts = state_wait_opts(timeout, poll_interval)?;
+        Ok(runtime::block_on(
+            py,
+            self.wait_for_state_op(microvm_id, wanted, fail_on.unwrap_or_default(), opts),
+        )?)
+    }
+
+    /// The awaitable twin of `wait_for_state`. Cancelling it stops the polling and touches no
+    /// VM.
+    // Literals, for `wait_for_state`'s reason.
+    #[pyo3(signature = (microvm_id, wanted, *, fail_on=None, timeout=300.0, poll_interval=5.0))]
+    async fn wait_for_state_async(
+        &self,
+        microvm_id: String,
+        wanted: Vec<String>,
+        fail_on: Option<Vec<String>>,
+        timeout: f64,
+        poll_interval: f64,
+    ) -> PyCoreResult<PyMicrovm> {
+        let opts = state_wait_opts(timeout, poll_interval)?;
+        let op = self.wait_for_state_op(microvm_id, wanted, fail_on.unwrap_or_default(), opts);
+        Ok(runtime::spawn(op).await?)
     }
 
     /// `ListMicrovmImages`, every page: every image in the account and region.
     fn list_images(&self, py: Python<'_>) -> PyCoreResult<Vec<PyImageSummary>> {
-        let plane = Arc::clone(&self.inner);
-        let items = runtime::block_on(py, async move { plane.list_images().await })?;
-        Ok(items
-            .into_iter()
-            .map(|inner| PyImageSummary { inner })
-            .collect())
+        Ok(runtime::block_on(py, self.list_images_op())?)
+    }
+
+    /// The awaitable twin of `list_images`.
+    async fn list_images_async(&self) -> PyCoreResult<Vec<PyImageSummary>> {
+        Ok(runtime::spawn(self.list_images_op()).await?)
     }
 
     /// Deletes the image, its extra versions first, retrying while it refuses (an image still
@@ -586,15 +788,24 @@ impl PyControlPlane {
         attempts: Option<u32>,
         backoff: Option<f64>,
     ) -> PyCoreResult<bool> {
-        let attempts = attempts.unwrap_or(DEFAULT_DELETE_ATTEMPTS);
-        let backoff = match backoff {
-            Some(backoff) => seconds(backoff)?,
-            None => DEFAULT_DELETE_BACKOFF,
-        };
-        let plane = Arc::clone(&self.inner);
-        Ok(runtime::block_on(py, async move {
-            Ok::<_, microvms_core::Error>(plane.delete_image(&identifier, attempts, backoff).await)
-        })?)
+        let (attempts, backoff) = delete_budget(attempts, backoff)?;
+        Ok(runtime::block_on(
+            py,
+            self.delete_image_op(identifier, attempts, backoff),
+        ))
+    }
+
+    /// The awaitable twin of `delete_image`. A lifecycle call: cancelling the awaitable leaves
+    /// the deletion and its retries running to their answer.
+    #[pyo3(signature = (identifier, *, attempts=None, backoff=None))]
+    async fn delete_image_async(
+        &self,
+        identifier: String,
+        attempts: Option<u32>,
+        backoff: Option<f64>,
+    ) -> PyCoreResult<bool> {
+        let (attempts, backoff) = delete_budget(attempts, backoff)?;
+        Ok(runtime::spawn_shielded(self.delete_image_op(identifier, attempts, backoff)).await)
     }
 
     /// `ListMicrovmImageVersions`, every page: each version, its status, and its build
@@ -604,15 +815,18 @@ impl PyControlPlane {
         py: Python<'_>,
         identifier: String,
     ) -> PyCoreResult<Vec<PyImageVersion>> {
-        let plane = Arc::clone(&self.inner);
-        let items = runtime::block_on(
+        Ok(runtime::block_on(
             py,
-            async move { plane.list_image_versions(&identifier).await },
-        )?;
-        Ok(items
-            .into_iter()
-            .map(|inner| PyImageVersion { inner })
-            .collect())
+            self.list_image_versions_op(identifier),
+        )?)
+    }
+
+    /// The awaitable twin of `list_image_versions`.
+    async fn list_image_versions_async(
+        &self,
+        identifier: String,
+    ) -> PyCoreResult<Vec<PyImageVersion>> {
+        Ok(runtime::spawn(self.list_image_versions_op(identifier)).await?)
     }
 
     /// `UpdateMicrovmImageVersion`: `status` is `"ACTIVE"` or `"INACTIVE"`.
@@ -628,13 +842,23 @@ impl PyControlPlane {
         status: &str,
     ) -> PyCoreResult<PyImageVersion> {
         let status: ops::VersionStatus = status.parse()?;
-        let plane = Arc::clone(&self.inner);
-        let inner = runtime::block_on(py, async move {
-            plane
-                .set_image_version_status(&identifier, &version, status)
-                .await
-        })?;
-        Ok(PyImageVersion { inner })
+        Ok(runtime::block_on(
+            py,
+            self.set_image_version_status_op(identifier, version, status),
+        )?)
+    }
+
+    /// The awaitable twin of `set_image_version_status`. A lifecycle call: cancelling the
+    /// awaitable leaves the update running to its readback.
+    async fn set_image_version_status_async(
+        &self,
+        identifier: String,
+        version: String,
+        status: String,
+    ) -> PyCoreResult<PyImageVersion> {
+        let status: ops::VersionStatus = status.parse()?;
+        let op = self.set_image_version_status_op(identifier, version, status);
+        Ok(runtime::spawn_shielded(op).await?)
     }
 
     /// `ListMicrovmImageBuilds` for one version, every page: one build per Graviton
@@ -645,11 +869,19 @@ impl PyControlPlane {
         identifier: String,
         version: String,
     ) -> PyCoreResult<Vec<PyImageBuild>> {
-        let plane = Arc::clone(&self.inner);
-        let items = runtime::block_on(py, async move {
-            plane.list_image_builds(&identifier, &version).await
-        })?;
-        Ok(items.into_iter().map(PyImageBuild::from).collect())
+        Ok(runtime::block_on(
+            py,
+            self.list_image_builds_op(identifier, version),
+        )?)
+    }
+
+    /// The awaitable twin of `list_image_builds`.
+    async fn list_image_builds_async(
+        &self,
+        identifier: String,
+        version: String,
+    ) -> PyCoreResult<Vec<PyImageBuild>> {
+        Ok(runtime::spawn(self.list_image_builds_op(identifier, version)).await?)
     }
 
     /// `GetMicrovmImageBuild`: one build, with the snapshot sizes the listing doesn't carry.
@@ -660,13 +892,20 @@ impl PyControlPlane {
         version: String,
         build_id: String,
     ) -> PyCoreResult<PyImageBuild> {
-        let plane = Arc::clone(&self.inner);
-        let inner = runtime::block_on(py, async move {
-            plane
-                .get_image_build(&identifier, &version, &build_id)
-                .await
-        })?;
-        Ok(PyImageBuild { inner })
+        Ok(runtime::block_on(
+            py,
+            self.get_image_build_op(identifier, version, build_id),
+        )?)
+    }
+
+    /// The awaitable twin of `get_image_build`.
+    async fn get_image_build_async(
+        &self,
+        identifier: String,
+        version: String,
+        build_id: String,
+    ) -> PyCoreResult<PyImageBuild> {
+        Ok(runtime::spawn(self.get_image_build_op(identifier, version, build_id)).await?)
     }
 
     fn __repr__(&self) -> String {

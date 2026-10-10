@@ -500,6 +500,25 @@ class RuleTests(FixtureCase):
         self.griffe["members"][0]["members"].append(function("create"))
         self.assertProblem("type Sandbox: ts: create is exempt but has a Python twin")
 
+    def test_an_awaitable_twin_pairs_with_its_blocking_spellings_typescript_twin(self):
+        """`run_async` pairs with TypeScript's `run`, as `run` does, so a twin needs no
+        exemption; and `create_async` is the Python twin of TypeScript's `create`."""
+        members = self.griffe["members"][0]["members"]
+        members.append(function("run_async"))
+        unpaired = "type Sandbox: py: run_async has no TypeScript twin and no exemption"
+        self.assertFalse(any(unpaired in problem for problem in self.problems()))
+        self.assertProblem("py: Sandbox.run_async belongs to no row")
+        members.append(function("create_async"))
+        self.assertProblem("type Sandbox: ts: create is exempt but has a Python twin")
+
+    def test_only_a_python_name_drops_the_async_suffix(self):
+        """A TypeScript `regionAsync` is its own name: napi writes no awaitable twins, so a
+        TypeScript member ending in `Async` pairs only with a Python member of that name."""
+        self.typedoc["children"][0]["children"].append(member("regionAsync"))
+        self.assertProblem(
+            "type Sandbox: ts: regionAsync has no Python twin and no exemption"
+        )
+
     def test_an_exempt_member_that_is_gone_fails(self):
         self.typedoc["children"][0]["children"] = [
             child

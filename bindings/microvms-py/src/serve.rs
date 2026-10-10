@@ -7,6 +7,8 @@
 //! converts the report. Dropping a handle stops its loop and cuts its open connections, so a
 //! relay can't outlive the object that owns it.
 
+use std::sync::Arc;
+
 use microvms_core::identity::TunnelIdentity;
 use microvms_core::session::serve::{
     ConnectionEnd, ForwardSummary, Serving, StopReason, TunnelSummary,
@@ -259,12 +261,24 @@ impl PyPortForwardReport {
 /// Keep a reference: dropping this object stops the tunnel and cuts its open connections.
 #[pyclass(frozen, name = "Tunnel", module = "microvms")]
 pub struct PyTunnel {
-    task: Serving<TunnelSummary>,
+    /// An `Arc` so `stop_async` can own the loop it stops.
+    task: Arc<Serving<TunnelSummary>>,
 }
 
 impl PyTunnel {
     pub(crate) fn new(task: Serving<TunnelSummary>) -> Self {
-        Self { task }
+        Self {
+            task: Arc::new(task),
+        }
+    }
+
+    fn stop_op(
+        &self,
+        grace: Option<std::time::Duration>,
+    ) -> impl std::future::Future<Output = Result<PyTunnelReport, microvms_core::Error>> + Send + 'static
+    {
+        let task = Arc::clone(&self.task);
+        async move { task.stop(grace).await.map(|inner| PyTunnelReport { inner }) }
     }
 }
 
@@ -290,8 +304,14 @@ impl PyTunnel {
     #[pyo3(signature = (timeout=None))]
     fn stop(&self, py: Python<'_>, timeout: Option<f64>) -> PyCoreResult<PyTunnelReport> {
         let grace = grace(timeout)?;
-        let inner = runtime::block_on(py, self.task.stop(grace))?;
-        Ok(PyTunnelReport { inner })
+        Ok(runtime::block_on(py, self.stop_op(grace))?)
+    }
+
+    /// The awaitable twin of `stop`.
+    #[pyo3(signature = (timeout=None))]
+    async fn stop_async(&self, timeout: Option<f64>) -> PyCoreResult<PyTunnelReport> {
+        let grace = grace(timeout)?;
+        Ok(runtime::spawn(self.stop_op(grace)).await?)
     }
 
     fn __enter__(slf: Py<Self>) -> Py<Self> {
@@ -316,6 +336,27 @@ impl PyTunnel {
         Ok(false)
     }
 
+    /// `async with session.tunnel(...) as t:`.
+    async fn __aenter__(slf: Py<Self>) -> Py<Self> {
+        slf
+    }
+
+    /// `__exit__`, awaited.
+    #[pyo3(signature = (exc_type=None, exc_value=None, traceback=None))]
+    async fn __aexit__(
+        &self,
+        exc_type: Option<Py<PyAny>>,
+        exc_value: Option<Py<PyAny>>,
+        traceback: Option<Py<PyAny>>,
+    ) -> PyCoreResult<bool> {
+        let _ = (exc_value, traceback);
+        let stopped = runtime::spawn(self.stop_op(None)).await;
+        if exc_type.is_none() {
+            stopped?;
+        }
+        Ok(false)
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "Tunnel(local_address={:?}, running={})",
@@ -330,12 +371,29 @@ impl PyTunnel {
 /// Keep a reference: dropping this object stops the forward and cuts its open connections.
 #[pyclass(frozen, name = "PortForward", module = "microvms")]
 pub struct PyPortForward {
-    task: Serving<ForwardSummary>,
+    /// An `Arc` so `stop_async` can own the loop it stops.
+    task: Arc<Serving<ForwardSummary>>,
 }
 
 impl PyPortForward {
     pub(crate) fn new(task: Serving<ForwardSummary>) -> Self {
-        Self { task }
+        Self {
+            task: Arc::new(task),
+        }
+    }
+
+    fn stop_op(
+        &self,
+        grace: Option<std::time::Duration>,
+    ) -> impl std::future::Future<Output = Result<PyPortForwardReport, microvms_core::Error>>
+    + Send
+    + 'static {
+        let task = Arc::clone(&self.task);
+        async move {
+            task.stop(grace)
+                .await
+                .map(|inner| PyPortForwardReport { inner })
+        }
     }
 }
 
@@ -361,8 +419,14 @@ impl PyPortForward {
     #[pyo3(signature = (timeout=None))]
     fn stop(&self, py: Python<'_>, timeout: Option<f64>) -> PyCoreResult<PyPortForwardReport> {
         let grace = grace(timeout)?;
-        let inner = runtime::block_on(py, self.task.stop(grace))?;
-        Ok(PyPortForwardReport { inner })
+        Ok(runtime::block_on(py, self.stop_op(grace))?)
+    }
+
+    /// The awaitable twin of `stop`.
+    #[pyo3(signature = (timeout=None))]
+    async fn stop_async(&self, timeout: Option<f64>) -> PyCoreResult<PyPortForwardReport> {
+        let grace = grace(timeout)?;
+        Ok(runtime::spawn(self.stop_op(grace)).await?)
     }
 
     fn __enter__(slf: Py<Self>) -> Py<Self> {
@@ -381,6 +445,27 @@ impl PyPortForward {
     ) -> PyCoreResult<bool> {
         let _ = (exc_value, traceback);
         let stopped = self.stop(py, None);
+        if exc_type.is_none() {
+            stopped?;
+        }
+        Ok(false)
+    }
+
+    /// `async with session.port_forward(...) as t:`.
+    async fn __aenter__(slf: Py<Self>) -> Py<Self> {
+        slf
+    }
+
+    /// `__exit__`, awaited.
+    #[pyo3(signature = (exc_type=None, exc_value=None, traceback=None))]
+    async fn __aexit__(
+        &self,
+        exc_type: Option<Py<PyAny>>,
+        exc_value: Option<Py<PyAny>>,
+        traceback: Option<Py<PyAny>>,
+    ) -> PyCoreResult<bool> {
+        let _ = (exc_value, traceback);
+        let stopped = runtime::spawn(self.stop_op(None)).await;
         if exc_type.is_none() {
             stopped?;
         }

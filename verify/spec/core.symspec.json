@@ -173,6 +173,25 @@
       "verificationMethod": "test",
       "verifies": []
     },
+    "161a84ac-b69b-4c78-9667-9ebc8631cdc0": {
+      "createdAt": "2026-10-10T06:00:00.000Z",
+      "derives": [],
+      "id": "161a84ac-b69b-4c78-9667-9ebc8631cdc0",
+      "key": "BIND-26",
+      "negated": false,
+      "patternType": "unwanted-behavior",
+      "priority": "high",
+      "refines": [],
+      "satisfies": [],
+      "sentence": "If a caller cancels the awaitable twin of a Python binding call that is not a lifecycle transition, then the Python binding shall abort the call's task at its next await.",
+      "status": "draft",
+      "systemName": "Python binding",
+      "systemResponse": "abort the call's task at its next await",
+      "trigger": "a caller cancels the awaitable twin of a Python binding call that is not a lifecycle transition",
+      "updatedAt": "2026-10-10T06:00:00.000Z",
+      "verificationMethod": "test",
+      "verifies": []
+    },
     "199f54a0-5c1a-4346-afd1-fba392ef612a": {
       "createdAt": "2026-09-24T23:00:00.000Z",
       "derives": [],
@@ -1397,6 +1416,25 @@
       "verificationNote": "PLATFORM.md: unpriced regions answer AccessDeniedException with a null message, indistinguishable from an IAM denial",
       "verifies": []
     },
+    "c3393818-64b9-415b-941b-1ab6b2a896cf": {
+      "createdAt": "2026-10-10T06:00:00.000Z",
+      "derives": [],
+      "id": "c3393818-64b9-415b-941b-1ab6b2a896cf",
+      "key": "BIND-25",
+      "negated": false,
+      "patternType": "event-driven",
+      "priority": "high",
+      "refines": [],
+      "satisfies": [],
+      "sentence": "When a caller awaits the awaitable twin of a Python binding method that calls AWS or the daemon, the Python binding shall run the future that the method's blocking spelling runs, with the same arguments, as a task on the binding's shared runtime, and answer that future's result or its error class.",
+      "status": "draft",
+      "systemName": "Python binding",
+      "systemResponse": "run the future that the method's blocking spelling runs, with the same arguments, as a task on the binding's shared runtime, and answer that future's result or its error class",
+      "trigger": "a caller awaits the awaitable twin of a Python binding method that calls AWS or the daemon",
+      "updatedAt": "2026-10-10T06:00:00.000Z",
+      "verificationMethod": "test",
+      "verifies": []
+    },
     "c6964e21-f4e6-4463-bbf8-66ea5b21cfed": {
       "createdAt": "2026-08-08T01:56:00.587Z",
       "derives": [],
@@ -1454,6 +1492,26 @@
       "updatedAt": "2026-09-24T18:00:00.000Z",
       "verificationMethod": "test",
       "verifies": []
+    },
+    "d1a30eee-5a28-4af3-860e-bdbcdc39a6ac": {
+      "createdAt": "2026-10-10T06:00:00.000Z",
+      "derives": [],
+      "id": "d1a30eee-5a28-4af3-860e-bdbcdc39a6ac",
+      "key": "BIND-27",
+      "negated": false,
+      "patternType": "unwanted-behavior",
+      "priority": "critical",
+      "refines": [],
+      "satisfies": [],
+      "sentence": "If a caller cancels the awaitable twin of a lifecycle transition (a launch, an image build, a suspend, a resume or a teardown), then the Python binding shall run the transition to completion on the object that started it.",
+      "status": "draft",
+      "systemName": "Python binding",
+      "systemResponse": "run the transition to completion on the object that started it",
+      "trigger": "a caller cancels the awaitable twin of a lifecycle transition (a launch, an image build, a suspend, a resume or a teardown)",
+      "updatedAt": "2026-10-10T06:00:00.000Z",
+      "verificationMethod": "test",
+      "verifies": [],
+      "verificationNote": "an abandoned launch can leave a running MicroVM no handle names; the blocking spelling over asyncio.to_thread had the same outcome, since a thread can't be cancelled"
     },
     "d27e0e6e-ddee-4114-bbc3-b9a151ea0d10": {
       "createdAt": "2026-08-08T01:55:59.717Z",

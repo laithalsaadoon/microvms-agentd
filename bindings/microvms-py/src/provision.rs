@@ -100,14 +100,33 @@ fn provision(
     state_dir: Option<PathBuf>,
     binary: Option<PathBuf>,
 ) -> PyCoreResult<Provisioned> {
-    py.detach(|| {
-        provision::agentd_with(&Request {
-            version: version.as_deref(),
-            state_dir: state_dir.as_deref(),
-            binary: binary.as_deref(),
-        })
+    py.detach(|| provision_now(version, state_dir, binary))
+        .map_err(CoreError)
+}
+
+/// The chain itself, blocking: both spellings call it, the awaitable one on the shared
+/// runtime's blocking pool, because core's fetch is synchronous and runs its own thread.
+fn provision_now(
+    version: Option<String>,
+    state_dir: Option<PathBuf>,
+    binary: Option<PathBuf>,
+) -> Result<Provisioned, microvms_core::Error> {
+    provision::agentd_with(&Request {
+        version: version.as_deref(),
+        state_dir: state_dir.as_deref(),
+        binary: binary.as_deref(),
     })
-    .map_err(CoreError)
+}
+
+/// [`provision`] as an awaitable. Cancelling it leaves the fetch to finish and fill the cache.
+async fn provision_async(
+    version: Option<String>,
+    state_dir: Option<PathBuf>,
+    binary: Option<PathBuf>,
+) -> PyCoreResult<Provisioned> {
+    crate::runtime::spawn_blocking(move || provision_now(version, state_dir, binary))
+        .await
+        .map_err(CoreError)
 }
 
 /// The `agentd` daemon binary for `version` (default: this client's own), as bytes.
@@ -144,5 +163,32 @@ pub fn provision_agentd_report(
 ) -> PyCoreResult<PyProvisionedAgentd> {
     Ok(PyProvisionedAgentd {
         inner: provision(py, version, state_dir, binary)?,
+    })
+}
+
+/// The awaitable twin of `provision_agentd`.
+#[pyfunction]
+#[pyo3(signature = (version=None, state_dir=None, binary=None))]
+pub async fn provision_agentd_async(
+    version: Option<String>,
+    state_dir: Option<PathBuf>,
+    binary: Option<PathBuf>,
+) -> PyCoreResult<Py<PyBytes>> {
+    let provisioned = provision_async(version, state_dir, binary).await?;
+    Ok(Python::attach(|py| {
+        PyBytes::new(py, &provisioned.bytes).unbind()
+    }))
+}
+
+/// The awaitable twin of `provision_agentd_report`.
+#[pyfunction]
+#[pyo3(signature = (version=None, state_dir=None, binary=None))]
+pub async fn provision_agentd_report_async(
+    version: Option<String>,
+    state_dir: Option<PathBuf>,
+    binary: Option<PathBuf>,
+) -> PyCoreResult<PyProvisionedAgentd> {
+    Ok(PyProvisionedAgentd {
+        inner: provision_async(version, state_dir, binary).await?,
     })
 }

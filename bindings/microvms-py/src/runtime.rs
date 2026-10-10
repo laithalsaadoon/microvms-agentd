@@ -1,16 +1,43 @@
 // SPDX-License-Identifier: Apache-2.0
-//! One tokio runtime for the process, and the two ways to block on it.
+//! One tokio runtime for the process, the two ways to block on it, and the two ways to await it.
 //!
-//! # Why sync bindings over an async core
+//! # Two spellings over one async core (BIND-25)
 //!
-//! `microvms-core` is async throughout, and Python is not. The two ways to bridge that
-//! are a real `asyncio` awaitable through `pyo3-async-runtimes`, or a synchronous method
-//! that blocks. This ships the second and only the second, which is the choice
-//! `research-bindings.yaml` names as the default: a sync surface works in a plain script,
-//! in a notebook, and under `pytest`, and a caller who wants concurrency has
-//! `asyncio.to_thread`. Offering both would mean two spellings of every method on
-//! [`crate::sandbox::Sandbox`] and [`crate::session::Session`], and the second spelling
-//! would be the one nobody tested.
+//! `microvms-core` is async throughout. Every method that does I/O or waits has two Python
+//! spellings: the blocking one (`sandbox.run(...)`), which works in a plain script, in a
+//! notebook and under `pytest`, and an awaitable twin with the same arguments and an `_async`
+//! suffix (`await sandbox.run_async(...)`), for a caller on an asyncio event loop. Both drive the
+//! same future, built once by the method's `*_op` helper, so the second spelling is not a second
+//! implementation: [`block_on`] runs that future on the calling thread, and [`spawn`] or
+//! [`spawn_shielded`] runs it as a task on the shared runtime that a pyo3 `async fn` awaits.
+//!
+//! The suffix rather than an `a` prefix (`aread`, as httpx spells it) because two of the names
+//! it would make, `ExecHandle.await` and `ExecProcess.await`, are a keyword Python refuses.
+//!
+//! # The awaitable runs on the shared runtime, not on the event loop
+//!
+//! A pyo3 `async fn` is polled by asyncio on the event loop's thread with the GIL held, and it
+//! has no tokio context there. So the twin's body is spawned onto [`RUNTIME`] and the coroutine
+//! awaits only the task's handle: the HTTP, the TLS, the polling and the hashing all run on
+//! tokio's workers with the GIL released, and when the task finishes its waker hands the result
+//! back through `loop.call_soon_threadsafe`. Nothing the loop runs waits on the network.
+//!
+//! # What cancelling an awaitable does
+//!
+//! asyncio cancels a task by throwing into its coroutine, and pyo3 then drops the future it was
+//! polling, which drops the task's handle. Two outcomes follow from that, and each method picks
+//! one by which spawn it calls:
+//!
+//! * [`spawn`] (BIND-26): the task is aborted at its next `.await`, the way dropping a Rust
+//!   future cancels it. For reads, waits, polls, transfers and exec starts: nothing billable is
+//!   half-made by stopping one, and a wait that went on without its caller would hold the
+//!   sandbox's lock for the rest of its deadline.
+//! * [`spawn_shielded`] (BIND-27): the task runs to completion with nobody awaiting it, and its
+//!   effect lands on the sandbox it holds. For the lifecycle transitions (launch, build,
+//!   suspend, resume, terminate and the control plane's own): aborting a launch between
+//!   `RunMicrovm` and recording its answer would leave a running VM no handle names, which is
+//!   the one outcome worse than waiting. It is what `asyncio.to_thread` over the blocking
+//!   method does, since a thread can't be cancelled either.
 //!
 //! # The GIL is released first, and that is not an optimization
 //!
@@ -34,13 +61,18 @@
 //!
 //! One `LazyLock`, not a runtime per call. A current-thread runtime would be cheaper to
 //! create and wrong: the core's `ProxyAuth` mints under a `tokio::sync::Mutex` held
-//! across an await, and `block_in_place` requires the multi-thread flavour. The
-//! `LazyLock` holds only a runtime and calls no Python during initialization, so it is
-//! not the `OnceLock`-against-the-GIL deadlock PyO3's FAQ warns about.
+//! across an await, `block_in_place` requires the multi-thread flavour, and a spawned task
+//! needs workers that run while no Python thread is blocked on anything. The `LazyLock`
+//! holds only a runtime and calls no Python during initialization, so it is not the
+//! `OnceLock`-against-the-GIL deadlock PyO3's FAQ warns about.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::LazyLock;
+use std::task::{Context, Poll};
 
 use pyo3::prelude::*;
+use tokio::task::JoinHandle;
 
 /// The process's runtime. See the module docs for why one, why multi-thread, and why
 /// `LazyLock` is safe here.
@@ -89,4 +121,147 @@ where
 /// `__next__` that has to return between items.
 pub(crate) fn handle() -> tokio::runtime::Handle {
     RUNTIME.handle().clone()
+}
+
+/// Spawns `future` on the shared runtime and returns the awaitable side of it, which aborts
+/// the task when it is dropped unfinished: a cancelled coroutine stops the work.
+///
+/// For every awaitable twin but the lifecycle transitions; the module docs say which is which
+/// and why.
+pub(crate) fn spawn<F>(future: F) -> Spawned<F::Output>
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    Spawned {
+        task: RUNTIME.spawn(future),
+        abort_on_drop: true,
+    }
+}
+
+/// [`spawn`] for a lifecycle transition: dropping the awaitable leaves the task running to
+/// completion, so a cancelled launch still records its VM on the sandbox that started it.
+pub(crate) fn spawn_shielded<F>(future: F) -> Spawned<F::Output>
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    Spawned {
+        task: RUNTIME.spawn(future),
+        abort_on_drop: false,
+    }
+}
+
+/// Runs a blocking core call on the shared runtime's blocking pool and returns the awaitable
+/// side of it: the twin of a call core makes synchronous, such as the daemon fetch, which runs
+/// its own thread. A thread can't be stopped, so a cancelled awaitable leaves the call to finish,
+/// as [`spawn_shielded`] does.
+pub(crate) fn spawn_blocking<F, T>(call: F) -> Spawned<T>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    Spawned {
+        task: RUNTIME.spawn_blocking(call),
+        abort_on_drop: false,
+    }
+}
+
+/// A task on the shared runtime, awaited from a pyo3 coroutine. See [`spawn`].
+///
+/// Its output is the task's own. A task that panicked re-raises the panic here, on the
+/// coroutine's poll, where pyo3 turns it into `PanicException` exactly as it does for a panic in
+/// a blocking method; the runtime is never shut down, so the only cancellation a task meets is
+/// [`Spawned`]'s own abort, which happens after nothing can await it any more.
+pub(crate) struct Spawned<T> {
+    task: JoinHandle<T>,
+    abort_on_drop: bool,
+}
+
+impl<T> Future for Spawned<T> {
+    type Output = T;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<T> {
+        match Pin::new(&mut self.task).poll(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Ok(output)) => Poll::Ready(output),
+            Poll::Ready(Err(error)) => match error.try_into_panic() {
+                Ok(payload) => std::panic::resume_unwind(payload),
+                Err(error) => {
+                    panic!("a task on the shared runtime ended without a result: {error}")
+                }
+            },
+        }
+    }
+}
+
+impl<T> Drop for Spawned<T> {
+    fn drop(&mut self) {
+        // Aborting a finished task is a no-op, so this needs no "did it finish" check.
+        if self.abort_on_drop {
+            self.task.abort();
+        }
+    }
+}
+
+/// Takes a tokio mutex from a blocking method or a property, with the interpreter held.
+///
+/// The uncontended case is the common one and costs one atomic: a property read between
+/// calls. When the lock is held, by a transition in flight or an awaitable twin running on the
+/// runtime, the GIL is released for the wait, because the holder can be a coroutine whose
+/// completion needs it, and [`block_on_detached`] takes the wait onto the runtime so a property
+/// read from a runtime worker doesn't panic as `blocking_lock` would.
+pub(crate) fn lock_now<'a, T>(
+    py: Python<'_>,
+    mutex: &'a tokio::sync::Mutex<T>,
+) -> tokio::sync::MutexGuard<'a, T>
+where
+    T: Send,
+{
+    match mutex.try_lock() {
+        Ok(guard) => guard,
+        Err(_) => py.detach(|| block_on_detached(mutex.lock())),
+    }
+}
+
+/// The awaitable an `__anext__` answers, typed in the stub as `Awaitable[T]` where `T` is what
+/// awaiting it yields.
+///
+/// pyo3 turns an `async fn` into a coroutine for an ordinary method but not for the `__anext__`
+/// slot, so each async iterator's `__anext__` calls an `async fn` of a helper class and answers
+/// the coroutine that call returns. That coroutine is a `Bound<PyAny>` to pyo3's introspection,
+/// which would print `-> Any` and give every `async for` loop untyped elements; this wrapper
+/// carries the element type to the stub and converts to the coroutine itself.
+pub(crate) struct Awaitable<'py, T> {
+    coroutine: Bound<'py, PyAny>,
+    yields: std::marker::PhantomData<T>,
+}
+
+impl<'py, T> Awaitable<'py, T> {
+    /// Calls `method` on `helper` for the coroutine its `async fn` returns.
+    pub(crate) fn call(helper: &Bound<'py, PyAny>, method: &str) -> PyResult<Self> {
+        Ok(Self {
+            coroutine: helper.call_method0(method)?,
+            yields: std::marker::PhantomData,
+        })
+    }
+}
+
+impl<'py, T> IntoPyObject<'py> for Awaitable<'py, T>
+where
+    T: IntoPyObject<'py>,
+{
+    type Target = PyAny;
+    type Output = Bound<'py, PyAny>;
+    type Error = std::convert::Infallible;
+
+    #[cfg(feature = "stubs")]
+    const OUTPUT_TYPE: pyo3::inspect::PyStaticExpr = pyo3::type_hint_subscript!(
+        pyo3::type_hint_identifier!("collections.abc", "Awaitable"),
+        T::OUTPUT_TYPE
+    );
+
+    fn into_pyobject(self, _py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        Ok(self.coroutine)
+    }
 }

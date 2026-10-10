@@ -60,6 +60,9 @@ traced requirement is missing a layer. Requirements are defined in
 | BIND-22 | waived | waived | 1 | 1 | 1 | waived |
 | BIND-23 | 1 | waived | 1 | 2 | 1 | 1 |
 | BIND-24 | 1 | waived | 1 | 1 | 1 | waived |
+| BIND-25 | waived | waived | waived | 1 | 1 | waived |
+| BIND-26 | waived | waived | waived | 1 | 1 | waived |
+| BIND-27 | waived | waived | waived | 1 | 1 | waived |
 | CLI-1 | waived | waived | waived | 1 | 2 | waived |
 | CLI-2 | waived | waived | waived | 1 | 5 | waived |
 | CLI-3 | waived | waived | waived | 2 | 1 | 2 |
@@ -699,6 +702,39 @@ If a frame of an identity-verified tunnel does not authenticate at the frame's p
 - **test:** `crates/microvms-edges/tests/tunnel_end_of_stream.rs`
 - **impl:** `crates/microvms-edges/src/session/tunnel.rs`
 - **live:** waived: a live daemon and the endpoint proxy neither replay nor forge a frame, so a live run can't present one; the stand-in tests send both to the client's real relay
+
+## BIND-25
+
+When a caller awaits the awaitable twin of a Python binding method that calls AWS or the daemon, the Python binding shall run the future that the method's blocking spelling runs, with the same arguments, as a task on the binding's shared runtime, and answer that future's result or its error class.
+
+- **model:** waived: one future behind two spellings has no state of its own to explore; the future's states are core's, which its models hold
+- **gherkin:** waived: no Gherkin tier drives the bindings; the Python suite calls each twin beside its blocking spelling and compares the answers
+- **fuzz:** waived: the surface is a fixed set of signatures, not an input stream; the census test enumerates it twin by twin
+- **test:** `bindings/microvms-py/tests/test_async.py`
+- **impl:** `bindings/microvms-py/src/runtime.rs`
+- **live:** waived: a twin makes the AWS calls its blocking spelling makes and no other; the live suite drives those through the CLI and core
+
+## BIND-26
+
+If a caller cancels the awaitable twin of a Python binding call that is not a lifecycle transition, then the Python binding shall abort the call's task at its next await.
+
+- **model:** waived: cancellation is the runtime's abort of one task, not a protocol state; the core's own models hold the states a dropped request leaves
+- **gherkin:** waived: no Gherkin tier drives the bindings; the Python suite cancels a twin against a loopback daemon and a stalling proxy
+- **fuzz:** waived: there is no input stream; the rule is over which spawn a twin calls
+- **test:** `bindings/microvms-py/tests/test_async.py`
+- **impl:** `bindings/microvms-py/src/runtime.rs`
+- **live:** waived: a cancelled read makes no AWS call a live run could observe that the loopback tests don't; the proxy test watches the connection itself
+
+## BIND-27
+
+If a caller cancels the awaitable twin of a lifecycle transition (a launch, an image build, a suspend, a resume or a teardown), then the Python binding shall run the transition to completion on the object that started it.
+
+- **model:** waived: cancellation is the runtime's choice not to abort one task; the transitions it lets finish are core's, which its models hold
+- **gherkin:** waived: no Gherkin tier drives the bindings; the Python suite cancels a lifecycle twin through a stalling proxy
+- **fuzz:** waived: there is no input stream; the rule is over which spawn a twin calls
+- **test:** `bindings/microvms-py/tests/test_async.py`
+- **impl:** `bindings/microvms-py/src/runtime.rs`
+- **live:** waived: launching a VM to cancel its launch costs a billable VM per run for what the proxy test shows offline: the request stays open after the awaitable is gone
 
 ## CLI-1
 

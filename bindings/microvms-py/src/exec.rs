@@ -19,6 +19,11 @@
 //! `ControlFlow::Break`. That is what `for event in handle.stream(): break` has to do, and
 //! it is why the task owns everything it touches rather than borrowing from the handle.
 //!
+//! The same object is an async iterator: `async for event in handle.stream()` awaits the
+//! same `recv` from a coroutine instead of blocking on it. tokio's channel is runtime
+//! agnostic, so the coroutine polls it on the event loop's thread and the sender's wake
+//! reaches the loop through pyo3's waker; the drive itself stays on the shared runtime.
+//!
 //! # Events are classes, not tuples
 //!
 //! `ExecEvent` in the core is an enum with three shapes. A Python caller gets three
@@ -40,8 +45,8 @@
 //! [`crate::cost`]'s `by_phase` took the same shape of fix at a smaller scale: core grew
 //! `CostPhase::from_str` and both bindings' hand-rolled phase tables came out.
 
+use std::future::Future;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::Duration;
 
 use microvms_core::session::{ExecEvent, ExecHandle, ExecResult, StreamOptions};
@@ -215,6 +220,16 @@ pub struct PyStdinAck {
     exec_id: String,
     written: usize,
     eof: bool,
+}
+
+impl PyStdinAck {
+    fn wrap(ack: protocol::exec::StdinResponse) -> Self {
+        Self {
+            exec_id: ack.exec_id,
+            written: ack.written,
+            eof: ack.eof,
+        }
+    }
 }
 
 #[pymethods]
@@ -442,15 +457,21 @@ impl From<ExecEvent> for StreamEvent {
     }
 }
 
-/// A Python iterator over an exec's output.
+/// The receiving end of a stream's channel, shared between an iterator's `__next__` and its
+/// `__anext__`.
+type EventReceiver =
+    Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<Result<ExecEvent, microvms_core::Error>>>>;
+
+/// A Python iterator, and async iterator, over an exec's output.
 ///
 /// See the module docs for why this is a task and a bounded channel rather than a stored
 /// future. `receiver` is behind a `Mutex` because `#[pyclass]` methods take `&self` when
 /// the class is shared, and `recv` needs `&mut`; the lock is held only across one `recv`
-/// and never across a Python callback, so it cannot deadlock against the GIL.
-#[pyclass(name = "ExecStream", module = "microvms")]
+/// and never across a Python callback, so it cannot deadlock against the GIL. tokio's, so a
+/// coroutine can hold it across the `recv` it awaits.
+#[pyclass(frozen, name = "ExecStream", module = "microvms")]
 pub struct ExecStream {
-    receiver: Mutex<tokio::sync::mpsc::Receiver<Result<ExecEvent, microvms_core::Error>>>,
+    receiver: EventReceiver,
 }
 
 impl ExecStream {
@@ -496,7 +517,7 @@ impl ExecStream {
             }
         });
         Self {
-            receiver: Mutex::new(receiver),
+            receiver: Arc::new(tokio::sync::Mutex::new(receiver)),
         }
     }
 }
@@ -516,17 +537,53 @@ impl ExecStream {
     /// `StopIteration`, because the stub is read off this return type: `None` would put
     /// `| None` in an event loop's element type, where no `None` is ever yielded.
     fn __next__(&self, py: Python<'_>) -> PyResult<StreamEvent> {
-        let received = py.detach(|| {
-            let mut receiver = self
-                .receiver
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            runtime::block_on_detached(receiver.recv())
-        });
+        let receiver = Arc::clone(&self.receiver);
+        let received =
+            py.detach(|| runtime::block_on_detached(async { receiver.lock().await.recv().await }));
         match received {
             Some(Ok(event)) => Ok(event.into()),
             Some(Err(error)) => Err(to_py_err(py, &error)),
             None => Err(pyo3::exceptions::PyStopIteration::new_err(())),
+        }
+    }
+
+    fn __aiter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    /// The next event, awaited, or `StopAsyncIteration` when the stream ends: `async for`.
+    ///
+    /// Cancelling the await leaves the event unread rather than lost: the channel keeps it
+    /// until the next `__anext__` or `__next__`.
+    fn __anext__<'py>(&self, py: Python<'py>) -> PyResult<runtime::Awaitable<'py, StreamEvent>> {
+        let next = Bound::new(
+            py,
+            NextEvent {
+                receiver: Arc::clone(&self.receiver),
+            },
+        )?;
+        runtime::Awaitable::call(next.as_any(), "recv")
+    }
+}
+
+/// The awaitable `ExecStream.__anext__` answers: one `recv`, as a pyo3 coroutine.
+///
+/// A class of its own because pyo3 0.29 turns an `async fn` into a coroutine for an ordinary
+/// method and not for the `__anext__` slot, which must return an awaitable. It isn't in the
+/// module, so it has no name a caller types or a stub prints.
+#[pyclass(frozen, name = "ExecStreamNext", module = "microvms")]
+struct NextEvent {
+    receiver: EventReceiver,
+}
+
+#[pymethods]
+impl NextEvent {
+    async fn recv(&self) -> PyResult<StreamEvent> {
+        let received = self.receiver.lock().await.recv().await;
+        match received {
+            Some(Ok(event)) => Ok(event.into()),
+            Some(Err(error)) => Err(Python::attach(|py| to_py_err(py, &error))),
+            None => Err(pyo3::exceptions::PyStopAsyncIteration::new_err(())),
         }
     }
 }
@@ -549,6 +606,70 @@ impl PyExecHandle {
             inner: Arc::new(inner),
         }
     }
+
+    // The futures each method's two spellings drive. Each owns a clone of the handle's `Arc`,
+    // so the awaitable twin can run it as a task on the shared runtime.
+
+    fn poll_op(
+        &self,
+    ) -> impl Future<Output = Result<PyExecResult, microvms_core::Error>> + Send + 'static {
+        let inner = Arc::clone(&self.inner);
+        async move { inner.poll().await.map(PyExecResult::wrap) }
+    }
+
+    fn wait_op(
+        &self,
+        timeout: Duration,
+    ) -> impl Future<Output = Result<PyExecResult, microvms_core::Error>> + Send + 'static {
+        let inner = Arc::clone(&self.inner);
+        async move { inner.wait(timeout).await.map(PyExecResult::wrap) }
+    }
+
+    /// Generic over the bytes, so the blocking spelling lends `bytes` and the awaitable one
+    /// hands over an owned `PyBackedBytes`, with no copy on either path.
+    fn write_stdin_op<D>(
+        &self,
+        data: D,
+        eof: bool,
+    ) -> impl Future<Output = Result<PyStdinAck, microvms_core::Error>> + Send + use<D>
+    where
+        D: AsRef<[u8]> + Send,
+    {
+        let inner = Arc::clone(&self.inner);
+        async move {
+            inner
+                .write_stdin(data.as_ref(), eof)
+                .await
+                .map(PyStdinAck::wrap)
+        }
+    }
+
+    fn close_stdin_op(
+        &self,
+    ) -> impl Future<Output = Result<PyStdinAck, microvms_core::Error>> + Send + 'static {
+        let inner = Arc::clone(&self.inner);
+        async move { inner.close_stdin().await.map(PyStdinAck::wrap) }
+    }
+
+    fn ack_op(
+        &self,
+    ) -> impl Future<Output = Result<PyExecResult, microvms_core::Error>> + Send + 'static {
+        let inner = Arc::clone(&self.inner);
+        async move { inner.ack().await.map(PyExecResult::wrap) }
+    }
+
+    fn kill_op(&self) -> impl Future<Output = Result<bool, microvms_core::Error>> + Send + 'static {
+        let inner = Arc::clone(&self.inner);
+        async move { inner.kill().await }
+    }
+
+    fn wait_and_ack_op(
+        &self,
+        timeout: Duration,
+    ) -> impl Future<Output = Result<PyExecResult, microvms_core::Error>> + Send + 'static {
+        let inner = Arc::clone(&self.inner);
+        async move { inner.wait_and_ack(timeout).await.map(PyExecResult::wrap) }
+    }
 }
 
 #[pymethods]
@@ -560,10 +681,12 @@ impl PyExecHandle {
 
     /// Reads current status and output. Read-only server-side; safe to spin on.
     fn poll(&self, py: Python<'_>) -> PyCoreResult<PyExecResult> {
-        Ok(PyExecResult::wrap(runtime::block_on(
-            py,
-            self.inner.poll(),
-        )?))
+        Ok(runtime::block_on(py, self.poll_op())?)
+    }
+
+    /// The awaitable twin of `poll`.
+    async fn poll_async(&self) -> PyCoreResult<PyExecResult> {
+        Ok(runtime::spawn(self.poll_op()).await?)
     }
 
     /// Polls until the exec is done, or raises `TimeoutError`.
@@ -573,10 +696,15 @@ impl PyExecHandle {
     #[pyo3(signature = (timeout=DEFAULT_WAIT))]
     fn wait(&self, py: Python<'_>, timeout: f64) -> PyCoreResult<PyExecResult> {
         let timeout = seconds(timeout)?;
-        Ok(PyExecResult::wrap(runtime::block_on(
-            py,
-            self.inner.wait(timeout),
-        )?))
+        Ok(runtime::block_on(py, self.wait_op(timeout))?)
+    }
+
+    /// The awaitable twin of `wait`. Cancelling it is giving up as a timeout does: the exec
+    /// is untouched.
+    #[pyo3(signature = (timeout=DEFAULT_WAIT))]
+    async fn wait_async(&self, timeout: f64) -> PyCoreResult<PyExecResult> {
+        let timeout = seconds(timeout)?;
+        Ok(runtime::spawn(self.wait_op(timeout)).await?)
     }
 
     /// An iterator over output as it arrives, reconnecting at the last good offset.
@@ -627,34 +755,46 @@ impl PyExecHandle {
     /// input is complete.
     #[pyo3(signature = (data, *, eof=false))]
     fn write_stdin(&self, py: Python<'_>, data: &[u8], eof: bool) -> PyCoreResult<PyStdinAck> {
-        let ack = runtime::block_on(py, self.inner.write_stdin(data, eof))?;
-        Ok(PyStdinAck {
-            exec_id: ack.exec_id,
-            written: ack.written,
-            eof: ack.eof,
-        })
+        Ok(runtime::block_on(py, self.write_stdin_op(data, eof))?)
+    }
+
+    /// The awaitable twin of `write_stdin`.
+    #[pyo3(signature = (data, *, eof=false))]
+    async fn write_stdin_async(&self, data: Py<PyBytes>, eof: bool) -> PyCoreResult<PyStdinAck> {
+        let data = Python::attach(|py| pyo3::pybacked::PyBackedBytes::from(data.into_bound(py)));
+        Ok(runtime::spawn(self.write_stdin_op(data, eof)).await?)
     }
 
     /// Sends EOF. Nothing else closes stdin: the daemon's copy of the pipe outlives the
     /// child's wait, so a child blocked reading stdin hangs until its timeout otherwise.
     fn close_stdin(&self, py: Python<'_>) -> PyCoreResult<PyStdinAck> {
-        let ack = runtime::block_on(py, self.inner.close_stdin())?;
-        Ok(PyStdinAck {
-            exec_id: ack.exec_id,
-            written: ack.written,
-            eof: ack.eof,
-        })
+        Ok(runtime::block_on(py, self.close_stdin_op())?)
+    }
+
+    /// The awaitable twin of `close_stdin`.
+    async fn close_stdin_async(&self) -> PyCoreResult<PyStdinAck> {
+        Ok(runtime::spawn(self.close_stdin_op()).await?)
     }
 
     /// Releases the buffered output and starts the TTL clock.
     fn ack(&self, py: Python<'_>) -> PyCoreResult<PyExecResult> {
-        Ok(PyExecResult::wrap(runtime::block_on(py, self.inner.ack())?))
+        Ok(runtime::block_on(py, self.ack_op())?)
+    }
+
+    /// The awaitable twin of `ack`.
+    async fn ack_async(&self) -> PyCoreResult<PyExecResult> {
+        Ok(runtime::spawn(self.ack_op()).await?)
     }
 
     /// Signals the whole process group. `False` means nothing was signalled because the
     /// child had already been reaped — which is the outcome a kill wanted.
     fn kill(&self, py: Python<'_>) -> PyCoreResult<bool> {
-        Ok(runtime::block_on(py, self.inner.kill())?)
+        Ok(runtime::block_on(py, self.kill_op())?)
+    }
+
+    /// The awaitable twin of `kill`.
+    async fn kill_async(&self) -> PyCoreResult<bool> {
+        Ok(runtime::spawn(self.kill_op()).await?)
     }
 
     /// Wait, then ack, returning the result that carries the output.
@@ -665,10 +805,15 @@ impl PyExecHandle {
     #[pyo3(signature = (timeout=DEFAULT_WAIT))]
     fn wait_and_ack(&self, py: Python<'_>, timeout: f64) -> PyCoreResult<PyExecResult> {
         let timeout = seconds(timeout)?;
-        Ok(PyExecResult::wrap(runtime::block_on(
-            py,
-            self.inner.wait_and_ack(timeout),
-        )?))
+        Ok(runtime::block_on(py, self.wait_and_ack_op(timeout))?)
+    }
+
+    /// The awaitable twin of `wait_and_ack`. Cancelled during the wait it leaves the exec
+    /// untouched; cancelled during the ack, the ack may have landed.
+    #[pyo3(signature = (timeout=DEFAULT_WAIT))]
+    async fn wait_and_ack_async(&self, timeout: f64) -> PyCoreResult<PyExecResult> {
+        let timeout = seconds(timeout)?;
+        Ok(runtime::spawn(self.wait_and_ack_op(timeout)).await?)
     }
 
     fn __repr__(&self) -> String {

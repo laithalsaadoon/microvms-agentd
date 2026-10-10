@@ -6,7 +6,8 @@
 //! the gate. Dropping the handle stops the task, so a keepalive cannot outlive the object
 //! that owns it unnoticed.
 
-use std::sync::{Mutex, PoisonError};
+use std::future::Future;
+use std::sync::Arc;
 use std::time::Duration;
 
 use microvms_core::Error;
@@ -66,7 +67,8 @@ impl PyKeepAwakeReport {
 /// Keep a reference: dropping this object stops the keepalive.
 #[pyclass(frozen, name = "KeepAwake", module = "microvms")]
 pub struct PyKeepAwake {
-    task: KeepAwakeTask,
+    /// An `Arc` so an awaitable `stop_async` or `wait_async` can own the task it waits on.
+    task: Arc<KeepAwakeTask>,
 }
 
 /// Where the keepalive reads the session from.
@@ -83,8 +85,11 @@ pub(crate) enum Source {
 
 impl Source {
     /// The sandbox-held source and its launch idle window, or `None` without a session.
-    pub(crate) fn in_sandbox(sandbox: &Mutex<Sandbox>) -> Option<(Self, Option<Duration>)> {
-        let guard = sandbox.lock().unwrap_or_else(PoisonError::into_inner);
+    pub(crate) fn in_sandbox(
+        py: Python<'_>,
+        sandbox: &tokio::sync::Mutex<Sandbox>,
+    ) -> Option<(Self, Option<Duration>)> {
+        let guard = runtime::lock_now(py, sandbox);
         let session = guard.session()?.clone();
         Some((
             Self::InSandbox(session, guard.watch_lifecycle()),
@@ -105,8 +110,34 @@ impl PyKeepAwake {
         };
         let _runtime = runtime::handle().enter();
         Ok(Self {
-            task: policy.spawn(session, running)?,
+            task: Arc::new(policy.spawn(session, running)?),
         })
+    }
+
+    fn stop_op(&self) -> impl Future<Output = Result<PyKeepAwakeReport, Error>> + Send + 'static {
+        let task = Arc::clone(&self.task);
+        task.request_stop();
+        async move {
+            task.finished()
+                .await
+                .map(|inner| PyKeepAwakeReport { inner })
+        }
+    }
+
+    fn wait_op(
+        &self,
+        timeout: Option<Duration>,
+    ) -> impl Future<Output = Result<Option<PyKeepAwakeReport>, Error>> + Send + 'static {
+        let task = Arc::clone(&self.task);
+        async move {
+            let finished = match timeout {
+                Some(limit) => tokio::time::timeout(limit, task.finished()).await.ok(),
+                None => Some(task.finished().await),
+            };
+            Ok(finished
+                .transpose()?
+                .map(|inner| PyKeepAwakeReport { inner }))
+        }
     }
 }
 
@@ -120,9 +151,13 @@ impl PyKeepAwake {
 
     /// Stops polling and returns the report. Raises the poll's error if one ended it.
     fn stop(&self, py: Python<'_>) -> PyCoreResult<PyKeepAwakeReport> {
-        self.task.request_stop();
-        let inner = runtime::block_on(py, self.task.finished())?;
-        Ok(PyKeepAwakeReport { inner })
+        Ok(runtime::block_on(py, self.stop_op())?)
+    }
+
+    /// The awaitable twin of `stop`. The stop is asked for before the first await, so
+    /// cancelling this still stops the keepalive; only the wait for its report is given up.
+    async fn stop_async(&self) -> PyCoreResult<PyKeepAwakeReport> {
+        Ok(runtime::spawn(self.stop_op()).await?)
     }
 
     /// Waits for the keepalive to end on its own (`while_busy` or `max_duration`).
@@ -135,15 +170,14 @@ impl PyKeepAwake {
         timeout: Option<f64>,
     ) -> PyCoreResult<Option<PyKeepAwakeReport>> {
         let timeout = timeout.map(crate::exec::seconds).transpose()?;
-        let finished = runtime::block_on(py, async {
-            match timeout {
-                Some(limit) => tokio::time::timeout(limit, self.task.finished()).await.ok(),
-                None => Some(self.task.finished().await),
-            }
-        });
-        Ok(finished
-            .transpose()?
-            .map(|inner| PyKeepAwakeReport { inner }))
+        Ok(runtime::block_on(py, self.wait_op(timeout))?)
+    }
+
+    /// The awaitable twin of `wait`.
+    #[pyo3(signature = (timeout=None))]
+    async fn wait_async(&self, timeout: Option<f64>) -> PyCoreResult<Option<PyKeepAwakeReport>> {
+        let timeout = timeout.map(crate::exec::seconds).transpose()?;
+        Ok(runtime::spawn(self.wait_op(timeout)).await?)
     }
 
     fn __enter__(slf: Py<Self>) -> Py<Self> {
@@ -161,6 +195,27 @@ impl PyKeepAwake {
     ) -> PyCoreResult<bool> {
         let _ = (exc_value, traceback);
         let stopped = self.stop(py);
+        if exc_type.is_none() {
+            stopped?;
+        }
+        Ok(false)
+    }
+
+    /// `async with session.keep_awake() as k:`.
+    async fn __aenter__(slf: Py<Self>) -> Py<Self> {
+        slf
+    }
+
+    /// `__exit__`, awaited.
+    #[pyo3(signature = (exc_type=None, exc_value=None, traceback=None))]
+    async fn __aexit__(
+        &self,
+        exc_type: Option<Py<PyAny>>,
+        exc_value: Option<Py<PyAny>>,
+        traceback: Option<Py<PyAny>>,
+    ) -> PyCoreResult<bool> {
+        let _ = (exc_value, traceback);
+        let stopped = runtime::spawn(self.stop_op()).await;
         if exc_type.is_none() {
             stopped?;
         }
