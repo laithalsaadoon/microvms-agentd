@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! The Gherkin behavior spec for IMAGE-1 through IMAGE-4, run against the real functions.
 //!
-//! The scenarios live in `tests/features/wrap_dockerfile.feature`, tagged with the requirement
+//! The scenarios live in `tests/features/wrap_task_image.feature`, tagged with the requirement
 //! each one verifies; this file is their step definitions and runner. It is a `harness = false`
 //! test, so `cargo test` runs it everywhere, and it writes a JUnit report when
 //! `CUCUMBER_JUNIT` names a file (give that path absolutely: `cargo test` runs this binary from
@@ -236,7 +236,7 @@ fn derived_name(world: &mut Wrap) {
 fn main() {
     let features = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/tests/features/wrap_dockerfile.feature"
+        "/tests/features/wrap_task_image.feature"
     );
     // `cargo test <filter>` passes a libtest filter to every test target. A filter naming
     // something else selects nothing here, as libtest would.
