@@ -1,6 +1,6 @@
 [package]
 name = "microvms-domain"
-version = "0.11.0"
+version = "0.12.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -18,7 +18,7 @@ categories = ["virtualization"]
 [dependencies]
 # The wire contract, shared with the daemon (ARCH-2). The identity seeds' validation lives
 # there so the host and the daemon can't disagree about what a seed is.
-protocol = { package = "microvms-protocol", version = "0.11.0", path = "../protocol" }
+protocol = { package = "microvms-protocol", version = "0.12.0", path = "../protocol" }
 # The error taxonomy's Display impls. 2.x rather than 1.x: `#[error]` on an enum
 # with `#[from]` is the same surface, and the 2.0 line is what receives fixes.
 thiserror = "2.0.19"

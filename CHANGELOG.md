@@ -13,6 +13,68 @@ CONTRIBUTING.md, "Changelog", says how to write one.
 
 <!-- towncrier release notes start -->
 
+## [0.12.0] - 2026-10-10
+
+### Added
+
+- **`Sandbox.launch_image_arn` in Python and `Sandbox.launchImageArn()` in Node (#280).** Both
+  bindings expose core's `Sandbox::launch_image_arn`: the image ARN `run` sent in `RunMicrovm`,
+  with a bare name resolved, recorded before the call so a refused launch still names it. It is
+  `None` (Node: `null`) until `run` has resolved an image, and on an adopted sandbox.
+- **Native asyncio awaitables in the Python binding (#544, BIND-25, BIND-26, BIND-27).** Every
+  Python method that calls AWS or the daemon has a twin with the same arguments and an `_async`
+  suffix that returns a coroutine: `await Sandbox.create_async(region)`,
+  `await sandbox.run_async(...)`, `await session.run_sync_async([...])`,
+  `await handle.wait_async()`, `await preflight_async()` and the rest. A twin runs the future its
+  blocking spelling runs, as a task on the binding's shared runtime, so the event loop never
+  waits on the network and concurrent awaits overlap. `ExecStream` and `ByteStream` work with
+  `async for`, and `Sandbox`, `AgentVm`, `KeepAwake`, `Tunnel` and `PortForward` with
+  `async with`. Cancelling a read, wait, transfer or exec start aborts it; cancelling a lifecycle
+  transition (a launch, an image build, a suspend, a resume or a teardown) lets it finish, so a
+  cancelled launch still leaves its VM on the sandbox that started it. Built on PyO3's own
+  coroutine support, with no new dependency.
+
+### Changed
+
+- **A cost report counts no suspend/resume cycle unless its caller names one, on every surface
+  (#280).** `microvm cost` and `cost --estimate` defaulted `--cycles` to 1, so a report of a run
+  that never suspended carried a snapshot write and read it never paid, while Python's and
+  Node's `run_report` and `estimate_run` defaulted to none. A report claims only what the caller
+  says happened, so each surface takes core's new `DEFAULT_REPORT_CYCLES`, zero, which the
+  manifest publishes as `clientDefaults.reportCycles`. The residency comparison keeps its
+  default of one cycle, `DEFAULT_RESIDENCY_CYCLES`, on every surface, since its per-cycle figure
+  is the point: `cost --compare` with no `--cycles` still prices one, and a `--cycles` given
+  feeds both the report and the comparison. A script that relied on the old CLI default passes
+  `--cycles 1`. Python's `run_report`, `estimate_run` and `compare_residency` name core's
+  constants, so the stub prints those defaults as `...`.
+- **`SigstoreVerifier` checks the daemon release with `sigstore-verify` 0.14.0 (#523).**
+  `sigstore-verify`, `sigstore-trust-root` and `sigstore-types` move from 0.13.0 to 0.14.0
+  together, since 0.14.0 is a breaking release of each and the verifier takes the other two's
+  types. The check is the same: the certificate chain to Fulcio, the SCT, the Rekor inclusion
+  proof, checkpoint and SET, the release workflow's identity and issuer matched exactly, and the
+  SLSA provenance predicate, offline against the embedded public-good trusted root, which 0.14.0
+  carries unchanged from 0.13.0.
+
+### Fixed
+
+- **A credential failure during a proxy token mint is `ERR_CREDENTIALS` (#280).** A mint the
+  control plane refused for the caller's identity was reported as `ERR_RETRYABLE` (exit 3), with
+  a message saying the identical request may succeed. It keeps its credential class: exit 4
+  on the CLI and `CredentialsError` in Python, and its message says the request fails the same
+  way until the identity is fixed. A throttle or any other mint failure stays retryable.
+- **`ControlPlane::list_microvms` lists each VM once (#280).** The service can return one VM on
+  two pages of a `ListMicrovms` walk while VMs change state, and the listing concatenated the
+  pages, so `ls --remote` and both bindings' `ControlPlane.list` could list a VM twice. A repeat
+  keeps the place the VM was first listed and the entry read last, the newer reading of its
+  state.
+- **An ensured image's name covers the fields the service fixes at create (#280).**
+  `ensure_image`, `build --reuse` and the agent recipes named an image for its artifact, base,
+  base version and size alone, so a reuse could return an image built without the identity
+  repair, `inherit_workdir`, hook timeouts or log destination the caller asked for. Those
+  fields are part of the name's hash, and the hash's version moves to 2, so every ensured image
+  is renamed once: the first ensure after upgrading builds a fresh image, and the old one is
+  left for the caller to delete. Tags stay out of the name.
+
 ## [0.11.0] - 2026-10-02
 
 ### Added
