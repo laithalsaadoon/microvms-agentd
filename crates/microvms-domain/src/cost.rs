@@ -2105,7 +2105,20 @@ impl ResidencyComparison {
 
 /// The suspend/resume cycles [`compare_residency`] prices when the caller names none: one,
 /// the fewest that make a suspension more than a termination.
+///
+/// One rather than [`DEFAULT_REPORT_CYCLES`]'s zero: the comparison is a hypothetical whose
+/// per-cycle figure is its point, and pricing no cycle would show suspension's transitions as
+/// free.
 pub const DEFAULT_RESIDENCY_CYCLES: u32 = 1;
+
+/// The suspend/resume cycles a report counts when the caller names none: zero, the
+/// `suspend_resume_cycles` of [`RunUsage::default`] and [`PlanUsage::default`], and what the
+/// CLI's `cost` and `cost --estimate` and both bindings' `run_report` and `estimate_run` apply.
+///
+/// Zero because a report claims only what its caller says happened (#280). A cycle charges a
+/// snapshot write and read, so a default of one would bill every run for a suspension it never
+/// had. [`compare_residency`] defaults to [`DEFAULT_RESIDENCY_CYCLES`] instead.
+pub const DEFAULT_REPORT_CYCLES: u32 = 0;
 
 /// The warm-pool argument, with its own counter-argument attached.
 ///
@@ -4690,6 +4703,57 @@ mod tests {
         for (usage, launched) in runs {
             assert_eq!(usage.infer_launched(), launched, "{usage:?}");
         }
+    }
+
+    /// A usage's default counts the report's default cycles, zero, and a report of it has no
+    /// suspend or resume line, while the comparison's default prices one cycle (#280).
+    #[test]
+    fn a_report_defaults_to_no_cycle_and_a_comparison_to_one() {
+        assert_eq!(DEFAULT_REPORT_CYCLES, 0);
+        assert_eq!(
+            RunUsage::default().suspend_resume_cycles,
+            DEFAULT_REPORT_CYCLES
+        );
+        assert_eq!(
+            PlanUsage::default().suspend_resume_cycles,
+            DEFAULT_REPORT_CYCLES
+        );
+        let report = estimate_run(
+            SizeClass::Mib2048,
+            &PlanUsage {
+                running_seconds: 600.0,
+                ..PlanUsage::launched()
+            },
+            &rates(),
+            fresh_day(),
+            DEFAULT_ESTIMATE_LABEL,
+        )
+        .expect("a report");
+        let phases: Vec<CostPhase> = report.items().iter().map(|item| item.phase).collect();
+        assert_eq!(
+            phases,
+            [CostPhase::Launch, CostPhase::Running, CostPhase::Running]
+        );
+
+        assert_eq!(DEFAULT_RESIDENCY_CYCLES, 1);
+        let comparison = compare_residency(
+            SizeClass::Mib2048,
+            Duration::from_secs(3600),
+            DEFAULT_RESIDENCY_CYCLES,
+            &rates(),
+            fresh_day(),
+        )
+        .expect("a comparison");
+        let suspended: Vec<CostPhase> = comparison
+            .suspended()
+            .items()
+            .iter()
+            .map(|item| item.phase)
+            .collect();
+        assert_eq!(
+            suspended,
+            [CostPhase::Suspended, CostPhase::Suspend, CostPhase::Resume]
+        );
     }
 
     /// **The unpriced line has no `usd` key at all.**

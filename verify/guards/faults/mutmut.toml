@@ -304,3 +304,83 @@ expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_rerun_gets_what_the_failed_run_left_of_the_share ("
 transform = { file = "tools/check-mutmut.py", replace = "else seconds - (time.monotonic() - begun)", with = "else seconds + (time.monotonic() - begun)" }
+
+# `mutmut-result` reports the shards' combined result as `mutation testing the gate scripts`,
+# for main's ruleset to require (#279). No job carries the name, or a shard does too; it stops
+# waiting for the shards; it's skipped when a shard fails, which the ruleset reads as passing;
+# or it runs on main's push too, where the shards are skipped, and fails there.
+[[family]]
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_the_required_check_is_the_aggregator"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "mutmut-job-aggregator-missing"
+message = "0 jobs carry the required check's name"
+transform = { file = ".github/workflows/ci.yml", replace = "  mutmut-result:\n    name: mutation testing the gate scripts\n", with = "  mutmut-result:\n    name: mutation testing the gate scripts result\n" }
+
+[[family.fault]]
+id = "mutmut-job-leg-name"
+message = "2 jobs carry the required check's name"
+transform = { file = ".github/workflows/ci.yml", replace = "    name: mutation testing the gate scripts (shard ${{ matrix.shard }} of 4)\n", with = "    name: mutation testing the gate scripts\n" }
+
+[[family.fault]]
+id = "mutmut-job-aggregator-needs"
+message = "the aggregator doesn't wait for the shards"
+transform = { file = ".github/workflows/ci.yml", replace = "    name: mutation testing the gate scripts\n    needs: mutmut\n", with = "    name: mutation testing the gate scripts\n" }
+
+[[family.fault]]
+id = "mutmut-job-aggregator-always"
+message = "the aggregator doesn't run when a shard fails"
+transform = { file = ".github/workflows/ci.yml", replace = "    needs: mutmut\n    if: always() && github.event_name == 'pull_request'\n", with = "    needs: mutmut\n    if: github.event_name == 'pull_request'\n" }
+
+[[family.fault]]
+id = "mutmut-job-aggregator-on-push"
+message = "the aggregator runs where the shards don't"
+transform = { file = ".github/workflows/ci.yml", replace = "    needs: mutmut\n    if: always() && github.event_name == 'pull_request'\n", with = "    needs: mutmut\n    if: always()\n" }
+
+# It passes a shard that timed out (`cancelled`), fails red with nothing in its log, or reads
+# another job's result.
+[[family]]
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_the_aggregator_passes_only_when_every_shard_passed"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "mutmut-job-aggregator-result"
+message = "with the shards cancelled"
+transform = { file = ".github/workflows/ci.yml", replace = "        run: '[ \"$RESULT\" = success ] || { echo \"::error::a mutmut shard ended $RESULT; open the red mutation testing the gate scripts (shard k of 4) check\"; exit 1; }'\n", with = "        run: '[ \"$RESULT\" != failure ] || { echo \"::error::a mutmut shard ended $RESULT; open the red mutation testing the gate scripts (shard k of 4) check\"; exit 1; }'\n" }
+
+[[family.fault]]
+id = "mutmut-job-aggregator-silent"
+message = "the aggregator fails without saying why"
+transform = { file = ".github/workflows/ci.yml", replace = "        run: '[ \"$RESULT\" = success ] || { echo \"::error::a mutmut shard ended $RESULT; open the red mutation testing the gate scripts (shard k of 4) check\"; exit 1; }'\n", with = "        run: test \"$RESULT\" = success\n" }
+
+[[family.fault]]
+id = "mutmut-job-aggregator-other-job"
+message = "unmodeled `${{ needs.guards.result }}`"
+transform = { file = ".github/workflows/ci.yml", replace = "          RESULT: ${{ needs.mutmut.result }}\n", with = "          RESULT: ${{ needs.guards.result }}\n" }
+
+# It passes over a red shard: its step is skipped, or its exit swallowed.
+[[family]]
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_the_aggregator_has_no_way_to_pass_over_a_red_shard"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "mutmut-job-aggregator-step-if"
+message = "an aggregator step sets a key that can hide a red shard"
+transform = { file = ".github/workflows/ci.yml", replace = "      - name: every mutmut shard passed\n", with = "      - name: every mutmut shard passed\n        if: needs.mutmut.result == 'success'\n" }
+
+[[family.fault]]
+id = "mutmut-job-aggregator-step-continue"
+message = "an aggregator step sets a key that can hide a red shard"
+transform = { file = ".github/workflows/ci.yml", replace = "      - name: every mutmut shard passed\n", with = "      - name: every mutmut shard passed\n        continue-on-error: true\n" }
+
+[[family.fault]]
+id = "mutmut-job-aggregator-job-continue"
+message = "the aggregator job sets a key that can hide a red shard"
+transform = { file = ".github/workflows/ci.yml", replace = "    needs: mutmut\n    if: always() && github.event_name == 'pull_request'\n", with = "    needs: mutmut\n    if: always() && github.event_name == 'pull_request'\n    continue-on-error: true\n" }

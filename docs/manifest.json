@@ -41,6 +41,7 @@
       },
       "promptTimeoutSeconds": 900.0,
       "readyTimeoutSeconds": 120.0,
+      "reportCycles": 0,
       "residencyCycles": 1,
       "sizeMib": 2048,
       "stream": {
@@ -4019,7 +4020,7 @@
           },
           {
             "choices": null,
-            "default": "1",
+            "default": null,
             "help": "Suspend/resume cycles, each paying a snapshot write plus a read",
             "name": "cycles",
             "positional": false,

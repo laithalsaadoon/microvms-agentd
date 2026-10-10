@@ -122,7 +122,10 @@ CI's `mutants` job runs cargo-mutants over the Rust a pull request changes, and
 `check`, because each mutant is a build. A mutant is one small change to the
 code, such as a return value replaced or a `>` turned into `>=`. Only the
 mutated package's own tests run against it, so a test in `crates/microvms-core/tests`
-doesn't catch a mutant in the app. A change with no Rust in it passes at once.
+doesn't catch a mutant in the app. A change with no Rust in it passes at once. The job
+runs as four shards that report under their own names, and the `mutation testing` check
+is their combined result, which fails when any shard didn't pass. It's the one name main's
+ruleset can require; until the ruleset lists it, read the shards before a merge.
 
 Reading `missed.txt`: each shard uploads its `mutants.out` as an artifact, and
 the job's log prints the same list. Each line names a mutant by file, line,
@@ -151,7 +154,9 @@ original takes a no-mutate pragma on its line, with the reason in parentheses af
 the script requires. The job runs in four shards, each with its share of the changed functions
 and their base, and each within a budget under the job's timeout; a function a shard's budget
 leaves undecided passes, and the log names it. `mise run mutmut` takes the same `--shard` and
-`--budget` arguments the job hands `ci:mutmut`.
+`--budget` arguments the job hands `ci:mutmut`. The `mutation testing the gate scripts` check
+is the shards' combined result, as `mutation testing` is for `mutants`, and main's ruleset
+requires it by that name once it lists it.
 
 Two kinds of code take `#[cfg_attr(test, mutants::skip)]` rather than an
 exclusion: a new test double behind `cfg(any(test, feature = "test-support"))`

@@ -67,9 +67,9 @@ use std::collections::BTreeMap;
 
 use microvms_core::SizeClass;
 use microvms_core::cost::{
-    self, Amount, BillingLine, CalendarDate, CostPhase, CostReport as CoreReport, DurationP,
-    EstimatedUsd as CoreUsd, LineItem as CoreLineItem, PlanUsage, Provenance, RateTable, RunUsage,
-    Total as CoreTotal,
+    self, Amount, BillingLine, CalendarDate, CostPhase, CostReport as CoreReport,
+    DEFAULT_REPORT_CYCLES, DEFAULT_RESIDENCY_CYCLES, DurationP, EstimatedUsd as CoreUsd,
+    LineItem as CoreLineItem, PlanUsage, Provenance, RateTable, RunUsage, Total as CoreTotal,
 };
 use microvms_core::prelude::*;
 use pyo3::prelude::*;
@@ -903,8 +903,9 @@ impl PyResidencyComparison {
 ///
 /// Leave `launched` out and the core infers it: running time, or an image of non-zero size
 /// (a launch reads a snapshot, so claiming one adds a transfer line). Leave `label` out and
-/// the report is labelled `"run"`. Both defaults are the core's, the ones `microvm cost`
-/// applies.
+/// the report is labelled `"run"`. Leave `suspend_resume_cycles` out and the report counts
+/// none, so it has no suspend or resume line: a report claims only what the caller says
+/// happened. All three defaults are the core's, the ones `microvm cost` applies.
 #[pyfunction]
 #[pyo3(signature = (
     size,
@@ -914,7 +915,7 @@ impl PyResidencyComparison {
     image_build=None,
     image_gb=None,
     image_retained=None,
-    suspend_resume_cycles=0,
+    suspend_resume_cycles=DEFAULT_REPORT_CYCLES,
     snapshot_gb=None,
     launched=None,
     label=None,
@@ -969,7 +970,8 @@ pub(crate) fn run_report(
 ///
 /// Leave `launched` out and the core infers it: running time, or an image of non-zero size, so
 /// a plan of suspended time alone reads no launch snapshot. Leave `label` out and the report
-/// is labelled `"estimate"`, what `microvm cost --estimate` labels the same plan (#255).
+/// is labelled `"estimate"`, what `microvm cost --estimate` labels the same plan (#255). Leave
+/// `suspend_resume_cycles` out and the plan counts none, as `microvm cost --estimate` does.
 #[pyfunction]
 #[pyo3(signature = (
     size,
@@ -978,7 +980,7 @@ pub(crate) fn run_report(
     suspended_seconds=0.0,
     image_gb=None,
     image_retained_seconds=None,
-    suspend_resume_cycles=0,
+    suspend_resume_cycles=DEFAULT_REPORT_CYCLES,
     snapshot_gb=None,
     launched=None,
     label=None,
@@ -1022,10 +1024,15 @@ pub(crate) fn estimate_run(
 }
 
 /// The warm-pool argument, with its own counter-argument attached.
+///
+/// Leave `cycles` out and the comparison prices one suspend/resume cycle, the core's default
+/// and the one `microvm cost --compare` applies: the per-cycle figure is what keeps the
+/// argument honest. A report's `suspend_resume_cycles` defaults to none instead.
 #[pyfunction]
-// A literal, not core's `DEFAULT_RESIDENCY_CYCLES`, for the reason `wait_for_state`'s
-// signature gives: the stub would print a named default as `...`.
-#[pyo3(signature = (size, hold_seconds, cycles=1, *, rates=None))]
+// Core's constant rather than a literal, as `run_report` and `estimate_run` name
+// `DEFAULT_REPORT_CYCLES`, so each default has one definition. The stub prints a named default
+// as `...`, which `parity:check` holds through its `[[default]]` row (#280).
+#[pyo3(signature = (size, hold_seconds, cycles=DEFAULT_RESIDENCY_CYCLES, *, rates=None))]
 pub(crate) fn compare_residency(
     size: PySizeClass,
     hold_seconds: f64,

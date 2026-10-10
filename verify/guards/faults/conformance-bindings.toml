@@ -1,0 +1,39 @@
+# ── the live suite's binding-handles section, offline (#263, #270) ───────────
+
+# The lane builds with the maturin CI's `bindings:py` task installs; a pin of its own would build
+# a binding CI never tested.
+[[family]]
+guard = "conformance/selftest/bindings.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "conformance-bindings-maturin-pin"
+message = "FAIL  the binding lane's maturin pin is the bindings:py task's"
+transform = { file = "conformance/lanes/bindings.py", replace = "MATURIN = \"maturin@1.14.1\"", with = "MATURIN = \"maturin@1.13.0\"" }
+
+# A driver line read as an event without its `event` field: a traceback that happens to parse as
+# JSON would pass for an answer.
+[[family.fault]]
+id = "conformance-bindings-event-field-ignored"
+message = "FAIL  a driver line that isn't an event is refused by name"
+transform = { file = "conformance/lanes/bindings.py", replace = "    if not isinstance(event, dict) or not isinstance(event.get(\"event\"), str):\n", with = "    if not isinstance(event, dict):\n" }
+
+# A failed build step read as a pass: the driver would run against a venv with no binding in it.
+[[family.fault]]
+id = "conformance-bindings-build-failure-ignored"
+message = "FAIL  a failed maturin build ends the Python build and leaves the Node build"
+transform = { file = "conformance/lanes/bindings.py", replace = "            if done.returncode != 0:\n", with = "            if False:\n" }
+
+# A verdict that compares the report with itself passes a handle that stopped for any reason.
+[[family.fault]]
+id = "conformance-bindings-stop-reason-unread"
+message = "FAIL  every binding-handle check fails on an absent value and on a wrong one"
+transform = { file = "conformance/lanes/bindings.py", replace = "            report.get(\"stopped\"),\n            \"limit\",\n", with = "            report.get(\"stopped\"),\n            report.get(\"stopped\") or \"limit\",\n" }
+
+# The request, agent token included, written to the report's invocation log.
+[[family.fault]]
+id = "conformance-bindings-token-logged"
+message = "FAIL  the binding lane's log never carries an agent token"
+transform = { file = "conformance/lanes/bindings.py", replace = "            log.append(command_for_log(command) + f\"  # {kind} request on stdin\")\n", with = "            log.append(command_for_log(command) + json.dumps(session))\n" }

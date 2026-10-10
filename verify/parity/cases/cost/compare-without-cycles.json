@@ -1,0 +1,12 @@
+{
+  "capability": "compare-residency",
+  "input": {
+    "size_mib": 2048,
+    "hold_seconds": 3600
+  },
+  "expect": {
+    "cycles": 1,
+    "ratio": "2.6252621055026757920192149245",
+    "render": "2 GB / 1 vCPU baseline (billed while running), with a fixed ceiling of 8 GB / 4 vCPU provisioned from the start (what the guest reports) held 3600s (projected)\n  running:   ~$0.126100 (estimated)\n  suspended: ~$0.048033 (estimated) (1 cycle(s) included)\n  ratio:     2.6x cheaper suspended\n  per cycle: ~$0.010700 (estimated) — break-even hold 1371s, so avoid churn rather than residency"
+  }
+}

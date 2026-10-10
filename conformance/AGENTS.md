@@ -16,6 +16,16 @@ directory first on its module search path, whatever the working directory:
 - `selftest/`: the offline half. `selftest/suite.py` runs every twin; a lane's twins, where it
   has them, are in the `selftest/` module of the same name.
 
+`drivers/` holds what the suite runs outside its own interpreter: `drivers/handles.py` and
+`drivers/handles.mjs` drive the Python and Node bindings' tunnel, port-forward and import handles
+through each binding's public API alone, over one JSON-lines protocol (the Python file's
+docstring has it). `lanes/bindings.py` builds both bindings from the working tree on a thread
+started before the suite's VM launches (uv and maturin, npx and the napi CLI, at the pins CI's
+`bindings:py` and `dts` tasks use, which its self-test twin holds), then runs each driver
+against the kept VM and makes the request through each handle itself, with httpx. A live run
+therefore needs Node on PATH as well as cargo and uv; `mise run live` gets it from `mise.toml`,
+and `live-conformance.yml` installs it.
+
 - Offline first: `./conformance/run_rs.py --self-test` exercises the suite's own helpers and
   their negative twins, and `mise run live:check` checks the live tier's wiring in
   `.config/mise/tasks/live.toml`. Both are free, and `mise run check` runs both (the first as

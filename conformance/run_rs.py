@@ -20,10 +20,12 @@ beside it. They import as top-level packages because Python puts this file's dir
   suite's own image;
 - `lanes/`: the checks, one module per area, and `lanes/suite.py`, which runs them in order
   against one account;
-- `selftest/`: the offline half, with the stub CLI and the helpers' negative twins.
+- `selftest/`: the offline half, with the stub CLI and the helpers' negative twins;
+- `drivers/`, beside them and imported by none: the scripts `lanes/bindings.py` runs under each
+  binding's own runtime.
 
-A hybrid driver, and both paths are deliberate
-----------------------------------------------
+A hybrid driver, and every path is deliberate
+---------------------------------------------
 
 1. **The CLI, through `--json` envelopes.** The client under test, and the whole protocol
    surface: lifecycle, exec identity, file and tar transfer, streaming, stdin, health. Every
@@ -51,6 +53,12 @@ A hybrid driver, and both paths are deliberate
    layer fewer between the daemon's decision and the assertion about it, and no way for a
    client's status table to be the thing that passes.
 
+3. **The Python and Node bindings, through drivers** (`lanes/bindings.py`, `drivers/`). Each
+   binding is built from the working tree and a small script of each language opens the
+   binding's tunnel and port-forward handles and imports a name record against the kept VM,
+   through the binding's public API alone. The request through each handle is the suite's own,
+   with httpx, so the client on this side of a handle is never the code under test.
+
 `Results.skipped` stays in the summary as a count that should read zero: a suite that removed
 its own ability to report a skip is a suite whose next gap is silent.
 
@@ -61,8 +69,10 @@ This run creates real MicroVMs and is billable, about 20 minutes: about 15 for t
 about five for `drive_idle_keepalive`, which launches a second VM from the image already built
 and deliberately waits out a 60-second idle window twice, plus `drive_agent_vm`, which builds
 the two-agent image on the arm64 builder, launches a VM with egress, and pays for two model
-calls on Bedrock. It belongs to `mise run live` and is never hooked. `--self-test` is the
-offline half: it drives the envelope-to-exception mapping, the NDJSON stream reader and the
+calls on Bedrock. Building the two bindings costs no AWS call and runs on a thread beside the
+suite image's build: from an empty target directory on a 16-core host at 0552d8c the Python
+build took 129 s and the Node build after it 92 s, and a smaller runner takes longer. It
+belongs to `mise run live` and is never hooked. `--self-test` is the offline half: it drives the envelope-to-exception mapping, the NDJSON stream reader and the
 lanes' own helpers against a stub `microvm` script and touches no account.
 
 Usage:

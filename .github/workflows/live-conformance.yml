@@ -129,6 +129,14 @@ jobs:
           # dependencies, so there is no lockfile a cache key could watch and
           # `auto` warns rather than caching.
           enable-cache: false
+      # Node for the suite's binding-handles section (`conformance/lanes/bindings.py`), which
+      # builds the Python and Node bindings from this checkout on a branch and on a tag alike
+      # (maturin through uvx, napi through npx) and drives their handles on the suite's VM.
+      # 22 for the reason `mise.toml` pins it: the floor of microvms-js's `engines`. The same
+      # setup-node commit `release.yml` and `addons.yml` pin.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22'
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
         with:
           terraform_wrapper: false

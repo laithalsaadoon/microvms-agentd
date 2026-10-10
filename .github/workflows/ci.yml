@@ -478,6 +478,28 @@ jobs:
           path: mutants.out/
           if-no-files-found: warn
 
+  # The check `mutation testing`, as the shards' combined result, for main's ruleset to require
+  # by one name (#279): the shards report under their own names. It's `guards-result`'s twin, and
+  # that job's comment has why it's `always()` and not `!cancelled()` and why it passes on
+  # `success` only. Its `if` is `always()` and the shards' own condition: on a push to main the
+  # shards are skipped, and so is this, since a required check is read on a pull request and a
+  # skipped shard read here would turn main's push run red. On a pull request it always runs, and
+  # a shard that failed, timed out, was cancelled or was skipped fails it. A pull request with no
+  # Rust still reports it green, because each shard passes without mutating anything. It has no
+  # step `if` and no `continue-on-error`, since either would let it pass over a red shard, and
+  # test_check_mutants.py holds its shape. It checks nothing out and runs no task.
+  mutants-result:
+    name: mutation testing
+    needs: mutants
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: every mutants shard passed
+        env:
+          RESULT: ${{ needs.mutants.result }}
+        run: '[ "$RESULT" = success ] || { echo "::error::a mutants shard ended $RESULT; open the red mutation testing (shard k of 4) check"; exit 1; }'
+
   # `mise run mutmut`, the Python twin of `mutants`: mutmut changes the functions a pull request
   # touches in tools/*.py, one mutant at a time, and the job fails when a changed function has
   # more surviving mutants than it had on the base (a new one starts from none).
@@ -526,6 +548,22 @@ jobs:
           BASE: origin/${{ github.base_ref }}
           SHARD: ${{ matrix.shard }}/4
         run: mise run ci:mutmut --base "$BASE" --shard "$SHARD"
+
+  # The check `mutation testing the gate scripts`, as the shards' combined result, for main's
+  # ruleset to require by one name: `mutants-result`'s twin, with its `if` for the same reasons.
+  # A pull request that changes no script still reports it green, because each shard passes
+  # without measuring anything. test_check_mutmut.py holds its shape.
+  mutmut-result:
+    name: mutation testing the gate scripts
+    needs: mutmut
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: every mutmut shard passed
+        env:
+          RESULT: ${{ needs.mutmut.result }}
+        run: '[ "$RESULT" = success ] || { echo "::error::a mutmut shard ended $RESULT; open the red mutation testing the gate scripts (shard k of 4) check"; exit 1; }'
 
   build:
     name: static aarch64 binary

@@ -20,7 +20,7 @@ use crate::agents::{DEFAULT_PROMPT_TIMEOUT, DEFAULT_SIZE, PromptOptions, bedrock
 use crate::control::artifact::WrapOptions;
 use crate::control::ensure::EnsureImageRequest;
 use crate::control::{CreateImageRequest, DEFAULT_AGENT_PORT};
-use crate::cost::DEFAULT_RESIDENCY_CYCLES;
+use crate::cost::{DEFAULT_REPORT_CYCLES, DEFAULT_RESIDENCY_CYCLES};
 use crate::sandbox::{
     DEFAULT_LIFECYCLE_TIMEOUT, LIFECYCLE_POLL_INTERVAL, RunRequest, TeardownOpts,
 };
@@ -60,6 +60,7 @@ pub fn client_defaults() -> Value {
         "clientGraceSeconds": seconds(DEFAULT_CLIENT_GRACE),
         "bedrockTokenTtlHours": bedrock::MAX_LIFETIME.as_secs() / 3600,
         "residencyCycles": DEFAULT_RESIDENCY_CYCLES,
+        "reportCycles": DEFAULT_REPORT_CYCLES,
         "keepAwakeToleratedErrors": crate::session::keepalive::DEFAULT_TOLERATED_ERRORS,
         "syncDeleteTimeoutSeconds": seconds(crate::workspace::DEFAULT_SYNC_DELETE_TIMEOUT),
         "launch": {

@@ -17,6 +17,7 @@ from lanes.agents import daemon_deadline_ok, prompt_metadata_ok
 from lanes.posture import EXECUTION_ROLE_ACTION_PREFIX, execution_role_actions
 from lanes.quickstart import digest_record_agrees
 
+from selftest.bindings import check_binding_handles
 from selftest.caller_artifact import check_caller_artifact_section
 from selftest.closed_output import (
     check_bdd_outcome,
@@ -67,6 +68,7 @@ def self_test() -> int:
         check_gh_logged_out(results)
         check_version_skew_helpers(results)
         check_cost_checks(results)
+        check_binding_handles(results)
 
         # -- the success side -------------------------------------------------
         ok = cli.call("ok")
