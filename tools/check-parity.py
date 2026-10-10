@@ -371,7 +371,7 @@ def normalize(name: str) -> str:
 def paired(name: str, key: str) -> str:
     """The name a `[[type]]` member pairs under: `normalize`'s, with a Python awaitable twin's
     `_async` suffix dropped first, so it pairs with its blocking spelling's TypeScript twin."""
-    if key == "py" and name.endswith("_async") and not name.startswith("_"):
+    if key == "py" and name.endswith("_async"):
         name = name.removesuffix("_async")
     return normalize(name)
 

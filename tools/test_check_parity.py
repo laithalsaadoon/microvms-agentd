@@ -512,11 +512,11 @@ class RuleTests(FixtureCase):
         self.assertProblem("type Sandbox: ts: create is exempt but has a Python twin")
 
     def test_only_a_python_name_drops_the_async_suffix(self):
-        """A TypeScript `regionAsync` is its own name: napi writes no awaitable twins, so a
-        TypeScript member ending in `Async` pairs only with a Python member of that name."""
-        self.typedoc["children"][0]["children"].append(member("regionAsync"))
+        """The suffix rule is Python's: a TypeScript member spelled `run_async` keeps its whole
+        name, so it doesn't pair with Python's `run` the way Python's `run_async` would."""
+        self.typedoc["children"][0]["children"].append(member("run_async"))
         self.assertProblem(
-            "type Sandbox: ts: regionAsync has no Python twin and no exemption"
+            "type Sandbox: ts: run_async has no Python twin and no exemption"
         )
 
     def test_an_exempt_member_that_is_gone_fails(self):
