@@ -4541,7 +4541,7 @@
         "type": "boolean"
       }
     ],
-    "version": "0.11.0"
+    "version": "0.12.0"
   },
   "status": "ok",
   "type": "microvm.manifest"

@@ -1,6 +1,6 @@
 [package]
 name = "microvms-cli"
-version = "0.11.0"
+version = "0.12.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -35,7 +35,7 @@ path = "src/main.rs"
 [dependencies]
 # The whole product surface. Every AWS call, every trap closure, the cost engine,
 # and the error taxonomy the exit table is a rendering of.
-microvms-core = { version = "0.11.0", path = "../microvms-core" }
+microvms-core = { version = "0.12.0", path = "../microvms-core" }
 # No direct `protocol` edge: the wire types are named through
 # `microvms_core::protocol::` (core's re-export), so this crate has exactly one
 # door to everything below it. The direct edge existed while core lacked the
@@ -111,7 +111,7 @@ pkg-fmt = "zip"
 # The same core, with the shared test doubles (`microvms_core::testing`) the guards script it
 # through. The version is here because `check-publishable.py` refuses a versionless path
 # dependency of any kind, and resolver 3 keeps the feature out of a normal build.
-microvms-core = { version = "0.11.0", path = "../microvms-core", features = ["test-support"] }
+microvms-core = { version = "0.12.0", path = "../microvms-core", features = ["test-support"] }
 # Temp files/dirs for the test suites: random names with O_EXCL creation and
 # guaranteed cleanup on drop. Replaces eight hand-rolled pid+thread-id helpers
 # that deleted-then-created by fixed name.

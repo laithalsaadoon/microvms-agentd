@@ -1,6 +1,6 @@
 [package]
 name = "microvms-core"
-version = "0.11.0"
+version = "0.12.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -17,13 +17,13 @@ categories = ["api-bindings", "virtualization"]
 [dependencies]
 # The wire contract, shared with the daemon rather than mirrored (ARCH-2), and re-exported so
 # a consumer names wire types through this crate.
-protocol = { package = "microvms-protocol", version = "0.11.0", path = "../protocol" }
+protocol = { package = "microvms-protocol", version = "0.12.0", path = "../protocol" }
 # The rules and values, which do no I/O (ARCH-6).
-microvms-domain = { version = "0.11.0", path = "../microvms-domain" }
+microvms-domain = { version = "0.12.0", path = "../microvms-domain" }
 # The use cases, written against ports (ARCH-7).
-microvms-app = { version = "0.11.0", path = "../microvms-app" }
+microvms-app = { version = "0.12.0", path = "../microvms-app" }
 # The production port implementations, which `prelude` wires into the use cases.
-microvms-edges = { version = "0.11.0", path = "../microvms-edges" }
+microvms-edges = { version = "0.12.0", path = "../microvms-edges" }
 
 [features]
 # The shared test doubles in `microvms_core::testing`, for a dependent's `[dev-dependencies]`
@@ -36,7 +36,7 @@ test-support = ["microvms-app/test-support"]
 # dependency on this crate with `test-support`: `cargo publish` resolves a versioned
 # self-dependency against the registry, where the feature doesn't exist yet, and
 # `tools/check-publishable.py` refuses one.
-microvms-app = { version = "0.11.0", path = "../microvms-app", features = ["test-support"] }
+microvms-app = { version = "0.12.0", path = "../microvms-app", features = ["test-support"] }
 # What the integration tests build their fixtures from: the daemon's wire payloads, the tunnel's
 # WebSocket and Noise handshake, a context's zip and hash, and the scratch directories' names.
 # Test-only, so outside the placement set, which covers what ships.
