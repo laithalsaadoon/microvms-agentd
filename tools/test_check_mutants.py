@@ -543,6 +543,126 @@ class WrapperTests(unittest.TestCase):
         self.assertIn("+    42", Path(str(self.argv_file) + ".diff").read_text())
 
 
+# The check main's ruleset requires of the `mutants` job by one name: the shards report under
+# their own names, and one job reports their combined result under this one (#279).
+REQUIRED = "mutation testing"
+
+
+class ResultJobTests(unittest.TestCase):
+    """The `mutants` shards' combined result is one job, `guards-result`'s twin: it waits for
+    every shard, runs wherever they run even when one fails, and passes only on `success`."""
+
+    def jobs(self) -> dict:
+        return yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())["jobs"]
+
+    def aggregator(self) -> dict:
+        jobs = self.jobs()
+        named = [j for j, body in jobs.items() if body.get("name") == REQUIRED]
+        self.assertEqual(
+            len(named),
+            1,
+            f"{len(named)} jobs carry the required check's name `{REQUIRED}`, not one",
+        )
+        self.assertNotEqual(named[0], "mutants", "the required check is one shard")
+        return jobs[named[0]]
+
+    def test_the_required_check_is_the_aggregator(self):
+        job = self.aggregator()
+        needs = job.get("needs")
+        self.assertIn(
+            "mutants",
+            [needs] if isinstance(needs, str) else list(needs or []),
+            "the aggregator doesn't wait for the shards",
+        )
+        # Without `always()` it's skipped when a shard fails, and a skipped required check
+        # counts as passing. The rest of its condition is the shards' own: run where they don't
+        # (a push to main) and it reads them `skipped` and fails there.
+        condition = str(job.get("if")).removeprefix("${{").removesuffix("}}").strip()
+        head, _, rest = condition.partition(" && ")
+        self.assertEqual(
+            head, "always()", "the aggregator doesn't run when a shard fails"
+        )
+        self.assertEqual(
+            rest,
+            str(self.jobs()["mutants"].get("if") or ""),
+            "the aggregator runs where the shards don't",
+        )
+
+    def test_the_aggregator_passes_only_when_every_shard_passed(self):
+        # A timed-out shard reports `cancelled`, not `failure`, so only `success` passes.
+        steps = [s for s in self.aggregator().get("steps") or [] if "run" in s]
+        self.assertEqual(len(steps), 1, "the aggregator runs one step")
+        (step,) = steps
+        expression = re.compile(r"\$\{\{\s*(.+?)\s*\}\}")
+        for result in ("success", "failure", "cancelled", "skipped"):
+            with self.subTest(result=result):
+
+                def value(match: re.Match) -> str:
+                    self.assertEqual(
+                        match.group(1),
+                        "needs.mutants.result",
+                        f"unmodeled `${{{{ {match.group(1)} }}}}`",
+                    )
+                    return result
+
+                env = {
+                    k: expression.sub(value, str(v))
+                    for k, v in (step.get("env") or {}).items()
+                }
+                out = subprocess.run(
+                    [
+                        "bash",
+                        "--noprofile",
+                        "--norc",
+                        "-eo",
+                        "pipefail",
+                        "-c",
+                        step["run"],
+                    ],
+                    capture_output=True,
+                    text=True,
+                    env={"PATH": os.environ["PATH"], **env},
+                )
+                self.assertEqual(
+                    out.returncode == 0,
+                    result == "success",
+                    f"the aggregator's exit {out.returncode} with the shards {result}",
+                )
+                if result != "success":
+                    # A red required check with an empty log doesn't say where to look.
+                    self.assertIn(
+                        f"::error::a mutants shard ended {result}",
+                        out.stdout,
+                        "the aggregator fails without saying why",
+                    )
+
+    def test_the_aggregator_has_no_way_to_pass_over_a_red_shard(self):
+        # A step `if` skips its one step and `continue-on-error` swallows its exit, and either
+        # leaves the job green with a shard red. The aggregator runs no task, so
+        # test_check_ci_parity.py's `CiCommands` never runs it; this holds it to keys that can't
+        # make it pass.
+        job = self.aggregator()
+        extra = set(job) - {
+            "name",
+            "needs",
+            "if",
+            "runs-on",
+            "timeout-minutes",
+            "steps",
+        }
+        self.assertEqual(
+            extra, set(), "the aggregator job sets a key that can hide a red shard"
+        )
+        for step in job.get("steps") or []:
+            with self.subTest(step=step.get("name")):
+                extra = set(step) - {"name", "env", "run"}
+                self.assertEqual(
+                    extra,
+                    set(),
+                    "an aggregator step sets a key that can hide a red shard",
+                )
+
+
 def tracked_rust() -> list[str]:
     """Every `.rs` file git sees in this tree, untracked ones included, ignored ones not."""
     return subprocess.run(

@@ -282,8 +282,11 @@ check that holds it, or says that review does.
   CI's `mutants` job fails on a mutant of the changed Rust that no test
   catches, which is what a test that only checks "it returned" leaves behind,
   and its `mutmut` job fails when a function a change touches in `tools/*.py`
-  has more surviving mutants than it had on the base. Neither is a required
-  check yet, so read their results before a merge.
+  has more surviving mutants than it had on the base. Each runs as shards, and
+  one job reports their combined result as one check for main's ruleset to
+  require: `mutants-result` as `mutation testing` and `mutmut-result` as
+  `mutation testing the gate scripts`. Until the ruleset lists them, read
+  their results before a merge.
 - A requirement is covered by a test that names it, not by a mention.
   `trace:check` counts a key only in a test's name, its own doc comment or
   docstring, a pytest marker, or a Node test's title.
