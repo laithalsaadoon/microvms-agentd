@@ -33,15 +33,18 @@ import { isDeepStrictEqual } from 'node:util';
 
 import {
   AgentVm,
+  Duration,
   NameRegistry,
   Region,
   Sandbox,
   Session,
   SizeClass,
+  compareResidency,
   defaultBaseImage,
   egressPostureFor,
   estimateRun,
   isRetryable,
+  runReport,
   wrapDockerfile,
 } from '../index.js';
 import { codeOf, startSseServer, wireKindOf } from './support/sse.mjs';
@@ -280,18 +283,38 @@ async function imageName(testCase) {
 }
 
 async function cost(testCase) {
-  assert.equal(testCase.capability, 'estimate', testCase.id);
   // `input.defaults` stays out: the binding's own defaults for `launched` and the label are what
-  // the case asks about.
-  return answered(() =>
-    JSON.parse(
-      estimateRun(sizeOf(testCase), {
-        runningSeconds: testCase.input.running_seconds,
-        suspendedSeconds: testCase.input.suspended_seconds,
-        suspendResumeCycles: testCase.input.suspend_resume_cycles,
-      }).toJson(),
-    ),
-  );
+  // the case asks about. A cycle count the case leaves out is `undefined`, an option left out, so
+  // the case asks about the binding's own default for that too.
+  const { input } = testCase;
+  if (testCase.capability === 'estimate') {
+    return answered(() =>
+      JSON.parse(
+        estimateRun(sizeOf(testCase), {
+          runningSeconds: input.running_seconds,
+          suspendedSeconds: input.suspended_seconds,
+          suspendResumeCycles: input.suspend_resume_cycles,
+        }).toJson(),
+      ),
+    );
+  }
+  if (testCase.capability === 'run-report') {
+    return answered(() =>
+      JSON.parse(
+        runReport(sizeOf(testCase), {
+          running: Duration.measured(input.running_seconds),
+          suspendResumeCycles: input.suspend_resume_cycles,
+        }).toJson(),
+      ),
+    );
+  }
+  if (testCase.capability === 'compare-residency') {
+    return answered(() => {
+      const comparison = compareResidency(sizeOf(testCase), input.hold_seconds, input.cycles);
+      return { cycles: comparison.cycles, ratio: comparison.ratio, render: comparison.render() };
+    });
+  }
+  throw new Error(`${testCase.id}: no TypeScript handler for ${testCase.capability} in cost`);
 }
 
 async function daemonStatus(testCase) {

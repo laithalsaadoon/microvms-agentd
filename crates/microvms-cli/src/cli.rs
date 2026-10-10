@@ -2259,8 +2259,12 @@ pub struct CostArgs {
     pub image_gb: Option<f64>,
 
     /// Suspend/resume cycles, each paying a snapshot write plus a read.
-    #[arg(long, default_value_t = 1)]
-    pub cycles: u32,
+    ///
+    /// Left out, the report counts none, since a report claims only what happened, and
+    /// `--compare` prices one, since its per-cycle figure is the point. A count given here
+    /// feeds both.
+    #[arg(long)]
+    pub cycles: Option<u32>,
 
     /// The hold to compare running against suspended over, in seconds.
     #[arg(long, default_value = "3600", value_parser = parse_report_seconds)]

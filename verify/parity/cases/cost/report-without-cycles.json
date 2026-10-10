@@ -1,0 +1,78 @@
+{
+  "capability": "run-report",
+  "input": {
+    "size_mib": 2048,
+    "running_seconds": 600
+  },
+  "expect": {
+    "complete": true,
+    "estimated": true,
+    "fullyMeasured": true,
+    "items": [
+      {
+        "amount": {
+          "kind": "estimated-usd",
+          "usd": "0.00310"
+        },
+        "duration": null,
+        "line": "snapshot-read",
+        "note": "1 x 2 GB; 'launch or resume' shares one rate, and which snapshot a launch reads is undocumented",
+        "phase": "launch",
+        "quantity": "2",
+        "unit": "GB"
+      },
+      {
+        "amount": {
+          "kind": "estimated-usd",
+          "usd": "0.0166166400"
+        },
+        "duration": {
+          "provenance": "measured",
+          "seconds": 600.0
+        },
+        "line": "vcpu",
+        "note": "1 vCPU baseline",
+        "phase": "running",
+        "quantity": "600",
+        "unit": "vCPU-seconds"
+      },
+      {
+        "amount": {
+          "kind": "estimated-usd",
+          "usd": "0.0044000400"
+        },
+        "duration": {
+          "provenance": "measured",
+          "seconds": 600.0
+        },
+        "line": "memory",
+        "note": "2 GB baseline, billed separately from vCPU",
+        "phase": "running",
+        "quantity": "1200",
+        "unit": "GB-seconds"
+      }
+    ],
+    "label": "run",
+    "rates": {
+      "region": "us-east-1",
+      "retrieved": "2026-08-07",
+      "sourceUrl": "https://aws.amazon.com/lambda/pricing/"
+    },
+    "size": {
+      "baselineMib": 2048,
+      "baselineVcpu": 1.0,
+      "describe": "2 GB / 1 vCPU baseline (billed while running), with a fixed ceiling of 8 GB / 4 vCPU provisioned from the start (what the guest reports)",
+      "headroomMib": 6144,
+      "peakMib": 8192,
+      "peakVcpu": 4.0
+    },
+    "total": {
+      "isLowerBound": false,
+      "priced": "0.0241166800",
+      "render": "~$0.024117 (estimated)"
+    }
+  },
+  "ignore": [
+    "staleness"
+  ]
+}

@@ -3175,9 +3175,13 @@ def check_budget(report: CostReport, max_usd: str, on_breach: str) -> BudgetVerd
     Core's `Budget::check`, the gate `microvm cost --max-cost` applies.
     """
 
-def compare_residency(size: SizeClass, hold_seconds: float, cycles: int = 1, *, rates: RateTable |None = None) -> ResidencyComparison:
+def compare_residency(size: SizeClass, hold_seconds: float, cycles: int = ..., *, rates: RateTable |None = None) -> ResidencyComparison:
     """
     The warm-pool argument, with its own counter-argument attached.
+    
+    Leave `cycles` out and the comparison prices one suspend/resume cycle, the core's default
+    and the one `microvm cost --compare` applies: the per-cycle figure is what keeps the
+    argument honest. A report's `suspend_resume_cycles` defaults to none instead.
     """
 
 def core_version() -> str:
@@ -3213,7 +3217,7 @@ def egress_posture_for(egress: bool = False, connectors: Sequence[str] |None = N
     `region`, each connector ARN is checked against the region it names.
     """
 
-def estimate_run(size: SizeClass, *, running_seconds: float = 0.0, suspended_seconds: float = 0.0, image_gb: float |None = None, image_retained_seconds: float |None = None, suspend_resume_cycles: int = 0, snapshot_gb: float |None = None, launched: bool |None = None, label: str |None = None, rates: RateTable |None = None) -> CostReport:
+def estimate_run(size: SizeClass, *, running_seconds: float = 0.0, suspended_seconds: float = 0.0, image_gb: float |None = None, image_retained_seconds: float |None = None, suspend_resume_cycles: int = ..., snapshot_gb: float |None = None, launched: bool |None = None, label: str |None = None, rates: RateTable |None = None) -> CostReport:
     """
     What a plan will cost, before spending anything (COST-10).
     
@@ -3224,7 +3228,8 @@ def estimate_run(size: SizeClass, *, running_seconds: float = 0.0, suspended_sec
     
     Leave `launched` out and the core infers it: running time, or an image of non-zero size, so
     a plan of suspended time alone reads no launch snapshot. Leave `label` out and the report
-    is labelled `"estimate"`, what `microvm cost --estimate` labels the same plan (#255).
+    is labelled `"estimate"`, what `microvm cost --estimate` labels the same plan (#255). Leave
+    `suspend_resume_cycles` out and the plan counts none, as `microvm cost --estimate` does.
     """
 
 def install_agent_access(session: Session, agents: Sequence[AgentSpec], token: BearerToken) -> None:
@@ -3305,7 +3310,7 @@ def provision_agentd_report(version: str |None = None, state_dir: str |PathLike[
     verification, the path, the version, and the digest.
     """
 
-def run_report(size: SizeClass, *, running: Duration |None = None, suspended: Duration |None = None, image_build: Duration |None = None, image_gb: float |None = None, image_retained: Duration |None = None, suspend_resume_cycles: int = 0, snapshot_gb: float |None = None, launched: bool |None = None, label: str |None = None, rates: RateTable |None = None) -> CostReport:
+def run_report(size: SizeClass, *, running: Duration |None = None, suspended: Duration |None = None, image_build: Duration |None = None, image_gb: float |None = None, image_retained: Duration |None = None, suspend_resume_cycles: int = ..., snapshot_gb: float |None = None, launched: bool |None = None, label: str |None = None, rates: RateTable |None = None) -> CostReport:
     """
     Per-phase attribution for one sandbox's lifecycle.
     
@@ -3320,8 +3325,9 @@ def run_report(size: SizeClass, *, running: Duration |None = None, suspended: Du
     
     Leave `launched` out and the core infers it: running time, or an image of non-zero size
     (a launch reads a snapshot, so claiming one adds a transfer line). Leave `label` out and
-    the report is labelled `"run"`. Both defaults are the core's, the ones `microvm cost`
-    applies.
+    the report is labelled `"run"`. Leave `suspend_resume_cycles` out and the report counts
+    none, so it has no suspend or resume line: a report claims only what the caller says
+    happened. All three defaults are the core's, the ones `microvm cost` applies.
     """
 
 def session_constants() -> dict:

@@ -262,16 +262,44 @@ def image_name(case: Case, _servers: Callable[..., SseServer]) -> dict[str, Any]
 
 
 def cost(case: Case, _servers: Callable[..., SseServer]) -> dict[str, Any]:
-    assert case.capability == "estimate", case.id
     # `input.defaults` stays out: the binding's own defaults for `launched` and the label are
-    # what the case asks about.
-    return answered(
-        lambda: microvms.estimate_run(
-            case.size(),
-            running_seconds=case.input["running_seconds"],
-            suspended_seconds=case.input["suspended_seconds"],
-            suspend_resume_cycles=case.input["suspend_resume_cycles"],
-        ).to_dict()
+    # what the case asks about. A cycle count the case leaves out is a keyword left out, so the
+    # case asks about the binding's own default for that too.
+    def given(key: str) -> dict[str, Any]:
+        return {key: case.input[key]} if key in case.input else {}
+
+    if case.capability == "estimate":
+        return answered(
+            lambda: microvms.estimate_run(
+                case.size(),
+                running_seconds=case.input["running_seconds"],
+                suspended_seconds=case.input["suspended_seconds"],
+                **given("suspend_resume_cycles"),
+            ).to_dict()
+        )
+    if case.capability == "run-report":
+        return answered(
+            lambda: microvms.run_report(
+                case.size(),
+                running=microvms.Duration.measured(case.input["running_seconds"]),
+                **given("suspend_resume_cycles"),
+            ).to_dict()
+        )
+    if case.capability == "compare-residency":
+
+        def compare() -> dict[str, Any]:
+            comparison = microvms.compare_residency(
+                case.size(), case.input["hold_seconds"], **given("cycles")
+            )
+            return {
+                "cycles": comparison.cycles,
+                "ratio": comparison.ratio,
+                "render": comparison.render(),
+            }
+
+        return answered(compare)
+    raise AssertionError(
+        f"{case.id}: no Python handler for {case.capability!r} in cost"
     )
 
 

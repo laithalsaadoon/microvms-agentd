@@ -568,7 +568,9 @@ fn a_piped_ls_with_an_empty_ledger_says_nothing_outstanding() {
 /// Three fields per line and no total row, through the real binary — the same contract
 /// `render::report_dense`'s unit test pins, asserted here across the process boundary because
 /// this is the shape a shell pipeline actually receives. What the Python oracle printed for
-/// `cost --running-sec 3600 --build-sec 600 --image-gb 2 --dense` — seven lines, no total:
+/// `cost --running-sec 3600 --build-sec 600 --image-gb 2 --dense` — seven lines, no total. The
+/// oracle's `--cycles` defaulted to 1, and this client's report counts no cycle unless one is
+/// named (#280), so the invocation below passes `--cycles 1` to print the same seven:
 ///
 /// ```text
 /// image-build\tseconds\tunpriced
@@ -593,6 +595,8 @@ fn the_dense_cost_path_is_cuttable_and_marks_unpriced_lines() {
             "600",
             "--image-gb",
             "2",
+            "--cycles",
+            "1",
             "--dense",
         ],
         &[],

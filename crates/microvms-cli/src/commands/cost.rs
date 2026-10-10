@@ -13,9 +13,9 @@
 //! field a `Measured` value could be written into.
 
 use microvms_core::cost::{
-    Budget, CalendarDate, DEFAULT_ESTIMATE_LABEL, DEFAULT_RUN_LABEL, DurationP, EstimatedUsd,
-    OnBreach as CoreOnBreach, PlanUsage, RunUsage, compare_residency, estimate_run, pinned_rates,
-    run_report,
+    Budget, CalendarDate, DEFAULT_ESTIMATE_LABEL, DEFAULT_REPORT_CYCLES, DEFAULT_RESIDENCY_CYCLES,
+    DEFAULT_RUN_LABEL, DurationP, EstimatedUsd, OnBreach as CoreOnBreach, PlanUsage, RunUsage,
+    compare_residency, estimate_run, pinned_rates, run_report,
 };
 use microvms_core::prelude::*;
 use serde_json::{Map, Value};
@@ -66,13 +66,16 @@ pub fn cost<O: std::io::Write, E: std::io::Write>(
         }
     }
 
+    // One flag, two defaults: the report counts only the cycles the caller names, and the
+    // comparison prices one when none is named, because its per-cycle figure is its point.
+    let report_cycles = args.cycles.unwrap_or(DEFAULT_REPORT_CYCLES);
     let report = if args.estimate {
         let mut plan = PlanUsage {
             running_seconds: args.running_sec,
             suspended_seconds: args.suspended_sec,
             image_gb: args.image_gb,
             image_retained_seconds: None,
-            suspend_resume_cycles: args.cycles,
+            suspend_resume_cycles: report_cycles,
             snapshot_gb: None,
             launched: false,
         };
@@ -96,7 +99,7 @@ pub fn cost<O: std::io::Write, E: std::io::Write>(
             image_build: measured(args.build_sec)?,
             image_gb: args.image_gb,
             image_retained: None,
-            suspend_resume_cycles: args.cycles,
+            suspend_resume_cycles: report_cycles,
             snapshot_gb: None,
             launched: false,
         };
@@ -113,7 +116,13 @@ pub fn cost<O: std::io::Write, E: std::io::Write>(
     let mut comparison_json = Value::Null;
     let mut comparison_text = String::new();
     if args.compare {
-        let comparison = compare_residency(size, args.hold_sec, args.cycles, &rates, today)?;
+        let comparison = compare_residency(
+            size,
+            args.hold_sec,
+            args.cycles.unwrap_or(DEFAULT_RESIDENCY_CYCLES),
+            &rates,
+            today,
+        )?;
         comparison_text = comparison.render()?;
         comparison_json = comparison.to_json()?;
     }
@@ -243,7 +252,7 @@ mod tests {
             suspended_sec: 0.0,
             build_sec: 0.0,
             image_gb: None,
-            cycles: 1,
+            cycles: None,
             hold_sec: std::time::Duration::from_secs(3600),
             max_cost: None,
             on_breach: None,
@@ -281,57 +290,77 @@ mod tests {
         );
     }
 
-    /// A zero-length *duration* phase produces no line, while the cycle transitions still do.
+    /// The arguments `microvm cost <argv>` parses to, so a test reads the flags' own defaults
+    /// rather than the ones `args` writes.
+    fn parsed(argv: &[&str]) -> CostArgs {
+        use clap::Parser;
+        let full: Vec<&str> = ["microvm", "cost"].iter().chain(argv).copied().collect();
+        match crate::cli::Cli::try_parse_from(&full)
+            .unwrap_or_else(|error| panic!("{full:?} parses: {error}"))
+            .command
+        {
+            crate::cli::Command::Cost(args) => args,
+            other => panic!("{full:?} parsed as {other:?}"),
+        }
+    }
+
+    /// The phase of each line of a rendered report, in order.
+    fn phases_of(rendered: &Rendered) -> Vec<String> {
+        rendered.data["report"]["items"]
+            .as_array()
+            .expect("an array")
+            .iter()
+            .map(|item| item["phase"].as_str().unwrap_or_default().to_string())
+            .collect()
+    }
+
+    /// A report carries suspend and resume lines only when its caller names cycles (#280).
     ///
-    /// The split is not obvious and it is deliberate parity with the oracle, which I checked
-    /// rather than inferred: `run_report(size=2048, launched=False, suspend_resume_cycles=1)`
-    /// prints exactly `[('suspend', 'GB'), ('resume', 'GB')]`. A duration of zero means "this
-    /// phase did not happen" and gets no line, because a line priced at zero claims a
-    /// measurement nobody took. A *cycle* count of one is a different statement — it says a
-    /// transition happened, and `--cycles` defaults to 1 in both clients — so the snapshot write
-    /// and read are real charges with no duration to them.
-    ///
-    /// My first draft of this test asserted `items.is_empty()` and was simply wrong about the
-    /// contract. Recorded rather than quietly fixed, because the failure mode it would have
-    /// caused is the interesting one: "correct" it by dropping the cycles default and a caller
-    /// comparing residency reads transitions as free, which is the exact inversion
-    /// `ResidencyComparison`'s per-cycle figure exists to prevent.
+    /// A report claims only what the caller says happened. A run with no suspension never
+    /// paid a snapshot write and read, so `cost` with no `--cycles` has neither line, the
+    /// report every binding's `run_report` gives when `suspend_resume_cycles` is left out.
+    /// `--cycles 1` says one cycle happened, and it adds the write and the read: transfers with
+    /// no duration to them, while a zero-length duration phase still gets no line. Under
+    /// `--compare` the same absent flag prices one cycle, `DEFAULT_RESIDENCY_CYCLES`, because the
+    /// comparison's per-cycle figure is its point, and the report beside it still claims none.
     #[test]
-    fn a_zero_length_duration_produces_no_line_while_a_cycle_still_does() {
-        let (rendered, _) = run_cost(args(crate::cli::MemoryMib::Mib2048));
+    fn a_report_carries_a_cycle_only_when_the_caller_names_one() {
+        let (rendered, _) = run_cost(parsed(&[]));
+        assert_eq!(
+            phases_of(&rendered),
+            Vec::<String>::new(),
+            "no flag named a phase or a cycle, so nothing happened to price"
+        );
+        assert_eq!(rendered.data["report"]["total"]["priced"], "0");
+        assert_eq!(rendered.data["comparison"], Value::Null);
+
+        let (rendered, _) = run_cost(parsed(&["--cycles", "1"]));
+        assert_eq!(phases_of(&rendered), ["suspend", "resume"]);
         let items = rendered.data["report"]["items"]
             .as_array()
             .expect("an array");
-        let phases: Vec<&str> = items
-            .iter()
-            .map(|item| item["phase"].as_str().unwrap_or_default())
-            .collect();
-        assert_eq!(
-            phases,
-            ["suspend", "resume"],
-            "the one default cycle's two transitions, and nothing a clock would have timed"
-        );
         // No duration on either, which is what says these are transfers rather than phases.
         assert!(
             items.iter().all(|item| item["duration"].is_null()),
             "{items:?}"
         );
-        assert_eq!(rendered.data["comparison"], Value::Null);
 
-        // And `--cycles 0` really does produce an empty report, so the lines above are the
-        // cycle's rather than something unconditional.
-        let mut no_cycles = args(crate::cli::MemoryMib::Mib2048);
-        no_cycles.cycles = 0;
-        let (empty, _) = run_cost(no_cycles);
-        assert!(
-            empty.data["report"]["items"]
-                .as_array()
-                .expect("an array")
-                .is_empty(),
-            "{}",
-            empty.data["report"]["items"]
+        let (rendered, _) = run_cost(parsed(&["--estimate", "--running-sec", "600"]));
+        assert_eq!(
+            phases_of(&rendered),
+            ["launch", "running", "running"],
+            "an estimate takes the same default as the report"
         );
-        assert_eq!(empty.data["report"]["total"]["priced"], "0");
+
+        let (rendered, _) = run_cost(parsed(&["--compare"]));
+        assert_eq!(rendered.data["comparison"]["cycles"], 1);
+        assert_eq!(phases_of(&rendered), Vec::<String>::new());
+
+        // An explicit count feeds both.
+        let (rendered, _) = run_cost(parsed(&["--compare", "--cycles", "3"]));
+        assert_eq!(rendered.data["comparison"]["cycles"], 3);
+        assert_eq!(phases_of(&rendered), ["suspend", "resume"]);
+        assert_eq!(rendered.data["report"]["items"][0]["note"], "3 x 2 GB");
     }
 
     /// `--compare` carries the per-cycle cost and the break-even hold beside the ratio.
@@ -471,9 +500,7 @@ mod tests {
         // phase is omitted, which is the oracle's `if running_sec else None`. Without this
         // half the fix above could have refused zero too and every default invocation would
         // exit 2.
-        let mut zeroes = args(crate::cli::MemoryMib::Mib2048);
-        zeroes.cycles = 0;
-        let (rendered, _) = run_cost(zeroes);
+        let (rendered, _) = run_cost(args(crate::cli::MemoryMib::Mib2048));
         assert!(
             rendered.data["report"]["items"]
                 .as_array()
@@ -711,7 +738,6 @@ mod tests {
 
         let mut zero_image = args(crate::cli::MemoryMib::Mib2048);
         zero_image.image_gb = Some(0.0);
-        zero_image.cycles = 0;
         assert_eq!(
             phases(zero_image),
             ["image-build", "image-storage"],
@@ -722,7 +748,6 @@ mod tests {
         // the flag being ignored.
         let mut real_image = args(crate::cli::MemoryMib::Mib2048);
         real_image.image_gb = Some(2.0);
-        real_image.cycles = 0;
         assert_eq!(
             phases(real_image),
             ["image-build", "image-storage", "launch"]
