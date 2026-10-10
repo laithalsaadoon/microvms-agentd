@@ -44,7 +44,6 @@ The agent helpers are a deliberate convenience layer over core primitives;
 - Guest-side process-tree cloning as a substitute for provider snapshots.
 - A new turn-boundary suspend protocol: consumers can use existing lifecycle
   calls and endpoint health polling.
-- Competing with AgentCore by duplicating its managed execution product.
 
 ## The AWS ask, and the honest bet
 

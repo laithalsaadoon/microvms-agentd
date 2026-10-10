@@ -32,9 +32,8 @@ another, pins with a manual tracking obligation, one number written down in seve
 rationale paragraphs that have outlived the code they explain.
 
 **Deliberate is distinguished from accidental throughout.** Rows marked *deliberate* are
-documented refusals with a stated cost — `docs/STRATEGY.md:41-47` declines a turn-boundary
-suspend protocol, guest-side process-tree cloning, duplicating AgentCore's managed execution
-product, and "a scheduler, pool manager, or general orchestrator." A declined item is still debt in the sense that it is capability a
+documented refusals with a stated cost — `docs/STRATEGY.md:41-46` declines a turn-boundary
+suspend protocol, guest-side process-tree cloning, and "a scheduler, pool manager, or general orchestrator." A declined item is still debt in the sense that it is capability a
 reader may expect and will not find, but it is not rot, and calling it rot would misprice it. The
 accidental rows are the ones where nobody chose the current state.
 
@@ -117,7 +116,6 @@ Declined scope is written the same way, at document level rather than at a call 
 - "A scheduler, pool manager, or general orchestrator." — `docs/STRATEGY.md:43`
 - "Guest-side process-tree cloning as a substitute for provider snapshots." — `docs/STRATEGY.md:44`
 - "A new turn-boundary suspend protocol" — `docs/STRATEGY.md:45`
-- "Competing with AgentCore by duplicating its managed execution product." — `docs/STRATEGY.md:47`
 - `> **Implemented. This document is kept as history because the reasoning still` / `> applies; the numbers below are outdated.**` — `docs/CLI-COVERAGE-PLAN.md:3-4`
 
 One consequence of the convention is worth stating plainly: an acceptance paragraph is
