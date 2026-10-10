@@ -2,23 +2,9 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://github.com/laithalsaadoon/microvms-agentd/blob/main/.vex/microvms-agentd.openvex.json",
   "author": "laithalsaadoon/microvms-agentd maintainers",
-  "timestamp": "2026-10-07T01:30:11Z",
-  "version": 5,
+  "timestamp": "2026-10-10T17:03:27Z",
+  "version": 6,
   "statements": [
-    {
-      "vulnerability": {
-        "name": "RUSTSEC-2026-0235",
-        "description": "rkyv: insufficient archive validation can cause out-of-bounds reads in archives containing Rc/Arc"
-      },
-      "products": [
-        {
-          "@id": "pkg:cargo/rkyv@0.7.46"
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_present",
-      "impact_statement": "rkyv 0.7 appears in Cargo.lock only as an optional dependency of rust_decimal whose feature this workspace never enables. `cargo tree -i rkyv` prints 'nothing to print': no crate depends on it and it is never compiled into any artifact. The lockfile records optional dependencies regardless. Re-check if rust_decimal's `rkyv` feature is ever turned on."
-    },
     {
       "vulnerability": {
         "name": "GHSA-vfj7-8cjw-p6xm",
@@ -35,40 +21,6 @@
       "status": "not_affected",
       "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
       "impact_statement": "braces is in site/pnpm-lock.yaml only, the docs site's build tooling, through micromatch 4.0.8, which only starlight-llms-txt 0.11.0 depends on (its generator.ts matches page ids against the include, exclude, promote and demote patterns). Those patterns are the ones site/astro.config.ts sets, so the nested patterns the advisory needs would have to be committed to this repository, and the worst they do is crash a docs build. Nothing in site/ ships in a crate, wheel or npm package. Re-check if the site starts taking glob patterns from anything other than its own config, or when braces publishes a fixed release."
-    },
-    {
-      "vulnerability": {
-        "name": "GHSA-ch52-4w7c-c8xp",
-        "description": "http-cache-semantics: max-stale handling can disclose cross-user cached responses",
-        "aliases": [
-          "CVE-2026-93748"
-        ]
-      },
-      "products": [
-        {
-          "@id": "pkg:npm/http-cache-semantics@4.2.0"
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
-      "impact_statement": "http-cache-semantics is in site/pnpm-lock.yaml only, through astro 7.2.9, which imports it in dist/assets/build/remote.js to cache remote images it fetches during a build. The advisory needs a shared cache that answers requests from several users, one of them sending a large max-stale. The site builds static files (site/astro.config.ts sets no output mode and no adapter, and uses passthroughImageService), so no server runs this code, and the only requests it sees are the ones the build itself makes. Re-check if the site gains a server adapter or on-demand rendering, or when http-cache-semantics publishes a fixed release."
-    },
-    {
-      "vulnerability": {
-        "name": "GHSA-rj75-hqrm-r3gf",
-        "aliases": [
-          "CVE-2026-104844"
-        ],
-        "description": "postcss-selector-parser: quadratic complexity in flat selector parsing allows CPU exhaustion"
-      },
-      "products": [
-        {
-          "@id": "pkg:npm/postcss-selector-parser@6.1.4"
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
-      "impact_statement": "postcss-selector-parser 6.1.4 is in site/pnpm-lock.yaml only, the docs site build tooling, through postcss-nested 6.2.0, which only @expressive-code/core 0.44.2 depends on (the lockfile snapshots list no other dependent of either). @expressive-code/core runs postcss-nested in the style preprocessor of its dist/index.js over the CSS that its own plugins and the expressiveCode.styleOverrides in site/astro.config.ts emit during a build. Every selector it parses is committed to this repository or ships in a pinned package, so the long flat selector the advisory needs would have to be committed here, and the worst it does is slow a docs build. Nothing in site/ ships in a crate, wheel or npm package. Proof: in site/pnpm-lock.yaml the only snapshot listing postcss-selector-parser is postcss-nested@6.2.0, and the only one listing postcss-nested is @expressive-code/core@0.44.2. Re-check if the site starts compiling CSS from anything outside this repository, or when @expressive-code moves to postcss-nested 7 or postcss-selector-parser publishes a fixed 6.x release."
     }
   ]
 }

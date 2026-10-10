@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+# Accepted findings for site/pnpm-lock.yaml, each with its reason. A mirror of
+# .vex/microvms-agentd.openvex.json for osv-scanner, which cannot read VEX: every
+# vulnerability ignored here MUST also carry a statement there. It sits beside the lockfile
+# because osv-scanner, and OpenSSF Scorecard through it, apply a config file only to the
+# lockfiles in its own directory. See .vex/README.md.
+
+[[IgnoredVulns]]
+id = "GHSA-vfj7-8cjw-p6xm"
+# braces 3.0.3 (no fixed release on 2026-10-10) is docs-site build tooling only: micromatch,
+# from starlight-llms-txt, expands the include/exclude/promote/demote patterns that
+# site/astro.config.ts sets. An attacker can't supply a pattern; the VEX statement says more.
+reason = "docs-site build tool; its glob patterns come only from site/astro.config.ts"
