@@ -38,8 +38,8 @@ traced requirement is missing a layer. Requirements are defined in
 | ARCH-8 | waived | waived | waived | 1 | 1 | waived |
 | BIND-1 | waived | waived | waived | 1 | 2 | waived |
 | BIND-2 | waived | waived | waived | 3 | 7 | waived |
-| BIND-3 | waived | waived | waived | 1 | 1 | waived |
-| BIND-4 | waived | waived | waived | 1 | 1 | waived |
+| BIND-3 | waived | waived | waived | 1 | 1 | 1 |
+| BIND-4 | waived | waived | waived | 1 | 1 | 1 |
 | BIND-5 | waived | waived | waived | 2 | 2 | waived |
 | BIND-6 | 1 | 1 | 1 | 5 | 7 | 1 |
 | BIND-7 | 1 | 1 | 1 | 4 | 4 | 1 |
@@ -467,7 +467,7 @@ The Python binding shall deposit a thin idiomatic wrapper over microvms-core via
 - **fuzz:** waived: there is no input stream; the rule is over manifests and source
 - **test:** `crates/microvms-cli/tests/dependency_direction.rs`
 - **impl:** `bindings/microvms-py/src/lib.rs`
-- **live:** waived: the wrapper makes no AWS call of its own; core's calls are the live tier's
+- **live:** `conformance/lanes/bindings.py`
 
 ## BIND-4
 
@@ -478,7 +478,7 @@ The JavaScript binding shall deposit a thin idiomatic wrapper over microvms-core
 - **fuzz:** waived: there is no input stream; the rule is over manifests and source
 - **test:** `crates/microvms-cli/tests/dependency_direction.rs`
 - **impl:** `bindings/microvms-js/src/lib.rs`
-- **live:** waived: the wrapper makes no AWS call of its own; core's calls are the live tier's
+- **live:** `conformance/lanes/bindings.py`
 
 ## BIND-5
 

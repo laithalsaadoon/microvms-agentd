@@ -26,6 +26,7 @@ from harness.image import conformance_dockerfile, resolve_base_ref
 from harness.results import Results, run_section
 
 from lanes.agents import drive_agent_vm
+from lanes.bindings import BindingBuild, drive_binding_handles
 from lanes.bootstrap import drive_daemon_lane
 from lanes.caller_artifact import drive_caller_artifact
 from lanes.closed_output import drive_closed_output, drive_closed_output_bdd
@@ -156,6 +157,10 @@ def run_suite(args: argparse.Namespace) -> int:
             # grew the five surfaces `docs/CLI-COVERAGE-PLAN.md` names, so there is nothing
             # left to announce. The summary still prints a skip count, which should read
             # zero — see `Results.skip`.
+            # The Python and Node bindings build from the working tree on a thread of their
+            # own, started first so the build overlaps the suite image's build in
+            # `drive_lifecycle`; `drive_binding_handles` joins it. It calls no AWS API.
+            bindings = BindingBuild(Path(tmp) / "bindings", cli.log).start()
             run_section(results, "local_commands", drive_local_commands, cli, results)
             # Preflight (#223) before anything is launched: it launches nothing itself.
             run_section(results, "preflight", drive_preflight, cli, results)
@@ -322,6 +327,18 @@ def run_suite(args: argparse.Namespace) -> int:
                 results,
             )
             run_section(results, "serve", drive_serve, cli, launched, results)
+            # The bindings' handles over those loops (#263, #270) right after them, on the
+            # same kept VM, so a failure here that `serve` didn't have is the binding's.
+            run_section(
+                results,
+                "binding_handles",
+                drive_binding_handles,
+                cli,
+                launched,
+                bindings,
+                Path(tmp) / "binding-names",
+                results,
+            )
             run_section(
                 results,
                 "file_transfer",

@@ -19,14 +19,12 @@ issue = "#306"
 waive.model = "a property of the crate's dependencies and surface, not of a state"
 waive.gherkin = "no behavior to script: the dependency set and the adapter-logic ratchet check it over manifests and source"
 waive.fuzz = "there is no input stream; the rule is over manifests and source"
-waive.live = "the wrapper makes no AWS call of its own; core's calls are the live tier's"
 
 [BIND-4]
 issue = "#306"
 waive.model = "a property of the crate's dependencies and surface, not of a state"
 waive.gherkin = "no behavior to script: the dependency set and the adapter-logic ratchet check it over manifests and source"
 waive.fuzz = "there is no input stream; the rule is over manifests and source"
-waive.live = "the wrapper makes no AWS call of its own; core's calls are the live tier's"
 
 [BIND-5]
 issue = "#306"
