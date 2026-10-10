@@ -6,6 +6,13 @@ per accessor, and no arithmetic or coercion the core doesn't have. The crate doc
 
 - Behavior belongs in the Rust layers below. A binding converts types and maps errors; it
   doesn't add defaults, retries or validation.
+- Every method or function that calls AWS or the daemon has an awaitable twin named with an
+  `_async` suffix (`create_async` for a constructor), with the same signature. Both spellings
+  drive one future, built by the method's `*_op` helper: the blocking one through
+  `runtime::block_on`, the twin through `runtime::spawn`, or `runtime::spawn_shielded` for a
+  lifecycle transition, which runs to completion when its awaitable is cancelled
+  (`src/runtime.rs` has the rules). A new twin goes in `TWINS` in `tests/test_async.py`, whose
+  census fails otherwise, and in its row's `py` cell in `verify/parity/capabilities.toml`.
 - A change to the exposed surface means `mise run stubs` to regenerate `microvms.pyi`;
   `stubs:check` in `mise run check` fails on a stale stub. Don't change the stub generator's
   maturin pin without checking its output path. A new public function, or a new method

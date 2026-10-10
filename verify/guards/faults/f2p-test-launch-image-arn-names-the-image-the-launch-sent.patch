@@ -24,11 +24,11 @@ index 230c5f8..bc0c722 100644
      ///
      /// The absence is information: TRAP-8's message distinguishes "no stateReason" from an
 diff --git a/bindings/microvms-py/src/sandbox.rs b/bindings/microvms-py/src/sandbox.rs
-index 5ef2669..ab75e4e 100644
+index 12e4622..d93f610 100644
 --- a/bindings/microvms-py/src/sandbox.rs
 +++ b/bindings/microvms-py/src/sandbox.rs
-@@ -782,16 +782,6 @@ impl PySandbox {
-         self.read(|sandbox| sandbox.microvm().map(|vm| vm.endpoint.clone()))
+@@ -1108,16 +1108,6 @@ impl PySandbox {
+         })
      }
  
 -    /// The image ARN `run` sent in `RunMicrovm`: the caller's identifier with a bare name
@@ -37,8 +37,8 @@ index 5ef2669..ab75e4e 100644
 -    /// Recorded before the call, so a launch the service refused still names the image it
 -    /// asked for. `None` until `run` has resolved an image, and on an adopted sandbox.
 -    #[getter]
--    fn launch_image_arn(&self) -> Option<String> {
--        self.read(|sandbox| sandbox.launch_image_arn().map(str::to_owned))
+-    fn launch_image_arn(&self, py: Python<'_>) -> Option<String> {
+-        self.read(py, |sandbox| sandbox.launch_image_arn().map(str::to_owned))
 -    }
 -
      /// Why the VM is in its current state, when the service said.

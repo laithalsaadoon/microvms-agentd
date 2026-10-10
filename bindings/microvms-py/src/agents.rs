@@ -25,7 +25,8 @@
 //! [`PyBearerToken`] shows its length in `repr`, and only `expose()` returns the text — for a
 //! caller who writes it somewhere themselves. Everything on this surface takes the object.
 
-use std::sync::{Arc, Mutex, PoisonError};
+use std::future::Future;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use microvms_core::agents::bedrock::{self, BearerToken, MAX_LIFETIME};
@@ -45,8 +46,8 @@ use crate::errors::{CoreError, PyCoreResult};
 use crate::exec::{PyExecHandle, PyExecResult, seconds};
 use crate::region::PyRegion;
 use crate::runtime;
-use crate::sandbox::{PyEnsuredImage, PyImage, PySandbox, PyTeardownReport};
-use crate::session::PySession;
+use crate::sandbox::{PyEnsuredImage, PyImage, PySandbox, PyTeardownReport, SharedSandbox};
+use crate::session::{PySession, session_op};
 
 /// One agent to install: its name, and the two defaults a caller may override.
 ///
@@ -195,13 +196,20 @@ fn lifetime_of(ttl_seconds: Option<f64>) -> Result<Duration, Error> {
     }
 }
 
-fn mint(region: &Region, ttl_seconds: Option<f64>) -> Result<PyBearerToken, Error> {
+/// The mint both spellings of `mint_bedrock_token`, and `install_access` without a token,
+/// drive. The lifetime is checked before the future exists, so a bad one costs no call.
+fn mint_op(
+    region: Region,
+    ttl_seconds: Option<f64>,
+) -> Result<impl Future<Output = Result<PyBearerToken, Error>> + Send + 'static, Error> {
     let lifetime = lifetime_of(ttl_seconds)?;
-    let minted = runtime::block_on_detached(bedrock::mint(region, lifetime))?;
-    Ok(PyBearerToken {
-        token: minted.token,
-        region: region.clone(),
-        expires_at: minted.expires_at,
+    Ok(async move {
+        let minted = bedrock::mint(&region, lifetime).await?;
+        Ok(PyBearerToken {
+            token: minted.token,
+            region,
+            expires_at: minted.expires_at,
+        })
     })
 }
 
@@ -217,7 +225,17 @@ pub fn mint_bedrock_token(
     region: PyRegion,
     ttl_seconds: Option<f64>,
 ) -> PyCoreResult<PyBearerToken> {
-    Ok(py.detach(|| mint(&region.inner, ttl_seconds))?)
+    Ok(runtime::block_on(py, mint_op(region.inner, ttl_seconds)?)?)
+}
+
+/// The awaitable twin of `mint_bedrock_token`.
+#[pyfunction]
+#[pyo3(signature = (region, *, ttl_seconds=None))]
+pub async fn mint_bedrock_token_async(
+    region: PyRegion,
+    ttl_seconds: Option<f64>,
+) -> PyCoreResult<PyBearerToken> {
+    Ok(runtime::spawn(mint_op(region.inner, ttl_seconds)?).await?)
 }
 
 /// Mint with explicit STS credentials and their expiry without changing process env.
@@ -257,10 +275,25 @@ pub fn mint_bedrock_token_with_credentials(
 /// with no marker is refused as a precondition, naming `agent-up`.
 #[pyfunction]
 pub fn installed_agents(py: Python<'_>, session: &PySession) -> PyCoreResult<Vec<PyAgentSpec>> {
-    let specs = session.detached(py, |session| {
-        runtime::block_on_detached(agents::installed_agents(session))
-    })?;
-    Ok(specs.into_iter().map(PyAgentSpec::wrap).collect())
+    Ok(runtime::block_on(py, installed_agents_op(session))?)
+}
+
+/// The awaitable twin of `installed_agents`.
+#[pyfunction]
+pub async fn installed_agents_async(session: Py<PySession>) -> PyCoreResult<Vec<PyAgentSpec>> {
+    Ok(runtime::spawn(installed_agents_op(session.get())).await?)
+}
+
+fn installed_agents_op(
+    session: &PySession,
+) -> impl Future<Output = Result<Vec<PyAgentSpec>, Error>> + Send + 'static {
+    session_op!(session.held(), |session| Ok(agents::installed_agents(
+        session
+    )
+    .await?
+    .into_iter()
+    .map(PyAgentSpec::wrap)
+    .collect()))
 }
 
 /// Installs Bedrock access for `agents` into a running VM over `session`.
@@ -275,11 +308,33 @@ pub fn install_agent_access(
     agents: Vec<PyAgentSpec>,
     token: PyBearerToken,
 ) -> PyCoreResult<()> {
+    Ok(runtime::block_on(
+        py,
+        install_access_op(session, agents, &token),
+    )?)
+}
+
+/// The awaitable twin of `install_agent_access`.
+#[pyfunction]
+pub async fn install_agent_access_async(
+    session: Py<PySession>,
+    agents: Vec<PyAgentSpec>,
+    token: PyBearerToken,
+) -> PyCoreResult<()> {
+    Ok(runtime::spawn(install_access_op(session.get(), agents, &token)).await?)
+}
+
+fn install_access_op(
+    session: &PySession,
+    agents: Vec<PyAgentSpec>,
+    token: &PyBearerToken,
+) -> impl Future<Output = Result<(), Error>> + Send + 'static {
     let specs: Vec<AgentSpec> = agents.into_iter().map(|spec| spec.inner).collect();
     let access = token.access();
-    Ok(session.detached(py, move |session| {
-        runtime::block_on_detached(agents::install_access(session, &specs, &access))
-    })?)
+    session_op!(session.held(), |session| agents::install_access(
+        session, &specs, &access
+    )
+    .await)
 }
 
 /// Starts one task for `agent` over `session` and returns its handle. Does not wait.
@@ -305,16 +360,60 @@ pub fn prompt_agent(
     permission_mode: &str,
     reap_group_on_exit: bool,
 ) -> PyCoreResult<PyExecHandle> {
-    let options = PromptOptions {
+    let options = prompt_options(exec_id, timeout_sec, permission_mode, reap_group_on_exit)?;
+    Ok(runtime::block_on(
+        py,
+        prompt_agent_op(session, agent.inner, task.to_string(), options),
+    )?)
+}
+
+/// The awaitable twin of `prompt_agent`.
+#[pyfunction]
+#[pyo3(signature = (session, agent, task, *, timeout_sec=None, exec_id=None, permission_mode="agent-default", reap_group_on_exit=false))]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "keyword-only prompt options mirror core"
+)]
+pub async fn prompt_agent_async(
+    session: Py<PySession>,
+    agent: PyAgentSpec,
+    task: String,
+    timeout_sec: Option<f64>,
+    exec_id: Option<String>,
+    permission_mode: &str,
+    reap_group_on_exit: bool,
+) -> PyCoreResult<PyExecHandle> {
+    let options = prompt_options(exec_id, timeout_sec, permission_mode, reap_group_on_exit)?;
+    let op = prompt_agent_op(session.get(), agent.inner, task, options);
+    Ok(runtime::spawn(op).await?)
+}
+
+fn prompt_agent_op(
+    session: &PySession,
+    agent: AgentSpec,
+    task: String,
+    options: PromptOptions,
+) -> impl Future<Output = Result<PyExecHandle, Error>> + Send + 'static {
+    session_op!(session.held(), |session| agents::prompt(
+        session, &agent, &task, &options
+    )
+    .await
+    .map(PyExecHandle::wrap))
+}
+
+/// The prompt options every prompting method's keywords build.
+fn prompt_options(
+    exec_id: Option<String>,
+    timeout_sec: Option<f64>,
+    permission_mode: &str,
+    reap_group_on_exit: bool,
+) -> Result<PromptOptions, Error> {
+    Ok(PromptOptions {
         exec_id,
         timeout: timeout_sec.map(seconds).transpose()?,
-        permission_mode: permission_mode.parse().map_err(CoreError)?,
+        permission_mode: permission_mode.parse()?,
         reap_group_on_exit,
-    };
-    let handle = session.detached(py, |session| {
-        runtime::block_on_detached(agents::prompt(session, &agent.inner, task, &options))
-    })?;
-    Ok(PyExecHandle::wrap(handle))
+    })
 }
 
 /// The layer's fixed values, for a caller that wants to reason about the guest.
@@ -359,49 +458,295 @@ pub fn agent_constants(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
 /// The sequence is the CLI's `agent-up` and `agent-prompt`, one method per step:
 /// `find_image` or `build_artifact` + your upload + `build_image`; `launch`;
 /// `install_access`; `prompt` or `prompt_sync`; `terminate`. `sandbox` and `session` reach
-/// the same VM for suspend, resume, `cp`-shaped transfers, and any other exec.
+/// the same VM for suspend, resume, `cp`-shaped transfers, and any other exec. Each step that
+/// calls AWS or the VM has an awaitable `_async` twin that drives the same future.
 #[pyclass(frozen, name = "AgentVm", module = "microvms")]
 pub struct PyAgentVm {
-    sandbox: Arc<Mutex<Sandbox>>,
+    sandbox: SharedSandbox,
     specs: Vec<AgentSpec>,
     region: Region,
 }
 
+/// The VM's session, or the core's refusal, the one its own `AgentVm` makes before a launch.
+fn launched(sandbox: &Sandbox) -> Result<&microvms_core::session::Session, Error> {
+    agents::launched_session(sandbox)
+}
+
+/// `agents`, or the core's default list when the caller names none.
+fn specs_or_default(agents: Option<Vec<PyAgentSpec>>) -> Vec<AgentSpec> {
+    agents
+        .map(|agents| agents.into_iter().map(|spec| spec.inner).collect())
+        .unwrap_or_else(agents::default_specs)
+}
+
 impl PyAgentVm {
-    fn detached<T>(&self, py: Python<'_>, body: impl FnOnce(&mut Sandbox) -> T + Send) -> T
-    where
-        T: Send,
-    {
-        py.detach(|| {
-            let mut guard = self.sandbox.lock().unwrap_or_else(PoisonError::into_inner);
-            body(&mut guard)
-        })
+    fn own(sandbox: Sandbox, specs: Vec<AgentSpec>, region: Region) -> Self {
+        Self {
+            sandbox: Arc::new(tokio::sync::Mutex::new(sandbox)),
+            specs,
+            region,
+        }
     }
 
-    fn read<T>(&self, body: impl FnOnce(&Sandbox) -> T) -> T {
-        let guard = self.sandbox.lock().unwrap_or_else(PoisonError::into_inner);
-        body(&guard)
+    fn read<T>(&self, py: Python<'_>, body: impl FnOnce(&Sandbox) -> T) -> T {
+        body(&runtime::lock_now(py, &self.sandbox))
     }
 
     fn image_request(
         &self,
+        py: Python<'_>,
         binary: Vec<u8>,
         build_role_arn: &str,
         size: Option<PySizeClass>,
     ) -> Result<microvms_core::control::CreateImageRequest, Error> {
         let size = size.map(|size| size.inner).unwrap_or(DEFAULT_SIZE);
-        self.read(|sandbox| {
+        self.read(py, |sandbox| {
             agents::image_request_for(sandbox, &self.specs, binary, build_role_arn, size)
         })
     }
 
-    fn with_session<T>(
-        sandbox: &Sandbox,
-        body: impl FnOnce(&microvms_core::session::Session) -> Result<T, Error>,
-    ) -> Result<T, Error> {
-        // The core's refusal, the one its own `AgentVm` makes before a launch.
-        body(agents::launched_session(sandbox)?)
+    // The futures each step's two spellings drive. Each reads what it needs off the sandbox
+    // under the same lock it then calls through, so the request and the call see one state.
+
+    fn open_op(
+        region: Region,
+        specs: Vec<AgentSpec>,
+    ) -> Result<impl Future<Output = Result<Self, Error>> + Send + 'static, Error> {
+        agents::require_specs(&specs)?;
+        Ok(async move {
+            let sandbox = Sandbox::new(region.clone()).await?;
+            Ok(Self::own(sandbox, specs, region))
+        })
     }
+
+    async fn from_name_op(
+        store: microvms_core::names::FileNameStore,
+        region: Region,
+        name: String,
+        specs: Vec<AgentSpec>,
+        port: Option<u16>,
+    ) -> Result<Self, Error> {
+        let vm =
+            agents::AgentVm::from_name(&store, specs, &name, Some(region.clone()), port).await?;
+        let (sandbox, specs) = vm.into_parts();
+        Ok(Self::own(sandbox, specs, region))
+    }
+
+    async fn adopt_op(
+        region: Region,
+        specs: Vec<AgentSpec>,
+        microvm_id: String,
+        endpoint: String,
+        agent_token: String,
+        port: Option<u16>,
+    ) -> Result<Self, Error> {
+        let vm = agents::AgentVm::adopt_in(
+            region.clone(),
+            specs,
+            microvm_id,
+            endpoint,
+            agent_token,
+            port,
+        )
+        .await?;
+        let (sandbox, specs) = vm.into_parts();
+        Ok(Self::own(sandbox, specs, region))
+    }
+
+    fn find_image_op(
+        &self,
+        binary: Vec<u8>,
+        build_role_arn: String,
+        size: Option<PySizeClass>,
+    ) -> impl Future<Output = Result<Option<String>, Error>> + Send + 'static {
+        let inner = Arc::clone(&self.sandbox);
+        let specs = self.specs.clone();
+        let size = size.map(|size| size.inner).unwrap_or(DEFAULT_SIZE);
+        async move {
+            let sandbox = inner.lock().await;
+            let name =
+                agents::image_request_for(&sandbox, &specs, binary, &build_role_arn, size)?.name;
+            let found = sandbox.find_image_by_name(&name).await?;
+            Ok(found.map(|image| image.image_arn))
+        }
+    }
+
+    fn ensure_image_op(
+        &self,
+        binary: Vec<u8>,
+        build_role_arn: String,
+        s3_bucket: String,
+        size: Option<PySizeClass>,
+        s3_key_prefix: Option<String>,
+    ) -> impl Future<Output = Result<PyEnsuredImage, Error>> + Send + 'static {
+        let inner = Arc::clone(&self.sandbox);
+        let specs = self.specs.clone();
+        let size = size.map(|size| size.inner).unwrap_or(DEFAULT_SIZE);
+        async move {
+            let mut sandbox = inner.lock().await;
+            let request = agents::ensure_request_for(
+                &sandbox,
+                &specs,
+                binary,
+                &build_role_arn,
+                size,
+                &s3_bucket,
+                s3_key_prefix,
+            )?;
+            sandbox
+                .ensure_image(request)
+                .await
+                .map(PyEnsuredImage::from)
+        }
+    }
+
+    fn build_image_op(
+        &self,
+        binary: Vec<u8>,
+        code_artifact_uri: String,
+        build_role_arn: String,
+        size: Option<PySizeClass>,
+    ) -> impl Future<Output = Result<PyImage, Error>> + Send + 'static {
+        let inner = Arc::clone(&self.sandbox);
+        let specs = self.specs.clone();
+        let size = size.map(|size| size.inner).unwrap_or(DEFAULT_SIZE);
+        async move {
+            let mut sandbox = inner.lock().await;
+            let mut request =
+                agents::image_request_for(&sandbox, &specs, binary, &build_role_arn, size)?;
+            request.code_artifact_uri = code_artifact_uri;
+            sandbox.build_image(request).await.map(PyImage::wrap)
+        }
+    }
+
+    fn launch_op(
+        &self,
+        request: microvms_core::sandbox::RunRequest,
+    ) -> impl Future<Output = Result<PySession, Error>> + Send + 'static {
+        let inner = Arc::clone(&self.sandbox);
+        async move {
+            // The core's launch waits for RUNNING and then for the daemon to answer (#254).
+            inner.lock().await.run(request).await?;
+            Ok(PySession::in_sandbox(inner))
+        }
+    }
+
+    /// The install both spellings of `install_access` drive, minting first when the caller
+    /// gave no token.
+    fn install_access_op(
+        &self,
+        token: Option<PyBearerToken>,
+        ttl_seconds: Option<f64>,
+    ) -> Result<impl Future<Output = Result<PyBearerToken, Error>> + Send + 'static, Error> {
+        let mint = match token {
+            Some(_) => None,
+            None => Some(mint_op(self.region.clone(), ttl_seconds)?),
+        };
+        let inner = Arc::clone(&self.sandbox);
+        let specs = self.specs.clone();
+        Ok(async move {
+            let token = match (token, mint) {
+                (Some(token), _) => token,
+                (None, Some(mint)) => mint.await?,
+                (None, None) => unreachable!("a mint is planned whenever no token was given"),
+            };
+            let access = token.access();
+            let sandbox = inner.lock().await;
+            let session = launched(&sandbox)?;
+            agents::install_access(session, &specs, &access).await?;
+            Ok(token)
+        })
+    }
+
+    fn prompt_op(
+        &self,
+        agent: &str,
+        task: String,
+        options: PromptOptions,
+    ) -> Result<impl Future<Output = Result<PyExecHandle, Error>> + Send + 'static, Error> {
+        let agent: Agent = agent.parse()?;
+        let spec = agents::spec_for(&self.specs, agent)?.clone();
+        let inner = Arc::clone(&self.sandbox);
+        Ok(async move {
+            let sandbox = inner.lock().await;
+            let session = launched(&sandbox)?;
+            agents::prompt(session, &spec, &task, &options)
+                .await
+                .map(PyExecHandle::wrap)
+        })
+    }
+
+    fn prompt_sync_op(
+        &self,
+        agent: &str,
+        task: String,
+        options: PromptOptions,
+    ) -> Result<impl Future<Output = Result<PyExecResult, Error>> + Send + 'static, Error> {
+        let agent: Agent = agent.parse()?;
+        let spec = agents::spec_for(&self.specs, agent)?.clone();
+        let inner = Arc::clone(&self.sandbox);
+        Ok(async move {
+            let sandbox = inner.lock().await;
+            let session = launched(&sandbox)?;
+            agents::prompt_sync(session, &spec, &task, &options)
+                .await
+                .map(PyExecResult::wrap)
+        })
+    }
+}
+
+/// `launch`'s keywords, both spellings', as one value for [`launch_request`].
+struct LaunchArgs {
+    image_identifier: String,
+    execution_role_arn: Option<String>,
+    agent_token: Option<String>,
+    client_token: Option<String>,
+    max_idle_sec: Option<u32>,
+    suspended_sec: Option<u32>,
+    auto_resume: bool,
+    max_duration_sec: Option<u32>,
+    image_version: Option<String>,
+    egress_network_connectors: Option<Vec<String>>,
+    log_group: Option<String>,
+    log_stream: Option<String>,
+    disable_logging: bool,
+    launch_env: Option<std::collections::HashMap<String, String>>,
+    shell: bool,
+    ready_timeout: Option<f64>,
+}
+
+/// The core launch request for `launch`'s keywords: the agent recipe's request with each knob
+/// the layer leaves open set, every unset one left at the core's figure.
+fn launch_request(
+    specs: &[AgentSpec],
+    args: LaunchArgs,
+) -> Result<microvms_core::sandbox::RunRequest, Error> {
+    let mut request =
+        agents::launch_request_for(specs, &args.image_identifier, args.execution_role_arn)
+            .with_vpc_egress(args.egress_network_connectors.unwrap_or_default());
+    if let Some(env) = args.launch_env {
+        request.launch_env = env;
+    }
+    request.shell = args.shell;
+    if let Some(timeout) = args.ready_timeout {
+        request.ready_timeout = seconds(timeout)?;
+    }
+    request.image_version = args.image_version;
+    request.logging =
+        crate::sandbox::logging_for(args.log_group, args.log_stream, args.disable_logging)?;
+    request.agent_token = args.agent_token;
+    request.client_token = args.client_token;
+    if let Some(idle) = args.max_idle_sec {
+        request.max_idle_sec = idle;
+    }
+    if let Some(suspended) = args.suspended_sec {
+        request.suspended_sec = suspended;
+    }
+    request.auto_resume = args.auto_resume;
+    if let Some(ceiling) = args.max_duration_sec {
+        request.max_duration_sec = ceiling;
+    }
+    Ok(request)
 }
 
 #[pymethods]
@@ -417,16 +762,19 @@ impl PyAgentVm {
         region: PyRegion,
         agents: Option<Vec<PyAgentSpec>>,
     ) -> PyCoreResult<PyAgentVm> {
-        let specs: Vec<AgentSpec> = agents
-            .map(|agents| agents.into_iter().map(|spec| spec.inner).collect())
-            .unwrap_or_else(agents::default_specs);
-        agents::require_specs(&specs).map_err(CoreError)?;
-        let sandbox = runtime::block_on(py, Sandbox::new(region.inner.clone()))?;
-        Ok(PyAgentVm {
-            sandbox: Arc::new(Mutex::new(sandbox)),
-            specs,
-            region: region.inner,
-        })
+        let open = Self::open_op(region.inner, specs_or_default(agents))?;
+        Ok(runtime::block_on(py, open)?)
+    }
+
+    /// The awaitable twin of `AgentVm(region, agents)`.
+    #[staticmethod]
+    #[pyo3(signature = (region, agents=None))]
+    async fn create_async(
+        region: PyRegion,
+        agents: Option<Vec<PyAgentSpec>>,
+    ) -> PyCoreResult<PyAgentVm> {
+        let open = Self::open_op(region.inner, specs_or_default(agents))?;
+        Ok(runtime::spawn(open).await?)
     }
 
     /// Adopts the agent VM registered as `name` in `registry`; see `Sandbox.from_name`.
@@ -440,20 +788,34 @@ impl PyAgentVm {
         agents: Option<Vec<PyAgentSpec>>,
         port: Option<u16>,
     ) -> PyCoreResult<PyAgentVm> {
-        let specs: Vec<AgentSpec> = agents
-            .map(|agents| agents.into_iter().map(|spec| spec.inner).collect())
-            .unwrap_or_else(agents::default_specs);
-        let store = registry.store.clone();
-        let wanted = region.inner.clone();
-        let vm = runtime::block_on(py, async move {
-            agents::AgentVm::from_name(&store, specs, &name, Some(wanted), port).await
-        })?;
-        let (sandbox, specs) = vm.into_parts();
-        Ok(PyAgentVm {
-            sandbox: Arc::new(Mutex::new(sandbox)),
-            specs,
-            region: region.inner,
-        })
+        let op = Self::from_name_op(
+            registry.store.clone(),
+            region.inner,
+            name,
+            specs_or_default(agents),
+            port,
+        );
+        Ok(runtime::block_on(py, op)?)
+    }
+
+    /// The awaitable twin of `AgentVm.from_name`.
+    #[staticmethod]
+    #[pyo3(signature = (region, name, registry, agents=None, *, port=None))]
+    async fn from_name_async(
+        region: PyRegion,
+        name: String,
+        registry: Py<crate::names::PyNameRegistry>,
+        agents: Option<Vec<PyAgentSpec>>,
+        port: Option<u16>,
+    ) -> PyCoreResult<PyAgentVm> {
+        let op = Self::from_name_op(
+            registry.get().store.clone(),
+            region.inner,
+            name,
+            specs_or_default(agents),
+            port,
+        );
+        Ok(runtime::spawn(op).await?)
     }
 
     /// An agent VM for a VM another process launched; see `Sandbox.adopt`.
@@ -471,26 +833,37 @@ impl PyAgentVm {
         agents: Option<Vec<PyAgentSpec>>,
         port: Option<u16>,
     ) -> PyCoreResult<PyAgentVm> {
-        let specs: Vec<AgentSpec> = agents
-            .map(|agents| agents.into_iter().map(|spec| spec.inner).collect())
-            .unwrap_or_else(agents::default_specs);
-        let vm = runtime::block_on(
-            py,
-            agents::AgentVm::adopt_in(
-                region.inner.clone(),
-                specs,
-                microvm_id,
-                endpoint,
-                agent_token,
-                port,
-            ),
-        )?;
-        let (sandbox, specs) = vm.into_parts();
-        Ok(PyAgentVm {
-            sandbox: Arc::new(Mutex::new(sandbox)),
-            specs,
-            region: region.inner,
-        })
+        let op = Self::adopt_op(
+            region.inner,
+            specs_or_default(agents),
+            microvm_id,
+            endpoint,
+            agent_token,
+            port,
+        );
+        Ok(runtime::block_on(py, op)?)
+    }
+
+    /// The awaitable twin of `AgentVm.adopt`.
+    #[staticmethod]
+    #[pyo3(signature = (region, microvm_id, endpoint, agent_token, agents=None, *, port=None))]
+    async fn adopt_async(
+        region: PyRegion,
+        microvm_id: String,
+        endpoint: String,
+        agent_token: String,
+        agents: Option<Vec<PyAgentSpec>>,
+        port: Option<u16>,
+    ) -> PyCoreResult<PyAgentVm> {
+        let op = Self::adopt_op(
+            region.inner,
+            specs_or_default(agents),
+            microvm_id,
+            endpoint,
+            agent_token,
+            port,
+        );
+        Ok(runtime::spawn(op).await?)
     }
 
     /// The specs this VM carries, in profile order.
@@ -517,15 +890,15 @@ impl PyAgentVm {
 
     /// The session, once `launch` has run.
     #[getter]
-    fn session(&self) -> Option<PySession> {
-        let has_session = self.read(|sandbox| sandbox.session().is_some());
+    fn session(&self, py: Python<'_>) -> Option<PySession> {
+        let has_session = self.read(py, |sandbox| sandbox.session().is_some());
         has_session.then(|| PySession::in_sandbox(Arc::clone(&self.sandbox)))
     }
 
     /// The Dockerfile `build_image` will send: the client's agentd stanza plus the agent
     /// layers. Read it to see what the image will contain; nothing in it is a secret.
-    fn dockerfile(&self) -> PyCoreResult<String> {
-        let port = self.read(Sandbox::port);
+    fn dockerfile(&self, py: Python<'_>) -> PyCoreResult<String> {
+        let port = self.read(py, Sandbox::port);
         Ok(agents::dockerfile(&self.specs, &BaseImage::al2023(), port)?)
     }
 
@@ -536,11 +909,12 @@ impl PyAgentVm {
     #[pyo3(signature = (*, binary, build_role_arn, size=None))]
     fn image_name(
         &self,
+        py: Python<'_>,
         binary: Vec<u8>,
         build_role_arn: &str,
         size: Option<PySizeClass>,
     ) -> PyCoreResult<String> {
-        Ok(self.image_request(binary, build_role_arn, size)?.name)
+        Ok(self.image_request(py, binary, build_role_arn, size)?.name)
     }
 
     /// The ARN of an existing image named per `image_name`, or `None` when there is none.
@@ -552,11 +926,19 @@ impl PyAgentVm {
         build_role_arn: &str,
         size: Option<PySizeClass>,
     ) -> PyCoreResult<Option<String>> {
-        let name = self.image_request(binary, build_role_arn, size)?.name;
-        let found = self.detached(py, move |sandbox| {
-            runtime::block_on_detached(sandbox.find_image_by_name(&name))
-        })?;
-        Ok(found.map(|image| image.image_arn))
+        let op = self.find_image_op(binary, build_role_arn.to_string(), size);
+        Ok(runtime::block_on(py, op)?)
+    }
+
+    /// The awaitable twin of `find_image`.
+    #[pyo3(signature = (*, binary, build_role_arn, size=None))]
+    async fn find_image_async(
+        &self,
+        binary: Vec<u8>,
+        build_role_arn: String,
+        size: Option<PySizeClass>,
+    ) -> PyCoreResult<Option<String>> {
+        Ok(runtime::spawn(self.find_image_op(binary, build_role_arn, size)).await?)
     }
 
     /// Builds or reuses this VM's image, named per `image_name`: returned at once when ready,
@@ -572,22 +954,29 @@ impl PyAgentVm {
         size: Option<PySizeClass>,
         s3_key_prefix: Option<String>,
     ) -> PyCoreResult<PyEnsuredImage> {
-        let size = size.map(|size| size.inner).unwrap_or(DEFAULT_SIZE);
-        let request = self.read(|sandbox| {
-            agents::ensure_request_for(
-                sandbox,
-                &self.specs,
-                binary,
-                build_role_arn,
-                size,
-                s3_bucket,
-                s3_key_prefix,
-            )
-        })?;
-        let ensured = self.detached(py, move |sandbox| {
-            runtime::block_on_detached(sandbox.ensure_image(request))
-        })?;
-        Ok(PyEnsuredImage::from(ensured))
+        let op = self.ensure_image_op(
+            binary,
+            build_role_arn.to_string(),
+            s3_bucket.to_string(),
+            size,
+            s3_key_prefix,
+        );
+        Ok(runtime::block_on(py, op)?)
+    }
+
+    /// The awaitable twin of `ensure_image`. A lifecycle transition: cancelling the awaitable
+    /// leaves the build or reuse running to completion.
+    #[pyo3(signature = (*, binary, build_role_arn, s3_bucket, size=None, s3_key_prefix=None))]
+    async fn ensure_image_async(
+        &self,
+        binary: Vec<u8>,
+        build_role_arn: String,
+        s3_bucket: String,
+        size: Option<PySizeClass>,
+        s3_key_prefix: Option<String>,
+    ) -> PyCoreResult<PyEnsuredImage> {
+        let op = self.ensure_image_op(binary, build_role_arn, s3_bucket, size, s3_key_prefix);
+        Ok(runtime::spawn_shielded(op).await?)
     }
 
     /// The artifact bytes to upload to `s3://<bucket>/<image_name>.zip` before `build_image`.
@@ -599,8 +988,8 @@ impl PyAgentVm {
         build_role_arn: &str,
         size: Option<PySizeClass>,
     ) -> PyCoreResult<Bound<'py, PyBytes>> {
-        let request = self.image_request(binary, build_role_arn, size)?;
-        let bytes = self.read(|sandbox| sandbox.build_artifact_for(&request))?;
+        let request = self.image_request(py, binary, build_role_arn, size)?;
+        let bytes = self.read(py, |sandbox| sandbox.build_artifact_for(&request))?;
         Ok(PyBytes::new(py, &bytes))
     }
 
@@ -615,11 +1004,27 @@ impl PyAgentVm {
         build_role_arn: &str,
         size: Option<PySizeClass>,
     ) -> PyCoreResult<PyImage> {
-        let mut request = self.image_request(binary, build_role_arn, size)?;
-        request.code_artifact_uri = code_artifact_uri.to_string();
-        Ok(self.detached(py, move |sandbox| {
-            runtime::block_on_detached(sandbox.build_image(request)).map(PyImage::wrap)
-        })?)
+        let op = self.build_image_op(
+            binary,
+            code_artifact_uri.to_string(),
+            build_role_arn.to_string(),
+            size,
+        );
+        Ok(runtime::block_on(py, op)?)
+    }
+
+    /// The awaitable twin of `build_image`. A lifecycle transition: cancelling the awaitable
+    /// leaves the build running to completion.
+    #[pyo3(signature = (*, binary, code_artifact_uri, build_role_arn, size=None))]
+    async fn build_image_async(
+        &self,
+        binary: Vec<u8>,
+        code_artifact_uri: String,
+        build_role_arn: String,
+        size: Option<PySizeClass>,
+    ) -> PyCoreResult<PyImage> {
+        let op = self.build_image_op(binary, code_artifact_uri, build_role_arn, size);
+        Ok(runtime::spawn_shielded(op).await?)
     }
 
     /// Launches with egress and waits for the daemon to answer.
@@ -684,41 +1089,103 @@ impl PyAgentVm {
         shell: bool,
         ready_timeout: Option<f64>,
     ) -> PyCoreResult<PySession> {
-        let mut request =
-            agents::launch_request_for(&self.specs, image_identifier, execution_role_arn)
-                .with_vpc_egress(egress_network_connectors.unwrap_or_default());
-        if let Some(env) = launch_env {
-            request.launch_env = env;
-        }
-        request.shell = shell;
-        if let Some(timeout) = ready_timeout {
-            request.ready_timeout = seconds(timeout)?;
-        }
-        request.image_version = image_version;
-        request.logging = crate::sandbox::logging_for(log_group, log_stream, disable_logging)?;
-        request.agent_token = agent_token;
-        request.client_token = client_token;
-        if let Some(idle) = max_idle_sec {
-            request.max_idle_sec = idle;
-        }
-        if let Some(suspended) = suspended_sec {
-            request.suspended_sec = suspended;
-        }
-        request.auto_resume = auto_resume;
-        if let Some(ceiling) = max_duration_sec {
-            request.max_duration_sec = ceiling;
-        }
-        // The core's launch waits for RUNNING and then for the daemon to answer (#254).
-        self.detached(py, move |sandbox| {
-            runtime::block_on_detached(sandbox.run(request)).map(|_| ())
-        })?;
-        Ok(PySession::in_sandbox(Arc::clone(&self.sandbox)))
+        let request = launch_request(
+            &self.specs,
+            LaunchArgs {
+                image_identifier: image_identifier.to_string(),
+                execution_role_arn,
+                agent_token,
+                client_token,
+                max_idle_sec,
+                suspended_sec,
+                auto_resume,
+                max_duration_sec,
+                image_version,
+                egress_network_connectors,
+                log_group,
+                log_stream,
+                disable_logging,
+                launch_env,
+                shell,
+                ready_timeout,
+            },
+        )?;
+        Ok(runtime::block_on(py, self.launch_op(request))?)
+    }
+
+    /// The awaitable twin of `launch`, with its keywords. A lifecycle transition: cancelling
+    /// the awaitable leaves the launch running to completion, so the VM it starts is still
+    /// this object's to terminate.
+    #[pyo3(signature = (
+        *,
+        image_identifier,
+        execution_role_arn=None,
+        agent_token=None,
+        client_token=None,
+        max_idle_sec=None,
+        suspended_sec=None,
+        auto_resume=false,
+        max_duration_sec=None,
+        image_version=None,
+        egress_network_connectors=None,
+        log_group=None,
+        log_stream=None,
+        disable_logging=false,
+        launch_env=None,
+        shell=false,
+        ready_timeout=None,
+    ))]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "`launch`'s keywords, one per launch knob the layer leaves open"
+    )]
+    async fn launch_async(
+        &self,
+        image_identifier: String,
+        execution_role_arn: Option<String>,
+        agent_token: Option<String>,
+        client_token: Option<String>,
+        max_idle_sec: Option<u32>,
+        suspended_sec: Option<u32>,
+        auto_resume: bool,
+        max_duration_sec: Option<u32>,
+        image_version: Option<String>,
+        egress_network_connectors: Option<Vec<String>>,
+        log_group: Option<String>,
+        log_stream: Option<String>,
+        disable_logging: bool,
+        launch_env: Option<std::collections::HashMap<String, String>>,
+        shell: bool,
+        ready_timeout: Option<f64>,
+    ) -> PyCoreResult<PySession> {
+        let request = launch_request(
+            &self.specs,
+            LaunchArgs {
+                image_identifier,
+                execution_role_arn,
+                agent_token,
+                client_token,
+                max_idle_sec,
+                suspended_sec,
+                auto_resume,
+                max_duration_sec,
+                image_version,
+                egress_network_connectors,
+                log_group,
+                log_stream,
+                disable_logging,
+                launch_env,
+                shell,
+                ready_timeout,
+            },
+        )?;
+        Ok(runtime::spawn_shielded(self.launch_op(request)).await?)
     }
 
     /// Hands the VM off to another process; see `Sandbox.detach`. The adopter passes the
     /// same agents to `AgentVm.adopt`.
     fn detach(&self, py: Python<'_>) -> PyCoreResult<crate::sandbox::PyDetached> {
-        let inner = self.detached(py, |sandbox| sandbox.detach())?;
+        let inner = runtime::lock_now(py, &self.sandbox).detach()?;
         Ok(crate::sandbox::PyDetached { inner })
     }
 
@@ -733,20 +1200,23 @@ impl PyAgentVm {
         token: Option<PyBearerToken>,
         ttl_seconds: Option<f64>,
     ) -> PyCoreResult<PyBearerToken> {
-        let token = match token {
-            Some(token) => token,
-            None => py.detach(|| mint(&self.region, ttl_seconds))?,
-        };
-        let access = token.access();
-        self.detached(py, |sandbox| {
-            Self::with_session(sandbox, |session| {
-                runtime::block_on_detached(agents::install_access(session, &self.specs, &access))
-            })
-        })?;
-        Ok(token)
+        let op = self.install_access_op(token, ttl_seconds)?;
+        Ok(runtime::block_on(py, op)?)
+    }
+
+    /// The awaitable twin of `install_access`.
+    #[pyo3(signature = (*, token=None, ttl_seconds=None))]
+    async fn install_access_async(
+        &self,
+        token: Option<PyBearerToken>,
+        ttl_seconds: Option<f64>,
+    ) -> PyCoreResult<PyBearerToken> {
+        let op = self.install_access_op(token, ttl_seconds)?;
+        Ok(runtime::spawn(op).await?)
     }
 
     /// Starts one task for `agent` and returns its handle. Does not wait.
+
     #[pyo3(signature = (agent, task, *, timeout_sec=None, exec_id=None, permission_mode="agent-default", reap_group_on_exit=false))]
     #[allow(
         clippy::too_many_arguments,
@@ -762,24 +1232,35 @@ impl PyAgentVm {
         permission_mode: &str,
         reap_group_on_exit: bool,
     ) -> PyCoreResult<PyExecHandle> {
-        let agent: Agent = agent.parse().map_err(CoreError)?;
-        let spec = agents::spec_for(&self.specs, agent)?.clone();
-        let options = PromptOptions {
-            exec_id,
-            timeout: timeout_sec.map(seconds).transpose()?,
-            permission_mode: permission_mode.parse().map_err(CoreError)?,
-            reap_group_on_exit,
-        };
-        let handle = self.detached(py, |sandbox| {
-            Self::with_session(sandbox, |session| {
-                runtime::block_on_detached(agents::prompt(session, &spec, task, &options))
-            })
-        })?;
-        Ok(PyExecHandle::wrap(handle))
+        let options = prompt_options(exec_id, timeout_sec, permission_mode, reap_group_on_exit)?;
+        let op = self.prompt_op(agent, task.to_string(), options)?;
+        Ok(runtime::block_on(py, op)?)
+    }
+
+    /// The awaitable twin of `prompt`. Cancelling it before the daemon answers may leave the
+    /// task started; pass an `exec_id` to reach it with `session.exec(exec_id)`.
+    #[pyo3(signature = (agent, task, *, timeout_sec=None, exec_id=None, permission_mode="agent-default", reap_group_on_exit=false))]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "keyword-only prompt options mirror core"
+    )]
+    async fn prompt_async(
+        &self,
+        agent: String,
+        task: String,
+        timeout_sec: Option<f64>,
+        exec_id: Option<String>,
+        permission_mode: &str,
+        reap_group_on_exit: bool,
+    ) -> PyCoreResult<PyExecHandle> {
+        let options = prompt_options(exec_id, timeout_sec, permission_mode, reap_group_on_exit)?;
+        let op = self.prompt_op(&agent, task, options)?;
+        Ok(runtime::spawn(op).await?)
     }
 
     /// Start, wait, ack: one task's whole result. `timeout` defaults to 900 seconds,
     /// because agent tasks run minutes, and is also the daemon-side budget.
+
     #[pyo3(signature = (agent, task, *, timeout=DEFAULT_PROMPT_TIMEOUT.as_secs_f64(), exec_id=None, permission_mode="agent-default", reap_group_on_exit=false))]
     #[allow(
         clippy::too_many_arguments,
@@ -795,24 +1276,34 @@ impl PyAgentVm {
         permission_mode: &str,
         reap_group_on_exit: bool,
     ) -> PyCoreResult<PyExecResult> {
-        let agent: Agent = agent.parse().map_err(CoreError)?;
-        let spec = agents::spec_for(&self.specs, agent)?.clone();
-        let options = PromptOptions {
-            exec_id,
-            timeout: Some(seconds(timeout)?),
-            permission_mode: permission_mode.parse().map_err(CoreError)?,
-            reap_group_on_exit,
-        };
-        let task = task.to_string();
-        let result = self.detached(py, |sandbox| {
-            Self::with_session(sandbox, |session| {
-                runtime::block_on_detached(agents::prompt_sync(session, &spec, &task, &options))
-            })
-        })?;
-        Ok(PyExecResult::wrap(result))
+        let options = prompt_options(exec_id, Some(timeout), permission_mode, reap_group_on_exit)?;
+        let op = self.prompt_sync_op(agent, task.to_string(), options)?;
+        Ok(runtime::block_on(py, op)?)
+    }
+
+    /// The awaitable twin of `prompt_sync`. Cancelling it stops the wait; the task keeps
+    /// running in the VM until its own timeout.
+    #[pyo3(signature = (agent, task, *, timeout=DEFAULT_PROMPT_TIMEOUT.as_secs_f64(), exec_id=None, permission_mode="agent-default", reap_group_on_exit=false))]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "keyword-only prompt options mirror core"
+    )]
+    async fn prompt_sync_async(
+        &self,
+        agent: String,
+        task: String,
+        timeout: f64,
+        exec_id: Option<String>,
+        permission_mode: &str,
+        reap_group_on_exit: bool,
+    ) -> PyCoreResult<PyExecResult> {
+        let options = prompt_options(exec_id, Some(timeout), permission_mode, reap_group_on_exit)?;
+        let op = self.prompt_sync_op(&agent, task, options)?;
+        Ok(runtime::spawn(op).await?)
     }
 
     /// Tears down, best-effort, never raising; see `Sandbox.terminate`.
+
     #[pyo3(signature = (
         *,
         delete_image=false,
@@ -838,6 +1329,33 @@ impl PyAgentVm {
             delete_backoff,
             wait_for_terminated,
         )
+    }
+
+    /// The awaitable twin of `terminate`; see `Sandbox.terminate_async`.
+    #[pyo3(signature = (
+        *,
+        delete_image=false,
+        delete_log_group=false,
+        delete_attempts=None,
+        delete_backoff=None,
+        wait_for_terminated=crate::sandbox::WaitForTerminated::Flag(false),
+    ))]
+    async fn terminate_async(
+        &self,
+        delete_image: bool,
+        delete_log_group: bool,
+        delete_attempts: Option<u32>,
+        delete_backoff: Option<f64>,
+        wait_for_terminated: crate::sandbox::WaitForTerminated,
+    ) -> PyCoreResult<PyTeardownReport> {
+        let opts = crate::sandbox::teardown_opts(
+            delete_image,
+            delete_log_group,
+            delete_attempts,
+            delete_backoff,
+            wait_for_terminated,
+        )?;
+        Ok(runtime::spawn_shielded(self.sandbox().terminate_op(opts)).await)
     }
 
     fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
@@ -866,8 +1384,28 @@ impl PyAgentVm {
         false
     }
 
-    fn __repr__(&self) -> String {
-        self.read(|sandbox| {
+    /// `async with AgentVm(...)`: returns the VM itself.
+    async fn __aenter__(slf: Py<Self>) -> Py<Self> {
+        slf
+    }
+
+    /// `__exit__`'s teardown, awaited; it runs to completion even when the task awaiting it
+    /// is cancelled.
+    #[pyo3(signature = (exc_type=None, exc_value=None, traceback=None))]
+    async fn __aexit__(
+        &self,
+        exc_type: Option<Py<PyAny>>,
+        exc_value: Option<Py<PyAny>>,
+        traceback: Option<Py<PyAny>>,
+    ) -> bool {
+        let _ = (exc_type, exc_value, traceback);
+        let opts = microvms_core::sandbox::TeardownOpts::default();
+        let _ = runtime::spawn_shielded(self.sandbox().terminate_op(opts)).await;
+        false
+    }
+
+    fn __repr__(&self, py: Python<'_>) -> String {
+        self.read(py, |sandbox| {
             format!(
                 "AgentVm(agents={:?}, lifecycle={:?}, microvm_id={:?})",
                 self.specs

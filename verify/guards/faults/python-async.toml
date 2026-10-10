@@ -1,0 +1,29 @@
+# ── the Python binding's awaitable twins (BIND-26, BIND-27) ──────────────────────────────────
+
+# A read's awaitable no longer aborts its task when the awaiting coroutine is dropped, so a
+# cancelled wait keeps polling until its own deadline.
+[[fault]]
+id = "py-async-cancel-leaves-the-task-running"
+guard = "bindings/microvms-py/tests/test_async.py::test_bind_26_a_cancelled_wait_stops_its_task"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_async.py::test_bind_26_a_cancelled_wait_stops_its_task"],
+]
+expect = "test-failed"
+suite = "bindings"
+note = "bindings/microvms-py/tests/test_async.py::test_bind_26_a_cancelled_wait_stops_its_task"
+transform = { file = "bindings/microvms-py/src/runtime.rs", replace = "        task: RUNTIME.spawn(future),\n        abort_on_drop: true,\n", with = "        task: RUNTIME.spawn(future),\n        abort_on_drop: false,\n" }
+
+# A lifecycle transition's awaitable aborts its task like a read's, so a cancelled launch or
+# teardown is dropped halfway.
+[[fault]]
+id = "py-async-cancel-aborts-a-lifecycle-transition"
+guard = "bindings/microvms-py/tests/test_async.py::test_bind_27_a_cancelled_lifecycle_transition_runs_on"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_async.py::test_bind_27_a_cancelled_lifecycle_transition_runs_on"],
+]
+expect = "test-failed"
+suite = "bindings"
+note = "bindings/microvms-py/tests/test_async.py::test_bind_27_a_cancelled_lifecycle_transition_runs_on"
+transform = { file = "bindings/microvms-py/src/runtime.rs", replace = "        task: RUNTIME.spawn(future),\n        abort_on_drop: false,\n", with = "        task: RUNTIME.spawn(future),\n        abort_on_drop: true,\n" }

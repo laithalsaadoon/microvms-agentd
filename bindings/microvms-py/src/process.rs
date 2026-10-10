@@ -26,7 +26,8 @@
 //! chunk and more arrives for it, the way two pipes do; read them from two threads when a
 //! command writes much to both. `wait()` reads the daemon's exec record and needs neither.
 
-use std::sync::{Arc, Mutex, PoisonError};
+use std::future::Future;
+use std::sync::Arc;
 
 use microvms_core::session::{
     DEFAULT_EXEC_WAIT, ExecHandle, GapLog, GapPolicy, SplitItem, StreamOptions,
@@ -44,9 +45,17 @@ use crate::runtime;
 /// side otherwise: a gap under the default policy, or a failure the stream couldn't reconnect
 /// through. The `receiver` is behind a `Mutex` for the reason `ExecStream`'s is: `recv` needs
 /// `&mut`, and the lock is held only across one `recv`, never across a Python callback.
-#[pyclass(name = "ByteStream", module = "microvms")]
+#[pyclass(frozen, name = "ByteStream", module = "microvms")]
 pub struct PyByteStream {
-    receiver: Mutex<tokio::sync::mpsc::Receiver<SplitItem>>,
+    receiver: Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<SplitItem>>>,
+}
+
+impl PyByteStream {
+    fn new(receiver: tokio::sync::mpsc::Receiver<SplitItem>) -> Self {
+        Self {
+            receiver: Arc::new(tokio::sync::Mutex::new(receiver)),
+        }
+    }
 }
 
 #[pymethods]
@@ -62,15 +71,49 @@ impl PyByteStream {
     /// `None`, as `ExecStream`'s is, so the stub's element type is `bytes` and not
     /// `bytes | None`.
     fn __next__(&self, py: Python<'_>) -> PyResult<Py<PyBytes>> {
-        let received = py.detach(|| {
-            let mut receiver = self.receiver.lock().unwrap_or_else(PoisonError::into_inner);
-            runtime::block_on_detached(receiver.recv())
-        });
+        let receiver = Arc::clone(&self.receiver);
+        let received =
+            py.detach(|| runtime::block_on_detached(async { receiver.lock().await.recv().await }));
         match received {
             Some(Ok(chunk)) => Ok(PyBytes::new(py, &chunk).unbind()),
             Some(Err(error)) => Err(to_py_err(py, &error)),
             None => Err(pyo3::exceptions::PyStopIteration::new_err(())),
         }
+    }
+
+    fn __aiter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    /// The next chunk, awaited, or `StopAsyncIteration` when the side ends: `async for`.
+    /// Cancelling the await leaves the chunk unread, as `ExecStream.__anext__` does.
+    fn __anext__<'py>(&self, py: Python<'py>) -> PyResult<runtime::Awaitable<'py, Py<PyBytes>>> {
+        let next = Bound::new(
+            py,
+            NextChunk {
+                receiver: Arc::clone(&self.receiver),
+            },
+        )?;
+        runtime::Awaitable::call(next.as_any(), "recv")
+    }
+}
+
+/// The awaitable `ByteStream.__anext__` answers, for `ExecStreamNext`'s reason. Not in the
+/// module either.
+#[pyclass(frozen, name = "ByteStreamNext", module = "microvms")]
+struct NextChunk {
+    receiver: Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<SplitItem>>>,
+}
+
+#[pymethods]
+impl NextChunk {
+    async fn recv(&self) -> PyResult<Py<PyBytes>> {
+        let received = self.receiver.lock().await.recv().await;
+        Python::attach(|py| match received {
+            Some(Ok(chunk)) => Ok(PyBytes::new(py, &chunk).unbind()),
+            Some(Err(error)) => Err(to_py_err(py, &error)),
+            None => Err(pyo3::exceptions::PyStopAsyncIteration::new_err(())),
+        })
     }
 }
 
@@ -140,20 +183,25 @@ impl PyExecProcess {
         runtime::handle().spawn(split.drive);
         Ok(Self {
             handle,
-            stdout: Py::new(
-                py,
-                PyByteStream {
-                    receiver: Mutex::new(split.stdout),
-                },
-            )?,
-            stderr: Py::new(
-                py,
-                PyByteStream {
-                    receiver: Mutex::new(split.stderr),
-                },
-            )?,
+            stdout: Py::new(py, PyByteStream::new(split.stdout))?,
+            stderr: Py::new(py, PyByteStream::new(split.stderr))?,
             gaps: split.gaps,
         })
+    }
+}
+
+impl PyExecProcess {
+    fn wait_op(
+        &self,
+        timeout: std::time::Duration,
+    ) -> impl Future<Output = Result<PyExecResult, microvms_core::Error>> + Send + 'static {
+        let handle = Arc::clone(&self.handle);
+        async move { handle.wait(timeout).await.map(PyExecResult::wrap) }
+    }
+
+    fn kill_op(&self) -> impl Future<Output = Result<bool, microvms_core::Error>> + Send + 'static {
+        let handle = Arc::clone(&self.handle);
+        async move { handle.kill().await }
     }
 }
 
@@ -205,17 +253,29 @@ impl PyExecProcess {
             .map(seconds)
             .transpose()?
             .unwrap_or(DEFAULT_EXEC_WAIT);
-        Ok(PyExecResult::wrap(runtime::block_on(
-            py,
-            self.handle.wait(timeout),
-        )?))
+        Ok(runtime::block_on(py, self.wait_op(timeout))?)
+    }
+
+    /// The awaitable twin of `wait`. Cancelling it leaves the exec untouched.
+    #[pyo3(signature = (timeout=None))]
+    async fn wait_async(&self, timeout: Option<f64>) -> PyCoreResult<PyExecResult> {
+        let timeout = timeout
+            .map(seconds)
+            .transpose()?
+            .unwrap_or(DEFAULT_EXEC_WAIT);
+        Ok(runtime::spawn(self.wait_op(timeout)).await?)
     }
 
     /// Signals the whole process group. Idempotent: `False` means nothing was signalled
     /// because the group was already gone, which is the outcome a kill wanted, so a caller
     /// can call this in a `finally` without guarding it.
     fn kill(&self, py: Python<'_>) -> PyCoreResult<bool> {
-        Ok(runtime::block_on(py, self.handle.kill())?)
+        Ok(runtime::block_on(py, self.kill_op())?)
+    }
+
+    /// The awaitable twin of `kill`.
+    async fn kill_async(&self) -> PyCoreResult<bool> {
+        Ok(runtime::spawn(self.kill_op()).await?)
     }
 
     fn __repr__(&self) -> String {

@@ -49,6 +49,9 @@ The check fails when:
   why the surface won't have it. An issue that isn't `#<number>` is also named as such.
 - a `[[type]]` member exists on one side only (names pair as `snake_case` equals `camelCase`)
   and its side's `exempt_members` doesn't name it, or an exempt member has a twin or is gone.
+  A Python awaitable twin (`run_async`, `create_async`) pairs as the name without its `_async`
+  suffix: a TypeScript method that calls AWS already answers a Promise, so `Sandbox.run` is the
+  TypeScript twin of both `Sandbox.run` and `Sandbox.run_async`.
 - a sentinel row doesn't resolve on all four surfaces. The table must mark `launch`, `health`,
   `kill` and `run-report`; a parser that returns nothing fails them, so an empty parse can't
   pass. A surface with no names at all is reported as well.
@@ -365,6 +368,14 @@ def normalize(name: str) -> str:
     return name.replace("_", "").lower()
 
 
+def paired(name: str, key: str) -> str:
+    """The name a `[[type]]` member pairs under: `normalize`'s, with a Python awaitable twin's
+    `_async` suffix dropped first, so it pairs with its blocking spelling's TypeScript twin."""
+    if key == "py" and name.endswith("_async"):
+        name = name.removesuffix("_async")
+    return normalize(name)
+
+
 def check(
     table: dict[str, Any],
     surfaces: dict[str, Surface],
@@ -641,10 +652,10 @@ def type_problems(
         problems.append(f"{where}: exempt_members.{key} isn't py or ts")
     for key, other in (("py", "ts"), ("ts", "py")):
         mine = sides[key].members
-        theirs = {normalize(member) for member in sides[other].members}
+        theirs = {paired(member, other) for member in sides[other].members}
         side_exempt = exempt.get(key) or {}
         for member in sorted(mine):
-            if normalize(member) not in theirs and member not in side_exempt:
+            if paired(member, key) not in theirs and member not in side_exempt:
                 problems.append(
                     f"{where}: {key}: {member} has no {LABELS[other]} twin and no exemption"
                 )
@@ -654,7 +665,7 @@ def type_problems(
                 problems.append(
                     f"{where}: {key}: {member} is exempt but isn't on the surface"
                 )
-            elif normalize(member) in theirs:
+            elif paired(member, key) in theirs:
                 problems.append(
                     f"{where}: {key}: {member} is exempt but has a {LABELS[other]} twin"
                 )

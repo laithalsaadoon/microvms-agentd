@@ -18,28 +18,28 @@ id = "launch"
 sentinel = true
 core = "microvms_core::sandbox::Sandbox::run"
 cli = "run"
-py = "Sandbox.run"
+py = ["Sandbox.run", "Sandbox.run_async"]
 ts = "Sandbox.run"
 
 [[capability]]
 id = "open-sandbox"
 core = "microvms_core::sandbox::Sandbox::new"
 cli = { exempt = "`seam.rs` opens it for every command" }
-py = "Sandbox"
+py = ["Sandbox", "Sandbox.create_async"]
 ts = "Sandbox.create"
 
 [[capability]]
 id = "wait-until-running"
 core = "microvms_core::sandbox::Sandbox::wait_until_running"
 cli = ["run --no-wait", "wait"]
-py = "Sandbox.wait_until_running"
+py = ["Sandbox.wait_until_running", "Sandbox.wait_until_running_async"]
 ts = "Sandbox.waitUntilRunning"
 
 [[capability]]
 id = "build-image"
 core = "microvms_core::sandbox::Sandbox::build_image"
 cli = "build"
-py = "Sandbox.build_image"
+py = ["Sandbox.build_image", "Sandbox.build_image_async"]
 ts = "Sandbox.buildImage"
 
 [[capability]]
@@ -53,7 +53,7 @@ ts = "Sandbox.buildArtifact"
 id = "ensure-image"
 core = "microvms_core::sandbox::Sandbox::ensure_image"
 cli = "build --reuse"
-py = "Sandbox.ensure_image"
+py = ["Sandbox.ensure_image", "Sandbox.ensure_image_async"]
 ts = "Sandbox.ensureImage"
 
 [[capability]]
@@ -74,14 +74,14 @@ ts = "Sandbox.imageExists"
 id = "adopt"
 core = "microvms_core::sandbox::Sandbox::adopt"
 cli = "adopt"
-py = "Sandbox.adopt"
+py = ["Sandbox.adopt", "Sandbox.adopt_async"]
 ts = "Sandbox.adopt"
 
 [[capability]]
 id = "from-name"
 core = "microvms_core::sandbox::Sandbox::from_name"
 cli = "exec --name"
-py = "Sandbox.from_name"
+py = ["Sandbox.from_name", "Sandbox.from_name_async"]
 ts = "Sandbox.fromName"
 
 [[capability]]
@@ -95,21 +95,21 @@ ts = "Sandbox.detach"
 id = "suspend"
 core = "microvms_core::sandbox::Sandbox::suspend"
 cli = "suspend"
-py = "Sandbox.suspend"
+py = ["Sandbox.suspend", "Sandbox.suspend_async"]
 ts = "Sandbox.suspend"
 
 [[capability]]
 id = "resume"
 core = "microvms_core::sandbox::Sandbox::resume"
 cli = "resume"
-py = "Sandbox.resume"
+py = ["Sandbox.resume", "Sandbox.resume_async"]
 ts = "Sandbox.resume"
 
 [[capability]]
 id = "terminate"
 core = "microvms_core::sandbox::Sandbox::terminate"
 cli = "terminate"
-py = "Sandbox.terminate"
+py = ["Sandbox.terminate", "Sandbox.terminate_async"]
 ts = "Sandbox.terminate"
 
 [[capability]]
@@ -123,7 +123,7 @@ ts = "Sandbox.session"
 id = "managed-base-versions"
 core = "microvms_core::sandbox::Sandbox::managed_base_versions"
 cli = "doctor"
-py = "Sandbox.managed_base_versions"
+py = ["Sandbox.managed_base_versions", "Sandbox.managed_base_versions_async"]
 ts = "Sandbox.managedBaseVersions"
 
 [[capability]]
@@ -146,7 +146,7 @@ ts = "egressPostureFor"
 id = "attach"
 core = "microvms_core::session::Session::attach"
 cli = "@connection"
-py = "Session.attach"
+py = ["Session.attach", "Session.attach_async"]
 ts = "Session.attach"
 
 [[capability]]
@@ -161,35 +161,35 @@ id = "health"
 sentinel = true
 core = "microvms_core::session::Session::health"
 cli = "health"
-py = "Session.health"
+py = ["Session.health", "Session.health_async"]
 ts = "Session.health"
 
 [[capability]]
 id = "wait-until-ready"
 core = "microvms_core::session::Session::wait_until_ready"
 cli = "wait"
-py = "Session.wait_until_ready"
+py = ["Session.wait_until_ready", "Session.wait_until_ready_async"]
 ts = "Session.waitUntilReady"
 
 [[capability]]
 id = "exec-start"
 core = "microvms_core::session::Session::run"
 cli = "exec --detach"
-py = "Session.run"
+py = ["Session.run", "Session.run_async"]
 ts = "Session.run"
 
 [[capability]]
 id = "exec-sync"
 core = "microvms_core::session::Session::run_sync"
 cli = "exec"
-py = "Session.run_sync"
+py = ["Session.run_sync", "Session.run_sync_async"]
 ts = "Session.runSync"
 
 [[capability]]
 id = "run-to-completion"
 core = "microvms_core::session::Session::run_to_completion"
 cli = "exec --complete"
-py = "Session.run_to_completion"
+py = ["Session.run_to_completion", "Session.run_to_completion_async"]
 ts = "Session.runToCompletion"
 
 [[capability]]
@@ -204,70 +204,70 @@ id = "kill"
 sentinel = true
 core = "microvms_core::session::Session::kill"
 cli = "kill"
-py = "Session.kill"
+py = ["Session.kill", "Session.kill_async"]
 ts = "Session.kill"
 
 [[capability]]
 id = "procs"
 core = "microvms_core::session::Session::procs"
 cli = "ps"
-py = "Session.procs"
+py = ["Session.procs", "Session.procs_async"]
 ts = "Session.procs"
 
 [[capability]]
 id = "upload-file"
 core = "microvms_core::session::Session::upload_file"
 cli = "cp"
-py = "Session.upload_file"
+py = ["Session.upload_file", "Session.upload_file_async"]
 ts = "Session.uploadFile"
 
 [[capability]]
 id = "download-file"
 core = "microvms_core::session::Session::download_file"
 cli = "cp"
-py = "Session.download_file"
+py = ["Session.download_file", "Session.download_file_async"]
 ts = "Session.downloadFile"
 
 [[capability]]
 id = "download-file-range"
 core = "microvms_core::session::Session::download_file_lines"
 cli = "cp --lines"
-py = "Session.download_file"
+py = ["Session.download_file", "Session.download_file_async"]
 ts = "Session.downloadFile"
 
 [[capability]]
 id = "file-exists"
 core = "microvms_core::session::Session::file_exists"
 cli = "exists"
-py = "Session.file_exists"
+py = ["Session.file_exists", "Session.file_exists_async"]
 ts = "Session.fileExists"
 
 [[capability]]
 id = "upload-tar"
 core = "microvms_core::session::Session::upload_tar"
 cli = "cp --tar"
-py = "Session.upload_tar"
+py = ["Session.upload_tar", "Session.upload_tar_async"]
 ts = "Session.uploadTar"
 
 [[capability]]
 id = "download-tar"
 core = "microvms_core::session::Session::download_tar"
 cli = "cp --tar"
-py = "Session.download_tar"
+py = ["Session.download_tar", "Session.download_tar_async"]
 ts = "Session.downloadTar"
 
 [[capability]]
 id = "sync-directory"
 core = "microvms_core::session::Session::sync_pass"
 cli = "sync"
-py = "Session.sync_dir"
+py = ["Session.sync_dir", "Session.sync_dir_async"]
 ts = "Session.syncDir"
 
 [[capability]]
 id = "download-dir"
 core = "microvms_core::session::Session::download_dir"
 cli = { exempt = "`run <DIR>`'s artifacts come back through it, and `cp --tar` moves the archive itself" }
-py = "Session.download_dir"
+py = ["Session.download_dir", "Session.download_dir_async"]
 ts = "Session.downloadDir"
 
 [[capability]]
@@ -288,42 +288,42 @@ ts = "Session.egressPosture"
 id = "connect-headers"
 core = "microvms_core::session::Session::connect_headers"
 cli = { exempt = "consumed inside `tunnel` and `port-forward`" }
-py = "Session.connect_headers"
+py = ["Session.connect_headers", "Session.connect_headers_async"]
 ts = "Session.connectHeaders"
 
 [[capability]]
 id = "connect-subprotocols"
 core = "microvms_core::session::Session::connect_subprotocols"
 cli = { exempt = "consumed inside `tunnel` and `port-forward`" }
-py = "Session.connect_subprotocols"
+py = ["Session.connect_subprotocols", "Session.connect_subprotocols_async"]
 ts = "Session.connectSubprotocols"
 
 [[capability]]
 id = "split-streams"
 core = "microvms_core::session::ExecHandle::split"
 cli = { exempt = "`exec --stream` carries both streams as events" }
-py = ["Session.spawn", "ExecProcess", "ExecProcess.kill", "ExecProcess.wait"]
+py = ["Session.spawn", "ExecProcess", "ExecProcess.kill", "ExecProcess.wait", "Session.spawn_async", "ExecProcess.kill_async", "ExecProcess.wait_async"]
 ts = ["Session.spawn", "ExecProcess", "ExecProcess.kill", "ExecProcess.wait"]
 
 [[capability]]
 id = "tunnel"
 core = ["microvms_core::session::serve::serve_tunnel", "microvms_core::session::serve::start_tunnel"]
 cli = "tunnel"
-py = "Session.tunnel"
+py = ["Session.tunnel", "Session.tunnel_async"]
 ts = "Session.tunnel"
 
 [[capability]]
 id = "port-forward"
 core = ["microvms_core::session::serve::serve_forward", "microvms_core::session::serve::start_forward"]
 cli = "port-forward"
-py = "Session.port_forward"
+py = ["Session.port_forward", "Session.port_forward_async"]
 ts = "Session.portForward"
 
 [[capability]]
 id = "verify-identity"
 core = "microvms_core::session::tunnel::verify_identity"
 cli = "tunnel --verify-identity"
-py = "Session.tunnel"
+py = ["Session.tunnel", "Session.tunnel_async"]
 ts = "Session.tunnel"
 
 [[capability]]
@@ -346,14 +346,14 @@ ts = { exempt = "needs a raw TTY" }
 id = "poll"
 core = "microvms_core::session::exec::ExecHandle::poll"
 cli = "exec --poll"
-py = "ExecHandle.poll"
+py = ["ExecHandle.poll", "ExecHandle.poll_async"]
 ts = "ExecHandle.poll"
 
 [[capability]]
 id = "ack"
 core = "microvms_core::session::exec::ExecHandle::ack"
 cli = "ack"
-py = "ExecHandle.ack"
+py = ["ExecHandle.ack", "ExecHandle.ack_async"]
 ts = "ExecHandle.ack"
 
 [[capability]]
@@ -367,35 +367,35 @@ ts = "ExecHandle.stream"
 id = "write-stdin"
 core = "microvms_core::session::exec::ExecHandle::write_stdin"
 cli = "stdin"
-py = "ExecHandle.write_stdin"
+py = ["ExecHandle.write_stdin", "ExecHandle.write_stdin_async"]
 ts = "ExecHandle.writeStdin"
 
 [[capability]]
 id = "close-stdin"
 core = "microvms_core::session::exec::ExecHandle::close_stdin"
 cli = "stdin --eof"
-py = "ExecHandle.close_stdin"
+py = ["ExecHandle.close_stdin", "ExecHandle.close_stdin_async"]
 ts = "ExecHandle.closeStdin"
 
 [[capability]]
 id = "wait"
 core = "microvms_core::session::exec::ExecHandle::wait"
 cli = "exec"
-py = "ExecHandle.wait"
+py = ["ExecHandle.wait", "ExecHandle.wait_async"]
 ts = "ExecHandle.wait"
 
 [[capability]]
 id = "wait-and-ack"
 core = "microvms_core::session::exec::ExecHandle::wait_and_ack"
 cli = "exec"
-py = "ExecHandle.wait_and_ack"
+py = ["ExecHandle.wait_and_ack", "ExecHandle.wait_and_ack_async"]
 ts = "ExecHandle.waitAndAck"
 
 [[capability]]
 id = "handle-kill"
 core = "microvms_core::session::exec::ExecHandle::kill"
 cli = "kill"
-py = "ExecHandle.kill"
+py = ["ExecHandle.kill", "ExecHandle.kill_async"]
 ts = "ExecHandle.kill"
 
 # ── the control plane ────────────────────────────────────────────────────────
@@ -404,77 +404,77 @@ ts = "ExecHandle.kill"
 id = "open-control-plane"
 core = "microvms_core::control::ControlPlane::new"
 cli = { exempt = "`seam.rs` opens it for every command" }
-py = "ControlPlane"
+py = ["ControlPlane", "ControlPlane.create_async"]
 ts = "ControlPlane.create"
 
 [[capability]]
 id = "list-microvms"
 core = "microvms_core::control::ControlPlane::list_microvms_matching"
 cli = "ls --remote"
-py = "ControlPlane.list"
+py = ["ControlPlane.list", "ControlPlane.list_async"]
 ts = "ControlPlane.list"
 
 [[capability]]
 id = "get-microvm"
 core = "microvms_core::control::ControlPlane::get_microvm"
 cli = { exempt = "`ls --remote` reports state; no command describes one VM" }
-py = "ControlPlane.get"
+py = ["ControlPlane.get", "ControlPlane.get_async"]
 ts = "ControlPlane.get"
 
 [[capability]]
 id = "wait-for-state"
 core = "microvms_core::control::ControlPlane::wait_for_state"
 cli = { exempt = "`suspend`, `resume` and `terminate --wait` wait inside the command" }
-py = "ControlPlane.wait_for_state"
+py = ["ControlPlane.wait_for_state", "ControlPlane.wait_for_state_async"]
 ts = "ControlPlane.waitForState"
 
 [[capability]]
 id = "suspend-by-id"
 core = "microvms_core::control::ControlPlane::suspend"
 cli = "suspend"
-py = "ControlPlane.suspend"
+py = ["ControlPlane.suspend", "ControlPlane.suspend_async"]
 ts = "ControlPlane.suspend"
 
 [[capability]]
 id = "resume-by-id"
 core = "microvms_core::control::ControlPlane::resume"
 cli = "resume"
-py = "ControlPlane.resume"
+py = ["ControlPlane.resume", "ControlPlane.resume_async"]
 ts = "ControlPlane.resume"
 
 [[capability]]
 id = "terminate-by-id"
 core = "microvms_core::control::ControlPlane::terminate"
 cli = "terminate"
-py = "ControlPlane.terminate"
+py = ["ControlPlane.terminate", "ControlPlane.terminate_async"]
 ts = "ControlPlane.terminate"
 
 [[capability]]
 id = "list-images"
 core = "microvms_core::control::ControlPlane::list_images"
 cli = "ls --remote"
-py = "ControlPlane.list_images"
+py = ["ControlPlane.list_images", "ControlPlane.list_images_async"]
 ts = "ControlPlane.listImages"
 
 [[capability]]
 id = "delete-image"
 core = "microvms_core::control::ControlPlane::delete_image"
 cli = "terminate --delete-image"
-py = "ControlPlane.delete_image"
+py = ["ControlPlane.delete_image", "ControlPlane.delete_image_async"]
 ts = "ControlPlane.deleteImage"
 
 [[capability]]
 id = "image-versions"
 core = "microvms_core::control::ControlPlane::list_image_versions"
 cli = "image-versions"
-py = "ControlPlane.list_image_versions"
+py = ["ControlPlane.list_image_versions", "ControlPlane.list_image_versions_async"]
 ts = "ControlPlane.listImageVersions"
 
 [[capability]]
 id = "set-image-version-status"
 core = "microvms_core::control::ControlPlane::set_image_version_status"
 cli = "image-set-status"
-py = "ControlPlane.set_image_version_status"
+py = ["ControlPlane.set_image_version_status", "ControlPlane.set_image_version_status_async"]
 ts = "ControlPlane.setImageVersionStatus"
 
 [[capability]]
@@ -484,7 +484,7 @@ core = [
   "microvms_core::control::ControlPlane::get_image_build",
 ]
 cli = ["image-builds", "image-builds --build-id"]
-py = ["ControlPlane.list_image_builds", "ControlPlane.get_image_build"]
+py = ["ControlPlane.list_image_builds", "ControlPlane.get_image_build", "ControlPlane.list_image_builds_async", "ControlPlane.get_image_build_async"]
 ts = ["ControlPlane.listImageBuilds", "ControlPlane.getImageBuild"]
 
 [[capability]]
@@ -528,7 +528,7 @@ ts = "defaultBaseImage"
 id = "provision-agentd"
 core = "microvms_core::provision::agentd"
 cli = { exempt = "implicit in run, build, quickstart and agent-up" }
-py = ["provision_agentd", "provision_agentd_report"]
+py = ["provision_agentd", "provision_agentd_report", "provision_agentd_async", "provision_agentd_report_async"]
 ts = ["provisionAgentd", "provisionAgentdReport"]
 
 # ── agents ───────────────────────────────────────────────────────────────────
@@ -537,21 +537,21 @@ ts = ["provisionAgentd", "provisionAgentdReport"]
 id = "agent-vm"
 core = "microvms_core::agents::AgentVm::new"
 cli = "agent-up"
-py = "AgentVm"
+py = ["AgentVm", "AgentVm.create_async"]
 ts = "AgentVm.create"
 
 [[capability]]
 id = "agent-launch"
 core = "microvms_core::agents::AgentVm::launch"
 cli = "agent-up"
-py = "AgentVm.launch"
+py = ["AgentVm.launch", "AgentVm.launch_async"]
 ts = "AgentVm.launch"
 
 [[capability]]
 id = "agent-find-image"
 core = "microvms_core::agents::image_name_for"
 cli = "agent-up"
-py = "AgentVm.find_image"
+py = ["AgentVm.find_image", "AgentVm.find_image_async"]
 ts = "AgentVm.findImage"
 
 [[capability]]
@@ -572,63 +572,63 @@ ts = "AgentVm.dockerfile"
 id = "agent-install-access"
 core = "microvms_core::agents::install_access"
 cli = "agent-up"
-py = "install_agent_access"
+py = ["install_agent_access", "install_agent_access_async"]
 ts = "installAgentAccess"
 
 [[capability]]
 id = "agent-prompt"
 core = "microvms_core::agents::prompt"
 cli = "agent-prompt"
-py = "prompt_agent"
+py = ["prompt_agent", "prompt_agent_async"]
 ts = "promptAgent"
 
 [[capability]]
 id = "agent-prompt-sync"
 core = ["microvms_core::agents::prompt_sync", "microvms_core::agents::AgentVm::prompt_sync"]
 cli = "agent-prompt"
-py = "AgentVm.prompt_sync"
+py = ["AgentVm.prompt_sync", "AgentVm.prompt_sync_async"]
 ts = "AgentVm.promptSync"
 
 [[capability]]
 id = "agent-adopt"
 core = ["microvms_core::agents::AgentVm::adopt", "microvms_core::agents::AgentVm::from_name"]
 cli = "agent-prompt --name"
-py = ["AgentVm.adopt", "AgentVm.from_name"]
+py = ["AgentVm.adopt", "AgentVm.from_name", "AgentVm.adopt_async", "AgentVm.from_name_async"]
 ts = ["AgentVm.adopt", "AgentVm.fromName"]
 
 [[capability]]
 id = "agent-build"
 core = "microvms_core::agents::AgentVm::build"
 cli = "agent-up"
-py = ["AgentVm.build_artifact", "AgentVm.build_image"]
+py = ["AgentVm.build_artifact", "AgentVm.build_image", "AgentVm.build_image_async"]
 ts = ["AgentVm.buildArtifact", "AgentVm.buildImage"]
 
 [[capability]]
 id = "agent-ensure-image"
 core = ["microvms_core::agents::AgentVm::ensure_image", "microvms_core::agents::ensure_request_for"]
 cli = "agent-up"
-py = "AgentVm.ensure_image"
+py = ["AgentVm.ensure_image", "AgentVm.ensure_image_async"]
 ts = "AgentVm.ensureImage"
 
 [[capability]]
 id = "agent-vm-access-and-prompt"
 core = ["microvms_core::agents::AgentVm::install_access", "microvms_core::agents::AgentVm::prompt"]
 cli = ["agent-up", "agent-prompt"]
-py = ["AgentVm.install_access", "AgentVm.prompt"]
+py = ["AgentVm.install_access", "AgentVm.prompt", "AgentVm.install_access_async", "AgentVm.prompt_async"]
 ts = ["AgentVm.installAccess", "AgentVm.prompt"]
 
 [[capability]]
 id = "agent-teardown"
 core = ["microvms_core::agents::AgentVm::detach", "microvms_core::agents::AgentVm::terminate"]
 cli = "terminate"
-py = ["AgentVm.detach", "AgentVm.terminate"]
+py = ["AgentVm.detach", "AgentVm.terminate", "AgentVm.terminate_async"]
 ts = ["AgentVm.detach", "AgentVm.terminate"]
 
 [[capability]]
 id = "mint-bedrock-token"
 core = "microvms_core::agents::bedrock::mint"
 cli = "agent-up --token-ttl-hours"
-py = "mint_bedrock_token"
+py = ["mint_bedrock_token", "mint_bedrock_token_async"]
 ts = "mintBedrockToken"
 
 [[capability]]
@@ -642,7 +642,7 @@ ts = "mintBedrockTokenWithCredentials"
 id = "installed-agents"
 core = "microvms_core::agents::installed_agents"
 cli = { exempt = "agent-up reports what it installed" }
-py = "installed_agents"
+py = ["installed_agents", "installed_agents_async"]
 ts = "installedAgents"
 
 # ── names ────────────────────────────────────────────────────────────────────
@@ -672,7 +672,7 @@ ts = "NameRegistry.releaseByVm"
 id = "import-record"
 core = ["microvms_core::names::import", "microvms_core::names::probe", "microvms_core::names::import_probed"]
 cli = "attach"
-py = "NameRegistry.import_record"
+py = ["NameRegistry.import_record", "NameRegistry.import_record_async"]
 ts = "NameRegistry.importRecord"
 
 # ── cost ─────────────────────────────────────────────────────────────────────
@@ -777,7 +777,7 @@ ts = "SizeClass.describe"
 id = "preflight"
 core = "microvms_core::preflight::preflight"
 cli = "doctor"
-py = "preflight"
+py = ["preflight", "preflight_async"]
 ts = "preflight"
 
 [[capability]]
@@ -856,18 +856,18 @@ id = "exec-wait"
 sentinel = true
 core = "execWaitSeconds"
 cli = ["exec --timeout", "run --timeout"]
-py = ["ExecHandle.wait(timeout)", "ExecHandle.wait_and_ack(timeout)", "Session.run_sync(timeout)"]
+py = ["ExecHandle.wait(timeout)", "ExecHandle.wait_and_ack(timeout)", "Session.run_sync(timeout)", "ExecHandle.wait_async(timeout)", "ExecHandle.wait_and_ack_async(timeout)", "Session.run_sync_async(timeout)"]
 
 [[default]]
 id = "lifecycle-wait"
 core = "lifecycleTimeoutSeconds"
 cli = ["suspend --timeout", "resume --timeout"]
-py = "ControlPlane.wait_for_state(timeout)"
+py = ["ControlPlane.wait_for_state(timeout)", "ControlPlane.wait_for_state_async(timeout)"]
 
 [[default]]
 id = "lifecycle-poll"
 core = "lifecyclePollIntervalSeconds"
-py = "ControlPlane.wait_for_state(poll_interval)"
+py = ["ControlPlane.wait_for_state(poll_interval)", "ControlPlane.wait_for_state_async(poll_interval)"]
 
 [[default]]
 id = "running-wait"
@@ -877,18 +877,18 @@ cli = "wait --timeout"
 [[default]]
 id = "ready-wait"
 core = "readyTimeoutSeconds"
-py = "Session.wait_until_ready(timeout)"
+py = ["Session.wait_until_ready(timeout)", "Session.wait_until_ready_async(timeout)"]
 
 [[default]]
 id = "prompt-wait"
 core = "promptTimeoutSeconds"
 cli = "agent-prompt --timeout"
-py = "AgentVm.prompt_sync(timeout)"
+py = ["AgentVm.prompt_sync(timeout)", "AgentVm.prompt_sync_async(timeout)"]
 
 [[default]]
 id = "client-grace"
 core = "clientGraceSeconds"
-py = "Session.run_to_completion(client_grace_sec)"
+py = ["Session.run_to_completion(client_grace_sec)", "Session.run_to_completion_async(client_grace_sec)"]
 
 [[default]]
 id = "size"
@@ -946,62 +946,62 @@ cli = "keepalive --tolerated-errors"
 [[default]]
 id = "launch-auto-resume"
 core = "launch.autoResume"
-py = ["Sandbox.run(auto_resume)", "AgentVm.launch(auto_resume)"]
+py = ["Sandbox.run(auto_resume)", "AgentVm.launch(auto_resume)", "Sandbox.run_async(auto_resume)", "AgentVm.launch_async(auto_resume)"]
 
 [[default]]
 id = "launch-egress"
 core = "launch.egress"
-py = ["Sandbox.run(egress)", "egress_posture_for(egress)"]
+py = ["Sandbox.run(egress)", "egress_posture_for(egress)", "Sandbox.run_async(egress)"]
 
 [[default]]
 id = "launch-deny-egress"
 core = "launch.denyEgress"
-py = ["Sandbox.run(deny_egress)", "egress_posture_for(deny_egress)"]
+py = ["Sandbox.run(deny_egress)", "egress_posture_for(deny_egress)", "Sandbox.run_async(deny_egress)"]
 
 [[default]]
 id = "launch-identity"
 core = "launch.identity"
-py = "Sandbox.run(identity)"
+py = ["Sandbox.run(identity)", "Sandbox.run_async(identity)"]
 
 [[default]]
 id = "launch-shell"
 core = "launch.shell"
-py = ["Sandbox.run(shell)", "AgentVm.launch(shell)"]
+py = ["Sandbox.run(shell)", "AgentVm.launch(shell)", "Sandbox.run_async(shell)", "AgentVm.launch_async(shell)"]
 
 [[default]]
 id = "launch-wait"
 core = "launch.wait"
-py = "Sandbox.run(wait)"
+py = ["Sandbox.run(wait)", "Sandbox.run_async(wait)"]
 
 [[default]]
 id = "launch-logging"
 core = "launch.loggingDisabled"
-py = ["Sandbox.run(disable_logging)", "AgentVm.launch(disable_logging)"]
+py = ["Sandbox.run(disable_logging)", "AgentVm.launch(disable_logging)", "Sandbox.run_async(disable_logging)", "AgentVm.launch_async(disable_logging)"]
 
 [[default]]
 id = "exec-shell"
 core = "exec.shell"
-py = ["Session.run(shell)", "Session.run_sync(shell)", "Session.run_to_completion(shell)", "Session.spawn(shell)"]
+py = ["Session.run(shell)", "Session.run_sync(shell)", "Session.run_to_completion(shell)", "Session.spawn(shell)", "Session.run_async(shell)", "Session.run_sync_async(shell)", "Session.run_to_completion_async(shell)", "Session.spawn_async(shell)"]
 
 [[default]]
 id = "exec-stdin"
 core = "exec.stdin"
-py = ["Session.run(stdin)", "Session.run_sync(stdin)", "Session.spawn(stdin)"]
+py = ["Session.run(stdin)", "Session.run_sync(stdin)", "Session.spawn(stdin)", "Session.run_async(stdin)", "Session.run_sync_async(stdin)", "Session.spawn_async(stdin)"]
 
 [[default]]
 id = "exec-reap"
 core = "exec.reapGroupOnExit"
-py = ["Session.run(reap_group_on_exit)", "Session.run_sync(reap_group_on_exit)", "Session.run_to_completion(reap_group_on_exit)", "Session.spawn(reap_group_on_exit)"]
+py = ["Session.run(reap_group_on_exit)", "Session.run_sync(reap_group_on_exit)", "Session.run_to_completion(reap_group_on_exit)", "Session.spawn(reap_group_on_exit)", "Session.run_async(reap_group_on_exit)", "Session.run_sync_async(reap_group_on_exit)", "Session.run_to_completion_async(reap_group_on_exit)", "Session.spawn_async(reap_group_on_exit)"]
 
 [[default]]
 id = "exec-inherit-env"
 core = "exec.inheritImageEnv"
-py = ["Session.run(inherit_image_env)", "Session.run_sync(inherit_image_env)", "Session.run_to_completion(inherit_image_env)", "Session.spawn(inherit_image_env)"]
+py = ["Session.run(inherit_image_env)", "Session.run_sync(inherit_image_env)", "Session.run_to_completion(inherit_image_env)", "Session.spawn(inherit_image_env)", "Session.run_async(inherit_image_env)", "Session.run_sync_async(inherit_image_env)", "Session.run_to_completion_async(inherit_image_env)", "Session.spawn_async(inherit_image_env)"]
 
 [[default]]
 id = "stream-reconnect"
 core = "stream.reconnect"
-py = ["ExecHandle.stream(reconnect)", "Session.spawn(reconnect)"]
+py = ["ExecHandle.stream(reconnect)", "Session.spawn(reconnect)", "Session.spawn_async(reconnect)"]
 
 [[default]]
 id = "stream-gap"
@@ -1011,37 +1011,37 @@ py = "ExecHandle.stream(error_on_gap)"
 [[default]]
 id = "teardown-delete-image"
 core = "teardown.deleteImage"
-py = ["Sandbox.terminate(delete_image)", "AgentVm.terminate(delete_image)"]
+py = ["Sandbox.terminate(delete_image)", "AgentVm.terminate(delete_image)", "Sandbox.terminate_async(delete_image)", "AgentVm.terminate_async(delete_image)"]
 
 [[default]]
 id = "teardown-delete-log-group"
 core = "teardown.deleteLogGroup"
-py = ["Sandbox.terminate(delete_log_group)", "AgentVm.terminate(delete_log_group)"]
+py = ["Sandbox.terminate(delete_log_group)", "AgentVm.terminate(delete_log_group)", "Sandbox.terminate_async(delete_log_group)", "AgentVm.terminate_async(delete_log_group)"]
 
 [[default]]
 id = "teardown-wait"
 core = "teardown.waitForTerminated"
-py = ["Sandbox.terminate(wait_for_terminated)", "AgentVm.terminate(wait_for_terminated)"]
+py = ["Sandbox.terminate(wait_for_terminated)", "AgentVm.terminate(wait_for_terminated)", "Sandbox.terminate_async(wait_for_terminated)", "AgentVm.terminate_async(wait_for_terminated)"]
 
 [[default]]
 id = "prompt-reap"
 core = "prompt.reapGroupOnExit"
-py = ["AgentVm.prompt(reap_group_on_exit)", "AgentVm.prompt_sync(reap_group_on_exit)", "prompt_agent(reap_group_on_exit)"]
+py = ["AgentVm.prompt(reap_group_on_exit)", "AgentVm.prompt_sync(reap_group_on_exit)", "prompt_agent(reap_group_on_exit)", "AgentVm.prompt_async(reap_group_on_exit)", "AgentVm.prompt_sync_async(reap_group_on_exit)", "prompt_agent_async(reap_group_on_exit)"]
 
 [[default]]
 id = "image-inherit-workdir"
 core = "image.inheritWorkdir"
-py = ["Sandbox.build_artifact(inherit_workdir)", "Sandbox.build_image(inherit_workdir)", "Sandbox.preflight(inherit_workdir)", "wrap_dockerfile(inherit_workdir)"]
+py = ["Sandbox.build_artifact(inherit_workdir)", "Sandbox.build_image(inherit_workdir)", "Sandbox.preflight(inherit_workdir)", "wrap_dockerfile(inherit_workdir)", "Sandbox.build_image_async(inherit_workdir)"]
 
 [[default]]
 id = "image-repair-identity"
 core = "image.repairGuestIdentity"
-py = ["Sandbox.build_image(repair_guest_identity)", "Sandbox.preflight(repair_guest_identity)"]
+py = ["Sandbox.build_image(repair_guest_identity)", "Sandbox.preflight(repair_guest_identity)", "Sandbox.build_image_async(repair_guest_identity)"]
 
 [[default]]
 id = "image-force"
 core = "image.force"
-py = "Sandbox.ensure_image(force)"
+py = ["Sandbox.ensure_image(force)", "Sandbox.ensure_image_async(force)"]
 
 [[default]]
 id = "sync-delete-budget"
@@ -1051,7 +1051,7 @@ cli = "sync --timeout"
 [[default]]
 id = "sync-full"
 exempt = "whether this sync ignores the VM's manifest: an argument of the call, with no default anywhere else"
-py = "Session.sync_dir(full)"
+py = ["Session.sync_dir(full)", "Session.sync_dir_async(full)"]
 
 [[default]]
 id = "watch-interval"
@@ -1071,25 +1071,23 @@ py = "Session.keep_awake(while_busy)"
 [[default]]
 id = "stdin-eof"
 exempt = "whether this one write closes stdin: an argument of the call, with no default anywhere else"
-py = "ExecHandle.write_stdin(eof)"
+py = ["ExecHandle.write_stdin(eof)", "ExecHandle.write_stdin_async(eof)"]
 
 # ── types whose members pair across the bindings ─────────────────────────────
 
 [[type]]
 name = "Sandbox"
 exempt_members.py = { suspended_window_seconds = "a property here; TypeScript has it as suspendedWindowSecondsAsync" }
-exempt_members.ts = { create = "the async factory idiom (js/sandbox.rs); Python constructs with Sandbox(...)", suspendedWindowSecondsAsync = "an async method, because napi can't await in a getter" }
+exempt_members.ts = { suspendedWindowSecondsAsync = "an async method, because napi can't await in a getter" }
 
 [[type]]
 name = "Session"
 
 [[type]]
 name = "AgentVm"
-exempt_members.ts = { create = "the async factory idiom; Python constructs with AgentVm(...)" }
 
 [[type]]
 name = "ControlPlane"
-exempt_members.ts = { create = "the async factory idiom; Python constructs with ControlPlane(...)" }
 
 [[type]]
 name = "ExecHandle"

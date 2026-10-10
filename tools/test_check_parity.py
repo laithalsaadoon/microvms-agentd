@@ -500,6 +500,36 @@ class RuleTests(FixtureCase):
         self.griffe["members"][0]["members"].append(function("create"))
         self.assertProblem("type Sandbox: ts: create is exempt but has a Python twin")
 
+    def test_an_awaitable_twin_pairs_with_its_blocking_spellings_typescript_twin(self):
+        """`run_async` pairs with TypeScript's `run`, as `run` does, so a twin needs no
+        exemption; and `create_async` is the Python twin of TypeScript's `create`."""
+        members = self.griffe["members"][0]["members"]
+        members.append(function("run_async"))
+        unpaired = "type Sandbox: py: run_async has no TypeScript twin and no exemption"
+        self.assertFalse(any(unpaired in problem for problem in self.problems()))
+        self.assertProblem("py: Sandbox.run_async belongs to no row")
+        members.append(function("create_async"))
+        self.assertProblem("type Sandbox: ts: create is exempt but has a Python twin")
+
+    def test_an_exempt_awaitable_twin_with_a_typescript_twin_fails(self):
+        """An exemption for `run_async` is stale: it pairs with TypeScript's `run`."""
+        self.griffe["members"][0]["members"].append(function("run_async"))
+        self.table = self.table.replace(
+            'name = "Sandbox"\n',
+            'name = "Sandbox"\nexempt_members.py = { run_async = "stale" }\n',
+        )
+        self.assertProblem(
+            "type Sandbox: py: run_async is exempt but has a TypeScript twin"
+        )
+
+    def test_only_a_python_name_drops_the_async_suffix(self):
+        """The suffix rule is Python's: a TypeScript member spelled `run_async` keeps its whole
+        name, so it doesn't pair with Python's `run` the way Python's `run_async` would."""
+        self.typedoc["children"][0]["children"].append(member("run_async"))
+        self.assertProblem(
+            "type Sandbox: ts: run_async has no Python twin and no exemption"
+        )
+
     def test_an_exempt_member_that_is_gone_fails(self):
         self.typedoc["children"][0]["children"] = [
             child

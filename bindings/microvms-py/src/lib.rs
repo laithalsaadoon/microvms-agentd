@@ -41,11 +41,13 @@
 //! `client_token` only with a stable agent token and identical request for recovery;
 //! it must mint a new key for every independently intended VM.
 //!
-//! # Sync methods over an async core, with the GIL released
+//! # Blocking methods and awaitable twins over one async core
 //!
-//! Every method blocks on one shared multi-thread tokio runtime, with `py.detach` first.
-//! See [`runtime`] for why sync rather than `asyncio`, why one runtime, and why the
-//! re-entrancy guard is not optional.
+//! Every method that does I/O or waits blocks on one shared multi-thread tokio runtime, with
+//! `py.detach` first, and has an awaitable twin with an `_async` suffix that runs the same
+//! future as a task on that runtime and returns a pyo3 coroutine for asyncio to await. See
+//! [`runtime`] for why both spellings drive one future, what cancelling an awaitable does,
+//! why one runtime, and why the re-entrancy guard is not optional.
 //!
 //! # Layout
 //!
@@ -128,7 +130,9 @@ mod microvms {
     #[pymodule_export]
     use super::agents::{
         PyAgentSpec, PyAgentVm, PyBearerToken, agent_constants, install_agent_access,
-        installed_agents, mint_bedrock_token, mint_bedrock_token_with_credentials, prompt_agent,
+        install_agent_access_async, installed_agents, installed_agents_async, mint_bedrock_token,
+        mint_bedrock_token_async, mint_bedrock_token_with_credentials, prompt_agent,
+        prompt_agent_async,
     };
     #[pymodule_export]
     use super::control::{
@@ -155,11 +159,14 @@ mod microvms {
     #[pymodule_export]
     use super::names::{PyNameRecord, PyNameRegistry};
     #[pymodule_export]
-    use super::preflight::{PyPreflightCheck, PyPreflightReport, preflight};
+    use super::preflight::{PyPreflightCheck, PyPreflightReport, preflight, preflight_async};
     #[pymodule_export]
     use super::process::{PyByteStream, PyExecProcess, PyOutputGap};
     #[pymodule_export]
-    use super::provision::{PyProvisionedAgentd, provision_agentd, provision_agentd_report};
+    use super::provision::{
+        PyProvisionedAgentd, provision_agentd, provision_agentd_async, provision_agentd_report,
+        provision_agentd_report_async,
+    };
     #[pymodule_export]
     use super::region::PyRegion;
     #[pymodule_export]

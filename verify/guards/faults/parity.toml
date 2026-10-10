@@ -16,7 +16,7 @@ transform = { file = "bindings/microvms-py/microvms.pyi", replace = "    def fil
 [[family.fault]]
 id = "parity-health-ts-cell"
 message = "health: ts: no cell; name the surface or exempt it"
-transform = { file = "verify/parity/capabilities.toml", replace = "py = \"Session.health\"\nts = \"Session.health\"\n", with = "py = \"Session.health\"\n" }
+transform = { file = "verify/parity/capabilities.toml", replace = "py = [\"Session.health\", \"Session.health_async\"]\nts = \"Session.health\"\n", with = "py = [\"Session.health\", \"Session.health_async\"]\n" }
 
 [[family.fault]]
 id = "parity-empty-pyi"
@@ -69,8 +69,15 @@ transform = { file = "verify/parity/capabilities.toml", replace = "py = \"RateTa
 
 [[family.fault]]
 id = "parity-exempt-member-deleted"
-message = "type AgentVm: ts: create has no Python twin and no exemption"
-transform = { file = "verify/parity/capabilities.toml", replace = "name = \"AgentVm\"\nexempt_members.ts = { create = \"the async factory idiom; Python constructs with AgentVm(...)\" }\n", with = "name = \"AgentVm\"\n" }
+message = "type Sandbox: ts: suspendedWindowSecondsAsync has no Python twin and no exemption"
+transform = { file = "verify/parity/capabilities.toml", replace = "exempt_members.ts = { suspendedWindowSecondsAsync = \"an async method, because napi can't await in a getter\" }\n", with = "" }
+
+# A Python awaitable twin pairs with its blocking spelling's TypeScript twin (#544); without
+# the suffix rule every twin on a `[[type]]` reads as unpaired.
+[[family.fault]]
+id = "parity-async-twin-unpaired"
+message = "type Sandbox: py: run_async has no TypeScript twin and no exemption"
+transform = { file = "tools/check-parity.py", replace = "        name = name.removesuffix(\"_async\")\n", with = "        pass\n" }
 
 # The self-test's named cases, each against the code that makes it pass.
 [[family]]
@@ -111,6 +118,12 @@ transform = { file = "tools/check-parity.py", replace = "                       
 
 # A surface that can't be read is reported and skipped, and the others are still checked: each
 # part of that, reverted, fails its test.
+
+[[family.fault]]
+id = "parity-test-async-twin-pairing"
+message = "FAIL: test_an_awaitable_twin_pairs_with_its_blocking_spellings_typescript_twin ("
+transform = { file = "tools/check-parity.py", replace = "        name = name.removesuffix(\"_async\")\n", with = "        pass\n" }
+
 [[family]]
 guard = "test_check_parity.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "RuleTests"]

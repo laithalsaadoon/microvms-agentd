@@ -51,7 +51,7 @@ run = [
 expect = "test-failed"
 suite = "bindings"
 message = "FAILED bindings/microvms-py/tests/test_build_project.py::test_ensure_image_refuses_them_before_any_call[project]"
-transform = { file = "bindings/microvms-py/src/sandbox.rs", replace = "            if let Some(dir) = project_dir {\n", with = "            if let Some(dir) = project_dir.filter(|_| false) {\n" }
+transform = { file = "bindings/microvms-py/src/sandbox.rs", replace = "                let project = project_dir\n", with = "                let project = project_dir.filter(|_| false)\n" }
 
 # The TypeScript pin never put on the request.
 [[fault]]
