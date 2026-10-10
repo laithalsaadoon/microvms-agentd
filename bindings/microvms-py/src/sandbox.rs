@@ -1331,6 +1331,9 @@ impl PySandbox {
         log_stream: Option<String>,
         token_scope: Option<String>,
     ) -> PyCoreResult<PyImage> {
+        // PyO3 polls this coroutine on the event-loop thread. Project files can live on a
+        // slow filesystem, so read them on the blocking pool before creating the image.
+        let project_files = runtime::spawn_blocking(move || project_files(project_dir)).await?;
         let request = create_image_request(ImageRequestArgs {
             name: &name,
             binary,
@@ -1340,7 +1343,7 @@ impl PySandbox {
             base_image,
             base_image_version,
             dockerfile,
-            project_files: project_files(project_dir)?,
+            project_files,
             repair_guest_identity,
             inherit_workdir,
             run_hook_timeout,
