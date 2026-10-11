@@ -1095,16 +1095,12 @@ mod tests {
     /// on the run hook's entry; a replay records an entry but runs nothing.
     #[tokio::test]
     async fn the_run_handler_runs_once_on_the_winning_bootstrap() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().expect("tempdir");
         let count = dir.path().join("count");
-        let handler = dir.path().join("run");
-        std::fs::write(
-            &handler,
-            format!("#!/bin/sh\necho x >> {}\n", count.display()),
-        )
-        .expect("write");
-        std::fs::set_permissions(&handler, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        crate::hook_handlers::write_test_handler(
+            &dir.path().join("run"),
+            &format!("echo x >> {}", count.display()),
+        );
         let state = AppState::new(Config {
             hooks_dir: dir.path().to_path_buf(),
             ..Config::default()
@@ -1122,11 +1118,8 @@ mod tests {
     /// failed hook is undocumented, and a VM that cannot suspend is the worse outcome.
     #[tokio::test]
     async fn a_failing_suspend_handler_still_answers_200() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().expect("tempdir");
-        let handler = dir.path().join("suspend");
-        std::fs::write(&handler, "#!/bin/sh\nexit 1\n").expect("write");
-        std::fs::set_permissions(&handler, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        crate::hook_handlers::write_test_handler(&dir.path().join("suspend"), "exit 1");
         let state = AppState::new(Config {
             hooks_dir: dir.path().to_path_buf(),
             ..Config::default()

@@ -191,6 +191,38 @@ pub fn handler_path(dir: &Path, hook: &str) -> PathBuf {
     dir.join(hook)
 }
 
+/// Writes `body` as an executable `/bin/sh` handler at `path`, for a test that runs it next.
+///
+/// A file this process writes stays open for writing until the write returns. A test on another
+/// thread that spawns a process in that window gives the child a copy of the open handle, which
+/// the child keeps until it execs, and running the handler while any process holds it open for
+/// writing fails with ETXTBSY ("Text file busy"). A child `sh` writes the file here, so this
+/// process never holds it open for writing.
+#[cfg(test)]
+pub(crate) fn write_test_handler(path: &Path, body: &str) {
+    use std::io::Write as _;
+    let mut writer = std::process::Command::new("/bin/sh")
+        .args(["-c", "cat > \"$0\" && chmod 755 \"$0\""])
+        .arg(path)
+        .stdin(Stdio::piped())
+        .spawn()
+        .expect("spawn the handler writer");
+    writer
+        .stdin
+        .take()
+        .expect("the writer's stdin")
+        .write_all(format!("#!/bin/sh\n{body}\n").as_bytes())
+        .expect("send the handler body");
+    assert!(
+        writer
+            .wait()
+            .expect("wait for the handler writer")
+            .success(),
+        "the handler writer failed for {}",
+        path.display()
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,8 +232,7 @@ mod tests {
 
     fn script(dir: &Path, hook: &str, body: &str) -> PathBuf {
         let path = handler_path(dir, hook);
-        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("write handler");
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        write_test_handler(&path, body);
         path
     }
 
