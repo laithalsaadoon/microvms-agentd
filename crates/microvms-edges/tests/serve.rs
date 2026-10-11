@@ -416,7 +416,7 @@ async fn get(local: SocketAddr, path: &str) -> String {
         return String::new();
     };
     client
-        .write_all(format!("GET {path} HTTP/1.1\r\nhost: localhost\r\n\r\n").as_bytes())
+        .write_all(format!("GET {path} HTTP/1.1\r\nhost: {local}\r\n\r\n").as_bytes())
         .await
         .expect("written");
     let mut response = Vec::new();

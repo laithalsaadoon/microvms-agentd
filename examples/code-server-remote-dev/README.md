@@ -14,7 +14,9 @@ From the repository root:
 
 ```bash
 mise run build
-bash examples/code-server-remote-dev/run.sh
+# Put your IDE password in a local file with mode 0600 first.
+CODE_SERVER_PASSWORD_FILE="$HOME/.config/code-server-password" \
+  bash examples/code-server-remote-dev/run.sh
 # Open http://127.0.0.1:8080
 ```
 
@@ -32,11 +34,23 @@ workspace for uid 1000. A changed Dockerfile changes the reusable image name.
 networking, shell access, auto-resume, and an idle window of 900 seconds.
 The launch environment supplies `HOME=/workspace` and an explicit `PATH`.
 
-The script starts code-server detached with `--auth none` and a guest
-loopback listener. The local forward also defaults to loopback and
-supplies the platform's port-scoped proxy credentials. Choose access controls
-appropriate for the host where the forward runs; the example is not a shared
-IDE service.
+The script starts code-server detached as uid 1000 with password authentication
+and a guest loopback listener. The local forward also defaults to loopback and
+supplies the platform's port-scoped proxy credentials.
+
+## Password authentication
+
+The IDE requires its own password. On first launch, `run.sh` reads
+`CODE_SERVER_PASSWORD_FILE`, requires mode 0600 or stricter, and uploads a
+mode-0600 configuration with `microvm cp`. The password is never included in
+an exec command or printed. Keep the password available when reconnecting;
+the configuration stays in the VM for that session.
+
+Any local user who can reach the forward can send a request, so the guest app
+must authenticate its users. The forward requires a `Host` header matching its
+bound address and port. Loopback bindings accept `localhost` and loopback IP
+literals. For a VM created without password authentication, run
+`microvm terminate code-server-dev --wait` and start this script again.
 
 ## Work, suspend, and reconnect
 

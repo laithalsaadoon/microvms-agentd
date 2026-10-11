@@ -30,8 +30,9 @@ uv run --frozen python -c \
 terraform -chdir=infra init -input=false
 terraform -chdir=infra apply "$@"
 terraform -chdir=infra output -json config > .agent/config.json
-read -r region secret < <(uv run --frozen python -c \
-  'import json; c=json.load(open(".agent/config.json")); print(c["region"], c["github_secret"])')
-echo "Wrote .agent/config.json. Store a GitHub token once (see README for scopes):"
-echo "  gh auth token | aws secretsmanager put-secret-value --region $region \\"
-echo "    --secret-id $secret --secret-string file:///dev/stdin"
+cat <<'SETUP'
+Wrote .agent/config.json. Store the source and publishing tokens (see README):
+  Use github_secret and github_publish_secret from .agent/config.json in turn:
+  aws secretsmanager put-secret-value --region <region> \
+    --secret-id <secret-arn> --secret-string file://<protected-token-file>
+SETUP

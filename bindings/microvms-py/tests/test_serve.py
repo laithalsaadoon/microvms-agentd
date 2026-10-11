@@ -136,7 +136,9 @@ def test_stop_with_a_timeout_cuts_a_connection_left_open(upstream: int) -> None:
     # The guest holding its answer proves the forward accepted the connection, which stays
     # open until it's cut.
     with socket.create_connection(address(forward.local_address), timeout=10) as kept:
-        kept.sendall(b"GET /slow HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        kept.sendall(
+            f"GET /slow HTTP/1.1\r\nHost: {forward.local_address}\r\n\r\n".encode()
+        )
         assert SLOW_ARRIVED.wait(10), "the forward never reached the guest"
         started = time.monotonic()
         report = forward.stop(timeout=0.2)

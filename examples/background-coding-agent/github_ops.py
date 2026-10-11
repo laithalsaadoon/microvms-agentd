@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """GitHub reads before the VM starts and writes after it stops.
 
-The token stays in Lambda. The guest receives a source tarball and the task text,
-so an agent steered by a hostile issue has no GitHub credential to misuse.
+The tokens stay in Lambda. The guest receives a source tarball and the task text.
+Changes are published through a separate credential to a configured fork.
 """
 
 import base64
@@ -42,6 +42,36 @@ def token() -> str:
 @cache
 def client() -> Github:
     return Github(auth=Auth.Token(token()), timeout=30)
+
+
+@cache
+def publish_client() -> Github:
+    secret = boto3.client("secretsmanager").get_secret_value(
+        SecretId=os.environ["GITHUB_PUBLISH_SECRET"]
+    )
+    return Github(auth=Auth.Token(secret["SecretString"].strip()), timeout=30)
+
+
+def publishing_repo(source):
+    """Resolve an explicitly configured fork with Actions disabled before any writes."""
+    forks = json.loads(os.environ.get("GITHUB_FORKS", "{}"))
+    name = forks.get(source.full_name)
+    if not isinstance(name, str) or name.casefold() == source.full_name.casefold():
+        raise ValueError("configure a separate publishing fork for this repository")
+    fork = publish_client().get_repo(name)
+    if not fork.fork or fork.parent.full_name.casefold() != source.full_name.casefold():
+        raise ValueError(
+            "the publishing repository must be a direct fork of the source"
+        )
+    # The branch is created only after the fork's own workflow execution is disabled.
+    _, permissions = fork.requester.requestJsonAndCheck(
+        "GET", f"{fork.url}/actions/permissions"
+    )
+    if permissions.get("enabled") is not False:
+        raise ValueError(
+            "disable GitHub Actions in the publishing fork before publishing"
+        )
+    return fork
 
 
 def redact(text: str) -> str:
@@ -163,7 +193,8 @@ def open_pull_request(job, meta: dict, bundle: dict[str, bytes]) -> str | None:
             for member in archive
             if member.isfile() or member.issym()
         }
-    repo = client().get_repo(job.repo)
+    source = client().get_repo(job.repo)
+    repo = publishing_repo(source)
     tree = []
     for status, mode, path in entries:
         if status == "D":
@@ -187,21 +218,22 @@ def open_pull_request(job, meta: dict, bundle: dict[str, bytes]) -> str | None:
         if error.status != 422:
             raise
         repo.get_git_ref(f"heads/{branch}").edit(commit.sha, force=True)
-    for existing in repo.get_pulls(state="all", head=f"{repo.owner.login}:{branch}"):
+    head = f"{repo.owner.login}:{branch}"
+    for existing in source.get_pulls(state="all", head=head):
         return existing.html_url
     report = redact(bundle.get("REPORT.md", b"").decode(errors="replace"))
     body = f"{report[:MAX_BODY]}\n\nCloses #{job.number}\n\n{marker(job.id)}"
     title = f"{meta['title']} (#{job.number})"
     try:
-        pull = repo.create_pull(
-            base=meta["base_ref"], head=branch, title=title, body=body, draft=True
+        pull = source.create_pull(
+            base=meta["base_ref"], head=head, title=title, body=body, draft=True
         )
     except GithubException as error:
         # Draft PRs are unavailable on some private-repository plans.
         if error.status != 422 or "draft" not in json.dumps(error.data).lower():
             raise
-        pull = repo.create_pull(
-            base=meta["base_ref"], head=branch, title=title, body=body
+        pull = source.create_pull(
+            base=meta["base_ref"], head=head, title=title, body=body
         )
     return pull.html_url
 

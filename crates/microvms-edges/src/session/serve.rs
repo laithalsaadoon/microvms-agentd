@@ -293,7 +293,6 @@ where
     // One client for the whole forward: connection reuse to the endpoint is what keeps a
     // page-load of thirty assets from paying thirty TLS handshakes.
     let client = Arc::new(ForwardClient::new()?);
-    let spec = Arc::new(spec);
     let mut report = ForwardReport {
         served: 0,
         refused: 0,
@@ -307,8 +306,16 @@ where
         stop,
         cut,
         |stream, _| {
-            let (spec, auth, client) = (Arc::clone(&spec), auth.clone(), Arc::clone(&client));
+            let (mut spec, auth, client) = (spec.clone(), auth.clone(), Arc::clone(&client));
             async move {
+                // A wildcard listener has no single address. The accepted socket names
+                // the concrete local interface, including the port chosen for a :0 bind.
+                spec.bind = stream.local_addr().map_err(|error| {
+                    Error::new(
+                        ErrorKind::Unexpected,
+                        format!("reading the local forward address failed: {error}"),
+                    )
+                })?;
                 let mut events = Vec::new();
                 let outcome =
                     serve_connection_via(stream, &spec, auth.as_ref(), &client, |event| {

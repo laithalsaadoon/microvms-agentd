@@ -1,0 +1,169 @@
+# Protected example configuration, publishing destinations, and local forward hosts.
+
+[[fault]]
+id = "bg-publishes-from-fork"
+guard = "examples/background-coding-agent/tests/test_github.py::test_changes_become_one_commit_and_a_retry_safe_draft"
+run = ["env", "PYTHONDONTWRITEBYTECODE=1", "uv", "run", "--project", "examples/background-coding-agent", "--frozen", "pytest", "-q", "-rA", "-p", "no:cacheprovider", "examples/background-coding-agent/tests/test_github.py::test_changes_become_one_commit_and_a_retry_safe_draft"]
+expect = "test-failed"
+suite = "script"
+transform = { file = "examples/background-coding-agent/github_ops.py", replace = "    repo = publishing_repo(source)", with = "    repo = source" }
+
+[[fault]]
+id = "bg-requires-configured-fork"
+guard = "examples/background-coding-agent/tests/test_github.py::test_publishing_requires_an_isolated_configured_fork[actions]"
+run = ["env", "PYTHONDONTWRITEBYTECODE=1", "uv", "run", "--project", "examples/background-coding-agent", "--frozen", "pytest", "-q", "-rA", "-p", "no:cacheprovider", "examples/background-coding-agent/tests/test_github.py::test_publishing_requires_an_isolated_configured_fork[actions]"]
+expect = "test-failed"
+suite = "script"
+transform = { file = "examples/background-coding-agent/github_ops.py", replace = "    repo = publishing_repo(source)", with = "    repo = publish_client().get_repo(\"publisher/app\")" }
+
+[[fault]]
+id = "bg-job-control-text"
+guard = "examples/background-coding-agent/tests/test_cli.py::test_job_list_renders_stored_text_literally"
+run = ["env", "PYTHONDONTWRITEBYTECODE=1", "uv", "run", "--project", "examples/background-coding-agent", "--frozen", "pytest", "-q", "-rA", "-p", "no:cacheprovider", "examples/background-coding-agent/tests/test_cli.py::test_job_list_renders_stored_text_literally"]
+expect = "test-failed"
+suite = "script"
+transform = { file = "examples/background-coding-agent/cli.py", replace = "                display_text,", with = "                str," }
+
+[[fault]]
+id = "bg-job-literal-cells"
+guard = "examples/background-coding-agent/tests/test_cli.py::test_every_job_cell_uses_literal_text"
+run = ["env", "PYTHONDONTWRITEBYTECODE=1", "uv", "run", "--project", "examples/background-coding-agent", "--frozen", "pytest", "-q", "-rA", "-p", "no:cacheprovider", "examples/background-coding-agent/tests/test_cli.py::test_every_job_cell_uses_literal_text"]
+expect = "test-failed"
+suite = "script"
+transform = { file = "examples/background-coding-agent/cli.py", replace = "                display_text,", with = "                str," }
+
+[[fault]]
+id = "editor-password-auth"
+guard = "examples/background-coding-agent/tests/test_code_server.py::test_editor_starts_with_a_protected_password_configuration"
+run = ["env", "PYTHONDONTWRITEBYTECODE=1", "uv", "run", "--project", "examples/background-coding-agent", "--frozen", "pytest", "-q", "-rA", "-p", "no:cacheprovider", "examples/background-coding-agent/tests/test_code_server.py::test_editor_starts_with_a_protected_password_configuration"]
+expect = "test-failed"
+suite = "script"
+transform = { file = "examples/code-server-remote-dev/run.sh", replace = "auth: password\\npassword: ", with = "auth: none\\npassword: " }
+
+[[fault]]
+id = "editor-password-file-mode"
+guard = "examples/background-coding-agent/tests/test_code_server.py::test_editor_requires_a_private_password_file_before_building[420]"
+run = ["env", "PYTHONDONTWRITEBYTECODE=1", "uv", "run", "--project", "examples/background-coding-agent", "--frozen", "pytest", "-q", "-rA", "-p", "no:cacheprovider", "examples/background-coding-agent/tests/test_code_server.py::test_editor_requires_a_private_password_file_before_building[420]"]
+expect = "test-failed"
+suite = "script"
+transform = { file = "examples/code-server-remote-dev/run.sh", replace = "if source.stat().st_mode & 0o077:", with = "if source.stat().st_mode & 0o000:" }
+
+[[fault]]
+id = "editor-reattach-auth"
+guard = "examples/background-coding-agent/tests/test_code_server.py::test_editor_reattaches_only_after_authenticated_initialization"
+run = ["env", "PYTHONDONTWRITEBYTECODE=1", "uv", "run", "--project", "examples/background-coding-agent", "--frozen", "pytest", "-q", "-rA", "-p", "no:cacheprovider", "examples/background-coding-agent/tests/test_code_server.py::test_editor_reattaches_only_after_authenticated_initialization"]
+expect = "test-failed"
+suite = "script"
+transform = { file = "examples/code-server-remote-dev/run.sh", replace = "microvm exec \"test -f /run/code-server-authenticated\"", with = "microvm exec \"true\"" }
+
+[[fault]]
+id = "forward-host-before-mint"
+guard = "session::forward::tests::requests_name_the_local_listener_before_minting"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::forward::tests::requests_name_the_local_listener_before_minting"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "    if !local_host_matches(&head.headers, spec.bind) {", with = "    if false && !local_host_matches(&head.headers, spec.bind) {" }
+
+[[fault]]
+id = "forward-host-authority"
+guard = "session::forward::tests::host_authorities_match_the_bound_address_and_port"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::forward::tests::host_authorities_match_the_bound_address_and_port"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "    if port != bind.port() {", with = "    if false && port != bind.port() {" }
+
+[[fault]]
+id = "forward-host-numeric-port"
+guard = "session::forward::tests::host_authorities_match_the_bound_address_and_port"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::forward::tests::host_authorities_match_the_bound_address_and_port"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "        None => return false,", with = "        None => 80," }
+
+[[fault]]
+id = "forward-host-the-caller-cannot-smuggle-its-own-proxy-headers-upstream"
+guard = "session::forward::tests::the_caller_cannot_smuggle_its_own_proxy_headers_upstream"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::forward::tests::the_caller_cannot_smuggle_its_own_proxy_headers_upstream"]
+expect = "test-failed"
+suite = "rust"
+transform = {file = "crates/microvms-edges/src/session/forward.rs", replace = "    if !local_host_matches(&head.headers, spec.bind) {", with = "    if true || !local_host_matches(&head.headers, spec.bind) {"}
+
+[[fault]]
+id = "forward-host-a-scope-refusal-is-answered-with-the-sentence-that-names-it"
+guard = "session::forward::tests::a_scope_refusal_is_answered_with_the_sentence_that_names_it"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::forward::tests::a_scope_refusal_is_answered_with_the_sentence_that_names_it"]
+expect = "test-failed"
+suite = "rust"
+transform = {file = "crates/microvms-edges/src/session/forward.rs", replace = "    if !local_host_matches(&head.headers, spec.bind) {", with = "    if true || !local_host_matches(&head.headers, spec.bind) {"}
+
+[[fault]]
+id = "forward-host-a-dead-guest-server-is-reported-as-502-rather-than-as-an-auth-problem"
+guard = "session::forward::tests::a_dead_guest_server_is_reported_as_502_rather_than_as_an_auth_problem"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::forward::tests::a_dead_guest_server_is_reported_as_502_rather_than_as_an_auth_problem"]
+expect = "test-failed"
+suite = "rust"
+transform = {file = "crates/microvms-edges/src/session/forward.rs", replace = "    if !local_host_matches(&head.headers, spec.bind) {", with = "    if true || !local_host_matches(&head.headers, spec.bind) {"}
+
+[[fault]]
+id = "forward-host-the-guests-own-404-is-relayed-and-not-reinterpreted"
+guard = "session::forward::tests::the_guests_own_404_is_relayed_and_not_reinterpreted"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::forward::tests::the_guests_own_404_is_relayed_and_not_reinterpreted"]
+expect = "test-failed"
+suite = "rust"
+transform = {file = "crates/microvms-edges/src/session/forward.rs", replace = "    if !local_host_matches(&head.headers, spec.bind) {", with = "    if true || !local_host_matches(&head.headers, spec.bind) {"}
+
+[[fault]]
+id = "forward-host-a-post-body-is-forwarded-and-the-response-length-is-re-derived"
+guard = "session::forward::tests::a_post_body_is_forwarded_and_the_response_length_is_re_derived"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::forward::tests::a_post_body_is_forwarded_and_the_response_length_is_re_derived"]
+expect = "test-failed"
+suite = "rust"
+transform = {file = "crates/microvms-edges/src/session/forward.rs", replace = "    if !local_host_matches(&head.headers, spec.bind) {", with = "    if true || !local_host_matches(&head.headers, spec.bind) {"}
+
+[[fault]]
+id = "forward-host-a-101-relays-the-handshake-and-then-stops-parsing"
+guard = "session::forward::tests::a_101_relays_the_handshake_and_then_stops_parsing"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::forward::tests::a_101_relays_the_handshake_and_then_stops_parsing"]
+expect = "test-failed"
+suite = "rust"
+transform = {file = "crates/microvms-edges/src/session/forward.rs", replace = "    if !local_host_matches(&head.headers, spec.bind) {", with = "    if true || !local_host_matches(&head.headers, spec.bind) {"}
+
+[[fault]]
+id = "forward-host-every-exchange-mints-through-the-cache-rather-than-capturing-headers-once"
+guard = "session::forward::tests::every_exchange_mints_through_the_cache_rather_than_capturing_headers_once"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::forward::tests::every_exchange_mints_through_the_cache_rather_than_capturing_headers_once"]
+expect = "test-failed"
+suite = "rust"
+transform = {file = "crates/microvms-edges/src/session/forward.rs", replace = "    if !local_host_matches(&head.headers, spec.bind) {", with = "    if true || !local_host_matches(&head.headers, spec.bind) {"}
+
+[[fault]]
+id = "bg-publisher-secret"
+guard = "examples/background-coding-agent/tests/test_github.py::test_publishing_uses_its_separate_secret"
+run = ["env", "PYTHONDONTWRITEBYTECODE=1", "uv", "run", "--project", "examples/background-coding-agent", "--frozen", "pytest", "-q", "-rA", "-p", "no:cacheprovider", "examples/background-coding-agent/tests/test_github.py::test_publishing_uses_its_separate_secret"]
+expect = "test-failed"
+suite = "script"
+transform = { file = "examples/background-coding-agent/github_ops.py", replace = "SecretId=os.environ[\"GITHUB_PUBLISH_SECRET\"]", with = "SecretId=os.environ[\"GITHUB_SECRET\"]" }
+
+[[fault]]
+id = "py-forward-bound-host"
+guard = "bindings/microvms-py/tests/test_serve.py::test_stop_with_a_timeout_cuts_a_connection_left_open"
+run = [["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_serve.py::test_stop_with_a_timeout_cuts_a_connection_left_open"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "crates/microvms-edges/src/session/serve.rs", replace = "    report.proxy_token_mints = auth.as_ref().map_or(0, |auth| auth.mint_count());", with = "    report.served = 0;\n    report.proxy_token_mints = auth.as_ref().map_or(0, |auth| auth.mint_count());" }
+
+[[fault]]
+id = "js-forward-bound-host"
+guard = "stop(timeout) cuts a connection left open"
+run = [["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"], ["node", "--test", "--test-reporter=tap", "--test-name-pattern=stop\\(timeout\\) cuts a connection left open", "bindings/microvms-js/__test__/serve.mjs"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "crates/microvms-edges/src/session/serve.rs", replace = "    report.proxy_token_mints = auth.as_ref().map_or(0, |auth| auth.mint_count());", with = "    report.served = 0;\n    report.proxy_token_mints = auth.as_ref().map_or(0, |auth| auth.mint_count());" }
+
+[[fault]]
+id = "forward-uses-bound-port"
+guard = "a_forward_handle_serves_until_stopped_and_reports"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "serve", "--", "--exact", "a_forward_handle_serves_until_stopped_and_reports"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/session/serve.rs", replace = "                spec.bind = stream.local_addr().map_err(|error| {", with = "                let _ = stream.local_addr().map_err(|error| {" }

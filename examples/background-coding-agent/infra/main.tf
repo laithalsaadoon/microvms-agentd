@@ -21,6 +21,11 @@ variable "image_version" {
   type    = string
   default = "1.0"
 }
+variable "github_forks" {
+  description = "Source owner/repo to publishing owner/repo. Each destination is a direct fork with Actions disabled."
+  type        = map(string)
+  default     = {}
+}
 variable "task_seconds" {
   description = "Agent time budget. The VM lives 15 minutes longer."
   type        = number
@@ -70,6 +75,12 @@ resource "aws_secretsmanager_secret" "github" {
   recovery_window_in_days = 0
 }
 
+# The publishing credential is separate from the source credential.
+resource "aws_secretsmanager_secret" "github_publish" {
+  name_prefix             = "${var.name}-github-publish-"
+  recovery_window_in_days = 0
+}
+
 # Inputs and agent output, kept 30 days like the job records.
 resource "aws_s3_bucket" "jobs" {
   bucket_prefix = "${var.name}-"
@@ -112,7 +123,7 @@ resource "aws_iam_role_policy" "worker" {
     Resource = "arn:aws:lambda:${var.region}:aws:network-connector:aws-network-connector:*" },
     { Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject"], Resource = "${aws_s3_bucket.jobs.arn}/*" },
     { Effect = "Allow", Action = ["dynamodb:GetItem", "dynamodb:UpdateItem"], Resource = aws_dynamodb_table.jobs.arn },
-    { Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = aws_secretsmanager_secret.github.arn },
+    { Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = [aws_secretsmanager_secret.github.arn, aws_secretsmanager_secret.github_publish.arn] },
     # The agent's Bedrock bearer token is presigned with this role's credentials.
     { Effect = "Allow", Action = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream",
     "bedrock:CallWithBearerToken"], Resource = "*" }
@@ -154,13 +165,15 @@ resource "aws_lambda_function" "worker" {
   }
   environment {
     variables = {
-      BUCKET         = aws_s3_bucket.jobs.id
-      JOBS_TABLE     = aws_dynamodb_table.jobs.name
-      GITHUB_SECRET  = aws_secretsmanager_secret.github.arn
-      IMAGE_ARN      = var.image_arn
-      IMAGE_VERSION  = var.image_version
-      GUEST_ROLE_ARN = aws_iam_role.guest.arn
-      TASK_SECONDS   = tostring(var.task_seconds)
+      BUCKET                = aws_s3_bucket.jobs.id
+      JOBS_TABLE            = aws_dynamodb_table.jobs.name
+      GITHUB_SECRET         = aws_secretsmanager_secret.github.arn
+      GITHUB_PUBLISH_SECRET = aws_secretsmanager_secret.github_publish.arn
+      GITHUB_FORKS          = jsonencode(var.github_forks)
+      IMAGE_ARN             = var.image_arn
+      IMAGE_VERSION         = var.image_version
+      GUEST_ROLE_ARN        = aws_iam_role.guest.arn
+      TASK_SECONDS          = tostring(var.task_seconds)
     }
   }
   depends_on = [aws_iam_role_policy.worker, aws_iam_role_policy_attachment.durable, aws_cloudwatch_log_group.worker]
@@ -168,10 +181,11 @@ resource "aws_lambda_function" "worker" {
 
 output "config" {
   value = {
-    region        = var.region
-    bucket        = aws_s3_bucket.jobs.id
-    table         = aws_dynamodb_table.jobs.name
-    function_arn  = aws_lambda_function.worker.qualified_arn
-    github_secret = aws_secretsmanager_secret.github.arn
+    region                = var.region
+    bucket                = aws_s3_bucket.jobs.id
+    table                 = aws_dynamodb_table.jobs.name
+    function_arn          = aws_lambda_function.worker.qualified_arn
+    github_secret         = aws_secretsmanager_secret.github.arn
+    github_publish_secret = aws_secretsmanager_secret.github_publish.arn
   }
 }

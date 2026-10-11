@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import re
+import socket
 import tempfile
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
@@ -397,7 +398,40 @@ def wrap(case: Case, _servers: Callable[..., SseServer]) -> dict[str, Any]:
     )
 
 
+def forward(case: Case, servers: Callable[..., SseServer]) -> dict[str, Any]:
+    server = servers([[b"parity"]])
+    session = microvms.Session.direct(server.endpoint, "parity-agent-token")
+    bind = f"{case.input['bind_ip']}:0" if "bind_ip" in case.input else None
+    handle = session.port_forward(server.port, bind=bind, max_connections=1)
+    _, raw_port = handle.local_address.rsplit(":", 1)
+    port = int(raw_port)
+    wrong_port = port - 1 if port == 65535 else port + 1
+    hosts = [
+        host.replace("{port}", str(port)).replace("{wrong_port}", str(wrong_port))
+        for host in case.input["hosts"]
+    ]
+    request = "GET /parity HTTP/1.1\r\n"
+    request += "".join(f"Host: {host}\r\n" for host in hosts)
+    request += "Connection: close\r\n\r\n"
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=10) as client:
+            client.sendall(request.encode())
+            response = bytearray()
+            while chunk := client.recv(4096):
+                response.extend(chunk)
+        report = handle.stop(timeout=10)
+        return {
+            "status": int(response.split()[1]),
+            "served": report.served,
+            "refused": report.refused,
+            "upstream_requests": len(server.requested_paths),
+        }
+    finally:
+        handle.stop(timeout=10)
+
+
 HANDLERS: dict[str, Callable[[Case, Callable[..., SseServer]], dict[str, Any]]] = {
+    "forward": forward,
     "image-name": image_name,
     "cost": cost,
     "error": daemon_status,

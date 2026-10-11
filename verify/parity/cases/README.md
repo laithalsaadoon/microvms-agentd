@@ -72,6 +72,13 @@ refusal regresses the case fails on a connection error rather than a signed requ
 
 ## The areas
 
+- `forward`: each runner sends HTTP Host fields through a local forward to a
+  loopback server. `{port}` is the bound port and `{wrong_port}` is another valid
+  port. Optional `bind_ip` selects a local address. Cases check the HTTP status,
+  served and refused counts, and upstream call counts. Core checks that each
+  refusal happens before a proxy token request. Python and Node use a port from the OS.
+  The command runner reserves a port before it runs `microvm`.
+
 - `image-name`: the name `ensure_image` gives an image and the CLI's `build --reuse` gives the
   same inputs (`ensure-image`), and the name `AgentVm.image_name` gives an agent image
   (`agent-image-name`). The binary is `binary_hex`, built from the default Dockerfile on AL2023

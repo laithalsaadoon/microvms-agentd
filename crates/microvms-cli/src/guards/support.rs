@@ -670,6 +670,7 @@ pub(super) fn script_prov_build(transport: &ScriptedTransport) {
 /// A recorder rather than an assertion sink, matching core's own testing shape: the assertions live
 /// at the call site where a reader can see them, not inside the fake where they are invisible.
 pub(super) struct DaemonScript {
+    endpoint: String,
     seen: Mutex<Vec<microvms_core::session::HttpRequest>>,
     pub(super) replies: Mutex<std::collections::VecDeque<(u16, Vec<u8>)>>,
     /// Chunk sequences for `open_stream`, front to back.
@@ -678,7 +679,12 @@ pub(super) struct DaemonScript {
 
 impl DaemonScript {
     pub(super) fn new() -> Arc<Self> {
+        Self::at_endpoint("https://mvm-1.example".to_string())
+    }
+
+    pub(super) fn at_endpoint(endpoint: String) -> Arc<Self> {
         Arc::new(Self {
+            endpoint,
             seen: Mutex::new(Vec::new()),
             replies: Mutex::new(std::collections::VecDeque::new()),
             streams: Mutex::new(std::collections::VecDeque::new()),
@@ -825,7 +831,7 @@ impl CoreSeam for ScriptedSessionSeam {
         // directly and is exactly right here: TRAP-9's mint is core's own tested property, and
         // adding a fake minter would put a second thing in the way of what this guard is asking.
         let backend = Arc::clone(&self.script) as Arc<dyn microvms_core::session::HttpBackend>;
-        let built = Session::builder("https://mvm-1.example", "agent-token")
+        let built = Session::builder(&self.script.endpoint, "agent-token")
             .with_backend(backend)
             .build();
         Box::pin(async move { built })
