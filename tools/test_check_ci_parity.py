@@ -25,12 +25,34 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 PARITY = runpy.run_path(
     str(Path(__file__).with_name("check-ci-parity.py")),
     run_name="tools.check-ci-parity",
 )
 REPO = Path(__file__).resolve().parents[1]
+
+# The pointers a git hook exports, copied from test_license_headers.py (scripts aren't
+# importable). `mise run check` runs this file from lefthook's pre-push, and from a linked
+# worktree git exports `GIT_DIR` there. Inherited, it turns the fixture's `git init` into a
+# reinit of the real repository, which sets `core.bare = true` in its shared config, and
+# points the gate's tracked-file listing at the real tree instead of the fixture's.
+GIT_ENV_LEAKS = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_CEILING_DIRECTORIES",
+)
+
+
+def clean_env() -> dict[str, str]:
+    """`os.environ` without the inherited git pointers, read at call time."""
+    return {k: v for k, v in os.environ.items() if k not in GIT_ENV_LEAKS}
+
 
 MISE = """\
 [tools]
@@ -158,11 +180,12 @@ class ParityTests(unittest.TestCase):
             path = root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
-        # The task loader asks git which files are tracked.
-        subprocess.run(["git", "init", "-q", str(root)], check=True)
         out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            code = PARITY["main"](["--root", str(root)])
+        with mock.patch.dict(os.environ, clean_env(), clear=True):
+            # The task loader asks git which files are tracked.
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            with contextlib.redirect_stdout(out):
+                code = PARITY["main"](["--root", str(root)])
         return code, out.getvalue()
 
     def assertFails(self, needle, **files):
@@ -182,6 +205,16 @@ class ParityTests(unittest.TestCase):
     def test_a_tree_whose_jobs_reach_every_check_task_passes(self):
         out = self.assertPasses()
         self.assertIn("reach all 3 of `check`'s", out)
+
+    def test_an_inherited_git_dir_leaves_that_repo_alone(self):
+        # The hook case: `GIT_DIR` names another repo while a case builds its tree. The decoy
+        # keeps its config and its commit, and the case still answers for its own tree.
+        with tempfile.TemporaryDirectory() as decoy:
+            subprocess.run(["git", "init", "-q", decoy], check=True, env=clean_env())
+            config = (Path(decoy) / ".git" / "config").read_text()
+            with mock.patch.dict(os.environ, {"GIT_DIR": str(Path(decoy) / ".git")}):
+                self.assertIn("reach all 3 of `check`'s", self.assertPasses())
+            self.assertEqual((Path(decoy) / ".git" / "config").read_text(), config)
 
     def test_a_check_task_no_job_reaches_fails(self):
         mise = edit(

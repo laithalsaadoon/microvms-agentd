@@ -130,6 +130,28 @@ run = {mutmut!r} if sys.argv[5] == "mutmut" else {python!r}
 os.execv(run, [run, *sys.argv[6:]])
 """
 
+# The pointers a git hook exports, copied from test_license_headers.py (scripts aren't
+# importable). `mise run check` runs this file from lefthook's pre-push, and from a linked
+# worktree git exports `GIT_DIR` there. Inherited by the fixture's own git calls, it turns
+# the throwaway repo's `git init`, commits and `update-ref` into writes to the real one:
+# `core.bare = true` in its shared config, commits on the checked-out branch, and a moved
+# `origin/main`.
+GIT_ENV_LEAKS = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_CEILING_DIRECTORIES",
+)
+
+
+def clean_env() -> dict[str, str]:
+    """`os.environ` without the inherited git pointers, read at call time."""
+    return {k: v for k, v in os.environ.items() if k not in GIT_ENV_LEAKS}
+
+
 SUITE = 'import runpy\nCALC = runpy.run_path("tools/calc.py", run_name="tools.calc")\n'
 # A CI checkout's git: no identity, and no guessing one.
 NO_IDENTITY = {
@@ -191,6 +213,7 @@ class Repo:
         return subprocess.run(
             ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
             cwd=self.root,
+            env=clean_env(),
             check=True,
             capture_output=True,
             text=True,
@@ -1219,6 +1242,24 @@ class SelectionTests(unittest.TestCase):
             "  tools/calc.py, measured by tools/test_calc.py:\n    add: 1 of 3 survive (1 on the base)\n",
             out,
         )
+
+    def test_an_inherited_git_dir_leaves_that_repo_alone(self):
+        # The hook case: `GIT_DIR` names another repo while a case builds its own. The decoy
+        # keeps its config, its branch and its `origin/main`, and the case's repo is whole.
+        decoy = Repo(self, {"keep.txt": "decoy\n"})
+        before = [
+            decoy.git("config", "--get", "core.bare"),
+            decoy.git("rev-parse", "HEAD", "refs/remotes/origin/main"),
+        ]
+        with mock.patch.dict(os.environ, {"GIT_DIR": str(decoy.root / ".git")}):
+            repo = Repo(self, {"tools/calc.py": calc(), "tools/test_calc.py": SUITE})
+            repo.commit({"tools/calc.py": calc("0 0 0", "return b + a")})
+        after = [
+            decoy.git("config", "--get", "core.bare"),
+            decoy.git("rev-parse", "HEAD", "refs/remotes/origin/main"),
+        ]
+        self.assertEqual(after, before)
+        self.assertEqual(repo.git("log", "--format=%s"), "head\nbase\n")
 
     def test_an_inherited_environment_reaches_neither_git_nor_mutmut(self):
         repo = Repo(self, {"tools/calc.py": calc(), "tools/test_calc.py": SUITE})
