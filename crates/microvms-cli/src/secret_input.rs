@@ -109,6 +109,59 @@ mod tests {
     use std::io::Write;
 
     #[test]
+    fn every_attached_command_refuses_an_unreadable_token_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let missing = directory.path().join("missing-token");
+        for arguments in [
+            vec!["exec", "true"],
+            vec!["wait"],
+            vec!["health"],
+            vec!["keepalive"],
+            vec!["ack", "exec-example"],
+            vec!["kill", "exec-example"],
+            vec!["ps"],
+            vec!["stdin", "exec-example"],
+            vec!["cp", "local", "vm:/remote"],
+            vec!["exists", "/remote"],
+            vec!["sync", "."],
+            vec!["adopt"],
+            vec!["port-forward", "8080"],
+            vec!["agent-prompt", "task"],
+            vec!["tunnel", "5432"],
+            vec!["attach", "--name", "example"],
+        ] {
+            let name = arguments[0];
+            let mut argv = vec!["microvm"];
+            argv.extend(arguments);
+            argv.extend([
+                "--endpoint",
+                "https://example.invalid",
+                "--microvm-id",
+                "mvm-example",
+                "--agent-token-file",
+                missing.to_str().unwrap(),
+            ]);
+            let mut command = Cli::try_parse_from(argv).unwrap().command;
+            let mut stdin = &b"untouched"[..];
+            let mut warnings = Vec::new();
+            let error = prepare(&mut command, &mut stdin, |warning| {
+                warnings.push(warning.to_owned())
+            })
+            .expect_err(name);
+            assert_eq!(error.exit, Exit::InvalidArg, "{name}");
+            assert!(
+                error
+                    .message
+                    .contains("could not read --agent-token-file input"),
+                "{name}: {}",
+                error.message
+            );
+            assert_eq!(stdin, b"untouched", "{name}");
+            assert!(warnings.is_empty(), "{name}: {warnings:?}");
+        }
+    }
+
+    #[test]
     fn file_inputs_preserve_credential_values() {
         let mut token = tempfile::NamedTempFile::new().unwrap();
         token.write_all(b"example-token\r\n").unwrap();
