@@ -70,12 +70,12 @@ The Python and TypeScript runners send HTTPS through a proxy on a loopback port 
 listens on. A launch or image case is meant to be refused before any AWS call, and if that
 refusal regresses the case fails on a connection error rather than a signed request.
 
-The tunnel cases start the portable Rust peer built by `mise run parity:fixtures`.
-The test and binding tasks build it automatically; build it first before running a
-single parity test directly. Its input states the expected handshake version,
-route, destination and confirmation independently of the client. Each surface
-starts its own verified tunnel, reads the peer's application bytes, and compares
-its report and the peer's confirmation verdict with the case's common `expect`.
+The tunnel cases use the Rust peer built by `mise run parity:fixtures`.
+Test and binding tasks build it. Run that task first to test one case directly.
+The peer takes its version, port, and ready message from the case file.
+It fixes its route at `/v1/tcp` and uses the Noise KK pattern.
+Each runner opens its own verified tunnel and reads the peer's data. It checks
+the tunnel report and the peer's verdict against the same `expect`.
 
 ## The areas
 
@@ -122,6 +122,6 @@ its report and the peer's confirmation verdict with the case's common `expect`.
   writing `record_text` to an explicit state directory, so each surface must resolve
   or refuse the default before adopting a named VM.
 - `size-class`: the class a resource request selects, or the refusal.
-- `tunnel`: a verified tunnel's destination agreement and server-first data, through
-  each surface's tunnel entry point against the same portable Noise peer.
+- `tunnel`: the guest port and data a guest sends first, through the public tunnel
+  APIs and the same Rust peer.
 - `wrap-dockerfile`: a task Dockerfile with the agentd stanza appended.

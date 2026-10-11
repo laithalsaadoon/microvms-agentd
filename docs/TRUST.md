@@ -120,7 +120,7 @@ and it renders the table in [Traceability](TRACEABILITY.md). A guard is written
 | A guest streams hostile server-sent events to the client | `BIND-22` | `crates/microvms-app/src/session/sse.rs::an_unterminated_stream_is_refused_at_the_pending_ceiling`, `crates/microvms-app/src/session/sse.rs::an_unrecognized_or_unparseable_frame_is_dropped_rather_than_raised`, `crates/microvms-app/src/session/sse_fuzz.rs::hostile_stream_bytes_stay_bounded_and_every_event_round_trips` | guarded |
 | A replaced or tampered daemon release asset | `BIND-18` | `crates/microvms-edges/src/provision/release.rs::another_signer_identity_is_refused`, `crates/microvms-edges/src/provision/release.rs::one_flipped_byte_in_the_asset_is_refused` | guarded |
 | A release directory (`$MICROVM_RELEASE_DIR`) holding an asset and a matching `SHA256SUMS` but no bundle, or another release's files under the requested tag | `BIND-18` | `crates/microvms-edges/src/provision/release.rs::a_release_directory_without_its_bundle_is_refused_despite_a_matching_checksum`, `crates/microvms-edges/src/provision/release.rs::another_releases_files_under_the_requested_tag_are_refused` | guarded |
-| An on-path party ends a verified tunnel early, with a plaintext close frame or by dropping the connection | `BIND-23`, `AGENTD-19`, `AGENTD-20` | `crates/microvms-edges/tests/tunnel_end_of_stream.rs::a_verified_tcp_consumer_observes_the_stream_verdict`, `crates/model-conformance/tests/tunnel_end_of_stream.rs::bind_23_a_close_frame_forged_mid_stream_ends_truncated`, `crates/model-conformance/tests/tunnel_end_of_stream.rs::bind_23_a_connection_dropped_mid_stream_ends_truncated`, `crates/model-conformance/tests/tunnel_end_of_stream.rs::bind_23_the_daemons_end_of_stream_withheld_ends_truncated`, `crates/model-conformance/tests/tunnel_end_of_stream.rs::agentd_20_the_clients_end_of_stream_withheld_resets_the_guest`, `crates/agentd/tests/tunnel_relay.rs::agentd_19_a_guest_eof_reaches_the_caller_as_the_end_of_stream` | guarded; a protocol 2 peer that omits the end-of-stream offer ends `ClosedUnproven`; protocol 1 verified tunnels are refused |
+| An on-path party ends a verified tunnel early, with a plaintext close frame or by dropping the connection | `BIND-23`, `AGENTD-19`, `AGENTD-20` | `crates/microvms-edges/tests/tunnel_end_of_stream.rs::a_verified_tcp_consumer_observes_the_stream_verdict`, `crates/model-conformance/tests/tunnel_end_of_stream.rs::bind_23_a_close_frame_forged_mid_stream_ends_truncated`, `crates/model-conformance/tests/tunnel_end_of_stream.rs::bind_23_a_connection_dropped_mid_stream_ends_truncated`, `crates/model-conformance/tests/tunnel_end_of_stream.rs::bind_23_the_daemons_end_of_stream_withheld_ends_truncated`, `crates/model-conformance/tests/tunnel_end_of_stream.rs::agentd_20_the_clients_end_of_stream_withheld_resets_the_guest`, `crates/agentd/tests/tunnel_relay.rs::agentd_19_a_guest_eof_reaches_the_caller_as_the_end_of_stream` | guarded. A protocol 2 peer that omits the end-of-stream offer ends `ClosedUnproven`. Each side refuses a protocol 1 handshake |
 
 **The end of stream.** A verified tunnel's WebSocket close frame is sent in the
 clear, so anything on the path can send one or drop the connection. The end of a
@@ -130,9 +130,9 @@ close, and a side that offered it in the handshake is held to it
 client reports the tunnel `Truncated` rather than closed. Its local TCP serving
 loop resets the local connection, and the daemon resets the guest connection, so a stream cut short on the path reads as
 a failure at both ends instead of a finished transfer. That's detection, not
-prevention: an on-path party can still end any tunnel early. Protocol 2 peers must agree on the handshake context and session confirmation.
+prevention: an on-path party can still end any tunnel early. Protocol 2 peers must agree on the handshake context and ready message.
 Within that version, a peer that omits the optional end-of-stream offer ends
-`ClosedUnproven`; check a transfer's length or digest where it matters.
+`ClosedUnproven`. Check a transfer's length or digest where it matters.
 
 ## The unenforced invariant
 
@@ -218,13 +218,13 @@ including when the guest protocol sends first. Subsequent tunnel data is encrypt
 with ChaCha20-Poly1305, beyond the proxy's TLS termination, and the stream's end is
 a message inside the same session. See `crates/protocol/src/identity.rs`.
 
-The trust root includes the AWS control plane and the run-hook delivery path: the
-VM's private seed travels in the `RunMicrovm` launch payload. The endpoint proxy
-also carries the agent token for authorized root control. Protecting the pinned
-key therefore assumes trusted control-plane/bootstrap delivery, authorized
-control, and guest-root access. The Noise proof terminates in the daemon and
-protects session traffic under those assumptions; it does not establish
-independence from those trusted components.
+The trust root includes the AWS control plane and run-hook delivery. The VM's
+private seed goes in the `RunMicrovm` launch payload. The endpoint proxy also
+handles the agent token for authorized root control. Protecting the pinned key
+depends on trusted control-plane and bootstrap delivery, authorized control, and
+guest-root access. The Noise proof ends in the daemon and protects session data
+under those assumptions. It does not establish independence from those trusted
+components.
 
 The local name record stores the host secret and VM public pin; it does not
 retain the VM secret. A stolen record can authorize the same tunnels its
