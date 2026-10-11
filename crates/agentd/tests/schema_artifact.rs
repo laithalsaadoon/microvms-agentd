@@ -432,3 +432,34 @@ fn the_stream_route_documents_all_three_typed_events() {
         .collect();
     assert_eq!(names, ["output", "gap", "exit"]);
 }
+
+/// The schema endpoint describes the media type its own handler sends.
+#[tokio::test]
+async fn the_schema_response_media_type_matches_its_document() {
+    let response = routes::app(AppState::new(Config::default()))
+        .oneshot(
+            Request::builder()
+                .uri("/v1/schema")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("the router answered");
+    assert_eq!(response.status(), StatusCode::OK);
+    let media_type = response.headers()["content-type"]
+        .to_str()
+        .expect("ASCII media type")
+        .to_owned();
+    assert_eq!(media_type, "application/json");
+    let bytes = axum::body::to_bytes(response.into_body(), 4 << 20)
+        .await
+        .expect("body");
+    let document: Value = serde_json::from_slice(&bytes).expect("JSON document");
+    let endpoint = document["routes"]
+        .as_array()
+        .expect("routes")
+        .iter()
+        .find(|route| route["method"] == "GET" && route["path"] == "/v1/schema")
+        .expect("the schema route describes itself");
+    assert_eq!(endpoint["response"]["media_type"], media_type);
+}
