@@ -75,7 +75,13 @@ class SseServer:
     `requested_methods` pairs with `requested_paths`.
     """
 
-    def __init__(self, scripts: Sequence[Sequence[bytes]], status: int = 200) -> None:
+    def __init__(
+        self,
+        scripts: Sequence[Sequence[bytes]],
+        status: int = 200,
+        *,
+        response: dict[str, object] | None = None,
+    ) -> None:
         self.requested_paths: list[str] = []
         self.requested_methods: list[str] = []
         remaining = iter(list(scripts))
@@ -117,15 +123,38 @@ class SseServer:
                     # own assertion rather than on a timeout.
                     frames = []
                 body = b"".join(frames)
-                self.send_response(status)
+                spec = response if len(paths) == 1 else None
+                code = int(spec["status"]) if spec else (400 if response else status)
+                if spec:
+                    body = (
+                        b"x" * int(spec["body_bytes"])
+                        if "body_bytes" in spec
+                        else str(spec.get("body", "")).encode()
+                    )
+                headers = dict(spec.get("headers", {})) if spec else {}
+                chunked = bool(spec and spec.get("chunked"))
+                self.send_response(code)
                 self.send_header(
-                    "content-type",
-                    "text/event-stream" if status == 200 else "text/plain",
+                    "content-type", "text/event-stream" if code == 200 else "text/plain"
                 )
-                self.send_header("content-length", str(len(body)))
+                if response is not None:
+                    self.send_header("connection", "close")
+                for name, value in headers.items():
+                    self.send_header(name, str(value))
+                if chunked:
+                    self.send_header("transfer-encoding", "chunked")
+                    body = f"{len(body):x}\r\n".encode() + body + b"\r\n0\r\n\r\n"
+                elif not any(name.lower() == "content-length" for name in headers):
+                    self.send_header("content-length", str(len(body)))
                 self.end_headers()
-                self.wfile.write(body)
-                self.wfile.flush()
+                try:
+                    self.wfile.write(body)
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    # Bounded readers may close after inspecting the response headers.
+                    pass
+                if response is not None:
+                    self.close_connection = True
 
             def log_message(self, *args: object) -> None:
                 """Silent: a passing test should print nothing."""
@@ -164,8 +193,13 @@ def sse_server() -> Iterator[type[SseServer]]:
     """
     built: list[SseServer] = []
 
-    def factory(scripts: Sequence[Sequence[bytes]], status: int = 200) -> SseServer:
-        server = SseServer(scripts, status)
+    def factory(
+        scripts: Sequence[Sequence[bytes]],
+        status: int = 200,
+        *,
+        response: dict[str, object] | None = None,
+    ) -> SseServer:
+        server = SseServer(scripts, status, response=response)
         built.append(server)
         return server
 

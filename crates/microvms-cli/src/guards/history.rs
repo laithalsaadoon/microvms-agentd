@@ -23,10 +23,45 @@ use super::support::{
     DaemonScript, STARTED_BODY, ScriptedSeam, ScriptedTransport, TempDir, against_daemon,
     attach_flags, dispatch_with, exec_command, full_infra, microvm_body, poll_body, region_flags,
 };
-use crate::cli::{AttachFlags, Command, HealthArgs, ResumeArgs, TerminateArgs};
+use crate::cli::{AttachFlags, Command, HealthArgs, ResumeArgs, SuspendArgs, TerminateArgs};
 use crate::exit::Exit;
 use crate::seam::futures_util_shim::BoxFuture;
 use crate::seam::{Attach, CoreSeam};
+
+#[tokio::test]
+async fn a_suspend_records_history_only_when_the_platform_reports_suspended() {
+    for (state, exit, expected_events) in [
+        ("SUSPENDED", None, vec!["suspended"]),
+        ("TERMINATED", Some(Exit::Platform), vec![]),
+    ] {
+        let dir = TempDir::new("history-suspend");
+        let transport = Arc::new(ScriptedTransport::new());
+        transport
+            .answer("GetMicrovm", 200, &microvm_body("RUNNING"))
+            .answer("SuspendMicrovm", 200, "{}")
+            .answer("GetMicrovm", 200, &microvm_body(state));
+        let seam = ScriptedSeam {
+            transport: Arc::clone(&transport),
+            clock: Arc::new(YieldingClock::default()),
+        };
+        let command = Command::Suspend(SuspendArgs {
+            microvm_id: "mvm-abc123".into(),
+            timeout: Duration::from_secs(30),
+            state_dir: Some(dir.0.clone()),
+            region: region_flags(),
+        });
+        let (result, _) = dispatch_with(&seam, &command, full_infra()).await;
+        let rendered = result.expect("the settled state is reported");
+        assert_eq!(rendered.data["state"], state);
+        assert_eq!(rendered.already_reported, exit);
+        let events = crate::history::read_events(&dir.0, "mvm-abc123");
+        let kinds: Vec<_> = events
+            .iter()
+            .map(|event| event["event"].as_str().expect("event name"))
+            .collect();
+        assert_eq!(kinds, expected_events, "settled state: {state}");
+    }
+}
 
 #[tokio::test]
 async fn a_terminate_appends_a_terminated_event_that_survives_the_command() {
@@ -745,4 +780,42 @@ async fn a_terminate_with_wait_sec_waits_for_terminated_up_to_that_deadline() {
         "the wait reads until its own deadline, not the core default's"
     );
     assert!(stderr.contains("did not reach TERMINATED"), "{stderr}");
+}
+
+/// Resolve a required history location before any remote operation starts.
+#[tokio::test]
+async fn an_unavailable_state_root_refuses_before_any_remote_operation() {
+    use super::support::{RefusingSeam, dispatch_with_env};
+    use clap::Parser as _;
+    for name in ["exec", "agent-prompt", "health", "suspend", "resume"] {
+        let mut argv = vec!["microvm", name, "--region", "us-east-1"];
+        if matches!(name, "suspend" | "resume") {
+            argv.push("mvm-1");
+        } else {
+            argv.extend([
+                "--microvm-id",
+                "mvm-1",
+                "--endpoint",
+                "https://mvm.example",
+                "--agent-token",
+                "test-token",
+            ]);
+            if matches!(name, "exec" | "agent-prompt") {
+                argv.push("true");
+            }
+        }
+        let command = crate::cli::Cli::try_parse_from(argv)
+            .expect("valid command")
+            .command;
+        let seam = RefusingSeam::new();
+        let (result, _) =
+            dispatch_with_env(&seam, &command, full_infra(), ("HOME", "relative-home")).await;
+        let error = result.expect_err("unavailable state root");
+        assert_eq!(error.code(), "ERR_PRECONDITION", "{name}: {error:?}");
+        assert!(
+            error.message.contains("absolute user home"),
+            "{name}: {error:?}"
+        );
+        assert!(seam.doors().is_empty(), "{name}: {:?}", seam.doors());
+    }
 }

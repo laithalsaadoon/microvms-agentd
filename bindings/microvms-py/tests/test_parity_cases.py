@@ -305,11 +305,18 @@ def cost(case: Case, _servers: Callable[..., SseServer]) -> dict[str, Any]:
 
 
 def daemon_status(case: Case, servers: Callable[..., SseServer]) -> dict[str, Any]:
-    server = servers([[case.input["body"].encode()]], case.input["status"])
+    spec = case.input.get("response")
+    server = servers(
+        [[case.input.get("body", "").encode()]],
+        case.input.get("status", 200),
+        response=spec,
+    )
     session = microvms.Session.direct(server.endpoint, "agent-token")
 
     def call() -> dict[str, Any]:
-        if case.capability == "health":
+        if case.capability == "stream":
+            next(iter(session.exec("x-1").stream()))
+        elif case.capability == "health":
             session.health()
         elif case.capability == "upload-file":
             session.upload_file(case.input["path"], b"parity")
@@ -325,7 +332,10 @@ def daemon_status(case: Case, servers: Callable[..., SseServer]) -> dict[str, An
             )
         return {"ok": True}
 
-    return answered(call)
+    answer = answered(call)
+    if spec is not None:
+        answer["upstream_requests"] = len(server.requested_paths)
+    return answer
 
 
 def egress(case: Case, _servers: Callable[..., SseServer]) -> dict[str, Any]:
@@ -361,11 +371,19 @@ def egress(case: Case, _servers: Callable[..., SseServer]) -> dict[str, Any]:
 def names(case: Case, _servers: Callable[..., SseServer]) -> dict[str, Any]:
     """The case's record written where the CLI's registry keeps it, then adopted by name."""
     assert case.capability == "from-name", case.id
-    with tempfile.TemporaryDirectory() as state:
-        registry = microvms.NameRegistry(state)
-        directory = Path(registry.directory)
-        directory.mkdir(parents=True, exist_ok=True)
-        (directory / f"{case.input['name']}.json").write_text(case.input["record_text"])
+    with tempfile.TemporaryDirectory() as state, pytest.MonkeyPatch.context() as env:
+        if "home" in case.input:
+            env.setenv("HOME", case.input["home"])
+            env.setenv("USERPROFILE", case.input["home"])
+            env.delenv("MICROVM_STATE_DIR", raising=False)
+            registry = microvms.NameRegistry()
+        else:
+            registry = microvms.NameRegistry(state)
+            directory = Path(registry.directory)
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / f"{case.input['name']}.json").write_text(
+                case.input["record_text"]
+            )
         try:
             sandbox = microvms.Sandbox.from_name(
                 microvms.Region.parse(case.input["region"]),
@@ -399,7 +417,7 @@ def wrap(case: Case, _servers: Callable[..., SseServer]) -> dict[str, Any]:
 
 
 def forward(case: Case, servers: Callable[..., SseServer]) -> dict[str, Any]:
-    server = servers([[b"parity"]])
+    server = servers([[b"parity"]], response=case.input.get("response"))
     session = microvms.Session.direct(server.endpoint, "parity-agent-token")
     bind = f"{case.input['bind_ip']}:0" if "bind_ip" in case.input else None
     handle = session.port_forward(server.port, bind=bind, max_connections=1)
@@ -420,12 +438,25 @@ def forward(case: Case, servers: Callable[..., SseServer]) -> dict[str, Any]:
             while chunk := client.recv(4096):
                 response.extend(chunk)
         report = handle.stop(timeout=10)
-        return {
+        answer = {
             "status": int(response.split()[1]),
             "served": report.served,
             "refused": report.refused,
             "upstream_requests": len(server.requested_paths),
         }
+        if "body" in case.expect:
+            head, body = response.decode().split("\r\n\r\n", 1)
+            headers = dict(line.split(":", 1) for line in head.split("\r\n")[1:])
+            answer["body"] = body
+            answer["location"] = next(
+                (
+                    value.strip()
+                    for name, value in headers.items()
+                    if name.lower() == "location"
+                ),
+                None,
+            )
+        return answer
     finally:
         handle.stop(timeout=10)
 

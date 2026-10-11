@@ -220,6 +220,26 @@ impl HttpBackend for ScriptedStatus {
 }
 
 async fn daemon_status(case: &Case) -> Value {
+    if case.input.get("response").is_some() {
+        use futures_util::StreamExt as _;
+        let upstream = parity_corpus::ForwardUpstream::for_case(case).await;
+        let session = Session::direct(format!("http://{}", upstream.address), "agent-token")
+            .expect("session");
+        let result = if case.capability == "stream" {
+            let handle = session.exec("x-1");
+            let stream = handle.stream();
+            futures_util::pin_mut!(stream);
+            stream.next().await.expect("stream response").map(|_| ())
+        } else {
+            session.health().await.map(|_| ())
+        };
+        let mut answer = match result {
+            Ok(()) => json!({"ok":true}),
+            Err(error) => refusal(&error),
+        };
+        answer["upstream_requests"] = json!(upstream.request_count());
+        return answer;
+    }
     let backend = Arc::new(ScriptedStatus {
         status: u16::try_from(case.input_u64("status")).expect("a status"),
         body: case.input_str("body").as_bytes().to_vec(),
@@ -296,10 +316,19 @@ async fn names(case: &Case) -> Value {
         case.id
     );
     let state = tempfile::tempdir().expect("a state directory");
-    let store = FileNameStore::in_state_root(state.path());
+    let home = case.input.get("home").and_then(Value::as_str);
+    let store = match home {
+        Some(home) => FileNameStore::default_location(&|key| {
+            matches!(key, "HOME" | "USERPROFILE").then(|| home.to_owned())
+        }),
+        None => FileNameStore::in_state_root(state.path()),
+    };
     let name = case.input_str("name");
-    std::fs::create_dir_all(store.dir()).expect("the names directory");
-    std::fs::write(store.path_of(name), case.input_str("record_text")).expect("writes the record");
+    if home.is_none() {
+        std::fs::create_dir_all(store.dir()).expect("the names directory");
+        std::fs::write(store.path_of(name), case.input_str("record_text"))
+            .expect("writes the record");
+    }
     let region: Region = case.input_str("region").parse().expect("a region");
     let adopted = match microvms_core::names::resolve(&store, name, Some(&region)) {
         Ok(record) => Sandbox::adopt_record(offline_plane(), record).await,
@@ -337,7 +366,7 @@ fn wrap(case: &Case) -> Value {
 async fn forward(case: &Case) -> Value {
     use microvms_core::session::proxy::ProxyAuth;
     use microvms_core::session::serve::{ServeLimits, start_forward};
-    let upstream = parity_corpus::ForwardUpstream::start().await;
+    let upstream = parity_corpus::ForwardUpstream::for_case(case).await;
     let auth = Arc::new(ProxyAuth::with_clock(
         Arc::new(CountingMinter::default()),
         DEFAULT_AGENT_PORT,
@@ -364,7 +393,7 @@ async fn forward(case: &Case) -> Value {
     .expect("starts the forward");
     let address = forward.local_address();
     let request = parity_corpus::forward_request(case, address.port());
-    let status =
+    let response =
         parity_corpus::forward_exchange(([127, 0, 0, 1], address.port()).into(), &request).await;
     let summary = forward
         .stop(Some(std::time::Duration::from_secs(10)))
@@ -378,6 +407,9 @@ async fn forward(case: &Case) -> Value {
         "{}: mints",
         case.id
     );
-    json!({"status": status, "served": summary.report.served,
-        "refused": summary.report.refused, "upstream_requests": upstream.request_count()})
+    let mut answer = parity_corpus::forward_answer(&response, case);
+    answer["served"] = json!(summary.report.served);
+    answer["refused"] = json!(summary.report.refused);
+    answer["upstream_requests"] = json!(upstream.request_count());
+    answer
 }

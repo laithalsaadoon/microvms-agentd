@@ -1,0 +1,23 @@
+{
+  "capability": "port-forward",
+  "input": {
+    "hosts": [
+      "localhost:{port}"
+    ],
+    "response": {
+      "status": 302,
+      "headers": {
+        "Location": "/next"
+      },
+      "body": "redirect body"
+    }
+  },
+  "expect": {
+    "status": 302,
+    "body": "redirect body",
+    "location": "/next",
+    "served": 1,
+    "refused": 0,
+    "upstream_requests": 1
+  }
+}

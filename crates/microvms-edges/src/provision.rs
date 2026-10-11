@@ -204,7 +204,7 @@ pub struct Request<'a> {
     /// The release version, with or without a leading `v`. Defaults to [`crate::VERSION`].
     pub version: Option<&'a str>,
     /// The state directory the cache lives under. Defaults to the CLI's
-    /// ([`microvms_app::names::default_state_root`]), so every surface shares one cache.
+    /// ([`crate::names::state_root`]), so every surface shares one cache.
     pub state_dir: Option<&'a Path>,
     /// A binary the caller manages. Outranks `$MICROVM_AGENTD`.
     pub binary: Option<&'a Path>,
@@ -388,7 +388,8 @@ fn fetch_error(tag: &str, reason: &str) -> ProvisionError {
     )
     .remedy(format!(
         "manual download: `gh release download {tag} --repo {RELEASE_REPO} --pattern {ASSET}` \
-         (then `gh attestation verify {ASSET} --repo {RELEASE_REPO}`), and pass its path as \
+         (then `gh attestation verify {ASSET} --repo {RELEASE_REPO} \
+         --cert-identity https://github.com/{RELEASE_REPO}/.github/workflows/release.yml@refs/tags/{tag}`), and pass its path as \
          the binary or ${ENV_OVERRIDE}"
     ))
     .remedy(
@@ -400,7 +401,7 @@ fn fetch_error(tag: &str, reason: &str) -> ProvisionError {
 /// Answers `request` from the caller's binary, the cache, or the release, in that order.
 ///
 /// `env` supplies `$MICROVM_AGENTD` and, when [`Request::state_dir`] is `None`, the
-/// variables [`microvms_app::names::default_state_root`] reads. `fetch` is the release seam;
+/// variables [`crate::names::state_root`] reads. `fetch` is the release seam;
 /// `progress` receives one line per step.
 pub fn resolve(
     request: &Request<'_>,
@@ -422,7 +423,8 @@ pub fn resolve(
 
     let state_dir = match request.state_dir {
         Some(dir) => dir.to_path_buf(),
-        None => microvms_app::names::default_state_root(env),
+        None => crate::names::state_root(env)
+            .map_err(|error| ProvisionError::new(Failure::Io, error.to_string()))?,
     };
     let cached = cache_path(&state_dir, &version);
     if let Some(hit) = cache_hit(&state_dir, &cached, &version, progress)? {
@@ -717,6 +719,56 @@ mod tests {
         }
     }
 
+    #[test]
+    fn provisioning_requires_an_absolute_default_root() {
+        const CHILD: &str = "MICROVMS_TEST_STATE_ROOT_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            struct Unused;
+            impl Fetch for Unused {
+                fn fetch(
+                    &self,
+                    _: &str,
+                    _: &Path,
+                    _: &mut dyn FnMut(&str),
+                ) -> Result<Verification, String> {
+                    panic!("an unresolved default root must not start a fetch");
+                }
+            }
+            let request = Request {
+                binary: None,
+                state_dir: None,
+                version: None,
+            };
+            let error = resolve(
+                &request,
+                &|key| matches!(key, "HOME" | "USERPROFILE").then(|| "relative-home".to_string()),
+                &Unused,
+                &mut |_| {},
+            )
+            .expect_err("relative default root");
+            assert!(error.message.contains("absolute user home"), "{error}");
+            assert!(!Path::new("relative-home").exists());
+            return;
+        }
+        // A subprocess gives even the regression's filesystem writes a scratch-only cwd,
+        // without changing the working directory of parallel tests.
+        let directory = tempfile::tempdir().expect("scratch directory");
+        let output = std::process::Command::new(std::env::current_exe().expect("test binary"))
+            .args([
+                "--exact",
+                "provision::tests::provisioning_requires_an_absolute_default_root",
+            ])
+            .env(CHILD, "1")
+            .current_dir(directory.path())
+            .output()
+            .expect("child test");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+
     /// **A cache miss fetches once; the next request is a cache hit** (BIND-17). The
     /// property the module exists for: one download per version per machine.
     #[test]
@@ -892,7 +944,11 @@ mod tests {
         assert_eq!(failure.failure, Failure::Fetch);
         assert!(failure.message.contains("v9.9.9"), "{}", failure.message);
         let remedies = failure.remedies.join("\n");
-        assert!(remedies.contains("gh release download"), "{remedies}");
+        assert!(
+            remedies.contains("gh release download v9.9.9"),
+            "{remedies}"
+        );
+        assert!(remedies.contains("--cert-identity https://github.com/laithalsaadoon/microvms-agentd/.github/workflows/release.yml@refs/tags/v9.9.9"), "{remedies}");
         assert!(remedies.contains(ENV_OVERRIDE), "{remedies}");
         assert!(
             remedies.contains("cargo build --release -p agentd"),

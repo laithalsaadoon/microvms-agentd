@@ -12,18 +12,62 @@
 use std::path::{Path, PathBuf};
 
 use microvms_app::error::{Error, ErrorKind};
-use microvms_app::names::{NameRecord, NameStore, default_state_root, validate_name};
+use microvms_app::names::{NameRecord, NameStore, validate_name};
+
+/// Resolve the shared state root from an explicit setting or the user's absolute home.
+///
+/// A default never depends on the working directory. Explicit state settings may be
+/// relative because the caller deliberately selected their location.
+pub fn state_root(env: &dyn Fn(&str) -> Option<String>) -> Result<PathBuf, Error> {
+    resolve_state_root(env, || {
+        #[cfg(unix)]
+        {
+            // The Unix implementation consults the passwd database when HOME is unset.
+            std::env::home_dir()
+        }
+        #[cfg(not(unix))]
+        {
+            None
+        }
+    })
+}
+
+fn resolve_state_root(
+    env: &dyn Fn(&str) -> Option<String>,
+    home: impl FnOnce() -> Option<PathBuf>,
+) -> Result<PathBuf, Error> {
+    if let Some(dir) = env("MICROVM_STATE_DIR").filter(|dir| !dir.is_empty()) {
+        return Ok(PathBuf::from(dir));
+    }
+    let configured = if cfg!(windows) {
+        env("USERPROFILE").or_else(|| env("HOME"))
+    } else {
+        env("HOME")
+    };
+    let home = configured.map(PathBuf::from).or_else(home);
+    match home {
+        Some(home) if home.is_absolute() => Ok(home.join(".microvm").join("runs")),
+        _ => Err(Error::new(
+            ErrorKind::Precondition,
+            "could not determine an absolute user home directory; set MICROVM_STATE_DIR explicitly",
+        )),
+    }
+}
 
 /// The CLI's registry: one JSON file per name in a directory, owner-only on Unix.
 #[derive(Clone, Debug)]
 pub struct FileNameStore {
     dir: PathBuf,
+    unavailable: Option<String>,
 }
 
 impl FileNameStore {
     /// A store over the directory that holds the name files themselves.
     pub fn new(dir: impl Into<PathBuf>) -> Self {
-        Self { dir: dir.into() }
+        Self {
+            dir: dir.into(),
+            unavailable: None,
+        }
     }
 
     /// The registry under `state_root/names` — where the CLI keeps it.
@@ -35,8 +79,17 @@ impl FileNameStore {
     }
 
     /// The registry the CLI would use in this environment.
+    ///
+    /// If no absolute home can be resolved, the returned store refuses every storage
+    /// operation with a precondition error and its directory is empty.
     pub fn default_location(env: &dyn Fn(&str) -> Option<String>) -> Self {
-        Self::in_state_root(&default_state_root(env))
+        match state_root(env) {
+            Ok(root) => Self::in_state_root(&root),
+            Err(error) => Self {
+                dir: PathBuf::new(),
+                unavailable: Some(error.to_string()),
+            },
+        }
     }
 
     /// The directory holding the name files.
@@ -47,6 +100,13 @@ impl FileNameStore {
     /// Where `name`'s record lives, whether or not one is registered.
     pub fn path_of(&self, name: &str) -> PathBuf {
         self.dir.join(format!("{name}.json"))
+    }
+
+    fn ready(&self) -> Result<(), Error> {
+        match &self.unavailable {
+            Some(message) => Err(Error::new(ErrorKind::Precondition, message.clone())),
+            None => Ok(()),
+        }
     }
 
     fn io(&self, action: &str, path: &Path, error: std::io::Error) -> Error {
@@ -63,6 +123,7 @@ impl NameStore for FileNameStore {
     /// is what a killed write leaves, and treating it as free would let a second VM claim
     /// a name whose first holder may still be billing.
     fn get(&self, name: &str) -> Result<Option<NameRecord>, Error> {
+        self.ready()?;
         validate_name(name).map_err(Error::invalid_arg)?;
         let path = self.path_of(name);
         let text = match std::fs::read_to_string(&path) {
@@ -83,6 +144,7 @@ impl NameStore for FileNameStore {
     }
 
     fn put(&self, record: &NameRecord) -> Result<(), Error> {
+        self.ready()?;
         validate_name(&record.name).map_err(Error::invalid_arg)?;
         std::fs::create_dir_all(&self.dir).map_err(|error| self.io("create", &self.dir, error))?;
         let path = self.path_of(&record.name);
@@ -92,6 +154,7 @@ impl NameStore for FileNameStore {
     }
 
     fn delete(&self, name: &str) -> Result<bool, Error> {
+        self.ready()?;
         validate_name(name).map_err(Error::invalid_arg)?;
         let path = self.path_of(name);
         match std::fs::remove_file(&path) {
@@ -108,6 +171,7 @@ impl NameStore for FileNameStore {
     /// Skips files that are not records: a torn file is reported by [`NameStore::get`]
     /// for its own name, and must not make every other name unlistable.
     fn list(&self) -> Result<Vec<NameRecord>, Error> {
+        self.ready()?;
         let entries = match std::fs::read_dir(&self.dir) {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -151,8 +215,55 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use microvms_app::names::resolve;
+    use microvms_app::names::{default_state_root, resolve};
     use microvms_app::region::Region;
+
+    #[test]
+    fn an_unset_home_uses_the_platform_default_for_the_registry() {
+        let store = FileNameStore::default_location(&|_| None);
+        #[cfg(unix)]
+        assert!(
+            store.dir().is_absolute(),
+            "the platform user home is absolute"
+        );
+        #[cfg(not(unix))]
+        assert!(
+            store.get("example").is_err(),
+            "an unavailable home refuses storage"
+        );
+    }
+
+    #[test]
+    fn an_unavailable_default_registry_refuses_operations() {
+        let store = FileNameStore::default_location(&|key| {
+            matches!(key, "HOME" | "USERPROFILE").then(|| "relative-home".to_string())
+        });
+        assert!(store.get("example").is_err());
+        assert!(store.list().is_err());
+        assert!(store.delete("example").is_err());
+        assert!(store.put(&record("example", "microvm-1")).is_err());
+    }
+
+    #[test]
+    fn explicit_state_settings_override_home_and_empty_settings_use_home() {
+        let home = TempDir::new("state-override");
+        let absolute = home.0.join("chosen-state");
+        for (setting, expected) in [
+            ("chosen-state".to_string(), PathBuf::from("chosen-state")),
+            (absolute.to_string_lossy().into_owned(), absolute),
+            (String::new(), home.0.join(".microvm").join("runs")),
+        ] {
+            let env = |key: &str| match key {
+                "MICROVM_STATE_DIR" => Some(setting.clone()),
+                "HOME" | "USERPROFILE" => Some(home.0.to_string_lossy().into_owned()),
+                _ => None,
+            };
+            assert_eq!(
+                FileNameStore::default_location(&env).dir(),
+                expected.join("names")
+            );
+        }
+    }
 
     struct TempDir(PathBuf);
 
@@ -333,13 +444,14 @@ mod tests {
 
     #[test]
     fn the_default_location_is_the_clis() {
+        let home = TempDir::new("default-location");
         let env = |key: &str| match key {
-            "HOME" => Some("/home/u".to_string()),
+            "HOME" => Some(home.0.to_string_lossy().into_owned()),
             _ => None,
         };
         assert_eq!(
             FileNameStore::default_location(&env).dir(),
-            Path::new("/home/u/.microvm/runs/names")
+            home.0.join(".microvm").join("runs").join("names")
         );
         let pinned = |key: &str| (key == "MICROVM_STATE_DIR").then(|| "/state".to_string());
         assert_eq!(default_state_root(&pinned), PathBuf::from("/state"));

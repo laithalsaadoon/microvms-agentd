@@ -319,11 +319,16 @@ async function cost(testCase) {
 }
 
 async function daemonStatus(testCase) {
-  const server = await startSseServer([[testCase.input.body]], { status: testCase.input.status });
+  const server = await startSseServer([[testCase.input.body ?? '']], {
+    status: testCase.input.status ?? 200, response: testCase.input.response,
+  });
   try {
     const session = Session.direct(server.endpoint, 'agent-token');
-    return await answered(async () => {
-      if (testCase.capability === 'health') {
+    const answer = await answered(async () => {
+      if (testCase.capability === 'stream') {
+        const handle = await session.exec('x-1');
+        for await (const event of handle.stream()) { void event; break; }
+      } else if (testCase.capability === 'health') {
         await session.health();
       } else if (testCase.capability === 'upload-file') {
         await session.uploadFile(testCase.input.path, new Uint8Array(Buffer.from('parity')));
@@ -341,6 +346,8 @@ async function daemonStatus(testCase) {
       }
       return { ok: true };
     });
+    if (testCase.input.response) answer.upstream_requests = server.requestedPaths.length;
+    return answer;
   } finally {
     await server.close();
   }
@@ -376,10 +383,20 @@ async function egress(testCase) {
 async function names(testCase) {
   assert.equal(testCase.capability, 'from-name', testCase.id);
   const state = mkdtempSync(join(tmpdir(), 'parity-names-'));
+  const variables = ['HOME', 'USERPROFILE', 'MICROVM_STATE_DIR'];
+  const saved = new Map(variables.map((name) => [name, process.env[name]]));
   try {
-    const registry = new NameRegistry(state);
-    mkdirSync(registry.directory, { recursive: true });
-    writeFileSync(join(registry.directory, `${testCase.input.name}.json`), testCase.input.record_text);
+    let registry;
+    if (Object.hasOwn(testCase.input, 'home')) {
+      process.env.HOME = testCase.input.home;
+      process.env.USERPROFILE = testCase.input.home;
+      delete process.env.MICROVM_STATE_DIR;
+      registry = new NameRegistry();
+    } else {
+      registry = new NameRegistry(state);
+      mkdirSync(registry.directory, { recursive: true });
+      writeFileSync(join(registry.directory, `${testCase.input.name}.json`), testCase.input.record_text);
+    }
     try {
       const sandbox = await Sandbox.fromName(
         Region.parse(testCase.input.region),
@@ -395,6 +412,10 @@ async function names(testCase) {
       return answer;
     }
   } finally {
+    for (const [name, value] of saved) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
     rmSync(state, { recursive: true, force: true });
   }
 }
@@ -410,7 +431,7 @@ async function wrap(testCase) {
 }
 
 async function forward(testCase) {
-  const server = await startSseServer([['parity']]);
+  const server = await startSseServer([['parity']], { response: testCase.input.response });
   const session = Session.direct(server.endpoint, 'parity-agent-token');
   const handle = await session.portForward(Number(new URL(server.endpoint).port), {
     bind: testCase.input.bind_ip ? `${testCase.input.bind_ip}:0` : undefined,
@@ -424,18 +445,25 @@ async function forward(testCase) {
     );
     const request = 'GET /parity HTTP/1.1\r\n' +
       hosts.map((host) => `Host: ${host}\r\n`).join('') + 'Connection: close\r\n\r\n';
-    const status = await new Promise((resolve, reject) => {
+    const response = await new Promise((resolve, reject) => {
       const socket = connect({ host: '127.0.0.1', port });
       const chunks = [];
       socket.setTimeout(10_000, () => socket.destroy(new Error('forward response timed out')));
       socket.on('connect', () => socket.write(request));
       socket.on('data', (chunk) => chunks.push(chunk));
-      socket.on('end', () => resolve(Number(Buffer.concat(chunks).toString().split(/\s+/)[1])));
+      socket.on('end', () => resolve(Buffer.concat(chunks).toString()));
       socket.on('error', reject);
     });
     const report = await handle.stop(10);
-    return { status, served: report.served, refused: report.refused,
+    const answer = { status: Number(response.split(/\s+/)[1]), served: report.served, refused: report.refused,
       upstream_requests: server.requestedPaths.length };
+    if ('body' in testCase.expect) {
+      const [head, body] = response.split('\r\n\r\n');
+      answer.body = body;
+      answer.location = head.split('\r\n').slice(1)
+        .find((line) => line.toLowerCase().startsWith('location:'))?.split(':').slice(1).join(':').trim() ?? null;
+    }
+    return answer;
   } finally {
     await handle.stop(10);
     await server.close();

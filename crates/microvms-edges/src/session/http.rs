@@ -11,6 +11,11 @@ use std::time::Duration;
 use futures_util::future::BoxFuture;
 
 use microvms_app::error::{Error, WireKind};
+
+// File downloads share this collector; keep their ceiling aligned with the daemon's
+// default upload budget. Error replies only need room for structured diagnostics.
+const RESPONSE_LIMIT: usize = 512 << 20;
+const ERROR_LIMIT: usize = 64 << 10;
 use microvms_app::session::http::{
     ChunkSource, HttpBackend, HttpRequest, HttpResponse, OpenStream,
 };
@@ -35,6 +40,8 @@ impl ReqwestBackend {
     pub fn new(base_url: &str, timeout: Duration) -> Result<Self, Error> {
         let client = reqwest::Client::builder()
             .timeout(timeout)
+            // Every daemon request stays on the endpoint it authenticated.
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|err| {
                 Error::new(
@@ -116,11 +123,12 @@ impl HttpBackend for ReqwestBackend {
                 .map_err(|err| transport_error(request.method, &request.path, err))?;
             let status = response.status().as_u16();
             let headers = collect_headers(&response);
-            let body = response
-                .bytes()
-                .await
-                .map_err(|err| transport_error(request.method, &request.path, err))?
-                .to_vec();
+            let limit = if is_failure(status) {
+                ERROR_LIMIT
+            } else {
+                RESPONSE_LIMIT
+            };
+            let body = collect_body(response, &request, limit, self.timeout).await?;
             Ok(HttpResponse {
                 status,
                 headers,
@@ -150,11 +158,7 @@ impl HttpBackend for ReqwestBackend {
             // The status is read before any body byte. On a failure the body is
             // collected so the typed error carries the daemon's detail string.
             if is_failure(status) {
-                let body = response
-                    .bytes()
-                    .await
-                    .map_err(|err| transport_error(request.method, &request.path, err))?
-                    .to_vec();
+                let body = collect_body(response, &request, ERROR_LIMIT, idle_timeout).await?;
                 return Ok((
                     HttpResponse {
                         status,
@@ -178,6 +182,42 @@ impl HttpBackend for ReqwestBackend {
             };
             Ok((head, Box::new(chunks) as Box<dyn ChunkSource>))
         })
+    }
+}
+
+/// Collect only a bounded response, including when it omits Content-Length.
+async fn collect_body(
+    mut response: reqwest::Response,
+    request: &HttpRequest,
+    limit: usize,
+    idle_timeout: Duration,
+) -> Result<Vec<u8>, Error> {
+    let too_large = || {
+        Error::wire(
+            WireKind::TooLarge,
+            format!(
+                "{} {} response exceeds {limit} bytes",
+                request.method, request.path
+            ),
+        )
+    };
+    if response
+        .content_length()
+        .is_some_and(|length| length > limit as u64)
+    {
+        return Err(too_large());
+    }
+    let mut body = Vec::new();
+    loop {
+        let chunk = tokio::time::timeout(idle_timeout, response.chunk())
+            .await
+            .map_err(|_| Error::wire(WireKind::Transport, "response body went idle"))?
+            .map_err(|err| transport_error(request.method, &request.path, err))?;
+        let Some(chunk) = chunk else { return Ok(body) };
+        if chunk.len() > limit.saturating_sub(body.len()) {
+            return Err(too_large());
+        }
+        body.extend_from_slice(&chunk);
     }
 }
 

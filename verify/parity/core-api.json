@@ -978,6 +978,7 @@
     "microvms_core::names::probe": "function",
     "microvms_core::names::resolve": "function",
     "microvms_core::names::resolve_record": "function",
+    "microvms_core::names::state_root": "function",
     "microvms_core::names::validate_name": "function",
     "microvms_core::preflight": "module",
     "microvms_core::preflight::Check": "struct",

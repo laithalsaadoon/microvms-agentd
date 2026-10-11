@@ -608,7 +608,7 @@ pub fn resolve_vm_identifier<O: Write, E: Write>(
     {
         return Ok((identifier.to_string(), None));
     }
-    let root = crate::seam::state_dir(state_dir_flag, ctx.env);
+    let root = crate::seam::try_state_dir(state_dir_flag, ctx.env)?;
     match crate::ledger::Names::new(&root).resolve(identifier, explicit_region(region).as_ref())? {
         Some(record) => {
             let region = record.region();

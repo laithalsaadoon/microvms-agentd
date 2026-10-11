@@ -1,0 +1,20 @@
+{
+  "capability": "health",
+  "input": {
+    "response": {
+      "status": 302,
+      "headers": {
+        "Location": "/next"
+      },
+      "body": "redirect body"
+    }
+  },
+  "expect": {
+    "error": {
+      "code": "ERR_PROTOCOL",
+      "wire_kind": null,
+      "retryable": false
+    },
+    "upstream_requests": 1
+  }
+}

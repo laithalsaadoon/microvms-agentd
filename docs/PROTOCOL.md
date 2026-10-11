@@ -623,3 +623,14 @@ SIGTERM-ignoring survivors. Processes that change process group or session may
 escape this mechanism; external platform VM termination supplies the final cap.
 These changes have local Linux regression coverage; AWS evidence must be recorded
 separately for the image and deployment being used.
+
+## Client response handling
+
+The production client does not follow redirects from the daemon. A local HTTP
+port forward returns the redirect's status, headers, and body to the caller. It
+does not request the new URL.
+
+The client caps bodies it buffers at 512 MiB for success and 64 KiB for errors.
+It checks both the declared length and the bytes read from the body. These caps
+do not apply to successful streams. If a request to open a stream fails, the
+client reads the error body with the 64 KiB cap and an idle timeout.

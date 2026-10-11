@@ -144,7 +144,7 @@ pub mod entropy {
 pub mod names {
     //! Named MicroVMs: the record, the store port, and the CLI's registry on disk.
     pub use microvms_app::names::*;
-    pub use microvms_edges::names::FileNameStore;
+    pub use microvms_edges::names::{FileNameStore, state_root};
 }
 
 pub mod preflight {

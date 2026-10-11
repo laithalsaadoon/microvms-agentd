@@ -1,0 +1,13 @@
+{
+  "capability": "from-name",
+  "input": {
+    "name": "parity",
+    "region": "us-east-1",
+    "home": "relative-home",
+    "message_mentions": ["absolute user home"]
+  },
+  "expect": {
+    "error": {"code": "ERR_PRECONDITION", "wire_kind": null},
+    "message_mentions": {"absolute user home": true}
+  }
+}

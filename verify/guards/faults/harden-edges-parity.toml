@@ -1,0 +1,43 @@
+# ── harden-edges-parity: FAIL_TO_PASS entries tools/fail-to-pass.py emitted ──
+
+# FAIL_TO_PASS: fails on 698fa78077ee with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-relative-default-home-core"
+guard = "core_answers_the_shared_case_corpus"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-relative-default-home-core.patch"
+
+# FAIL_TO_PASS: fails on 698fa78077ee with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-relative-default-home-cli"
+guard = "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-relative-default-home-cli.patch"
+
+# FAIL_TO_PASS: fails on 698fa78077ee with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-relative-default-home-python"
+guard = "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[names/relative-default-home]"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[names/relative-default-home]"],
+]
+expect = "test-failed"
+suite = "bindings"
+patch = "verify/guards/faults/f2p-relative-default-home-python.patch"
+
+# FAIL_TO_PASS: fails on 698fa78077ee with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-relative-default-home-node"
+guard = "names/relative-default-home"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+patch = "verify/guards/faults/f2p-relative-default-home-node.patch"

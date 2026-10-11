@@ -645,6 +645,13 @@ cli = { exempt = "agent-up reports what it installed" }
 py = ["installed_agents", "installed_agents_async"]
 ts = "installedAgents"
 
+[[capability]]
+id = "resolve-state-root"
+core = "microvms_core::names::state_root"
+cli = { exempt = "commands resolve the state root before accessing local state" }
+py = { exempt = "NameRegistry and provisioning resolve the state root internally" }
+ts = { exempt = "NameRegistry and provisioning resolve the state root internally" }
+
 # ── names ────────────────────────────────────────────────────────────────────
 
 [[capability]]

@@ -49,7 +49,7 @@ use crate::closed_output;
 use crate::commands::{Ctx, Rendered, STREAM_RESPONSE, explicit_region, response_type};
 use crate::exit::{CliError, Exit};
 use crate::history::{Event, History};
-use crate::seam::{Attach, state_dir};
+use crate::seam::{Attach, try_state_dir};
 
 /// The prefix that means "this side of the copy is in the VM".
 ///
@@ -194,7 +194,7 @@ pub(crate) fn resolve_attach<O: std::io::Write, E: std::io::Write>(
     flags: &AttachFlags,
 ) -> Result<(Attach, microvms_core::Region), CliError> {
     if let Some(name) = &flags.name {
-        let root = state_dir(flags.state_dir.clone(), ctx.env);
+        let root = try_state_dir(flags.state_dir.clone(), ctx.env)?;
         let names = crate::ledger::Names::new(&root);
         let Some(record) = names.resolve(name, explicit_region(region).as_ref())? else {
             return Err(unregistered_name(name, &root));
@@ -244,14 +244,17 @@ pub async fn exec<O: std::io::Write, E: std::io::Write>(
     ctx: &mut Ctx<'_, O, E>,
     args: &ExecArgs,
 ) -> Result<Rendered, CliError> {
-    let (session, microvm_id) = attach(ctx, &args.region, &args.attach).await?;
-
     // `--poll` first, because it is the one shape that starts nothing. Clap's `conflicts_with_all`
     // has already refused it beside every writing flag, so this branch cannot be reached with a
     // command to run.
     if let Some(exec_id) = &args.poll {
+        let (session, _) = attach(ctx, &args.region, &args.attach).await?;
         return poll_existing(ctx, &session, exec_id).await;
     }
+
+    // Resolve local state before a start can create work in the guest.
+    let root = try_state_dir(args.attach.state_dir.clone(), ctx.env)?;
+    let (session, microvm_id) = attach(ctx, &args.region, &args.attach).await?;
 
     let command = args
         .command
@@ -321,10 +324,7 @@ pub async fn exec<O: std::io::Write, E: std::io::Write>(
     // append below carries the daemon's own report — the confirmed exec id and the outcome
     // fields — and swallows its failures, so an unwritable state dir costs the record and
     // never the exec.
-    let history = History::for_vm(
-        &state_dir(args.attach.state_dir.clone(), ctx.env),
-        &microvm_id,
-    );
+    let history = History::for_vm(&root, &microvm_id);
 
     if let Some(bytes) = feed {
         write_and_close(ctx, &handle, &bytes).await?;
@@ -916,6 +916,7 @@ pub async fn health<O: std::io::Write, E: std::io::Write>(
     ctx: &mut Ctx<'_, O, E>,
     args: &HealthArgs,
 ) -> Result<Rendered, CliError> {
+    let root = try_state_dir(args.attach.state_dir.clone(), ctx.env)?;
     let (session, microvm_id) = attach(ctx, &args.region, &args.attach).await?;
     ctx.out.progress(&format!("health of {microvm_id}"));
     let health = session.health().await?;
@@ -997,11 +998,7 @@ pub async fn health<O: std::io::Write, E: std::io::Write>(
     // validate hook even run?" is answerable after the VM is gone. The id is always in
     // hand on this command — clap requires --microvm-id unless --name resolved one —
     // and the append swallows its failures like every history write.
-    crate::history::append_unseen_hooks(
-        &state_dir(args.attach.state_dir.clone(), ctx.env),
-        &microvm_id,
-        &health.hooks,
-    );
+    crate::history::append_unseen_hooks(&root, &microvm_id, &health.hooks);
 
     if health.identity_degraded {
         ctx.out.warn(
@@ -1974,7 +1971,7 @@ pub async fn attach_vm<O: std::io::Write, E: std::io::Write>(
     ctx: &mut Ctx<'_, O, E>,
     args: &AttachArgs,
 ) -> Result<Rendered, CliError> {
-    let root = state_dir(args.state_dir.clone(), ctx.env);
+    let root = try_state_dir(args.state_dir.clone(), ctx.env)?;
     let names = crate::ledger::Names::new(&root);
 
     let (mut record, region) = match &args.from {
@@ -2506,7 +2503,7 @@ pub async fn tunnel<O: std::io::Write, E: std::io::Write>(
         ) {
             (Some(seed), Some(pin), _) => (seed.clone(), pin.clone()),
             (None, None, Some(name)) => {
-                let root = state_dir(args.attach.state_dir.clone(), ctx.env);
+                let root = try_state_dir(args.attach.state_dir.clone(), ctx.env)?;
                 // Core's read, not the collision check's: a torn record is its own refusal,
                 // naming the file, rather than a record that seems to lack the pair.
                 let Some(record) = crate::ledger::Names::new(&root)
@@ -2759,7 +2756,7 @@ pub async fn shell<O: std::io::Write, E: std::io::Write>(
     // Which VM, resolved locally — the same name-or-explicit precedence `attach` has,
     // minus the agent token the shell never sends.
     let (endpoint, microvm_id, region) = if let Some(name) = &args.name {
-        let root = state_dir(args.state_dir.clone(), ctx.env);
+        let root = try_state_dir(args.state_dir.clone(), ctx.env)?;
         let names = crate::ledger::Names::new(&root);
         let Some(record) = names.resolve(name, explicit_region(&args.region).as_ref())? else {
             return Err(CliError::new(

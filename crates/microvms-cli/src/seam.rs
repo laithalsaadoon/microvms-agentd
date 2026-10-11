@@ -321,6 +321,18 @@ fn env_var_for(name: &str) -> &'static str {
     }
 }
 
+/// Resolve a caller-selected root or the shared absolute default before any state I/O.
+pub fn try_state_dir(
+    flag: Option<PathBuf>,
+    env: &dyn Fn(&str) -> Option<String>,
+) -> Result<PathBuf, microvms_core::error::Error> {
+    match flag {
+        Some(path) => Ok(path),
+        None => microvms_core::names::state_root(env),
+    }
+}
+
+#[cfg(test)]
 /// Where the run ledger lives: `$MICROVM_STATE_DIR`, else `~/.microvm/runs`.
 pub fn state_dir(flag: Option<PathBuf>, env: &dyn Fn(&str) -> Option<String>) -> PathBuf {
     if let Some(path) = flag {

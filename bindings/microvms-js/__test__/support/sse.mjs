@@ -61,7 +61,7 @@ export function exitFrame(total, { exitCode = 0, signal = null } = {}) {
  * caller must `close()`, because a leaked listener makes the *next* test flaky — the worst
  * failure mode a helper can have.
  */
-export async function startSseServer(scripts, { status = 200 } = {}) {
+export async function startSseServer(scripts, { status = 200, response: spec } = {}) {
   const requestedPaths = [];
   const requestedMethods = [];
   let attach = 0;
@@ -72,15 +72,22 @@ export async function startSseServer(scripts, { status = 200 } = {}) {
     // A script that ran out answers an empty body, which the core reads as a cut. Better than
     // hanging: a test that over-attaches should fail on its own assertion, not on a timeout.
     const frames = scripts[attach++] ?? [];
-    const body = frames.join('');
+    const wire = attach === 1 ? spec : undefined;
+    const body = wire
+      ? (wire.body_bytes === undefined ? (wire.body ?? '') : 'x'.repeat(wire.body_bytes))
+      : frames.join('');
     // Answered once the request body is read, so an upload sees the status rather than a
     // connection reset on bytes it hasn't finished sending.
     request.resume();
     request.on('end', () => {
-      response.writeHead(status, {
-        'content-type': status === 200 ? 'text/event-stream' : 'text/plain',
-        'content-length': Buffer.byteLength(body),
-      });
+      const code = wire?.status ?? (spec ? 400 : status);
+      const headers = { 'content-type': code === 200 ? 'text/event-stream' : 'text/plain',
+        ...(spec ? { connection: 'close' } : {}), ...wire?.headers };
+      if (wire?.chunked) headers['transfer-encoding'] = 'chunked';
+      else if (!Object.keys(headers).some((name) => name.toLowerCase() === 'content-length')) {
+        headers['content-length'] = Buffer.byteLength(body);
+      }
+      response.writeHead(code, headers);
       response.end(body);
     });
   });
