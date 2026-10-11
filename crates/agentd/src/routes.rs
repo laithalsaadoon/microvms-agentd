@@ -739,7 +739,7 @@ pub fn surface_docs() -> Vec<schema::Endpoint> {
             )
         },
         schema::Endpoint {
-            response: octet_stream("this document"),
+            response: json_body::<serde_json::Value>(),
             ..row(
                 "GET",
                 "/v1/schema".into(),

@@ -1,0 +1,13 @@
+diff --git a/crates/agentd/src/routes.rs b/crates/agentd/src/routes.rs
+index fe9d58c..126fbb5 100644
+--- a/crates/agentd/src/routes.rs
++++ b/crates/agentd/src/routes.rs
+@@ -739,7 +739,7 @@ pub fn surface_docs() -> Vec<schema::Endpoint> {
+             )
+         },
+         schema::Endpoint {
+-            response: json_body::<serde_json::Value>(),
++            response: octet_stream("this document"),
+             ..row(
+                 "GET",
+                 "/v1/schema".into(),
