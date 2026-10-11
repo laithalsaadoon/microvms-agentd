@@ -19,6 +19,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 
+pub mod tunnel;
+
 pub const SURFACES: [&str; 4] = ["core", "cli", "py", "ts"];
 
 /// The case every runner must load, and every runner that handles its area must run. A
@@ -32,7 +34,7 @@ pub const SENTINEL: &str = "wrap-dockerfile/sentinel";
 /// alone. The split is stated once, here, so a tier can't hand an area to the other without the
 /// other one planning it and failing on a case it has no handler for.
 pub const CLI_PROCESS_AREAS: [&str; 4] = ["cost", "egress", "size-class", "wrap-dockerfile"];
-pub const CLI_FAKE_AREAS: [&str; 4] = ["image-name", "error", "names", "forward"];
+pub const CLI_FAKE_AREAS: [&str; 5] = ["image-name", "error", "names", "forward", "tunnel"];
 
 const CASE_KEYS: [&str; 5] = ["capability", "input", "expect", "ignore", "skip"];
 

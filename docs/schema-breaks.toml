@@ -11,3 +11,8 @@
 # [[break]]
 # change = "route GET /v1/procs is gone"
 # why = "replaced by GET /v1/processes, which carries the pgid"
+
+# Protocol 2 requires the verified tunnel's version/route/port prologue and an
+# authenticated transport confirmation before the guest dial. Protocol 1 peers
+# are refused on verified tunnels. This encrypted framing change is reviewed here;
+# schema:compat compares the HTTP/JSON shapes and does not inspect Noise messages.

@@ -133,8 +133,8 @@ impl RunHookPayload {
     ///
     /// The two identity fields are the VM's own seed and the launching host's public key,
     /// under the keys `protocol::identity` declares — the daemon pins one and derives from
-    /// the other, which is what makes `microvm tunnel --verify-identity` able to prove the
-    /// far end without trusting the endpoint proxy. `None` produces byte-for-byte the
+    /// the other, which lets `microvm tunnel --verify-identity` prove possession of the
+    /// launch-pinned key under `protocol::identity`'s trust assumptions. `None` produces byte-for-byte the
     /// payload the other constructors always built, so a caller who never asks for identity
     /// cannot be affected by the field existing (the same compatibility rule `env` follows).
     ///

@@ -1017,7 +1017,7 @@ pub struct RunArgs {
     /// registry when `--vm-name` is given, and on the success envelope either way. A later
     /// `microvm tunnel --name <NAME> --verify-identity 5432` then completes a Noise KK
     /// handshake with the daemon before relaying a byte: proof the far end is this exact
-    /// VM, independent of the platform proxy, with every frame encrypted end to end.
+    /// VM against the launch pin, with every frame encrypted end to end.
     ///
     /// Costs 137 bytes of the launch payload's measured 4096-byte budget (the same budget
     /// as --launch-env). Requires --keep for --vm-name's reason: a VM torn down on the way

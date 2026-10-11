@@ -1116,3 +1116,10 @@ core = "microvms_core::secret_input::read_secret"
 cli = "exec --agent-token-file"
 py = { exempt = "Python callers own their input streams and supply credential strings." }
 ts = { exempt = "JavaScript callers own their input streams and supply credential strings." }
+
+[[capability]]
+id = "verified-tunnel-context"
+core = "microvms_core::protocol::identity::tunnel_prologue"
+cli = { exempt = "the tunnel relay applies the wire context internally; it is not a separate command" }
+py = { exempt = "the tunnel relay applies the wire context internally; it is not a separate Python operation" }
+ts = { exempt = "the tunnel relay applies the wire context internally; it is not a separate TypeScript operation" }

@@ -19,10 +19,14 @@ scripts already declare; the wheel's own 3.9 floor is for consumers, not for thi
 from __future__ import annotations
 
 import json
+import os
 import re
 import socket
+import subprocess
+import sys
 import tempfile
 from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -461,8 +465,70 @@ def forward(case: Case, servers: Callable[..., SseServer]) -> dict[str, Any]:
         handle.stop(timeout=10)
 
 
+def tunnel(case: Case, _servers: Callable[..., SseServer]) -> dict[str, Any]:
+    target = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
+    if not target.is_absolute():
+        target = ROOT / target
+    suffix = ".exe" if sys.platform == "win32" else ""
+    binary = target / "debug" / "examples" / f"parity-tunnel-peer{suffix}"
+    assert binary.is_file(), f"build {binary} with mise run parity:fixtures"
+    handle = None
+    # The peer owns the wire exchange; this runner reaches it through the binding's public
+    # tunnel handle. Bound every read so a missing handshake response fails the case.
+    with ThreadPoolExecutor(max_workers=1) as reader:
+        with subprocess.Popen(
+            [str(binary)],
+            cwd=ROOT,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+        ) as peer:
+            assert peer.stdin is not None and peer.stdout is not None
+            try:
+                peer.stdin.write(json.dumps(case.input) + "\n")
+                peer.stdin.close()
+                ready = json.loads(
+                    reader.submit(peer.stdout.readline).result(timeout=15)
+                )
+                identity = microvms.TunnelIdentity(
+                    ready["host_seed"], ready["vm_public_key"]
+                )
+                session = microvms.Session.direct(
+                    ready["endpoint"], "parity-tunnel-token"
+                )
+                handle = session.tunnel(
+                    ready["guest_port"],
+                    max_connections=1,
+                    verify_identity=identity,
+                )
+                _, port = handle.local_address.rsplit(":", 1)
+                received = bytearray()
+                with socket.create_connection(
+                    ("127.0.0.1", int(port)), timeout=15
+                ) as client:
+                    while chunk := client.recv(4096):
+                        received.extend(chunk)
+                report = handle.stop(timeout=15)
+                final = json.loads(
+                    reader.submit(peer.stdout.readline).result(timeout=15)
+                )
+                assert peer.wait(timeout=15) == 0, "the tunnel peer failed"
+                return {
+                    "received": received.decode(),
+                    "refused": report.refused,
+                    "confirmed": final["confirmed"],
+                }
+            finally:
+                if peer.poll() is None:
+                    peer.kill()
+                peer.wait(timeout=15)
+                if handle is not None:
+                    handle.stop(timeout=1)
+
+
 HANDLERS: dict[str, Callable[[Case, Callable[..., SseServer]], dict[str, Any]]] = {
     "forward": forward,
+    "tunnel": tunnel,
     "image-name": image_name,
     "cost": cost,
     "error": daemon_status,

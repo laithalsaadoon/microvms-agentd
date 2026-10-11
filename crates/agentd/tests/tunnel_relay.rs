@@ -508,11 +508,13 @@ async fn initiate(
     socket: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>,
     host_seed: [u8; 32],
     pinned_vm_public: [u8; 32],
+    guest_port: u16,
 ) -> Result<snow::TransportState, Option<(u16, String)>> {
     initiate_with(
         socket,
         host_seed,
         pinned_vm_public,
+        guest_port,
         &protocol::identity::HANDSHAKE_PAYLOAD,
     )
     .await
@@ -526,10 +528,13 @@ async fn initiate_with(
     socket: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>,
     host_seed: [u8; 32],
     pinned_vm_public: [u8; 32],
+    guest_port: u16,
     payload: &[u8],
 ) -> Result<(snow::TransportState, Vec<u8>), Option<(u16, String)>> {
     let mut initiator =
         snow::Builder::new(protocol::identity::NOISE_PATTERN.parse().expect("parses"))
+            .prologue(&protocol::identity::tunnel_prologue(guest_port))
+            .expect("valid prologue")
             .local_private_key(&host_seed)
             .expect("a 32-byte secret")
             .remote_public_key(&pinned_vm_public)
@@ -557,7 +562,15 @@ async fn initiate_with(
                     .read_message(&reply, &mut scratch)
                     .expect("the daemon's reply authenticates");
                 let offer = scratch[..read].to_vec();
-                return Ok((initiator.into_transport_mode().expect("transport"), offer));
+                let mut transport = initiator.into_transport_mode().expect("transport");
+                socket
+                    .send(sealed(
+                        &mut transport,
+                        protocol::identity::TUNNEL_CONFIRMATION,
+                    ))
+                    .await
+                    .expect("the confirmation is sent");
+                return Ok((transport, offer));
             }
             Some(Ok(Message::Close(Some(CloseFrame { code, reason })))) => {
                 return Err(Some((code.into(), reason.to_string())));
@@ -585,7 +598,7 @@ async fn a_verified_tunnel_proves_the_vm_and_carries_encrypted_bytes() {
     let daemon = identity_daemon(vm_seed, host_seed).await;
     let mut socket = open_identity_tunnel(daemon, server.port()).await;
 
-    let mut noise = initiate(&mut socket, host_seed, vm_public)
+    let mut noise = initiate(&mut socket, host_seed, vm_public, server.port())
         .await
         .expect("the launching host's handshake completes");
 
@@ -638,7 +651,7 @@ async fn a_valid_token_with_the_wrong_host_key_is_refused() {
     let daemon = identity_daemon(vm_seed, host_seed).await;
     let mut socket = open_identity_tunnel(daemon, server.port()).await;
 
-    let refusal = initiate(&mut socket, [1_u8; 32], vm_public)
+    let refusal = initiate(&mut socket, [1_u8; 32], vm_public, server.port())
         .await
         .expect_err("a wrong host key must not complete");
     let (code, reason) = refusal.expect("the daemon closes with a code, not a hangup");
@@ -662,7 +675,7 @@ async fn a_pin_from_a_different_vm_is_refused() {
     let daemon = identity_daemon(vm_seed, host_seed).await;
     let mut socket = open_identity_tunnel(daemon, server.port()).await;
 
-    let refusal = initiate(&mut socket, host_seed, other_vm_public)
+    let refusal = initiate(&mut socket, host_seed, other_vm_public, server.port())
         .await
         .expect_err("a wrong pin must not complete");
     let (code, _) = refusal.expect("the daemon closes with a code");
@@ -719,7 +732,7 @@ async fn a_refused_caller_never_causes_a_guest_connection() {
 
     let daemon = identity_daemon(vm_seed, host_seed).await;
     let mut socket = open_identity_tunnel(daemon, guest.port()).await;
-    let refusal = initiate(&mut socket, [1_u8; 32], vm_public).await;
+    let refusal = initiate(&mut socket, [1_u8; 32], vm_public, guest.port()).await;
     assert!(refusal.is_err(), "the wrong key must be refused");
 
     // The refusal already arrived, so any dial would have happened by now.
@@ -781,7 +794,7 @@ async fn verified_upload(
     let (guest, outcome) = reading_guest().await;
     let daemon = identity_daemon(vm_seed, host_seed).await;
     let mut socket = open_identity_tunnel(daemon, guest.port()).await;
-    let (mut noise, _) = initiate_with(&mut socket, host_seed, vm_public, offer)
+    let (mut noise, _) = initiate_with(&mut socket, host_seed, vm_public, guest.port(), offer)
         .await
         .expect("the launching host's handshake completes");
     socket
@@ -830,6 +843,7 @@ async fn agentd_19_a_guest_eof_reaches_the_caller_as_the_end_of_stream() {
         &mut socket,
         host_seed,
         vm_public,
+        guest.port(),
         &protocol::identity::HANDSHAKE_PAYLOAD,
     )
     .await
@@ -1039,7 +1053,7 @@ async fn one_chunk_relayed() -> (
     let (guest, recorded, outcome) = recording_guest().await;
     let daemon = identity_daemon(vm_seed, host_seed).await;
     let mut socket = open_identity_tunnel(daemon, guest.port()).await;
-    let mut noise = initiate(&mut socket, host_seed, vm_public)
+    let mut noise = initiate(&mut socket, host_seed, vm_public, guest.port())
         .await
         .expect("the launching host's handshake completes");
     let frame = sealed(&mut noise, b"once");

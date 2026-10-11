@@ -1964,6 +1964,7 @@ LINT_EXCEPTIONS = {
     ): 1,
     ("crates/microvms-cli/src/guards/doctor.rs", "clippy::disallowed_methods"): 2,
     ("crates/microvms-cli/src/guards/doctor.rs", "clippy::disallowed_types"): 2,
+    ("crates/microvms-cli/src/guards/parity.rs", "clippy::disallowed_types"): 1,
     ("crates/microvms-cli/src/guards/history.rs", "clippy::disallowed_methods"): 1,
     ("crates/microvms-cli/src/guards/support.rs", "clippy::disallowed_methods"): 3,
     ("crates/microvms-cli/src/guards/support.rs", "clippy::disallowed_types"): 3,

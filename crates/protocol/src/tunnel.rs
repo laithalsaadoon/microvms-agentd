@@ -73,7 +73,7 @@ pub mod close {
     /// exists by the time anyone reads this. A downgrade to an unverified tunnel would be
     /// worse than either — the caller asked for proof and would believe one it never got.
     pub const NO_IDENTITY: u16 = 4401;
-    /// The Noise handshake failed: a wrong pin, a replayed record, or a corrupted stream.
+    /// The Noise handshake or session confirmation failed.
     ///
     /// Deliberately one code for all three. Under `KK` both static keys are mixed into the
     /// handshake hash, so the daemon cannot distinguish "the caller pinned the wrong VM" from
@@ -111,7 +111,8 @@ pub mod close {
                  record copied from another launch would do that — or the caller does not hold \
                  the launching host's private key. The daemon cannot tell those apart: both \
                  static keys are mixed into the handshake hash, so both arrive as one \
-                 decryption failure."
+                 decryption failure. The protocol version, route, and requested guest port \
+                 must also agree, and the caller must confirm the resulting session."
                     .to_string(),
             ),
             _ => None,

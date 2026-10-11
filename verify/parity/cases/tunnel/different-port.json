@@ -1,0 +1,11 @@
+{
+  "capability": "tunnel",
+  "input": {
+    "scenario": "different-port",
+    "guest_port": 8080,
+    "protocol_version": "2",
+    "confirmation": "microvms-tunnel-ready",
+    "greeting": "guest-ready"
+  },
+  "expect": { "received": "", "refused": 1, "confirmed": false }
+}

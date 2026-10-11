@@ -174,7 +174,7 @@ async fn verified_relay(socket: WebSocket, port: u16, material: crate::tunnel_id
         return;
     };
 
-    let responder = match material.responder() {
+    let responder = match material.tunnel_responder(port) {
         Ok(responder) => responder,
         Err(error) => {
             // A build failure means the stored material is unusable, which the run hook
@@ -207,7 +207,7 @@ async fn verified_relay(socket: WebSocket, port: u16, material: crate::tunnel_id
             close_with(
                 *socket,
                 close::IDENTITY_REFUSED,
-                "identity handshake refused: wrong pin or wrong caller",
+                "identity handshake or session confirmation refused",
             )
             .await;
             return;
@@ -479,8 +479,8 @@ fn reset(read: tokio::net::tcp::OwnedReadHalf, write: tokio::net::tcp::OwnedWrit
 ///
 /// Two messages, one each way, which is what `KK` costs: the initiator's first message and
 /// the responder's reply. Each payload is the sender's offer of the end of stream
-/// (`protocol::identity::HANDSHAKE_PAYLOAD`), and nothing else: the guest port already
-/// travelled in the query string.
+/// (`protocol::identity::HANDSHAKE_PAYLOAD`). The shared prologue binds the route, version,
+/// and guest port. The caller then confirms the resulting transport session before dialing.
 pub(crate) mod handshake {
     use axum::extract::ws::{Message, WebSocket};
 
@@ -564,15 +564,38 @@ pub(crate) mod handshake {
             return Err(Failed::new(socket, "the caller went away mid-handshake"));
         }
 
-        match responder.into_transport_mode() {
-            Ok(transport) => Ok(Noise {
+        let mut transport = match responder.into_transport_mode() {
+            Ok(transport) => transport,
+            Err(error) => return Err(Failed::new(socket, error.to_string())),
+        };
+        // The caller confirms this session before any guest connection is opened. Consume
+        // this control message here so a server-first guest never waits for application data.
+        let confirmation = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                match socket.recv().await {
+                    Some(Ok(Message::Binary(frame))) => {
+                        let count = transport.read_message(&frame, &mut scratch).ok()?;
+                        return (scratch[..count] == *protocol::identity::TUNNEL_CONFIRMATION)
+                            .then_some(());
+                    }
+                    Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
+                    _ => return None,
+                }
+            }
+        })
+        .await;
+        if !matches!(confirmation, Ok(Some(()))) {
+            return Err(Failed::new(
                 socket,
-                transport,
-                scratch,
-                caller_proves_end,
-            }),
-            Err(error) => Err(Failed::new(socket, error.to_string())),
+                "the caller did not confirm the tunnel session",
+            ));
         }
+        Ok(Noise {
+            socket,
+            transport,
+            scratch,
+            caller_proves_end,
+        })
     }
 
     /// Reads the caller's handshake message, answering whether its payload offered the end of

@@ -141,6 +141,7 @@ transform = { file = "crates/microvms-app/src/session/split.rs", replace = "    
 id = "parity-py-wrap-newline"
 guard = "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[wrap-dockerfile/no-trailing-newline]"
 run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
   ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
   ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[wrap-dockerfile/no-trailing-newline]"],
 ]
@@ -153,6 +154,7 @@ transform = { file = "crates/microvms-app/src/control/artifact.rs", replace = " 
 id = "parity-ts-wrap-newline"
 guard = "wrap-dockerfile/no-trailing-newline"
 run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
   ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
@@ -164,6 +166,7 @@ transform = { file = "crates/microvms-app/src/control/artifact.rs", replace = " 
 [[family]]
 guard = "bindings/microvms-py/tests/test_parity_cases.py::test_every_area_and_the_sentinel_run"
 run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
   ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
   ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_every_area_and_the_sentinel_run"],
 ]
@@ -184,6 +187,7 @@ transform = { file = "bindings/microvms-py/tests/test_parity_cases.py", replace 
 id = "parity-py-no-handler"
 guard = "bindings/microvms-py/tests/test_parity_cases.py::test_the_corpus_plans_cleanly"
 run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
   ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
   ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_the_corpus_plans_cleanly"],
 ]
@@ -195,6 +199,7 @@ transform = { file = "bindings/microvms-py/tests/test_parity_cases.py", replace 
 [[family]]
 guard = "every area and the sentinel run"
 run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
   ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
@@ -215,6 +220,7 @@ transform = { file = "bindings/microvms-js/__test__/parity_cases.mjs", replace =
 id = "parity-ts-no-handler"
 guard = "the corpus plans cleanly"
 run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
   ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
@@ -230,6 +236,7 @@ transform = { file = "bindings/microvms-js/__test__/parity_cases.mjs", replace =
 id = "parity-py-unjudged"
 guard = "bindings/microvms-py/tests/test_parity_cases.py::test_every_planned_case_was_judged"
 run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
   ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
   ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py"],
 ]
@@ -242,6 +249,7 @@ transform = { file = "bindings/microvms-py/tests/test_parity_cases.py", replace 
 id = "parity-ts-unjudged"
 guard = "every planned case was judged"
 run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
   ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
@@ -254,6 +262,7 @@ transform = { file = "bindings/microvms-js/__test__/parity_cases.mjs", replace =
 id = "parity-py-skip-without-reference"
 guard = "bindings/microvms-py/tests/test_parity_cases.py::test_the_corpus_plans_cleanly"
 run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
   ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
   ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_the_corpus_plans_cleanly"],
 ]
@@ -266,6 +275,7 @@ transform = { file = "verify/parity/cases/image-name/ensure-image-name.json", re
 id = "parity-ts-skip-without-reference"
 guard = "the corpus plans cleanly"
 run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
   ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
@@ -279,6 +289,7 @@ transform = { file = "verify/parity/cases/image-name/ensure-image-name.json", re
 id = "parity-py-refuses-known-drift"
 guard = "bindings/microvms-py/tests/test_parity_cases.py::test_the_corpus_plans_cleanly"
 run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
   ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
   ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_the_corpus_plans_cleanly"],
 ]
@@ -291,6 +302,7 @@ transform = { file = "verify/parity/cases/size-class/cpu-only.json", replace = "
 id = "parity-ts-refuses-known-drift"
 guard = "the corpus plans cleanly"
 run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
   ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
@@ -306,6 +318,7 @@ transform = { file = "verify/parity/cases/size-class/cpu-only.json", replace = "
 id = "parity-py-cycles-dropped"
 guard = "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[cost/estimate-running-and-suspended]"
 run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
   ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
   ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[cost/estimate-running-and-suspended]"],
 ]
@@ -318,6 +331,7 @@ transform = { file = "bindings/microvms-py/src/cost.rs", replace = "        imag
 id = "parity-ts-suspended-dropped"
 guard = "cost/estimate-running-and-suspended"
 run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
   ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
@@ -389,6 +403,7 @@ transform = { file = "bindings/microvms-js/src/session.rs", replace = "        m
 id = "parity-py-names-region"
 guard = "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[names/region-mismatch]"
 run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
   ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
   ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[names/region-mismatch]"],
 ]
@@ -401,6 +416,7 @@ transform = { file = "crates/microvms-domain/src/names.rs", replace = "        &
 id = "parity-ts-names-region"
 guard = "names/region-mismatch"
 run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
   ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
@@ -442,6 +458,7 @@ transform = { file = "bindings/microvms-js/src/exec.rs", replace = "    microvms
 id = "parity-py-estimate-label-plan"
 guard = "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[cost/estimate-with-running-time]"
 run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
   ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
   ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[cost/estimate-with-running-time]"],
 ]
@@ -454,6 +471,7 @@ transform = { file = "bindings/microvms-py/src/cost.rs", replace = "        labe
 id = "parity-ts-estimate-label-plan"
 guard = "cost/estimate-with-running-time"
 run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
   ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
@@ -466,6 +484,7 @@ transform = { file = "bindings/microvms-js/src/cost.rs", replace = "            
 id = "parity-py-estimate-launched-true"
 guard = "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[cost/estimate-suspended-only]"
 run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
   ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
   ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[cost/estimate-suspended-only]"],
 ]
@@ -478,6 +497,7 @@ transform = { file = "bindings/microvms-py/src/cost.rs", replace = "    plan.lau
 id = "parity-ts-estimate-launched-true"
 guard = "cost/estimate-suspended-only"
 run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
   ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]

@@ -37,6 +37,7 @@ async fn the_cli_answers_the_shared_case_corpus_against_its_fakes() {
             "image-name" => parity_image_name(&case).await,
             "error" => parity_daemon_status(&case).await,
             "names" => parity_names(&case).await,
+            "tunnel" => parity_tunnel(&case).await,
             other => panic!(
                 "{}: parity_corpus::CLI_FAKE_AREAS gives the fakes tier area {other:?}, \
                  which it has no handler for",
@@ -46,6 +47,74 @@ async fn the_cli_answers_the_shared_case_corpus_against_its_fakes() {
         run.judge(&case, answer);
     }
     run.finish();
+}
+
+#[expect(
+    clippy::disallowed_types,
+    reason = "the shared case peer is a test-only subprocess, never part of the CLI"
+)]
+async fn parity_tunnel(case: &parity_corpus::Case) -> serde_json::Value {
+    use clap::Parser as _;
+    use std::process::Stdio;
+    use tokio::io::AsyncReadExt as _;
+
+    let child = std::process::Command::new(parity_corpus::tunnel::fixture_path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .expect("build the fixture with mise run parity:fixtures");
+    let mut peer = parity_corpus::tunnel::Peer::started(child, &case.input);
+    let ready = &peer.ready;
+    let reserved = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = reserved.local_addr().unwrap();
+    drop(reserved);
+    let ports = format!("{}:{}", address.port(), case.input_u64("guest_port"));
+    let command = Cli::try_parse_from([
+        "microvm",
+        "tunnel",
+        &ports,
+        "--endpoint",
+        ready["endpoint"].as_str().unwrap(),
+        "--microvm-id",
+        "mvm-parity",
+        "--agent-token",
+        "parity-tunnel-token",
+        "--region",
+        "us-east-1",
+        "--max-connections",
+        "1",
+        "--verify-identity",
+        "--identity-host-seed",
+        ready["host_seed"].as_str().unwrap(),
+        "--identity-vm-public-key",
+        ready["vm_public_key"].as_str().unwrap(),
+    ])
+    .unwrap()
+    .command;
+    let seam = super::support::ScriptedSessionSeam {
+        script: DaemonScript::at_endpoint(ready["endpoint"].as_str().unwrap().into()),
+    };
+    let read = async {
+        let mut client = loop {
+            match tokio::net::TcpStream::connect(address).await {
+                Ok(client) => break client,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let mut bytes = Vec::new();
+        client.read_to_end(&mut bytes).await.unwrap();
+        bytes
+    };
+    let ((result, _), bytes) = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        tokio::join!(dispatch_with(&seam, &command, full_infra()), read)
+    })
+    .await
+    .expect("the CLI tunnel completes");
+    let rendered = result.expect("the CLI reports the completed connection");
+    let verdict = peer.finish();
+    serde_json::json!({"received": String::from_utf8(bytes).unwrap(),
+        "refused": rendered.data["connectionsRefused"], "confirmed": verdict["confirmed"]})
 }
 
 /// A failure's facets, the way the envelope and the exit code state them.

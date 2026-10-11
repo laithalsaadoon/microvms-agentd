@@ -20,11 +20,12 @@
 //! is no way to present a certificate to the *VM* through the platform, and endpoint auth is
 //! the JWE alone.
 //!
-//! The JWE is scoped to one `microvmId` and the proxy enforces that scope, so an
-//! authenticated connection already binds to VM identity **as attested by AWS**. A caller who
-//! trusts the proxy needs nothing here. This module is for the caller who wants that binding
-//! without trusting the proxy, and it works because we control both endpoints: the proof
-//! terminates in the daemon rather than at the proxy.
+//! The JWE is scoped to one `microvmId` by the endpoint proxy. The additional
+//! Noise proof terminates in the daemon and checks possession of the launch-pinned key.
+//! Its trust root includes the AWS control plane and run-hook delivery: the host supplies
+//! the VM seed through `RunMicrovm`. The proxy carries the agent token used for root
+//! control, so key protection also assumes trusted authorized control and guest-root access.
+//! This is an application-layer proof under those assumptions, not independence from them.
 //!
 //! # Noise KK rather than TLS, on a measured constraint
 //!
@@ -79,12 +80,15 @@
 //! the offer the way it could strip a query flag. An older peer sends an empty payload and no
 //! end of stream, and it reads the newer peer's end of stream as a message with nothing in it,
 //! so a release that predates the end of stream and one that sends it still work together in
-//! either order. `docs/PROTOCOL.md` has what each side does without one.
+//! either order within the same handshake version. Protocol 2 requires a prologue
+//! binding the route and guest port, then a separate transport confirmation before
+//! the guest dial; protocol 1 verified tunnels are refused. `docs/PROTOCOL.md`
+//! has the complete version and end-of-stream rules.
 //!
 //! # The honest limit, restated here because this is where a reader will look
 //!
-//! This proves the far end is **`agentd` in the VM the caller launched**. It does not prove
-//! the VM is uncompromised: the workload runs as uid 0 and can in principle `ptrace` the
+//! Under the launch-material and privileged-access assumptions above, this proves
+//! possession of the key pinned for the VM. It does not prove the VM is uncompromised: the workload runs as uid 0 and can in principle `ptrace` the
 //! daemon and read the derived key out of its memory. Same class as the other entries on
 //! `docs/TRUST.md`'s unenforced list. It is documented rather than overclaimed.
 
@@ -101,6 +105,29 @@
 /// resolver, which is what keeps the daemon's build free of a C compiler. AES-GCM would pull
 /// that constraint back in on some targets for no security gain here.
 pub const NOISE_PATTERN: &str = "Noise_KK_25519_ChaChaPoly_BLAKE2s";
+
+/// The route bound into every verified tunnel handshake.
+pub const TUNNEL_ROUTE: &str = "/v1/tcp";
+
+/// The first transport message, consumed before the daemon connects to the guest.
+///
+/// A separate confirmation permits a guest protocol to send first without waiting for
+/// application bytes from the caller. It occupies transport position zero and is never relayed.
+pub const TUNNEL_CONFIRMATION: &[u8] = b"microvms-tunnel-ready";
+
+/// The context both peers authenticate alongside their pinned keys.
+///
+/// NUL-separated fixed fields and a big-endian port make the encoding unambiguous. The
+/// protocol version changes when this handshake contract changes; peers never retry without it.
+pub fn tunnel_prologue(guest_port: u16) -> Vec<u8> {
+    let mut context = format!(
+        "microvms-tunnel\0{NOISE_PATTERN}\0{}\0{TUNNEL_ROUTE}\0",
+        crate::PROTOCOL_VERSION
+    )
+    .into_bytes();
+    context.extend_from_slice(&guest_port.to_be_bytes());
+    context
+}
 
 /// The length of a seed, a static secret, and a public key. All 32 bytes, on x25519.
 ///
@@ -242,6 +269,19 @@ mod tests {
         // which is the constraint that ruled rustls out in the first place.
         assert!(NOISE_PATTERN.contains("ChaChaPoly"), "{NOISE_PATTERN}");
         assert!(NOISE_PATTERN.contains("BLAKE2s"), "{NOISE_PATTERN}");
+    }
+
+    #[test]
+    fn the_tunnel_context_includes_the_version_route_and_network_order_port() {
+        let mut expected = format!(
+            "microvms-tunnel\0{NOISE_PATTERN}\0{}\0/v1/tcp\0",
+            crate::PROTOCOL_VERSION
+        )
+        .into_bytes();
+        expected.extend_from_slice(&[0x12, 0x34]);
+        assert_eq!(tunnel_prologue(0x1234), expected);
+        assert_ne!(tunnel_prologue(0x1234), tunnel_prologue(0x3412));
+        assert_eq!(TUNNEL_CONFIRMATION, b"microvms-tunnel-ready");
     }
 
     #[test]

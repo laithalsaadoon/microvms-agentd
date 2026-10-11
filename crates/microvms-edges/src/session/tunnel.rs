@@ -70,7 +70,7 @@ use microvms_app::session::proxy::ProxyAuth;
 pub const TUNNEL_CHUNK_BYTES: usize = 64 * 1024;
 
 /// The daemon's tunnel route.
-const TUNNEL_PATH: &str = "/v1/tcp";
+const TUNNEL_PATH: &str = protocol::identity::TUNNEL_ROUTE;
 
 /// Bytes read from the local connection per Noise message on a verified tunnel.
 ///
@@ -567,7 +567,7 @@ async fn initiate(
     identity: &microvms_app::identity::TunnelIdentity,
     guest_port: u16,
 ) -> Result<Initiated, Error> {
-    let mut initiator = crate::identity::initiator(identity)?;
+    let mut initiator = crate::identity::tunnel_initiator(identity, guest_port)?;
     let mut scratch = vec![0_u8; NOISE_MAX_MESSAGE_BYTES];
 
     let written = initiator
@@ -595,8 +595,26 @@ async fn initiate(
     loop {
         match socket.next().await {
             Some(Ok(Message::Binary(reply))) => {
-                return read_reply(initiator, &reply, &mut scratch, guest_port)
-                    .map(Initiated::Transport);
+                let mut verified = read_reply(initiator, &reply, &mut scratch, guest_port)?;
+                let written = verified
+                    .transport
+                    .write_message(protocol::identity::TUNNEL_CONFIRMATION, &mut scratch)
+                    .map_err(|error| {
+                        Error::new(
+                            ErrorKind::Unexpected,
+                            format!("confirming the tunnel session failed: {error}"),
+                        )
+                    })?;
+                socket
+                    .send(Message::Binary(scratch[..written].to_vec().into()))
+                    .await
+                    .map_err(|error| {
+                        Error::new(
+                            ErrorKind::Unexpected,
+                            format!("sending the tunnel confirmation failed: {error}"),
+                        )
+                    })?;
+                return Ok(Initiated::Transport(verified));
             }
             Some(Ok(Message::Close(frame))) => {
                 return Ok(Initiated::Refused(classify_close(frame.as_ref())));
@@ -629,17 +647,15 @@ pub(crate) fn read_reply(
     guest_port: u16,
 ) -> Result<Verified, Error> {
     let offer = initiator.read_message(reply, scratch).map_err(|_| {
-        // *Our* verification failed on the daemon's reply: the far end is not the VM the pin
-        // was minted for. This is the diagnosis the daemon cannot make, since it does not know
-        // which key we pinned, and the one the caller most needs, because the likely cause is
-        // a record replayed from another VM.
+        // Noise authenticates the pinned key and the expected context together, so a
+        // failed reply does not distinguish a key mismatch from a different context.
         Error::new(
             ErrorKind::Unexpected,
             format!(
-                "the identity handshake reply did not verify against the pinned key for this \
-                 VM. The far end holds a different seed than the one this record was created \
-                 with: a record copied from another VM, or a VM relaunched with a fresh seed, \
-                 would both do this. (guest port {guest_port})"
+                "the identity handshake reply did not verify against the pinned key and \
+                 expected tunnel context (protocol {}, route {}, guest port {guest_port})",
+                protocol::PROTOCOL_VERSION,
+                protocol::identity::TUNNEL_ROUTE
             ),
         )
     })?;

@@ -774,7 +774,7 @@
     "stdin_write_timeout_secs": 5.0,
     "stream_replay_bytes": 1048576
   },
-  "protocol_version": "1",
+  "protocol_version": "2",
   "routes": [
     {
       "auth": "none (platform hook)",
@@ -1322,7 +1322,7 @@
           "meaning": "no token is installed yet, so the control API is closed. Never 404: a client mapping 404 onto \"not found\" would report a phantom absent artifact."
         }
       ],
-      "summary": "upgrade to a WebSocket relayed to 127.0.0.1:<port> in the guest, so a caller outside the VM can speak an arbitrary TCP protocol to a server inside it. Binary frames carry bytes in both directions and a frame is a byte range rather than a message — TCP has no message boundaries and neither does this. The dial is loopback-only and never resolves a name: a relay that could reach another host would be an open proxy inside the VM reachable with the agent token. One connection per WebSocket, deliberately: multiplexing would reimplement per-stream ids, flow control, and close handshakes that the platform already provides per connection. Outcomes arrive as close codes — 4502 nothing listening, 4400 port 0, 4500 a mid-relay failure — because a WebSocket route leaves HTTP behind after its 101. Rests on a measured platform property: binary frames survive a port-scoped token byte-exact (docs/PLATFORM.md, 2026-08-29). With `identity=1` the relay first completes a Noise KK handshake against the per-VM key delivered in the launch payload, which proves the far end is this VM without trusting the endpoint proxy and makes every later frame ciphertext; 4401 means this VM was launched without a seed and 4403 means the handshake was refused. The handshake runs before the dial, so a refused caller never reaches a guest service."
+      "summary": "upgrade to a WebSocket relayed to 127.0.0.1:<port> in the guest, so a caller outside the VM can speak an arbitrary TCP protocol to a server inside it. Binary frames carry bytes in both directions and a frame is a byte range rather than a message — TCP has no message boundaries and neither does this. The dial is loopback-only and never resolves a name: a relay that could reach another host would be an open proxy inside the VM reachable with the agent token. One connection per WebSocket, deliberately: multiplexing would reimplement per-stream ids, flow control, and close handshakes that the platform already provides per connection. Outcomes arrive as close codes — 4502 nothing listening, 4400 port 0, 4500 a mid-relay failure — because a WebSocket route leaves HTTP behind after its 101. Rests on a measured platform property: binary frames survive a port-scoped token byte-exact (docs/PLATFORM.md, 2026-08-29). With `identity=1` the relay first completes a Noise KK handshake against the per-VM key delivered in the launch payload, which proves the far end is the launch pin under the bootstrap trust assumptions and makes every later frame ciphertext; 4401 means this VM was launched without a seed and 4403 means the handshake was refused. The handshake runs before the dial, so a refused caller never reaches a guest service."
     },
     {
       "auth": "bearer",
@@ -1578,6 +1578,15 @@
   "unmatched_path": {
     "code": 404,
     "meaning": "no such route. Bearer routes are behind route_layer, so an unmatched path falls through to this rather than being answered 401 — a typo must not send a client chasing credentials."
+  },
+  "verified_tunnel": {
+    "confirmation": {
+      "plaintext": "microvms-tunnel-ready",
+      "when": "the first caller transport message, consumed before the guest dial"
+    },
+    "pattern": "Noise_KK_25519_ChaChaPoly_BLAKE2s",
+    "prologue": "NUL-separated microvms-tunnel, pattern, protocol_version, route; then big-endian u16 guest port",
+    "route": "/v1/tcp"
   },
   "version_header": "microvms-agentd-version"
 }

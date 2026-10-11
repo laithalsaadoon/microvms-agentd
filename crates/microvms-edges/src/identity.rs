@@ -15,7 +15,23 @@ pub use snow::HandshakeState;
 /// A Noise initiator bound to `identity`: proves the host, verifies the pin.
 ///
 /// Built per connection. A `HandshakeState` carries nonces and must never be reused.
+/// This low-level handshake has no tunnel context; `/v1/tcp` uses [`tunnel_initiator`].
 pub fn initiator(identity: &TunnelIdentity) -> Result<HandshakeState, Error> {
+    initiator_with_prologue(identity, &[])
+}
+
+/// Builds a verified tunnel handshake bound to its route, version, and guest port.
+pub fn tunnel_initiator(
+    identity: &TunnelIdentity,
+    guest_port: u16,
+) -> Result<HandshakeState, Error> {
+    initiator_with_prologue(identity, &protocol::identity::tunnel_prologue(guest_port))
+}
+
+fn initiator_with_prologue(
+    identity: &TunnelIdentity,
+    prologue: &[u8],
+) -> Result<HandshakeState, Error> {
     // The builder borrows both keys until `build_initiator`, so they need a home that
     // outlives the chain.
     let (host_seed, vm_public_key) = (identity.host_seed(), identity.vm_public_key());
@@ -24,7 +40,8 @@ pub fn initiator(identity: &TunnelIdentity) -> Result<HandshakeState, Error> {
             .parse()
             .expect("the pattern is a compile-time constant the protocol crate tests"),
     )
-    .local_private_key(&host_seed)
+    .prologue(prologue)
+    .and_then(|builder| builder.local_private_key(&host_seed))
     .and_then(|builder| builder.remote_public_key(&vm_public_key))
     .and_then(|builder| builder.build_initiator())
     .map_err(|error| {
