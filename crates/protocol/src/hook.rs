@@ -23,10 +23,22 @@ pub const HOOK_PREFIX: &str = "/aws/lambda-microvms/runtime/v1";
 /// `agent_token` from the top level answers 400, and the platform then terminates
 /// the VM with "Run lifecycle hook returned HTTP status 400" before any traffic is
 /// forwarded, so the mistake is invisible from the outside.
-#[derive(Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Deserialize, JsonSchema, Serialize)]
 pub struct RunHookEnvelope {
     #[serde(rename = "runHookPayload")]
     pub run_hook_payload: Option<String>,
+}
+
+impl std::fmt::Debug for RunHookEnvelope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The nested JSON string carries the same private values as RunHook.
+        f.debug_struct("RunHookEnvelope")
+            .field(
+                "run_hook_payload",
+                &self.run_hook_payload.as_ref().map(|_| "[REDACTED]"),
+            )
+            .finish()
+    }
 }
 
 /// The caller's own payload, carrying the per-VM secret and an optional launch
@@ -42,7 +54,7 @@ pub struct RunHookEnvelope {
 /// The whole payload shares one 4096-byte budget, so a caller who fills `env`
 /// with credentials is spending the token's room; `microvms-core` refuses an
 /// over-budget payload locally, before the call.
-#[derive(Debug, Default, Deserialize, JsonSchema, Serialize)]
+#[derive(Default, Deserialize, JsonSchema, Serialize)]
 pub struct RunHook {
     pub agent_token: String,
     /// Base environment applied to every subsequent exec, under the per-request
@@ -69,6 +81,24 @@ pub struct RunHook {
     /// half is missing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity_host_public_key: Option<String>,
+}
+
+impl std::fmt::Debug for RunHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Launch environments may contain credentials, so omit their keys as well as values.
+        f.debug_struct("RunHook")
+            .field("agent_token", &"[REDACTED]")
+            .field("env", &"[REDACTED]")
+            .field(
+                "identity_seed",
+                &self.identity_seed.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field(
+                "identity_host_public_key",
+                &self.identity_host_public_key.as_ref().map(|_| "[REDACTED]"),
+            )
+            .finish()
+    }
 }
 
 /// Why a `runHookPayload` string could not be read as a [`RunHook`].
@@ -192,6 +222,52 @@ impl RunHook {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn run_hook_debug_retains_field_names_and_omits_private_contents() {
+        let hook = RunHook {
+            agent_token: "example-agent-token-value".into(),
+            env: HashMap::from([(
+                "EXAMPLE_PRIVATE_KEY".into(),
+                "example-environment-value".into(),
+            )]),
+            identity_seed: Some("example-identity-seed-value".into()),
+            identity_host_public_key: Some("example-host-key-value".into()),
+        };
+        for rendered in [format!("{hook:?}"), format!("{hook:#?}")] {
+            assert!(rendered.starts_with("RunHook {"));
+            for field in [
+                "agent_token",
+                "env",
+                "identity_seed",
+                "identity_host_public_key",
+            ] {
+                assert!(rendered.contains(field));
+            }
+            for value in [
+                hook.agent_token.as_str(),
+                "EXAMPLE_PRIVATE_KEY",
+                "example-environment-value",
+                hook.identity_seed.as_deref().unwrap(),
+                hook.identity_host_public_key.as_deref().unwrap(),
+            ] {
+                assert!(!rendered.contains(value));
+            }
+        }
+    }
+
+    #[test]
+    fn run_hook_envelope_debug_omits_the_nested_payload() {
+        let envelope = RunHookEnvelope {
+            run_hook_payload: Some(r#"{"agent_token":"example-nested-token"}"#.into()),
+        };
+        for rendered in [format!("{envelope:?}"), format!("{envelope:#?}")] {
+            assert!(rendered.starts_with("RunHookEnvelope {"));
+            assert!(rendered.contains("run_hook_payload"));
+            assert!(!rendered.contains("example-nested-token"));
+            assert!(!rendered.contains("agent_token"));
+        }
+    }
 
     /// The envelope key is the platform's camelCase spelling, and getting it wrong
     /// terminates the VM with a 400 before any traffic is forwarded.

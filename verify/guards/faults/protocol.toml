@@ -1,0 +1,19 @@
+# ── protocol: FAIL_TO_PASS entries tools/fail-to-pass.py emitted ──
+
+# FAIL_TO_PASS: fails on 298d9865b26a with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-run-hook-debug-retains-field-names-and-omits-private"
+guard = "hook::tests::run_hook_debug_retains_field_names_and_omits_private_contents"
+run = ["cargo", "test", "-p", "microvms-protocol", "--lib", "--", "--exact", "hook::tests::run_hook_debug_retains_field_names_and_omits_private_contents"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-run-hook-debug-retains-field-names-and-omits-private.patch"
+
+# FAIL_TO_PASS: fails on 298d9865b26a with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-run-hook-envelope-debug-omits-the-nested-payload"
+guard = "hook::tests::run_hook_envelope_debug_omits_the_nested_payload"
+run = ["cargo", "test", "-p", "microvms-protocol", "--lib", "--", "--exact", "hook::tests::run_hook_envelope_debug_omits_the_nested_payload"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-run-hook-envelope-debug-omits-the-nested-payload.patch"
