@@ -626,12 +626,11 @@ separately for the image and deployment being used.
 
 ## Client response handling
 
-The production client does not follow redirects from daemon requests. Local HTTP
-port forwarding returns the upstream redirect's status, headers, and body to its
-caller without requesting the redirect destination.
+The production client does not follow redirects from the daemon. A local HTTP
+port forward returns the redirect's status, headers, and body to the caller. It
+does not request the new URL.
 
-Buffered responses are limited to 512 MiB for successful requests and 64 KiB for
-error responses. The limit applies to declared lengths and to bytes received
-without a length. Streaming successful responses keep their streaming behavior;
-error responses collected while opening a stream use the same 64 KiB limit and
-an idle timeout.
+The client caps bodies it buffers at 512 MiB for success and 64 KiB for errors.
+It checks both the declared length and the bytes read from the body. These caps
+do not apply to successful streams. If a request to open a stream fails, the
+client reads the error body with the 64 KiB cap and an idle timeout.
