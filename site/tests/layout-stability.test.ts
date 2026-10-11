@@ -2,7 +2,7 @@
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { type Browser, chromium } from "playwright"
+import { type Browser, chromium, type Page } from "playwright"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
 import {
@@ -12,7 +12,7 @@ import {
   KNOWN_LAYOUT_SHIFTS,
   LAYOUT_SHIFT_CEILING
 } from "../src/gates.js"
-import { type StaticSite, serveStatic } from "./static-server.js"
+import { type StaticSite, serveHeld, serveStatic } from "./static-server.js"
 
 /**
  * Layout stability, measured where the viewport cannot change under the measurement. Ported from
@@ -71,6 +71,63 @@ let site: StaticSite
 let browser: Browser
 const shifts = new Map<string, ReadonlyArray<Shift>>()
 
+/**
+ * Records every layout shift into `window.__shifts`.
+ *
+ * It's installed as an init script, so it's running before the document's first byte. Registering it
+ * after `goto` would miss every shift that happened during load, which is all of the ones worth
+ * catching.
+ *
+ * `hadRecentInput` entries are dropped for the reason the metric drops them: a shift the user asked
+ * for by clicking is not a layout defect. Nothing here clicks, so this only guards against a future
+ * case that does.
+ */
+const recordShifts = (): void => {
+  const w = window as unknown as { __shifts: Array<unknown> }
+  w.__shifts = []
+  new PerformanceObserver((list) => {
+    for (const entry of list.getEntries()) {
+      const shift = entry as PerformanceEntry & {
+        value: number
+        hadRecentInput: boolean
+        sources?: ReadonlyArray<{
+          node?: Element | null
+          previousRect?: DOMRectReadOnly
+          currentRect?: DOMRectReadOnly
+        }>
+      }
+      if (shift.hadRecentInput) continue
+      const box = (rect?: DOMRectReadOnly): string =>
+        rect === undefined
+          ? ""
+          : `${Math.round(rect.x)},${Math.round(rect.y)} ${Math.round(rect.width)}x${Math.round(rect.height)}`
+      // The node's identity, not its text: a tag plus its first classes is what a fix is written
+      // against, where a snippet of prose would make the failure message unreadable.
+      w.__shifts.push({
+        value: shift.value,
+        at: Math.round(shift.startTime),
+        sources: (shift.sources ?? []).map((source) => {
+          const node = source.node
+          const classes = node?.className ? String(node.className).trim().split(/\s+/) : []
+          return {
+            node: node
+              ? `${node.tagName.toLowerCase()}.${classes.slice(0, 3).join(".")}`
+              : "detached",
+            from: box(source.previousRect),
+            to: box(source.currentRect)
+          }
+        })
+      })
+    }
+  }).observe({ type: "layout-shift", buffered: true })
+}
+
+/** What `recordShifts` has recorded on a page so far. */
+const readShifts = async (page: Page): Promise<ReadonlyArray<Shift>> =>
+  (await page.evaluate(
+    () => (window as unknown as { __shifts: Array<unknown> }).__shifts
+  )) as ReadonlyArray<Shift>
+
 /** Every move that made up a page's total, so the failure message is the diagnosis. */
 const report = (entries: ReadonlyArray<Shift>): string =>
   entries
@@ -81,71 +138,43 @@ const report = (entries: ReadonlyArray<Shift>): string =>
     )
     .join("\n      ")
 
+/**
+ * A shift is claimed only if EVERY node it moved is declared and it stays inside that entry's bound.
+ * One shift can carry several source nodes, so a single declared node does not excuse the others
+ * travelling with it.
+ */
+const claimed = (shift: Shift): boolean =>
+  shift.sources.length > 0 &&
+  shift.sources.every((source) =>
+    KNOWN_LAYOUT_SHIFTS.some(
+      (known) => source.node.startsWith(known.node) && shift.value <= known.most
+    )
+  )
+
+/** Fails unless the shifts no `KNOWN_LAYOUT_SHIFTS` entry claims add up to less than the ceiling. */
+const expectUnderCeiling = (path: string, entries: ReadonlyArray<Shift>): void => {
+  const unclaimed = entries.filter((entry) => !claimed(entry))
+  const total = unclaimed.reduce((sum, entry) => sum + entry.value, 0)
+  expect(
+    total,
+    `${path} shifted ${total.toFixed(4)} outside the declared baseline, across ` +
+      `${unclaimed.length} of ${entries.length} shift(s):\n      ${report(unclaimed)}`
+  ).toBeLessThan(LAYOUT_SHIFT_CEILING)
+}
+
 beforeAll(async () => {
   site = await serveStatic(dist, BASE)
   browser = await chromium.launch()
   const context = await browser.newContext({ viewport: VIEWPORT })
   for (const path of AUDITED_PAGES) {
     const page = await context.newPage()
-    /**
-     * The observer is installed as an init script, so it is running before the document's first
-     * byte. Registering it after `goto` would miss every shift that happened during load, which is
-     * all of the ones worth catching.
-     *
-     * `hadRecentInput` entries are dropped for the reason the metric drops them: a shift the user
-     * asked for by clicking is not a layout defect. Nothing here clicks, so this only guards
-     * against a future case that does.
-     */
-    await page.addInitScript(() => {
-      const w = window as unknown as { __shifts: Array<unknown> }
-      w.__shifts = []
-      new PerformanceObserver((list) => {
-        for (const entry of list.getEntries()) {
-          const shift = entry as PerformanceEntry & {
-            value: number
-            hadRecentInput: boolean
-            sources?: ReadonlyArray<{
-              node?: Element | null
-              previousRect?: DOMRectReadOnly
-              currentRect?: DOMRectReadOnly
-            }>
-          }
-          if (shift.hadRecentInput) continue
-          const box = (rect?: DOMRectReadOnly): string =>
-            rect === undefined
-              ? ""
-              : `${Math.round(rect.x)},${Math.round(rect.y)} ${Math.round(rect.width)}x${Math.round(rect.height)}`
-          // The node's identity, not its text: a tag plus its first classes is what a fix is written
-          // against, where a snippet of prose would make the failure message unreadable.
-          w.__shifts.push({
-            value: shift.value,
-            at: Math.round(shift.startTime),
-            sources: (shift.sources ?? []).map((source) => {
-              const node = source.node
-              const classes = node?.className ? String(node.className).trim().split(/\s+/) : []
-              return {
-                node: node
-                  ? `${node.tagName.toLowerCase()}.${classes.slice(0, 3).join(".")}`
-                  : "detached",
-                from: box(source.previousRect),
-                to: box(source.currentRect)
-              }
-            })
-          })
-        }
-      }).observe({ type: "layout-shift", buffered: true })
-    })
+    await page.addInitScript(recordShifts)
     const response = await page.goto(`${site.origin}${path}`, { waitUntil: "networkidle" })
     // Same rule as the a11y tier: a 404 has a layout too, and a stable 404 is not a stable page.
     expect(response?.status(), `${path} is not a page of the built site`).toBe(200)
     await page.evaluate(() => document.fonts.ready)
     await page.waitForTimeout(SETTLE_MS)
-    shifts.set(
-      path,
-      (await page.evaluate(
-        () => (window as unknown as { __shifts: Array<unknown> }).__shifts
-      )) as ReadonlyArray<Shift>
-    )
+    shifts.set(path, await readShifts(page))
     await page.close()
   }
   await context.close()
@@ -161,28 +190,59 @@ describe("no audited page shifts its layout while it loads", () => {
     const entries = shifts.get(path)
     expect(entries, `${path} was never measured`).toBeDefined()
     if (entries === undefined) return
-
-    /**
-     * A shift is claimed only if EVERY node it moved is declared and it stays inside that entry's
-     * bound. One shift can carry several source nodes, so a single declared node does not excuse the
-     * others travelling with it.
-     */
-    const claimed = (shift: Shift): boolean =>
-      shift.sources.length > 0 &&
-      shift.sources.every((source) =>
-        KNOWN_LAYOUT_SHIFTS.some(
-          (known) => source.node.startsWith(known.node) && shift.value <= known.most
-        )
-      )
-
-    const unclaimed = entries.filter((entry) => !claimed(entry))
-    const total = unclaimed.reduce((sum, entry) => sum + entry.value, 0)
-    expect(
-      total,
-      `${path} shifted ${total.toFixed(4)} outside the declared baseline, across ` +
-        `${unclaimed.length} of ${entries.length} shift(s):\n      ${report(unclaimed)}`
-    ).toBeLessThan(LAYOUT_SHIFT_CEILING)
+    expectUnderCeiling(path, entries)
   })
+
+  /**
+   * The race a CI runner lost on 2026-09-26 and 2026-10-11, forced on every run.
+   *
+   * Starlight's table of contents is a `position: fixed` aside that takes its left edge from where its
+   * container sits in a flex row. The container comes before `.main-pane` in the HTML and is moved to
+   * the right by `order: 2`, so it sits at the row's left edge until `.main-pane` is parsed. Both
+   * failures were a frame painted in that gap: the aside drawn at x=300, then moved to x=1050, 0.4321
+   * CLS. Whether a frame lands in the gap depends on how busy the host is, so most runs pass, and
+   * the page loop above can't hold the fix on its own.
+   *
+   * `serveHeld` stops the page's bytes in front of `.main-pane`, the test waits for the aside and two
+   * animation frames, and only then sends the rest. The second frame starts after the first one was
+   * painted, so the browser has drawn the aside before `.main-pane` exists. Measured 2026-10-11 on
+   * this page at 1350x940: 0.4321 on every run without the rule in `src/styles/docs.css` that pins the
+   * container to the row's right end, and 0 with it.
+   */
+  it("keeps the table of contents still when a frame paints before the content is parsed", async () => {
+    const path = `${BASE}reference/typescript/classes/sandbox/`
+    const held = await serveHeld(dist, BASE, '<div class="main-pane')
+    const context = await browser.newContext({ viewport: VIEWPORT })
+    try {
+      const page = await context.newPage()
+      await page.addInitScript(recordShifts)
+      const loaded = page.goto(`${held.origin}${path}`, { waitUntil: "networkidle" })
+      // If a step below fails, `finally` closes the context while `goto` is still waiting, and `goto`
+      // rejects. This handler keeps that rejection from being reported as a second, unhandled error.
+      loaded.catch(() => undefined)
+      await page.waitForSelector(".right-sidebar", { state: "attached" })
+      const contentParsed = await page.evaluate(
+        () =>
+          new Promise<boolean>((done) =>
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() => done(document.querySelector(".main-pane") !== null))
+            )
+          )
+      )
+      expect(
+        contentParsed,
+        "`.main-pane` was parsed before a frame painted the table of contents, so this run can't show the race"
+      ).toBe(false)
+      held.release()
+      expect((await loaded)?.status(), `${path} is not a page of the built site`).toBe(200)
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForTimeout(SETTLE_MS)
+      expectUnderCeiling(path, await readShifts(page))
+    } finally {
+      await context.close()
+      await held.close()
+    }
+  }, 60_000)
 
   /**
    * Every page measured, and the probe proved capable of seeing a shift at all.

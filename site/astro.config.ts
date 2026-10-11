@@ -300,9 +300,10 @@ export default defineConfig({
 
       /*
        * `rfc.css` is the specification register — serif body, warm paper, one accent — and it is where
-       * `--docs-rule` is defined. `docs.css` carries the page-action controls, the agent note, and the
-       * diagram styles, and it stays independent of the register so a register change cannot break a
-       * control's target size.
+       * `--docs-rule` is defined. `docs.css` carries the page-action controls, the agent note, the
+       * diagram styles and the rule that keeps the table of contents from moving while a page loads,
+       * and it stays independent of the register so a register change cannot break a control's target
+       * size.
        */
       customCss: ["./src/styles/docs.css", "./src/styles/rfc.css"],
 

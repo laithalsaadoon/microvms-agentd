@@ -187,6 +187,10 @@ export const LAYOUT_SHIFT_CEILING = 0.1
  * Still empty 2026-09-25 over nine, with the four SDK reference pages added, and after the
  * Architecture drift page joined the same day.
  *
+ * Still empty 2026-10-11, after that Starlight right-sidebar shift failed CI twice on the TypeScript
+ * `Sandbox` page (0.4321 at 1350x940). It's fixed in `src/styles/docs.css` and isn't declared here,
+ * and `tests/layout-stability.test.ts` forces the race on every run.
+ *
  * An entry here is a bound, not a license: `node` has to match the shift's own source element and
  * `most` caps how far it may move, so the same element shifting further fails, and any other element
  * shifting at all fails. What an entry deliberately does NOT do is assert that the shift still fires.
