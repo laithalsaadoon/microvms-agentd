@@ -23,6 +23,8 @@ dependencies = [
  "futures-util",
  "getrandom 0.4.3",
  "http-body-util",
+ "hyper",
+ "hyper-util",
  "microvms-protocol",
  "nix",
  "schemars",
@@ -624,7 +626,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "microvms-protocol"
-version = "0.12.0"
+version = "1.0.0"
 dependencies = [
  "schemars",
  "serde",

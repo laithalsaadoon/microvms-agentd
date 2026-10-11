@@ -13,6 +13,31 @@ CONTRIBUTING.md, "Changelog", says how to write one.
 
 <!-- towncrier release notes start -->
 
+## [1.0.0] - 2026-10-11
+
+### Changed
+
+- **Refresh source contract notes and CLI installation (#553).** The installation task uses the current crate directory. Source comments describe the split client layers, adoption, streaming output, and hook acknowledgment.
+- **Publish the Node.js package as `microvms` (#553).** Installation commands and imports use the unscoped package name.
+- **Document the stable public surfaces (#553).** The CLI, Python and Node packages, published Rust crates, and wire protocol now have a shared stability policy and deprecation window. Updated guides describe the supported workflows and link to the contract checks.
+- **Release builds use fixed tool versions (#561).** The TypeScript declarations follow
+  the pinned NAPI-RS generator and omit `__napiBindingTarget`, which the package loader
+  does not export.
+
+### Fixed
+
+- **Redact run-hook debug output (#553).** The payload and its envelope retain field names while omitting token, environment, and identity values.
+- **Describe the schema response as JSON (#554).** Its advertised media type matches the response the endpoint serves.
+- **Bound client response and state handling (#559).** Disable HTTP redirect following, cap buffered responses, preserve release verification outcomes, resolve default state under an absolute user home, and reset incomplete verified TCP streams.
+- **Bound daemon connection and hook processing (#560).** Hook envelopes have
+  explicit size and collection limits; connections have admission, header-read,
+  and idle bounds. Rejected request draining and handler output collection finish
+  within their budgets. Archive file replacement preserves other hard links.
+- **Use configured publishing forks and protected editor credentials (#562).** Publish background changes through configured forks with Actions disabled, require a protected password configuration for the remote editor, validate local forwarded Host headers, and render job text literally.
+- **Bind verified tunnels to the guest port (#563).** Wire protocol 2 binds the version, route, and guest port to each session. It confirms the session before it dials the guest. Peers refuse protocol 1 verified handshakes. Upgrade the client and daemon as a pair. Rebuild old guest images before use.
+- **CLI credential inputs (#564):** Read agent tokens and tunnel identity secrets from protected files or stdin, and recommend registered names for subsequent commands.
+- **Validate JavaScript native class identity (#565).** Class arguments and getter receivers are checked against their declared native classes.
+
 ## [0.12.0] - 2026-10-10
 
 ### Added

@@ -18,7 +18,7 @@ The package is `microvms-protocol` because `protocol` is taken on crates.io. Dep
 rename it back:
 
 ```toml
-protocol = { package = "microvms-protocol", version = "0.12" }
+protocol = { package = "microvms-protocol", version = "1.0" }
 ```
 
 ## Reading

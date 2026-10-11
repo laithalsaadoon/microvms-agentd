@@ -33,7 +33,7 @@ Replace the empty `[dependencies]` section in `Cargo.toml` with:
 
 ```toml
 [dependencies]
-microvms-core = "0.12"
+microvms-core = "1.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
