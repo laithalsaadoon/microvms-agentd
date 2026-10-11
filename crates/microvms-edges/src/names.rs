@@ -423,13 +423,14 @@ mod tests {
 
     #[test]
     fn the_default_location_is_the_clis() {
+        let home = TempDir::new("default-location");
         let env = |key: &str| match key {
-            "HOME" => Some("/home/u".to_string()),
+            "HOME" => Some(home.0.to_string_lossy().into_owned()),
             _ => None,
         };
         assert_eq!(
             FileNameStore::default_location(&env).dir(),
-            Path::new("/home/u/.microvm/runs/names")
+            home.0.join(".microvm").join("runs").join("names")
         );
         let pinned = |key: &str| (key == "MICROVM_STATE_DIR").then(|| "/state".to_string());
         assert_eq!(default_state_root(&pinned), PathBuf::from("/state"));
