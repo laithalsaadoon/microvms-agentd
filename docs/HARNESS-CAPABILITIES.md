@@ -74,7 +74,8 @@ The CLI publishes its command, option, response, and exit-code contracts through
 streaming execution returns event lines followed by its final envelope. Read
 the manifest's alternate response when building a command consumer.
 
-Use the SDK for reusable application code and the CLI for shell workflows.
+Use [Embedding](EMBEDDING.md) to build a custom integration, the SDK for
+application code, and the CLI for shell workflows.
 Neither the client nor a guest proxy variable establishes internet isolation.
 Use the network topology described in [Networking](NETWORKING.md), and review
 [Trust](TRUST.md) before selecting workload credentials and permissions.

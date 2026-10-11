@@ -1,23 +1,21 @@
 # microvms-domain
 
-The rules every MicroVMs surface has to agree on: size classes, the cost engine and its
-rate table, region parsing, VM name validation, the service constraints, the error kinds,
-and the tunnel identity's derivation and pin.
+Shared rules for VM sizes, cost, regions, names, service limits, errors, and
+tunnel identity. The CLI and SDKs use these rules through `microvms-core`.
 
-This crate performs no I/O. It doesn't read the network, the filesystem, the environment,
-the clock, or the OS random pool, and it doesn't start a subprocess. A rule that needs one
-of those takes it as a parameter: `Region::from_env` takes a lookup function,
-`CalendarDate::from_unix_secs` takes the time, and `LaunchIdentity::from_seeds` takes the
-seeds. A rule gives the same answer on every machine, and a test passes its inputs in
-rather than faking global state.
+This crate does no I/O. It does not read files, the network, the clock, or
+process state. It does not start a process or ask the OS for random bytes.
+A rule that needs such a value takes it as an input. For example,
+`Region::from_env` takes a lookup function, and `LaunchIdentity::from_seeds`
+takes seeds. Tests pass values in and check the result.
 
-Most callers want [`microvms-core`](https://crates.io/crates/microvms-core) instead. It
-re-exports every item here at its `microvms_core::` path and supplies the I/O this crate
-leaves out, through `microvms_core::prelude`.
+## Choose a crate
 
-## Reading
+Use this crate to check inputs or compute costs with no I/O. Most apps should
+use [`microvms-core`](https://crates.io/crates/microvms-core). It re-exports
+these types and supplies I/O through `microvms_core::prelude`.
 
-The constraints and their measurements are recorded in
+The service limits and dated AWS measurements are in
 [`docs/PLATFORM.md`](https://github.com/laithalsaadoon/microvms-agentd/blob/main/docs/PLATFORM.md).
 
 ## License

@@ -1,7 +1,7 @@
 # Use microvms-agentd
 
 Run agents and their tools in remote AWS Lambda MicroVM sandboxes. Start with
-the [90-second path in the README](../README.md#start-in-90-seconds): configure
+the [setup path in the README](../README.md#configure-aws): configure
 existing AWS resources, launch a sandbox, run a task, collect the result, and
 terminate the VM. First-time AWS setup and image builds take longer.
 
@@ -43,8 +43,6 @@ These pages were checked against source revision `9729b82` on October 11, 2026.
 Confirm their citations when the code changes; a line number alone does not
 establish freshness. Current source and generated executable contracts take
 precedence.
-
-*Prose is generated; structure is mechanical. Cross-references are deterministic.*
 
 - Architecture: [overview](architecture/system-overview.md),
   [modules](architecture/module-map.md), [data flow](architecture/data-flow.md).

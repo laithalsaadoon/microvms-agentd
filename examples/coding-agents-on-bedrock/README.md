@@ -1,5 +1,10 @@
 # Claude Code and Codex CLI in a MicroVM, on Bedrock
 
+This script demonstrates the individual build, launch, and execution steps.
+For the maintained high-level workflow, use `microvm agent-up` and
+`microvm agent-prompt` as described in [Agent VMs](../../docs/AGENT-VMS.md).
+The commands below create billable AWS resources.
+
 This example runs Claude Code and Codex CLI headless inside a Lambda MicroVM, with
 model access through Bedrock and no vendor API key anywhere. `run.sh` is the
 whole thing; this file explains each decision it encodes.
@@ -40,8 +45,9 @@ authenticated channel.
 microvm run --keep --egress --image "$IMAGE_ARN" --config microvm.toml
 ```
 
-`--egress` matters: it requests the outbound-network connector, and without
-it the guest cannot reach Bedrock.
+`--egress` explicitly requests the managed internet connector for Bedrock
+access. Omitting it does not enforce network isolation; see
+[Networking](../../docs/NETWORKING.md).
 
 `microvm.toml` pins the size class, and the choice encodes the sizing rule
 for agent workloads. The minimum you request is your bill floor (25% of the
@@ -52,11 +58,11 @@ state punctuated by bursts of build and test work. The example picks
 `memory = 1024`, a 4 GiB always-present ceiling at half the floor cost of
 the 2048 default, and lets the peaks ride the headroom, which bills only by
 what is consumed. A steadier or heavier workload should keep the 2048
-default, whose 8 GiB ceiling survives the test suite. Both agents would install fine and then
-fail on their first model call. `--keep` leaves the VM running and reports
+default, with an 8 GiB ceiling; measure the actual workload before choosing
+a smaller baseline. `--keep` leaves the VM running and reports
 the values every attached command needs (endpoint, agent token,
-MicroVM id). The image goes by ARN: `RunMicrovm` answers 400 "Malformed ARN"
-for a bare name, so the script resolves the ARN from the image listing.
+MicroVM id). The script resolves the image ARN from the listing. The service expects an
+ARN; the CLI and shared `Sandbox.run` API can resolve a name for callers.
 
 ## Credentials, without a vendor key
 
@@ -98,8 +104,8 @@ agent exec passes `--user 1000 --group 1000`. Omit that and the failure is
 worse than an error: Claude Code's `--dangerously-skip-permissions` refuses
 to run as root, and under `acceptEdits` the agent then denies its own Bash,
 Grep, and WebFetch calls and returns a confident report built on zero tool
-calls. Measured on this task shape: as uid 0 the agent made no shell calls
-at all; as uid 1000 it made 147.
+calls. Check the resulting files and tool output as well as the process exit code;
+a successful response alone does not prove the task ran.
 
 The daemon itself stays root; demotion is per-command, which is why the
 script can still run `chown -R 1000:1000 /workspace` as root after the

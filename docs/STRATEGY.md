@@ -1,6 +1,6 @@
 # Strategy: the trust and preparation contract for coding agents on microVMs
 
-Provide a reusable guest daemon, client libraries, and measured AWS behavior
+Provide a reusable guest daemon, client libraries, and dated AWS observations
 for teams building on Lambda MicroVMs. Scheduling, pooling, and task routing
 belong to consumer applications.
 

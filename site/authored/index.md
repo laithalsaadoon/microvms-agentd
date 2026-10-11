@@ -13,7 +13,7 @@ remote AWS Lambda MicroVM, and bring back the results. Use the `microvm` CLI
 or a Python, JavaScript/TypeScript, or Rust SDK. No local Docker daemon or
 hypervisor is needed.
 
-## Start in 90 seconds
+## Start a coding agent
 
 With the CLI installed, AWS configured, and Bedrock model access enabled for
 your caller, start a coding agent from your project directory:
@@ -33,8 +33,8 @@ to use Codex CLI.
 **First time here?** [Install the CLI](/learn/tutorial/install/), then
 [configure AWS](/learn/tutorial/first-run/). You need AWS CLI v2, AWS credentials,
 Lambda MicroVMs access, an artifact bucket, and build/execution roles.
-The first image build takes several minutes; 90 seconds is the path to
-starting the workflow, not a promise that AWS setup or the build has finished.
+The first image build takes several minutes. Complete AWS setup before
+running this workflow.
 VMs, builds, and stored images create AWS charges.
 
 ## Pick your interface

@@ -14,6 +14,10 @@ Most callers want [`microvms-core`](https://crates.io/crates/microvms-core) inst
 re-exports every item here at its `microvms_core::` path and wires these implementations into
 the use cases.
 
+For the application-facing workflow, start with core's `Sandbox` and `Session`.
+Implementations here satisfy the ports declared in `microvms-app`; they do not
+define a separate client policy.
+
 ## License
 
 Apache-2.0

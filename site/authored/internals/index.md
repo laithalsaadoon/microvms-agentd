@@ -4,7 +4,9 @@ description: Protocol, trust boundaries, measured AWS behavior, and source analy
 ---
 
 Use [Learn](/learn/) for walkthroughs and [Reference](/reference/) for command
-syntax. These pages explain contracts and design decisions.
+syntax. These pages explain contracts and design decisions. Start with Protocol for
+wire behavior, Trust for deployment assumptions, and Platform for dated AWS
+observations.
 
 | Document | Purpose |
 |---|---|

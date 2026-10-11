@@ -19,8 +19,9 @@ Requires **CPython 3.9+**. On Windows, activate with
 
 ## Run your first command
 
-With an existing image and AWS credentials, this is the 90-second path to a
-working SDK example. One-time AWS setup and image builds take longer.
+This example starts a VM from an image, runs a command, and cleans up.
+Set up AWS and build the image first. Each launch creates resources that
+AWS bills to your account.
 
 You need Lambda MicroVMs access, your normal AWS credential configuration,
 and an execution role. Follow [AWS setup](https://laithalsaadoon.github.io/microvms-agentd/learn/tutorial/first-run/)
@@ -34,7 +35,8 @@ export MICROVM_IMAGE='paste data.imageIdentifier from the result'
 ```
 
 Use the **image ARN**, in the same account and region as your credentials.
-The CLI can resolve image names; the SDK example takes the ARN directly.
+The SDK can also look up an image by name in that region. This example uses
+the ARN returned by the build.
 The CLI provisions `agentd` and uploads the build artifact for you. Shell
 examples use Bash or Zsh; in PowerShell, set variables with `$env:NAME='value'`.
 
