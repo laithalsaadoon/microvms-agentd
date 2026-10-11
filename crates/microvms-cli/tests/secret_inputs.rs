@@ -12,10 +12,11 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 fn run(args: &[&str], input: &[u8]) -> support::Run {
+    let home = tempfile::tempdir().unwrap();
     let mut child = Command::new(support::binary())
         .args(args)
         .env_clear()
-        .env("HOME", "/nonexistent-microvm-test-home")
+        .env("HOME", home.path())
         .env("AWS_EC2_METADATA_DISABLED", "true")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
