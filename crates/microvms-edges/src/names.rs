@@ -258,7 +258,10 @@ mod tests {
                 "HOME" | "USERPROFILE" => Some(home.0.to_string_lossy().into_owned()),
                 _ => None,
             };
-            assert_eq!(state_root(&env).expect("state root"), expected);
+            assert_eq!(
+                FileNameStore::default_location(&env).dir(),
+                expected.join("names")
+            );
         }
     }
 
