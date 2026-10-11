@@ -946,6 +946,9 @@ mod tests {
             &[("Host".into(), "localhost".into())],
             "127.0.0.1:80".parse().unwrap()
         ));
+        for host in ["localhost", "localhost:8081", "localhost:0"] {
+            assert!(!local_host_matches(&[("Host".into(), host.into())], bind));
+        }
         assert!(!local_host_matches(
             &[("Host".into(), "localhost:invalid".into())],
             bind
