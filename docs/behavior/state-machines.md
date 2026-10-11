@@ -1,298 +1,299 @@
 # microvms-agentd · State machines
 
-Each machine below is declared once as a Rust enum. Boot, ExecPhase, and Lifecycle are also declared formally —
-twice over for the VM lifecycle — and the formal declaration is the authority: the `crates/model/`
-crate holds `stateright` models whose properties hold over every interleaving
-(`crates/model/src/lib.rs:441-526`, `crates/model/src/client.rs:546-701`), and `verify/spec/core.symspec.json`
-carries a state model with a machine-readable transition effect per requirement
-(`verify/spec/core.symspec.json:1014-1060`).
+The diagrams project explicit enum-valued state fields. Model diagrams describe the model's transitions; implementation diagrams describe assignments in the app. The lifecycle model names its mirror explicitly, while the stream has its own private enum (`crates/model/src/client.rs:56-74`, `crates/microvms-app/src/session/exec.rs:872-887`).
 
-The models are ordinary `cargo test` targets in the `agentd-model` crate
-(`crates/model/Cargo.toml:2`), driven by `.checker().spawn_bfs().join().assert_properties()`
-(`crates/model/src/lib.rs:536-543`, `crates/model/src/client.rs:712-718`) and run by `cargo test --all`
-(`.config/mise/tasks/test.toml:5`). The Z3 pass over the symspec is a separate task,
-`spec:core`, run with `--reachability-timeout-ms 5000` through `tools/check-spec.sh`, which refuses a symspec CLI
-older than 1.0 (`.config/mise/tasks/trace.toml:15-28`), with the daemon's own requirements gated by
-`./tools/check-spec.sh verify/spec/agentd.symspec.json` (`.config/mise/tasks/trace.toml:3-13`).
-
-Where a machine is mirrored across crates, the mirror is by convention rather than by a cargo
-dependency — `agentd-model` has no edge to `microvms-core` or to `agentd`
-(`crates/model/src/client.rs:58-59`) — so each mirror is named beside its diagram. The edge that does
-exist runs the other way: `agentd`'s tests depend on the model, and
-`crates/agentd/tests/model_conformance.rs` replays the Boot and ExecPhase machine against the daemon's
-routes, step by step. The app's side is the unpublished `model-conformance` crate, which depends
-on the model and on `microvms-app`: `crates/model-conformance/tests/client_lifecycle.rs` replays the
-client lifecycle against `Sandbox` over the app's fake control plane, and
-`crates/model-conformance/tests/tables.rs` drives the app's pure policies over the rows the other
-models expose.
+Transition labels use source event or function identifiers. Payloads and guards are explained beside each diagram; an unchanged enum value can still carry changed data (`crates/model/src/lib.rs:94-103`, `crates/model/src/client.rs:148-186`).
 
 ## Boot
 
-The one-shot bootstrap. Two states, and the whole security argument rests on the fact that only
-the first writer can install a token: the platform's own `/run` hook arrives from `127.0.0.1`,
-so it is indistinguishable at the socket level from a request sent by a process inside the
-MicroVM (`crates/model/src/lib.rs:11-18`).
-
-Entry is `Boot::Uninitialized`, the sole initial state (`crates/model/src/lib.rs:240`). Every edge is in
-the `Action::RunHook` arm (`crates/model/src/lib.rs:316-332`):
-
-- `Uninitialized --> Ready` on a first hook. The token and the principal who installed it are
-  both recorded, and the response is `Ok` — `crates/model/src/lib.rs:320-323`.
-- `Ready --> Ready` when the presented token equals the installed one. Answered `Ok`, because
-  the platform may retry its own hook and telling it the VM is broken would fail a launch that
-  is fine — `crates/model/src/lib.rs:326-328`.
-- `Ready --> Ready` when the presented token differs. Answered `Conflict`; nothing is replaced —
-  `crates/model/src/lib.rs:330`.
-
-A control request arriving while `Uninitialized` is answered `Unavailable`, not `Unauthorized`
-and never `NotFound`: clients map 404 onto "missing file", so the wrong code turns a protocol
-error into a phantom absent artifact — `crates/model/src/lib.rs:334-339`. The daemon's middleware makes
-the same three-way distinction, with `token_matches` returning `None` for "not bootstrapped" and
-`Some(false)` for "wrong credential" — `crates/agentd/src/auth.rs:69-80`,
-`crates/agentd/src/state.rs:245-249`.
-
-Mirrors:
-
-- `crates/agentd/src/state.rs:119` — the daemon stores no state enum. Its bootstrap state is
-  `token: Mutex<Option<Vec<u8>>>`, read through `is_bootstrapped()`
-  (`crates/agentd/src/state.rs:237-239`), so `None` is `Uninitialized` and `Some` is `Ready`.
-  `Bootstrap { Installed, AlreadyIdentical, Conflict }` (`crates/agentd/src/state.rs:96-106`) is the
-  outcome of an attempted install, not a state field, which is why its variants are this
-  diagram's edge labels. `AppState::bootstrap` decides all three under the token lock
-  (`crates/agentd/src/state.rs:202-221`) and `POST /run` maps them to 200/200/409
-  (`crates/agentd/src/routes.rs:213-234`).
-- `verify/spec/agentd.symspec.json:11-133` — the EARS requirements that are this machine:
-  install the agent token (`verify/spec/agentd.symspec.json:108`), accept an identical token
-  (`verify/spec/agentd.symspec.json:21`), reject a differing token (`verify/spec/agentd.symspec.json:72`), and
-  reject a control request while the token is not installed (`verify/spec/agentd.symspec.json:56`).
-
-These `always` properties hold over the whole reachable space: `AGENTD-3 bootstrap is one-shot`
-(`token_replacements == 0`, `crates/model/src/lib.rs:454-456`) and `AGENTD-1 control API is closed
-before bootstrap` (`crates/model/src/lib.rs:466-474`). `attacker never authorized`
-(`crates/model/src/lib.rs:451-453`) is stated unconditionally rather than consulting the config it
-discriminates, and the model reports both halves of the deployment invariant: held, the attacker
-never gains authority (`crates/model/src/lib.rs:536-543`); broken, `stateright` returns the concrete
-path by which it does (`crates/model/src/lib.rs:549-567`). One-shot survives even a racing in-VM
-process (`crates/model/src/lib.rs:571-578`).
-
-The launch environment travels in the same payload and is installed only on `Installed`
-(`crates/agentd/src/state.rs:210`), under the token lock, so a caller who loses the token cannot win
-the environment. It is deliberately never the same slot as the token, because the token's
-security property is that it stays out of child environments
-(`crates/agentd/src/state.rs:128-134`).
-
-Bootstrap state survives a suspend and resume — measured, not inferred — so `resume` is not an
-edge of this machine (`crates/agentd/src/routes.rs:261-290`).
+The daemon model starts at `Uninitialized`. `RunHook` installs `Ready`; later hooks keep that state, with the response determined by the supplied value. There is no terminal boot state (`crates/model/src/lib.rs:247-256`, `crates/model/src/lib.rs:325-340`).
 
 ```mermaid
 stateDiagram-v2
     [*] --> Uninitialized
-    Uninitialized --> Ready: Installed
-    Ready --> Ready: AlreadyIdentical
-    Ready --> Ready: Conflict
+    Uninitialized --> Ready: RunHook
+    Ready --> Ready: RunHook
 ```
 
-Defined at: `crates/model/src/lib.rs:64-69`
+Defined at: `crates/model/src/lib.rs:73-78`
+
+## ClientPhase
+
+The tunnel model initializes the client at `Idle`; `ClientHello` starts the handshake. `Deliver` invokes `client_reads`, which accepts a reply into `Relaying` or ends the relay at `Done`. During relay, delivered bytes preserve the phase, while an end, close, transport loss, or rejected frame can finish it. `ClientLocalEof` also finishes the relay; `Done` carries the result (`crates/model/src/tunnel.rs:421-470`, `crates/model/src/tunnel.rs:588-598`, `crates/model/src/tunnel.rs:697-742`, `crates/model/src/tunnel.rs:793-803`).
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Hello: ClientHello
+    Hello --> Relaying: Deliver
+    Hello --> Done: Deliver
+    Relaying --> Relaying: Deliver
+    Relaying --> Relaying: ClientSend
+    Relaying --> Done: Deliver
+    Relaying --> Done: ClientLocalEof
+    Done --> [*]
+```
+
+Defined at: `crates/model/src/tunnel.rs:260-266`
 
 ## ExecPhase
 
-Where one exec sits in its lifecycle. Output is held until the caller acks, which is what makes
-a retried poll safe (`crates/model/src/lib.rs:71-72`).
-
-Entry: `ExecStart(id)` for an unseen id pushes an entry at `Running` with `output_held: true`,
-`spawns: 1`, `starts: 1` — `crates/model/src/lib.rs:357-363`.
-
-- `ExecStart(id)` on a *known* id increments `starts` only; it spawns nothing and touches no
-  other field. That is the idempotency contract — `crates/model/src/lib.rs:350-366`. The daemon decides
-  it under the registry lock before the spawn, so two concurrent retries cannot both find the
-  slot empty — `crates/agentd/src/exec.rs:363-377`.
-- `ExecPoll(id)` touches no field — `crates/model/src/lib.rs:367-369`. Read-only is a property of the
-  step rather than of any reachable state, so it is asserted against the transition function
-  directly (`crates/model/src/lib.rs:574-606`) and the daemon handler carries the same rule
-  (`crates/agentd/src/exec.rs:402-434`).
-- `ChildExit(id)` applies only from `Running`; from any other phase `next_state` returns `None`
-  — `crates/model/src/lib.rs:403-411`. On the daemon the waiter sets `shared.terminal` *before*
-  `shared.result`, so a stream that sees the finish immediately finds the terminal marker
-  present — `crates/agentd/src/exec.rs:1173-1183`.
-- `ExecAck(id)` applies only from `Exited` and clears `output_held`. From any other phase the
-  response is `Conflict`, not a silent success that would drop output still being written —
-  `crates/model/src/lib.rs:370-379`. The daemon answers 409 `ERROR_STILL_RUNNING` when the result slot
-  is empty and `acked_at` is unset, and 409 `ERROR_ALREADY_ACKED` on a second ack; `acked_at` is
-  marked while the slot lock is still held so a concurrent duplicate cannot misreport an acked
-  exec as running — `crates/agentd/src/exec.rs:837-886`.
-- `Collect` retains only entries whose phase is not `Acked`, so `Acked` is the one phase an entry
-  can be collected from — `crates/model/src/lib.rs:380-398`. TTL collection on the daemon keeps any
-  entry whose `acked_at` is `None`, however old, because collecting it would destroy output the
-  caller never read — `crates/agentd/src/exec.rs:951-962`.
-
-`kill` signals the whole process group and leaves the phase alone; the phase moves only when the
-child actually exits, so it is not a transition of this machine —
-`crates/agentd/src/exec.rs:905-940`.
-
-Mirrors:
-
-- `crates/protocol/src/exec.rs:24-31` — `Phase { Running, Exited, Acked }`, doc comment "Mirrors
-  `ExecPhase` in the model crate" (`crates/protocol/src/exec.rs:16`). `rename_all = "snake_case"`
-  (`:23`) puts `running` / `exited` / `acked` on the wire, spelled once in `as_str` (`:47-53`)
-  with the closed set in `ALL` (`:40`) so a binding publishing the list reads it from the type.
-- `crates/agentd/src/exec.rs:1193-1201` — `phase_of(acked, finished)`. The daemon stores no phase field;
-  it derives one from `acked_at.is_some()` and `result.is_some()`, asserted exhaustively at
-  `crates/agentd/src/exec.rs:2363-2365`.
-
-These `always` properties hold over the whole reachable space: `output is never released before
-ack` (`crates/model/src/lib.rs:475-481`), `a retried start never spawns twice` (`spawns == 1`,
-`crates/model/src/lib.rs:482-484`), and `one exec entry per id` (`crates/model/src/lib.rs:485-490`). The first
-is audited against itself rather than asserted: the collect predicate flags any entry it would
-remove while `output_held` still holds, and acking is the only thing that releases output, so a
-collected entry with held output is exactly an exec destroyed without its caller's ack
-(`crates/model/src/lib.rs:388-405`). Coverage properties confirm the checker reached `Acked` and a
-retried start (`crates/model/src/lib.rs:513-518`).
+An accepted `ExecStart` creates `Running`; retries retain the existing phase. `ChildExit` produces `Exited`, `ExecAck` releases output and produces `Acked`, and `Collect` removes an acknowledged entry. Polls preserve the phase. The diagram assumes a control request has passed the model's request gate (`crates/model/src/lib.rs:343-419`).
 
 ```mermaid
 stateDiagram-v2
     [*] --> Running: ExecStart
     Running --> Running: ExecStart
+    Exited --> Exited: ExecStart
+    Acked --> Acked: ExecStart
     Running --> Running: ExecPoll
-    Running --> Exited: ChildExit
     Exited --> Exited: ExecPoll
-    Exited --> Acked: ExecAck
     Acked --> Acked: ExecPoll
+    Running --> Exited: ChildExit
+    Exited --> Acked: ExecAck
     Acked --> [*]: Collect
 ```
 
-Defined at: `crates/model/src/lib.rs:74-81`
+Defined at: `crates/model/src/lib.rs:83-90`
+
+## GuestRead
+
+The tunnel model initializes the guest connection at `Open`. A delivered end marker and the guest's own EOF produce `Eof`; `caller_vanished` chooses `Reset` or `Eof` according to the negotiated end-of-stream behavior. These transitions also mark the daemon side done (`crates/model/src/tunnel.rs:479-492`, `crates/model/src/tunnel.rs:549-575`, `crates/model/src/tunnel.rs:600-613`, `crates/model/src/tunnel.rs:759-778`).
+
+```mermaid
+stateDiagram-v2
+    [*] --> Open
+    Open --> Eof: Deliver
+    Open --> Reset: Deliver
+    Open --> Eof: GuestEof
+    Eof --> [*]
+    Reset --> [*]
+```
+
+Defined at: `crates/model/src/tunnel.rs:171-175`
 
 ## Lifecycle
 
-One MicroVM's whole life, as the client tracks it. A closed set of states, which is the point
-of the enum: a lifecycle held as a `String` would let `"RUNNING "` and `"Running"` both exist,
-and every guard would have to decide which it meant (`crates/microvms-app/src/sandbox.rs:116-120`). The
-state is a private field written only through `set_lifecycle` (`crates/microvms-app/src/sandbox.rs:841-844`), which
-`run`, `wait_until_running`, `adopt`, `suspend`, `resume`, and `terminate` call.
+A new `Sandbox` starts at `Pending`; `run` records an accepted launch there, and `wait_until_running` records `Running`. `suspend` first records `Suspending`, then `Suspended` or `Terminated` when its wait settles. `resume` records `Running` after its wait succeeds (`crates/microvms-app/src/sandbox.rs:762-763`, `crates/microvms-app/src/sandbox.rs:1205-1220`, `crates/microvms-app/src/sandbox.rs:1277-1306`, `crates/microvms-app/src/sandbox.rs:1584-1642`, `crates/microvms-app/src/sandbox.rs:1668-1707`).
 
-Entry is `Lifecycle::Pending` (`crates/microvms-app/src/sandbox.rs:743`), matching the symspec's
-`initial` (`verify/spec/core.symspec.json:1015`) and the model's sole init state
-(`crates/model/src/client.rs:287`).
+The diagram shows the launch-driven path. `adopt` instead initializes the handle from any recognized service state. `terminate` writes `Terminating` whenever the handle still has a VM record, including on repeated calls, and only a successful requested termination wait writes `Terminated`. Consequently, `Terminated` is not an absorbing enum state. Detachment and other flags can refuse an operation without changing this enum (`crates/microvms-app/src/sandbox.rs:1387-1425`, `crates/microvms-app/src/sandbox.rs:1499-1542`, `crates/microvms-app/src/sandbox.rs:1772-1823`).
 
-Edge labels below are the model's `Action` variants (`crates/model/src/client.rs:116-142`), which is the
-one vocabulary the declarations share. Each row gives the symspec key, the symspec's
-`stateEffect`, the model arm, and the client site:
+```mermaid
+stateDiagram-v2
+    [*] --> Pending
+    Pending --> Pending: run
+    Pending --> Running: wait_until_running
+    Running --> Suspending: suspend
+    Suspending --> Suspended: suspend
+    Suspending --> Terminated: suspend
+    Suspended --> Running: resume
+    Pending --> Terminating: terminate
+    Running --> Terminating: terminate
+    Suspending --> Terminating: terminate
+    Suspended --> Terminating: terminate
+    Terminating --> Terminating: terminate
+    Terminated --> Terminating: terminate
+    Terminating --> Terminated: terminate
+```
 
-- `LaunchAccepted` · `Pending --> Pending` · STATE-1 (`verify/spec/core.symspec.json:690`),
-  `when vm_state = PENDING: image_exists := true` (`:698`) · `crates/model/src/client.rs:374-384` ·
-  `crates/microvms-app/src/sandbox.rs:1116-1131`. The lifecycle is set after the wire call returns,
-  because acceptance *is* the call succeeding.
-- `HookSucceeded` · `Pending --> Running` · STATE-2 (`:372`),
-  `... vm_state := RUNNING, token_installed := true, bootstrap_count := bootstrap_count + 1`
-  (`:380`) · `crates/model/src/client.rs:388-409` · `crates/microvms-app/src/sandbox.rs:1187-1203`. This is the
-  one place `bootstrap_count` increments (STATE-3, `:897`).
-- `SuspendRequested` · `Running --> Suspending` · STATE-4 (`:103`),
-  `when vm_state = RUNNING: vm_state := SUSPENDING` (`:112`) · `crates/model/src/client.rs:427-443` ·
-  `crates/microvms-app/src/sandbox.rs:1462-1471`. The assignment follows the call for the same reason:
-  moving first would leave a throttled call stuck in a state neither suspend nor resume accepts,
-  bricking the handle over one bad request.
-- `SuspendComplete` · `Suspending --> Suspended` · STATE-6 (`:572`),
-  `when vm_state = SUSPENDING: vm_state := SUSPENDED` (`:580`) · `crates/model/src/client.rs:446-453` ·
-  `crates/microvms-app/src/sandbox.rs:1487-1488`.
-- `ResumeRequested` + `ResumeComplete` · `Suspended --> Running` · STATE-7 (`:690`),
-  `when vm_state = SUSPENDED: vm_state := RUNNING` (`:699`) · `crates/model/src/client.rs:456-501` ·
-  `crates/microvms-app/src/sandbox.rs:1554-1578`. Nothing is re-delivered: no payload, no token, no
-  bootstrap, because the in-memory token survived the freeze and re-delivering it would hit the
-  daemon's one-shot bootstrap and be refused (`crates/microvms-app/src/sandbox.rs:1512-1516`). The
-  session rebinds to the endpoint the service just reported, which drops the cached proxy token
-  (STATE-8, `:200`).
-- `TerminateRequested` · `Pending`/`Running`/`Suspended` `--> Terminating` · STATE-9 (`:593`),
-  `when vm_state = PENDING or vm_state = RUNNING or vm_state = SUSPENDED: vm_state :=
-  TERMINATING, was_terminated := true` (`:581`) · `crates/model/src/client.rs:504-511` ·
-  `crates/microvms-app/src/sandbox.rs:1651-1656`. Recorded before the call, so a terminate whose call
-  fails still marks the VM as one this client asked to destroy.
-- `TerminateComplete` · `Terminating --> Terminated` · STATE-10 (`:819`),
-  `when vm_state = TERMINATING: vm_state := TERMINATED` (`:827`) ·
-  `crates/model/src/client.rs:514-521` · `crates/microvms-app/src/sandbox.rs:1674-1683`. Reached only when the
-  optional `wait_for_state(&["TERMINATED"])` succeeds; when the wait fails the lifecycle stays at
-  `Terminating` honestly, because the platform accepted the terminate and the VM is on its way
-  out (`crates/microvms-app/src/sandbox.rs:1684-1689`).
+Defined at: `crates/microvms-app/src/sandbox.rs:132-145`
 
-One edge exists in the client with no matching `stateEffect`: the suspend wait settles on
-`SUSPENDED` **or** `TERMINATED`, and both are states this client asked for. A VM the launch-time
-`idlePolicy` killed mid-suspension lands directly in `Terminated` and also sets `was_terminated`,
-which is what then stops a resume from being offered — `crates/microvms-app/src/sandbox.rs:1483-1503`.
-The symspec omits `SUSPENDING` as a terminate source, and that omission is correct rather than a
-gap: `suspend(&mut self)` (`crates/microvms-app/src/sandbox.rs:1447`) holds the exclusive borrow across
-its own wait, so no caller can invoke `terminate(&mut self)` (`:1635`) while the lifecycle sits in
-`Suspending`. `Suspending` is transient within one call, never a resting state a caller can act
-from.
+## OutputEnd
 
-Every guard refuses before any control-plane call is made, and the zero-call refusal is the
-assertion rather than the resulting state:
+`output::End` is the output model's process state, initialized to `Running`. `Exit` chooses the terminal result through the configured output policy. The model also represents write-policy alternatives: `write` can move directly to `Panicked` or `Signaled`. Those alternatives are model outcomes, not a claim that the current CLI follows those policies (`crates/model/src/output.rs:347-383`, `crates/model/src/output.rs:396-439`, `crates/model/src/output.rs:509-526`).
 
-- `run` twice is refused on `bootstrap_count > 0 || microvm.is_some()` (STATE-3) —
-  `crates/microvms-app/src/sandbox.rs:1030-1042`.
-- `suspend` is refused unless the lifecycle is `Running` (STATE-5, `verify/spec/core.symspec.json:294`,
-  constraint at `:301`) — `crates/microvms-app/src/sandbox.rs:1451-1460`.
-- `resume` is refused when `was_terminated` or the lifecycle is `Terminated` (STATE-11, `:449`,
-  constraint at `:457`) — `crates/microvms-app/src/sandbox.rs:1535-1543` — and unless the lifecycle is
-  `Suspended` (STATE-7) — `:1544-1549`.
-- `resume` past the launch-time `suspendedDurationSeconds` window is refused with
-  `ErrorKind::WindowClosed` (STATE-12, `:488`) — `crates/microvms-app/src/sandbox.rs:1552`,
-  `:1597-1626`. An absent window is *not* a closed one: the window is our own `RunMicrovm` request's,
-  falling back to the `idlePolicy` that `GetMicrovm` reported, and with no window from either
-  source, or with the suspend stamp missing, the check passes, because this sandbox cannot know
-  how long the VM has been suspended and guessing would refuse a resume the service would honour
-  (`crates/microvms-app/src/sandbox.rs:1598-1608`).
-- `suspended_at` is cleared on a successful resume, so the next cycle's window is measured from
-  the next suspend rather than accumulating every suspension into one total —
-  `crates/microvms-app/src/sandbox.rs:1579-1582`.
+```mermaid
+stateDiagram-v2
+    [*] --> Running
+    Running --> Exited: Exit
+    Running --> Panicked: Exit
+    Running --> Signaled: Exit
+    Running --> Panicked: write
+    Running --> Signaled: write
+    Exited --> [*]
+    Panicked --> [*]
+    Signaled --> [*]
+```
 
-`Lifecycle::as_str` maps each state to the uppercase name the service uses, which is also what an
-error message prints — `crates/microvms-app/src/sandbox.rs:137-148`. `Lifecycle::is_live` is true for
-`Pending`, `Running`, `Suspending`, `Suspended`. These places read it: `Sandbox::adopt`, to decide
-whether an adopted VM gets a session (`crates/microvms-app/src/sandbox.rs:1299`); `Sandbox::detach`,
-which refuses to hand off a VM that is not live (`crates/microvms-app/src/sandbox.rs:1370`); and the
-`Drop` warning about a VM still billing, which stays silent for a detached or adopted sandbox —
-`crates/microvms-app/src/sandbox.rs:164-170`, `crates/microvms-app/src/sandbox.rs:1769-1797`.
+Defined at: `crates/model/src/output.rs:88-97`
 
-Mirrors:
+## Pc
 
-- `verify/spec/core.symspec.json:1023-1030` — `vm_state`, an enum whose domain is exactly `PENDING`,
-  `RUNNING`, `SUSPENDING`, `SUSPENDED`, `TERMINATING`, `TERMINATED`, beside the other
-  variables the `Sandbox` carries: `token_installed`, `image_exists`, `was_terminated`,
-  `bootstrap_count` (`:1028-1056`). The `STATE-1`..`STATE-12` keys cited above are EARS
-  sentences in the same document.
-- `crates/model/src/client.rs:61-74` — `VmState`, "Mirrors `microvms_core::sandbox::Lifecycle` by
-  convention rather than by dependency" (`:58-59`). Its transitions are driven by
-  `Action` (`:116-142`), each answered `Issued`, `RefusedLocally`, or `Ignored`
-  (`crates/model/src/client.rs:99-108`).
+The image model's caller starts at `Describe`. The diagram follows `Behavior::Specified`: each `Step` evaluates the current image and advances that caller. A ready image can return immediately; builds wait; deletions wait for absence; a refused create goes to `Redescribe`. A disappearance allows another describe, but a repeated disappearance reaches `Done`. Other configured model behaviors are excluded from this diagram (`crates/model/src/image.rs:149-164`, `crates/model/src/image.rs:233-340`, `crates/model/src/image.rs:387-407`).
 
-The invariants Z3 proves over the symspec are restated as `stateright` `always`
-properties over every interleaving of the model's actions:
-`STATE-3 bootstrap happens at most once` (`crates/model/src/client.rs:554-556`),
-`STATE-5 no suspend call outside RUNNING` (`crates/model/src/client.rs:557-566`), and
-`STATE-11 a terminated VM never reaches RUNNING` (`crates/model/src/client.rs:567-570`). The keys are
-the spec's (`verify/spec/core.symspec.json`), on the properties whose text matches the requirement's
-sentence. The STATE-5 property is asserted against the counter `suspends_outside_running`
-rather than against the resulting state, because a suspend from `Running` and one from
-`Suspended` both land in `Suspending`, so nothing in the post-state distinguishes them. The
-first attempt at this property passed while a twelve-step counterexample existed
-(`crates/model/src/client.rs:558-565`). Wire-call counts are state variables for the same reason
-(`crates/model/src/client.rs:23-34`): "a resume after terminate is rejected" is satisfied by a client
-that calls, fails, and burns a poll timeout, so the property that matters is that no resume call
-ever fires once `was_terminated` holds (`crates/model/src/client.rs:585-590`).
+`Done` carries `Returned`, `BuildFailed`, or `Vanished` on this path. A forced caller that has already deleted once joins the image it next finds; the `then_delete` payload distinguishes the waiting branches (`crates/model/src/image.rs:247-283`, `crates/model/src/image.rs:309-340`).
 
-Model checking found a defect behind the third invariant that code reading had missed. A resume
-issued legally from `Suspended`, then a terminate, then the resume's completion arriving late,
-put a `was_terminated` VM back in `Running` — STATE-11 broken by an interleaving no state-only
-gate catches. The fix makes a completion apply only while a resume is still in flight *and* the
-state is still `Suspended`, so the terminate wins, which is what the client does: `terminate`
-clears the session and the lifecycle before anything else — `crates/model/src/client.rs:175-184`,
-`crates/model/src/client.rs:483-501`, `crates/model/src/client.rs:509`.
+```mermaid
+stateDiagram-v2
+    [*] --> Describe
+    Describe --> Done: Step
+    Describe --> Waiting: Step
+    Describe --> AwaitingAbsent: Step
+    Describe --> Creating: Step
+    Waiting --> AwaitingAbsent: Step
+    Waiting --> Done: Step
+    Waiting --> Describe: Step
+    AwaitingAbsent --> Creating: Step
+    Creating --> Waiting: Step
+    Creating --> Redescribe: Step
+    Redescribe --> Done: Step
+    Redescribe --> Waiting: Step
+    Redescribe --> Describe: Step
+    Done --> [*]
+```
 
-Each guard is proved falsifiable rather than merely green. Under `Config::guards_skipped`
-(`crates/model/src/client.rs:247-252`) the client issues a suspend outside RUNNING, a resume after a
-terminate, and a resume with the window closed, and `stateright` hands back each path —
-`crates/model/src/client.rs:728-747`, `:752-765`, `:770-776`. Every `always` property has a `sometimes`
-property beside it (`crates/model/src/client.rs:649-699`) so none can pass over a space that never
-reached the interesting state.
+Defined at: `crates/model/src/image.rs:108-123`
+
+## Platform
+
+The image model initializes the shared platform as `Absent`, `Building`, `Ready`, or `Failed`. A caller's `Step` can create an absent image or delete a ready or failed image; the platform's own events settle the build and finish deletion. There is no absorbing platform state because callers can reuse the name (`crates/model/src/image.rs:291-300`, `crates/model/src/image.rs:343-357`, `crates/model/src/image.rs:365-383`, `crates/model/src/image.rs:404-420`).
+
+```mermaid
+stateDiagram-v2
+    [*] --> Absent
+    [*] --> Building
+    [*] --> Ready
+    [*] --> Failed
+    Absent --> Building: Step
+    Building --> Ready: BuildSettles
+    Building --> Failed: BuildSettles
+    Ready --> Deleting: Step
+    Failed --> Deleting: Step
+    Deleting --> Absent: DeletionFinishes
+```
+
+Defined at: `crates/model/src/image.rs:44-53`
+
+## PosturePhase
+
+`posture::Phase` tracks a launch while options are composed. Option changes and `Predict` retain `Composing`; `Launch` produces either `Refused` or `Launched`. `Adopt` changes the model's recorded report while preserving `Launched`. Neither result returns to composition (`crates/model/src/posture.rs:345-415`).
+
+```mermaid
+stateDiagram-v2
+    [*] --> Composing
+    Composing --> Composing: RequestEgress
+    Composing --> Composing: AddConnector
+    Composing --> Composing: AddMalformedConnector
+    Composing --> Composing: RequestDeny
+    Composing --> Composing: AuditRouting
+    Composing --> Composing: Predict
+    Composing --> Refused: Launch
+    Composing --> Launched: Launch
+    Launched --> Launched: Adopt
+    Refused --> [*]
+    Launched --> [*]
+```
+
+Defined at: `crates/model/src/posture.rs:254-261`
+
+## PreflightStep
+
+The preflight model starts at `Region` and advances through each report stage. A stage that cannot perform its probe still advances while recording `NotRun`; the report derives `ok` and reaches `Done` (`crates/model/src/preflight.rs:141-175`, `crates/model/src/preflight.rs:177-240`).
+
+```mermaid
+stateDiagram-v2
+    [*] --> Region
+    Region --> Credentials: Region
+    Credentials --> Service: Credentials
+    Service --> Report: Service
+    Report --> Done: Report
+    Done --> [*]
+```
+
+Defined at: `crates/model/src/preflight.rs:95-101`
+
+## ProvisionPhase
+
+`provision::Phase` starts at `Idle`. A request answered by a supplied binary or cache entry stays idle; a request that needs a fetch enters `Fetching`. `Download` moves to `Downloaded`, and both `Verify` and the modeled `Crash` return to idle with an outcome. `Tamper` changes cache data without changing the phase. There is no terminal phase because subsequent requests are modeled (`crates/model/src/provision.rs:364-426`, `crates/model/src/provision.rs:429-462`, `crates/model/src/provision.rs:505-565`, `crates/model/src/provision.rs:568-606`).
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Idle: Request
+    Idle --> Idle: Tamper
+    Idle --> Fetching: Request
+    Fetching --> Downloaded: Download
+    Downloaded --> Idle: Verify
+    Downloaded --> Idle: Crash
+```
+
+Defined at: `crates/model/src/provision.rs:233-241`
+
+## RunStep
+
+The run-to-completion model starts at `Start`. Under `Behavior::Specified`, an accepted start streams when a callback is present and waits otherwise. An exit event triggers acknowledgment; a cut or failed acknowledgment falls back to waiting. A client deadline triggers kill and a grace-period acknowledgment. `Done` means the call has returned a result or raised an error (`crates/model/src/run.rs:376-390`, `crates/model/src/run.rs:397-461`, `crates/model/src/run.rs:465-549`).
+
+```mermaid
+stateDiagram-v2
+    [*] --> Start
+    Start --> Streaming: Started
+    Start --> Waiting: Started
+    Start --> Done: StartFailed
+    Streaming --> AckAfterExit: ExitEvent
+    Streaming --> Waiting: StreamCut
+    Streaming --> Killing: Deadline
+    AckAfterExit --> Done: AckOk
+    AckAfterExit --> Waiting: AckFailed
+    Waiting --> Done: WaitDone
+    Waiting --> Done: WaitFatal
+    Waiting --> Killing: Deadline
+    Killing --> GraceAck: KillAnswered
+    GraceAck --> Done: GraceAckOk
+    GraceAck --> Done: GraceAckFailed
+    Done --> [*]
+```
+
+Defined at: `crates/model/src/run.rs:225-241`
+
+## StartStep
+
+The exec-start model's request phase is `Idle` until `Receive`, then `Resolved` after `Resolve`, and `Answered` after `Answer`. `Spawn` records a child without advancing the request phase; under the specified behavior it is offered after successful resolution. Boot and hook actions prepare the model before it offers requests (`crates/model/src/exec_start.rs:626-672`, `crates/model/src/exec_start.rs:675-721`).
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Received: Receive
+    Received --> Resolved: Resolve
+    Resolved --> Resolved: Spawn
+    Resolved --> Answered: Answer
+    Answered --> [*]
+```
+
+Defined at: `crates/model/src/exec_start.rs:521-530`
+
+## StreamState
+
+The app's output stream starts at `Reconnect` with the requested offset and no retries. `attach` succeeds into `Attached`, retries eligible errors when reconnecting is enabled, or ends at `Done`. The retry budget is checked before another attach (`crates/microvms-app/src/session/exec.rs:436-440`, `crates/microvms-app/src/session/exec.rs:548-552`, `crates/microvms-app/src/session/exec.rs:603-648`).
+
+While attached, `Output` advances the cursor to the maximum observed end offset. `Gap` advances it to at least `to` and ends at `Done` when `error_on_gap` is set. `Exit` ends the stream. `next_event` returning no event reconnects or returns from the stream immediately, according to `reconnect`; a retryable read error also reconnects when enabled. A non-retried read error produces `Done` (`crates/microvms-app/src/session/exec.rs:650-720`).
+
+The direct arrow from `Attached` to the final marker represents the no-event path with reconnecting disabled; that branch returns `None` without constructing `Done` (`crates/microvms-app/src/session/exec.rs:704-712`).
+
+```mermaid
+stateDiagram-v2
+    [*] --> Reconnect
+    Reconnect --> Attached: attach
+    Reconnect --> Reconnect: attach
+    Reconnect --> Done: attach
+    Reconnect --> Done: max_reconnects
+    Attached --> Attached: Output
+    Attached --> Attached: Gap
+    Attached --> Done: Gap
+    Attached --> Done: Exit
+    Attached --> Reconnect: next_event
+    Attached --> Reconnect: retryable
+    Attached --> Done: next_event
+    Attached --> [*]: next_event
+    Done --> [*]: advance
+```
+
+Defined at: `crates/microvms-app/src/session/exec.rs:874-887`
+
+## VmState
+
+The client model mirrors the lifecycle vocabulary and starts at `Pending`. The diagram uses its guarded configuration: `LaunchAccepted` keeps the pending state; `HookSucceeded` starts the VM; suspend and resume actions progress through their corresponding phases. `ResumeRequested` preserves `Suspended` while recording an in-flight resume (`crates/model/src/client.rs:56-74`, `crates/model/src/client.rs:287-305`, `crates/model/src/client.rs:374-505`).
+
+`TerminateRequested` writes `Terminating` and clears an in-flight resume; `TerminateComplete` writes `Terminated`. The request is offered before the first termination, including during suspension. In the guarded model, the completed termination is absorbing. A late resume completion changes nothing once its preconditions no longer hold (`crates/model/src/client.rs:344-367`, `crates/model/src/client.rs:489-526`).
 
 ```mermaid
 stateDiagram-v2
@@ -301,101 +302,37 @@ stateDiagram-v2
     Pending --> Running: HookSucceeded
     Running --> Suspending: SuspendRequested
     Suspending --> Suspended: SuspendComplete
-    Suspending --> Terminated: SuspendComplete
+    Suspended --> Suspended: ResumeRequested
     Suspended --> Running: ResumeComplete
     Pending --> Terminating: TerminateRequested
     Running --> Terminating: TerminateRequested
+    Suspending --> Terminating: TerminateRequested
     Suspended --> Terminating: TerminateRequested
     Terminating --> Terminated: TerminateComplete
+    Terminated --> [*]
 ```
 
-Defined at: `crates/microvms-app/src/sandbox.rs:122-135`
+Defined at: `crates/model/src/client.rs:61-74`
 
-## StreamState
+## WrapPhase
 
-The SSE output stream's cursor machine. It tracks where an attach is, how many times it has
-dropped, and the byte offset a resume would ask for. Written as a generator over an explicit
-state machine rather than a hand-rolled `Stream` impl, because the reconnect logic is a loop with
-an `await` in the middle and expressing that as a `poll_next` would mean storing the in-flight
-attach as a pinned field — where a self-referential-future bug lives
-(`crates/microvms-app/src/session/exec.rs:295-299`). The enum is private, so it has no mirror.
-
-Entry is `Reconnect { cursor: options.offset, attempts: 0 }`, seeded identically by both drivers:
-`stream_with` at `crates/microvms-app/src/session/exec.rs:424-427` and `for_each_event_async` at
-`:536-539`. `for_each_event` (`:471`) delegates to the async form (`:483`), so both consumers run
-one step function, `advance` — `crates/microvms-app/src/session/exec.rs:468-596`. `attempts` is zero
-for the first attach, which is why the backoff and the max-reconnect check are both skipped there
-(`:747-748`).
-
-Out of `Reconnect`:
-
-- a successful `attach` moves to `Attached` carrying the same cursor and attempt count — `:494-501`.
-- a retryable `attach` failure re-enters `Reconnect` with `attempts + 1`. A cut connection or a
-  failed token mint says nothing about the exec, which is still running server-side — `:502-510`.
-- a fatal failure goes to `Done` with the error, because reconnecting can never succeed. A 404 on
-  a collected entry is the case that matters — `:511-514`.
-- `attempts > options.max_reconnects` goes to `Done` with a retryable error naming the last good
-  offset — `:477-489`.
-- `attempts > 0` with `reconnect` off ends the stream without stepping the machine — `:473-476`.
-
-Out of `Attached`, on the next decoded `ExecEvent`:
-
-- `Output` stays `Attached` and advances the cursor to `offset + data.len()`, only past bytes
-  actually handed over — `:522-542`.
-- `Gap` advances the cursor to `to` unconditionally, so a reconnect does not ask for the evicted
-  range again and receive the same gap forever. It then stays `Attached`, or goes to `Done` with
-  a `WireKind::OutputGap` error when `options.error_on_gap` is set — `:543-564`. `from` is
-  inclusive and `to` exclusive, which is why `to` is where a cursor resumes
-  (`crates/microvms-app/src/session/sse.rs:248-252`).
-- `Exit` goes to `Done`. A finished command always delivers this event, and its absence is the
-  only thing distinguishing a cut connection from a finished command — the byte sequences are
-  otherwise identical — `:563-567`, `crates/microvms-app/src/session/sse.rs:253-255`.
-- a body that ends with no `Exit` event re-enters `Reconnect` with `attempts + 1`, or ends the
-  stream when `reconnect` is off — `:568-577`.
-- a retryable read error re-enters `Reconnect`; a fatal one goes to `Done` — `:578-584`. A parse
-  failure is `ErrorKind::Protocol`, and `Error::retryable` is true only for
-  `ErrorKind::Retryable` (`crates/microvms-domain/src/error.rs:116-118`), so a proxy answering an error
-  page is not retried `max_reconnects` times, refilling the buffer each pass —
-  `crates/microvms-app/src/session/exec.rs:734-739`.
-
-`Done` yields nothing and ends the stream — `:471`. `StreamState::cursor()` returns `None` for
-`Done` rather than a number: `Done` is reached from more than one place, so any value invented
-there could shadow the last real cursor the caller already holds — `:756-770`.
-
-`for_each_event_async` reports which `Done` path was taken as `EndReason`
-(`crates/microvms-app/src/session/exec.rs:148-159`). `EndReason` is a return classification, not a
-state the machine occupies, so it gets no diagram of its own. It is `Exited` when the terminal
-`Exit` event was delivered (`:456-460`), `Stopped` when the callback answered
-`ControlFlow::Break` (`:450-455`), and `Cut` when the body ended with no `Exit` event and
-reconnecting was refused (`:428-436`) — where the command's outcome is unknown rather than zero,
-and a caller reporting success would pass a CI step on evidence it never received (`:155-158`).
-The returned cursor is read off the machine through `next.cursor()` rather than recomputed from
-the events, so a caller that resumes holds one cursor and not a second one that would agree until
-a gap arrived — `:437-442`.
+The Dockerfile-wrapping model starts at `Composed`. `Wrap` yields `Wrapped` carrying either wrapped content or a refusal. Only wrapped content can proceed through `Check` to `Checked`; a refusal ends in `Wrapped`, while `Checked` has no further actions (`crates/model/src/wrap.rs:338-373`).
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Reconnect
-    Reconnect --> Attached: attach Ok
-    Reconnect --> Reconnect: attach retryable
-    Reconnect --> Done: attach fatal
-    Reconnect --> Done: max_reconnects
-    Attached --> Attached: Output
-    Attached --> Attached: Gap
-    Attached --> Done: Gap error_on_gap
-    Attached --> Done: Exit
-    Attached --> Reconnect: body ended
-    Attached --> Reconnect: read retryable
-    Attached --> Done: read fatal
-    Done --> [*]
+    [*] --> Composed
+    Composed --> Wrapped: Wrap
+    Wrapped --> Checked: Check
+    Wrapped --> [*]
+    Checked --> [*]
 ```
 
-Defined at: `crates/microvms-app/src/session/exec.rs:746-759`
+Defined at: `crates/model/src/wrap.rs:256-263`
 
 ## See also
 
-- [business logic](../insights/business-logic.md)
-- [contract map](../insights/contract-map.md)
-- [debugging guide](../insights/debugging-guide.md)
-- [impact analysis](../insights/impact-analysis.md)
-- [processes](processes.md)
+- [module map](../architecture/module-map.md) — 9 shared source citations
+- [data flow](../architecture/data-flow.md) — 2 shared source citations
+- [system overview](../architecture/system-overview.md) — 2 shared source citations
+- [processes](processes.md) — 2 shared source citations
+- [components](../diagrams/architecture/components.md) — 2 shared source citations

@@ -1,121 +1,78 @@
 # microvms-agentd · System overview
 
-AWS Lambda MicroVMs hands you an isolated Firecracker VM and no way to use it: there is no
-API to run a command inside one and no API to move a file into or out of one
-(`docs/PLATFORM.md:14-17`). Every harness built on the service has to supply both itself.
-This repository is that supply — `agentd`, a static daemon baked into the VM image, plus the
-`microvm` CLI and the Rust, Python, and Node libraries that talk to it (`README.md:11-15`).
-The CLI and libraries are distributed through crates.io, PyPI, and npm; the
-daemon is a release binary. Selected crates opt into publishing despite the
-workspace default of `publish = false`. The audience
-is whoever builds a sandbox product on MicroVMs — an agent harness, a CI runner, a
-code-execution service.
+`microvms-agentd` provides a guest daemon and client libraries for applications that run work in AWS Lambda MicroVMs: image preparation, VM lifecycle management, command execution, and file transfer belong to the same client stack. `crates/microvms-app/src/lib.rs:4` `crates/microvms-app/src/session/mod.rs:448` `crates/microvms-app/src/session/mod.rs:505`
+The guest process is `agentd`, started as the container's `CMD`; the host-facing entry points are the `microvm` executable and Rust, Python, and JavaScript bindings around the shared client implementation. `crates/agentd/src/main.rs:4` `crates/microvms-cli/Cargo.toml:21` `bindings/microvms-py/Cargo.toml:26` `bindings/microvms-js/Cargo.toml:20`
 
-The client's real work is absorbing the platform's surprises once. `docs/PLATFORM.md`
-records dated findings, many of which are
-traps in the specific sense that the platform's answer points away from the cause: an
-unsupported region answers `AccessDeniedException` with a null message, a `clientToken`
-replay wedges an image in `CREATING` for fifteen hours with no error at all
-(`crates/microvms-core/src/lib.rs:7-14`). Each closure is ranked by strength — S1 inexpressible, S2
-rejected locally before any call, S3 correct by default and overridable
-(`crates/microvms-core/src/lib.rs:23-40`).
+The client architecture separates decisions from external effects: `microvms-domain` holds sizing, cost, region, name, and error rules, while `microvms-app` composes use cases against ports for transport, storage, time, and other dependencies. `crates/microvms-domain/src/lib.rs:4` `crates/microvms-app/src/lib.rs:4`
+`microvms-edges` supplies production implementations for signed HTTP requests, sockets, the local name registry, release retrieval, and the clock; `microvms-core` wires those implementations into constructors and re-exports the public types. `crates/microvms-edges/src/lib.rs:7` `crates/microvms-core/src/lib.rs:77`
+The CLI and bindings depend on core, while `agentd` shares the `microvms-protocol` wire types with the client and has no dependency on the client implementation. `crates/microvms-cli/Cargo.toml:38` `bindings/microvms-py/Cargo.toml:26` `bindings/microvms-js/Cargo.toml:20` `crates/agentd/Cargo.toml:20`
 
-The workspace crates carry that (`Cargo.toml:2-10`), and the seams follow defect classes rather than
-layers. `protocol` is the wire contract as types: pure data, serde plus schemars, no tokio,
-no axum, no base64 (`crates/protocol/src/lib.rs:16-21`). Both the daemon and the client
-compile against it, so a renamed field fails a build instead of a consumer's runtime
-(`crates/agentd/Cargo.toml:11-15`). `agentd` is the daemon
-(`crates/agentd/src/lib.rs:37-52`) — `state` owns the one-shot bootstrap, `auth` decides
-before a body byte is read, `exec` and `fs` own idempotent exec and streaming tar. Its
-router is assembled by walking the same endpoint list `/v1/schema` publishes, so a
-documented route with no handler panics at startup (`crates/agentd/src/routes.rs:29-35`);
-the endpoints are split into a Bearer-guarded `control` router and an `open` one
-(`crates/agentd/src/routes.rs:51-59`, `crates/agentd/src/routes.rs:110-140`). It runs as the container
-`CMD` on a current-thread runtime sized for a 512 MiB guest (`crates/agentd/src/main.rs:4-6`,
-`crates/agentd/src/main.rs:24-27`).
+A typical workflow prepares an image, launches it through `Sandbox`, waits for the VM and daemon to become ready, and then uses the resulting `Session` for commands or file operations. `crates/microvms-app/src/sandbox.rs:917` `crates/microvms-app/src/sandbox.rs:1105` `crates/microvms-app/src/sandbox.rs:1262` `crates/microvms-app/src/session/mod.rs:448`
+A session starts a command without waiting for completion and returns an execution handle; callers can consume its event stream or use the synchronous-result helper, which awaits completion and acknowledges the output. `crates/microvms-app/src/session/mod.rs:443` `crates/microvms-app/src/session/exec.rs:421` `crates/microvms-app/src/session/mod.rs:476`
+Callers can also recover an execution handle from a known ID, separating the process identity from the lifetime of a particular client handle. `crates/microvms-app/src/session/mod.rs:471`
+File operations cover individual byte buffers and tar archives for directory trees, alongside remote existence queries and line-range reads. `crates/microvms-app/src/session/mod.rs:505` `crates/microvms-app/src/session/mod.rs:523` `crates/microvms-app/src/session/mod.rs:533` `crates/microvms-app/src/session/mod.rs:538`
+Lifecycle ownership is explicit: teardown returns a report of its outcome, and dropping a sandbox only warns about a live VM rather than initiating asynchronous cleanup. `crates/microvms-app/src/sandbox.rs:1772` `crates/microvms-app/src/sandbox.rs:1917`
 
-`microvms-core` is the client library's composition root; its own doc comment sorts the
-modules it re-exports by the crate below it that holds them: the rules and values in
-`microvms-domain`, the use cases (`control`, `session`, `sandbox`, `agents`) and their ports in
-`microvms-app`, and the production port implementations in `microvms-edges`
-(`crates/microvms-core/src/lib.rs:61-75`). `control` speaks
-hand-signed SigV4 rest-json because `lambda-microvms` has no SDK crate
-(`crates/microvms-app/src/control/mod.rs:2-3`); `session` is
-the in-VM client, carrying proxy auth and the byte-offset cursor that makes an interrupted
-stream resumable (`crates/microvms-app/src/session/mod.rs:4-7`); `sandbox` keeps every lifecycle
-field private so the Z3 proofs are proofs about the code
-(`crates/microvms-app/src/sandbox.rs:11-17`); `cost` treats unpriced as a distinct variant rather
-than zero (`crates/microvms-domain/src/cost.rs:22-27`).
+Each interface adapts that shared behavior to its caller: the CLI parses commands and renders results, Python exposes blocking calls and coroutine twins, and the Node binding maps asynchronous operations to JavaScript promises. `crates/microvms-cli/src/main.rs:80` `bindings/microvms-py/src/session.rs:1001` `bindings/microvms-py/src/session.rs:1006` `bindings/microvms-js/src/session.rs:708` `bindings/microvms-js/src/lib.rs:60`
+For automation, `microvm manifest` derives command and option descriptions from the parser; streaming execution describes its stdout as newline-delimited events followed by the final envelope, rather than an ordinary single JSON response. `crates/microvms-cli/src/manifest.rs:51` `crates/microvms-cli/src/manifest.rs:58`
+The daemon builds its router at startup and runs it on a current-thread Tokio runtime, keeping the guest entry point separate from the host applications' runtimes. `crates/agentd/src/main.rs:24` `crates/agentd/src/main.rs:77`
 
-`microvms-cli` ships `microvm` and its subcommands
-(`crates/microvms-cli/src/cli.rs:85-362`), each invocation writing exactly one JSON
-envelope to stdout and progress to stderr (`crates/microvms-cli/src/envelope.rs:4-11`). It has no
-lib target (`crates/microvms-cli/Cargo.toml:21-23`) and no second path to AWS: a denylist
-of HTTP clients, signers, and credential chains is asserted against `cargo metadata`
-(`crates/microvms-cli/tests/thinness.rs:54-101`). `microvms-py` and `microvms-js`
-wrap the same core and never the CLI (`bindings/microvms-py/Cargo.toml:22-26`,
-`bindings/microvms-js/Cargo.toml:20-21`). Verification sits outside the product graph: `model` depends
-only on `stateright`, with no workspace edge, modelling the protocol rather than importing it
-(`crates/model/Cargo.toml:12-13`), and `conformance/run_rs.py` drives the built CLI through its named
-checks against real AWS (`conformance/run_rs.py:9`). Start at
-`crates/agentd/src/lib.rs:9-35` for the trust boundary, then `crates/microvms-core/src/lib.rs:21-40` for
-the trap ladder.
+The architecture supports tests that replace the application's ports with shared test doubles, while production construction remains in core's prelude. `crates/microvms-app/src/lib.rs:34` `crates/microvms-core/src/prelude.rs:136`
+The workspace also contains `agentd-model` for state exploration and `model-conformance` for comparisons with the implementation; dependency-direction tests assert the allowed package relationships so these verification layers do not redefine the production architecture. `crates/model/Cargo.toml:7` `crates/model-conformance/Cargo.toml:8` `crates/microvms-cli/tests/dependency_direction.rs:25`
 
 ## Stack
 
 | Layer | Technology | Source |
 | --- | --- | --- |
-| Language | Rust, `edition = "2024"`, `resolver = "3"` | `Cargo.toml:23`, `Cargo.toml:11` |
-| Toolchain and targets | `channel = "1.99.0"`, `targets = ["aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl"]` | `rust-toolchain.toml:21-24` |
-| Shipping artifact | `lto`, `codegen-units = 1`, `panic = "unwind"`, `strip`, `opt-level = "z"` | `Cargo.toml:38-61` |
-| Daemon HTTP | `axum = "0.8.9"`; `tower-http` `"0.7"` with `limit` + `catch-panic` | `crates/agentd/Cargo.toml:25`, `crates/agentd/Cargo.toml:34` |
-| Async runtime | `tokio = "1.53"`, no `rt-multi-thread` in the daemon or the library | `crates/agentd/Cargo.toml:35-45`, `crates/microvms-app/Cargo.toml:33`, `crates/microvms-edges/Cargo.toml:92` |
-| AWS control plane | `reqwest = "0.13"` on `rustls`, `aws-sigv4 = "1.5"`, `aws-config = "1.10"` | `crates/microvms-edges/Cargo.toml:58-63`, `crates/microvms-edges/Cargo.toml:52`, `crates/microvms-edges/Cargo.toml:41-46` |
-| Wire schema | `schemars = "1.2.2"`, `default-features = false`, `derive` + `std` only | `crates/protocol/Cargo.toml:16` |
-| Money | `rust_decimal = "1.42"` with `serde-with-str` | `crates/microvms-domain/Cargo.toml:38` |
-| CLI surface | `clap = "4.6.6"` with `derive`; `ratatui = "0.30.2"` | `crates/microvms-cli/Cargo.toml:55`, `crates/microvms-cli/Cargo.toml:59` |
-| Bindings | `pyo3 = "0.29"` with `abi3-py39`; `napi = "3"` with `napi5` + `async` + `web_stream` | `bindings/microvms-py/Cargo.toml:38`, `bindings/microvms-js/Cargo.toml:44-48` |
-| Verification tiers | `stateright = "0.31"`, `turmoil = "0.7.2"`, `proptest = "1.11"` | `crates/model/Cargo.toml:10`, `crates/agentd/Cargo.toml:76`, `crates/agentd/Cargo.toml:73` |
-| Live suite | PEP 723 inline script under `uv`, `boto3` + `httpx` | `conformance/run_rs.py:1-5` |
-| Build gate | `mise run check` — lint, security, tests, schema, manifest, Python stubs, TypeScript declarations, model drift, publishability, live wiring, build, background example, traceability | `.config/mise/tasks/check.toml:11-42` |
+| Language | Rust, `edition = "2024"` | `Cargo.toml:30` |
+| Toolchain | `channel = "1.99.0"` | `rust-toolchain.toml:22` |
+| Guest HTTP | `axum = { version = "0.8.9", features = ["ws"] }` | `crates/agentd/Cargo.toml:25` |
+| Asynchronous runtime | `tokio = { version = "1.53", features = ["time", "sync", "io-util", "macros", "rt"] }` | `crates/microvms-app/Cargo.toml:33` |
+| Host HTTP | `reqwest` with `version = "0.13"` and `"rustls"` | `crates/microvms-edges/Cargo.toml:58` |
+| Wire schema | `schemars` with `version = "1.2.2"` and `["derive", "std"]` | `crates/protocol/Cargo.toml:24` |
+| CLI parsing | `clap = { version = "4.6.6", features = ["derive"] }` | `crates/microvms-cli/Cargo.toml:46` |
+| Python extension | `pyo3` with `version = "0.29"` and `["abi3-py39", "experimental-async"]` | `bindings/microvms-py/Cargo.toml:45` |
+| Node extension | `napi` with `version = "3"` and `"napi5"`, `"async"`, `"web_stream"` | `bindings/microvms-js/Cargo.toml:43` |
+| State exploration | `stateright = "0.31"` | `crates/model/Cargo.toml:14` |
 
 ## Module map
 
+Arrows represent declared production dependencies between workspace packages. `crates/microvms-core/Cargo.toml:20` `crates/microvms-edges/Cargo.toml:23` `crates/microvms-app/Cargo.toml:22` `crates/microvms-domain/Cargo.toml:21` `crates/agentd/Cargo.toml:20` `crates/microvms-cli/Cargo.toml:38` `bindings/microvms-py/Cargo.toml:26` `bindings/microvms-js/Cargo.toml:20`
+
 ```mermaid
 flowchart LR
-  protocol[protocol wire types]
-  agentd[agentd daemon]
-  domain[microvms-domain rules]
-  app[microvms-app use cases]
-  edges[microvms-edges port impls]
-  core[microvms-core composition root]
-  cli[microvm binary]
-  py[microvms-py PyO3]
-  js[microvms-js napi]
-  model[model stateright]
-  conf[conformance suite]
+  cli[microvms-cli]
+  py[microvms-py]
+  js[microvms-js]
+  core[microvms-core]
+  edges[microvms-edges]
+  app[microvms-app]
+  domain[microvms-domain]
+  protocol[microvms-protocol]
+  daemon[agentd]
 
-  agentd --> protocol
-  domain --> protocol
-  app --> domain
-  edges --> app
-  core --> app
-  core --> edges
-  core --> domain
-  core --> protocol
   cli --> core
   py --> core
   py --> protocol
   js --> core
   js --> protocol
-  conf -->|drives| cli
-  model -.checks.-> agentd
+  core --> edges
+  core --> app
+  core --> domain
+  core --> protocol
+  edges --> app
+  edges --> domain
+  edges --> protocol
+  app --> domain
+  app --> protocol
+  domain --> protocol
+  daemon --> protocol
 ```
 
 ## See also
 
-- [impact analysis](../insights/impact-analysis.md)
-- [contract map](../insights/contract-map.md)
-- [dependency graph](../diagrams/structural/dependency-graph.md)
-- [module map](module-map.md)
-- [business logic](../insights/business-logic.md)
+- [dependency graph](../diagrams/structural/dependency-graph.md) — 19 shared source citations
+- [module map](module-map.md) — 12 shared source citations
+- [ownership](../analysis/ownership.md) — 9 shared source citations
+- [impact analysis](../insights/impact-analysis.md) — 8 shared source citations
+- [contract map](../insights/contract-map.md) — 7 shared source citations

@@ -1,272 +1,80 @@
 # microvms-agentd · Risk hotspots
 
-Figures on this page were measured at `5e6f752` (2026-08-17).
+Risk here means maintenance attention suggested by recent changes. This is a dated measurement at commit `9729b82`, taken on 2026-10-11, using the UTC interval from 2026-09-11 inclusive to 2026-10-11 exclusive. The cohort is current implementation source under crates, bindings, tools, conformance, and the site's source and scripts; tests, fixtures, examples, generated declarations, and generated site content are excluded. Each changed path contributes its commit count. The median is 2 and the population standard deviation is 3.1185: `↑ rising` means at least 6 commits, `→ flat` means 1–5, and no touched path meets `↓ falling`. A rising path scores 1; ties use descending commit count, then path order.
 
-Risk here is composed from two measured signals, because the one the default recipe reaches
-for is empty. Both gate-level static-analysis passes return zero findings on every file:
-`cargo clippy --all-targets --message-format=json` emits 0 diagnostics at `warning` or
-`error` level, and the semgrep pass the gate runs over all seven crates
-(`.config/mise/tasks/security.toml:20`) reports 0 results. So severity is measured instead as **test-tier reach**,
-using CodeGraph's covering-test relation over the 4,430-node index. A symbol counts once, and
-only if it carries at least one inbound `calls`/`references`/`instantiates` dependent and
-sits outside any `#[cfg(test)]` region. **`error`** means no test file reaches it and its
-containing file holds zero in-file `#[test]` functions — no test tier in this repository
-reaches that symbol through a source-level edge. **`warn`** means no test file reaches it but
-the file does carry an in-file `#[cfg(test)]` module, so a same-file unit test may while no
-cross-file tier does. Trend is cross-sectional over the 30-day window: 78 live source files
-were touched across 114 commits, per-file commit counts have median 4.0 and population σ
-2.7928, so `↑ rising` is 7 or more commits (19 files), `→ flat` is 2 to 6 (58 files), and
-`↓ falling` is 1 (1 file). The score is `2 × error + 0.5 × warn + 1 × (trend is rising)`,
-ties broken by commit count descending. Totals across the 75 scored files: 278 error-class
-and 654 warn-class findings.
+No current per-file diagnostic dataset supports warning or error totals, so this ranking uses activity alone and omits an open-findings column. The arrows compare paths within this window; they do not measure acceleration over time. Counts use current path spellings, so moves and broad refactors can affect the ranking. “Top owner” names a suggested review role, and the drill-down describes recorded contribution concentration without assigning maintainership to an author. The source citations identify what each path does; they do not establish test coverage or runtime reliability.
 
-Four limitations bound every number below. First, the repository's whole history — 114
-commits, 2026-08-05 to 2026-08-17 — fits inside the 30-day window, so there is no earlier
-baseline and the trend arrow compares a file against its peers, never against its own past.
-Second, the covering-test relation counts test *files*, and Rust's dominant unit-test idiom
-here is an in-file `#[cfg(test)] mod tests`; 770 such tests exist across
-`microvms-core` (436), `microvms-cli` (172), `agentd` (130), `protocol` (17) and `model` (15),
-and none of them can satisfy a cross-file rule. A `warn` count is therefore a statement about
-tier reach, not about absence of testing — `crates/microvms-app/src/sandbox.rs` returns an empty
-`codegraph affected -d 1` result while holding 27 unit tests of its own. Third, and most
-consequential for reading the table: **no source-level edge can cross the PyO3 or napi-rs FFI
-boundary**, so the 159 pytest functions in `bindings/microvms-py/tests/` and the 168 `test(` calls in
-`bindings/microvms-js/__test__/` cannot register as covering tests for the Rust code they exercise, and
-CodeGraph does not classify a `.mjs` file as a test at all. Every `error` count in a bindings
-file measures Rust-tier reach only; the residual risk is narrower than "untested" and is
-named per file in the drill-down. The index also resolves references by name, so a
-declaration whose name is short or collides with a widely used external type absorbs mentions
-that are not references to it. `Duration` (`bindings/microvms-js/src/cost.rs:60`) is the clearest
-instance: it is the only node of that name in the index, so every `Duration` in the workspace
-resolves onto it, and it is credited with coverage from
-`crates/microvms-core/tests/turmoil_client.rs`, a file containing zero references to `microvms-js`.
-`live` (`bindings/microvms-js/src/session.rs:502`) and `data` (`bindings/microvms-py/src/exec.rs:236`) are
-likewise sole holders of their names. So per-symbol dependent counts below are what the index
-records rather than verified call sites, and the direction of the bias on `error` counts is
-toward understating them. Fourth, ownership carries no bus-factor information: one
-human authors 87 of 114 commits under two identities and a `bgagent` bot the other 27, every
-file has one or two distinct authors, and a `bgagent` top-owner share marks a file that
-arrived inside a large squashed commit rather than one with a second maintainer. Two modules
-are excluded from scoring because they are test code that lives under `src/`:
-`crates/microvms-cli/src/guards/` (`#![cfg(test)]` at `crates/microvms-cli/src/guards/mod.rs:25` and in each
-file under it, declared at `crates/microvms-cli/src/main.rs:36-37`) and
-`crates/microvms-app/src/control/fake.rs` (declared at
-`crates/microvms-app/src/control/mod.rs:900-901`). That exclusion mattered: before it was split by
-command area, `guards.rs` was the joint-highest-churn source file in the repository at 13
-commits, so a churn-only ranking put a file that never ships in a binary at the top.
-
-| File | Trend | Open findings | Top owner | Citation |
-| --- | --- | --- | --- | --- |
-| `bindings/microvms-py/src/cost.rs` | ↑ rising | 0 warn, 66 error | Laith Al-Saadoon 57% | `bindings/microvms-py/src/cost.rs` (1,123 LOC) |
-| `bindings/microvms-js/src/cost.rs` | → flat | 0 warn, 65 error | Laith Al-Saadoon 60% | `bindings/microvms-js/src/cost.rs` (1,038 LOC) |
-| `bindings/microvms-js/src/session.rs` | → flat | 0 warn, 25 error | Laith Al-Saadoon 60% | `bindings/microvms-js/src/session.rs` (609 LOC) |
-| `crates/microvms-domain/src/cost.rs` | ↑ rising | 93 warn, 0 error | bgagent 71% | `crates/microvms-domain/src/cost.rs` (4,127 LOC) |
-| `bindings/microvms-py/src/exec.rs` | ↑ rising | 0 warn, 22 error | Laith Al-Saadoon 71% | `bindings/microvms-py/src/exec.rs` (631 LOC) |
-| `bindings/microvms-js/src/exec.rs` | → flat | 0 warn, 19 error | Laith Al-Saadoon 60% | `bindings/microvms-js/src/exec.rs` (456 LOC) |
-| `bindings/microvms-js/src/sandbox.rs` | → flat | 0 warn, 16 error | Laith Al-Saadoon 60% | `bindings/microvms-js/src/sandbox.rs` (623 LOC) |
-| `bindings/microvms-js/src/process.rs` | ↓ falling | 0 warn, 12 error | Laith Al-Saadoon 100% | `bindings/microvms-js/src/process.rs` (541 LOC) |
-| `bindings/microvms-py/src/session.rs` | → flat | 0 warn, 11 error | Laith Al-Saadoon 67% | `bindings/microvms-py/src/session.rs` (605 LOC) |
-| `crates/microvms-app/src/sandbox.rs` | ↑ rising | 40 warn, 0 error | Laith Al-Saadoon 73% | `crates/microvms-app/src/sandbox.rs` (2,371 LOC) |
-| `crates/agentd/src/fs.rs` | ↑ rising | 38 warn, 0 error | bgagent 57% | `crates/agentd/src/fs.rs` (2,628 LOC) |
-| `bindings/microvms-py/src/sandbox.rs` | → flat | 0 warn, 10 error | Laith Al-Saadoon 67% | `bindings/microvms-py/src/sandbox.rs` (780 LOC) |
-
-The shape of that list is the finding. Nine of the twelve rows are binding files, and the
-reason is structural rather than per-file: all 18 files under `bindings/microvms-py/src/` and
-`bindings/microvms-js/src/` — 3,856 and 3,760 LOC respectively — contain zero `#[cfg(test)]` modules
-and zero `#[test]` functions, while the other five crates hold 770 between them — an average
-of 19 per file in `microvms-core`, 11 in `microvms-cli`, 10 in `agentd`. The three
-non-binding rows (`crates/microvms-domain/src/cost.rs`, `crates/microvms-app/src/sandbox.rs`,
-`crates/agentd/src/fs.rs`) are the opposite case: heavily unit-tested files whose churn is rising
-and whose public surface no cross-file tier reaches.
+| File | Trend | Top owner | Citation |
+| --- | --- | --- | --- |
+| `conformance/run_rs.py` | ↑ rising | Conformance maintainers | `conformance/run_rs.py:94` |
+| `crates/microvms-cli/src/cli.rs` | ↑ rising | CLI interface maintainers | `crates/microvms-cli/src/cli.rs:65` |
+| `crates/microvms-cli/src/commands/lifecycle.rs` | ↑ rising | CLI lifecycle maintainers | `crates/microvms-cli/src/commands/lifecycle.rs:475` |
+| `bindings/microvms-py/src/session.rs` | ↑ rising | Python binding maintainers | `bindings/microvms-py/src/session.rs:534` |
+| `crates/microvms-cli/src/commands/attached.rs` | ↑ rising | CLI session maintainers | `crates/microvms-cli/src/commands/attached.rs:243` |
+| `tools/ratchet.py` | ↑ rising | Architecture gate maintainers | `tools/ratchet.py:875` |
+| `crates/microvms-cli/src/commands/mod.rs` | ↑ rising | CLI output maintainers | `crates/microvms-cli/src/commands/mod.rs:47` |
+| `bindings/microvms-py/src/sandbox.rs` | ↑ rising | Python binding maintainers | `bindings/microvms-py/src/sandbox.rs:512` |
+| `conformance/lanes/suite.py` | ↑ rising | Conformance maintainers | `conformance/lanes/suite.py:82` |
+| `crates/microvms-app/src/sandbox.rs` | ↑ rising | Sandbox lifecycle maintainers | `crates/microvms-app/src/sandbox.rs:620` |
+| `bindings/microvms-js/src/sandbox.rs` | ↑ rising | Node binding maintainers | `bindings/microvms-js/src/sandbox.rs:668` |
+| `bindings/microvms-py/src/agents.rs` | ↑ rising | Python binding maintainers | `bindings/microvms-py/src/agents.rs:464` |
 
 ## Per-file drill-down
 
-### 1. `bindings/microvms-py/src/cost.rs`
+### 1. `conformance/run_rs.py`
 
-**What's there.** The PyO3 mirror of the cost engine, whose stated job is wrapping the core
-types "without loosening any of them (BIND-5)" by making the unsafe spellings absent rather
-than rejected — no `__float__`, `__int__`, `__index__`, `__add__` or any numeric dunder on
-`EstimatedUsd`, no `#[pyo3(transparent)]`, and no defaulting `Duration` constructor
-(`bindings/microvms-py/src/cost.rs:2-24`). Concretely it is 111 symbols of `#[pyclass(frozen,
-from_py_object)]` wrappers: `PyDuration` (`bindings/microvms-py/src/cost.rs:89`), `PySizeClass`
-(`bindings/microvms-py/src/cost.rs:488`), `PyRateTable` (`bindings/microvms-py/src/cost.rs:576`), `PyLineItem`
-(`bindings/microvms-py/src/cost.rs:313`) and `PyCostReport` (`bindings/microvms-py/src/cost.rs:696`).
+**What's there.** The conformance entry point parses command-line options and selects either the offline self-test or the live suite (`conformance/run_rs.py:94-128`). The offline suite constructs a stub CLI and exercises the harness and lane helpers (`conformance/selftest/suite.py:40-71`).
 
-**Recent activity.** 7 commits in the 30-day window, `↑ rising` — at the rising threshold of
-7 and joint-highest among all binding files.
+**Recent activity.** 28 commits; `↑ rising`, in the dated window above. Activity in the current entry-point path can include behavior that later moved into the harness and lanes; its current dispatch is small (`conformance/run_rs.py:90-128`).
 
-**Owners.** Laith Al-Saadoon 57% (4 of 7 commits); `bgagent` 43% (3 of 7). Two identities,
-one of them a bot, so no second human reviewer is implied.
+**Review ownership.** Conformance maintainers should review changes with the affected lane owner. Recorded contributions are concentrated: the leading author's share is 64%, with the remainder at 36% in this window.
 
-**Findings.** 66 error, 0 warn. All 66 of the file's 66 symbols that carry inbound dependents
-are error-class, the highest count in the repository, and `codegraph affected
-bindings/microvms-py/src/cost.rs -d 1 --json` returns an empty `affectedTests` array against 2
-dependents traversed in total. The most-depended-on uncovered symbols are `PySizeClass` (10
-dependents, `bindings/microvms-py/src/cost.rs:488`), the `seconds` getter (6 dependents,
-`bindings/microvms-py/src/cost.rs:126`), `PyDuration` (5, `bindings/microvms-py/src/cost.rs:89`) and
-`PyRateTable` (5, `bindings/microvms-py/src/cost.rs:576`). The mitigation is real and it is dynamic:
-`bindings/microvms-py/tests/test_cost.py` holds 39 pytest functions over 753 lines, and the generated
-stubs are gated by `stubs:check` (`.config/mise/tasks/contracts.toml:188-238`, listed in `check` at `.config/mise/tasks/check.toml:15`).
-What no tier covers is a Rust-level refactor of the absences the module docs enumerate — a
-`__float__` accidentally reintroduced on `EstimatedUsd` is caught only if a Python test
-happens to assert its absence, after a full native rebuild.
+**Review focus.** Preserve the explicit choice between the self-test and the live suite when changing argument handling (`conformance/run_rs.py:125-128`). Follow a change into the selected suite rather than treating the entry point's activity as evidence that its present body owns the behavior (`conformance/run_rs.py:90-91`).
 
-### 2. `bindings/microvms-js/src/cost.rs`
+### 2. `crates/microvms-cli/src/cli.rs`
 
-**What's there.** The napi-rs mirror of the same engine, where the entire BIND-5 requirement
-reduces to one decision: every type is a `#[napi]` **class** and never `#[napi(object)]`,
-because an object converts by structure and `{ amount: 1.5 }` would satisfy an `EstimatedUsd`
-parameter (`bindings/microvms-js/src/cost.rs:2-12`). `valueOf`, `toJSON`, `Symbol.toPrimitive` and any
-`add` method are absent by design, so `Number(usd)` is `NaN` and the figure leaves only
-through `.amount` as a string (`bindings/microvms-js/src/cost.rs:16-25`).
+**What's there.** `Cli` defines the command selection and global JSON, dense, and quiet output flags (`crates/microvms-cli/src/cli.rs:65-83`). The command enum starts with the run, quickstart, and build workflows (`crates/microvms-cli/src/cli.rs:97-120`).
 
-**Recent activity.** 5 commits, `→ flat`. It ranks second on score with no rising bonus,
-entirely on finding count.
+**Recent activity.** 21 commits; `↑ rising`, in the dated window above.
 
-**Owners.** Laith Al-Saadoon 60% (3 of 5); `bgagent` 40% (2 of 5).
+**Review ownership.** CLI interface maintainers should coordinate with the handler's review area. Recorded contributions are concentrated: the leading author's share is 90%, with the remainder at 10%.
 
-**Findings.** 65 error, 0 warn, out of 66 symbols with inbound dependents — and the 66th is a
-measurement artifact, not a covered symbol. The one symbol credited with coverage is
-`Duration` (`bindings/microvms-js/src/cost.rs:60`), attributed to
-`crates/microvms-core/tests/turmoil_client.rs`, which contains zero references to `microvms-js` in
-either spelling. `Duration` is the only node of that name in the entire index, so every
-`Duration` mention in the workspace — including every `std::time::Duration` — resolves onto
-this one napi class. The real figure for this file is 66 of 66. Highest-dependent uncovered
-symbols are `SizeClass` (27 dependents, `bindings/microvms-js/src/cost.rs:422`), `Amount` (5,
-`bindings/microvms-js/src/cost.rs:187`), the `CostReport::wrap` constructor (4,
-`bindings/microvms-js/src/cost.rs:619`), `Total` (3, `bindings/microvms-js/src/cost.rs:383`) and `all` (3,
-`bindings/microvms-js/src/cost.rs:450`).
-`bindings/microvms-js/__test__/cost.mjs` exercises this surface with 42 `test(` calls over 733 lines,
-but CodeGraph does not classify `.mjs` as a test file, so those never appear in `affected`
-output for any path. This crate's `index.d.ts` is gitignored (`.gitignore:29`) and no drift
-gate for it appears anywhere in `mise.toml`, unlike its Python twin whose stubs are checked
-at `.config/mise/tasks/contracts.toml:188-238` — the one asymmetry on this list that is a gap in the gate rather than
-a limit of the measurement.
+**Review focus.** Treat changes to accepted arguments as interface changes. The parser's size-request test checks both valid combinations and conflicts with the older memory option (`crates/microvms-cli/src/cli.rs:3843-3868`); the duration test separately checks the accepted domain for seconds-valued flags (`crates/microvms-cli/src/cli.rs:3872-3887`). These are source-level review anchors, not a claim that either test ran for this measurement.
 
-### 3. `bindings/microvms-js/src/session.rs`
+### 3. `crates/microvms-cli/src/commands/lifecycle.rs`
 
-**What's there.** The control API of one running MicroVM on the Node side, where the binding
-inherits its exclusion guarantees from the core: `Sandbox` owns its `Session` by value, hands
-out only `Option<&Session>`, so ordinary calls go through the sandbox; the one exception is
-`keepAwake`, which clones the session (a clone shares its transport) and gates on the sandbox's
-lifecycle watch so it can keep polling while a long call holds the lock
-(`bindings/microvms-js/src/session.rs:4-13`). The mutex is tokio's rather than `std`'s because every
-method is `async` and holds the guard across an `await`, reproducing the `&mut self` exclusion
-that `suspend`/`resume`/`terminate` require (`bindings/microvms-js/src/session.rs:15-19`).
+**What's there.** The lifecycle adapter merges run configuration into effective arguments and a report of their sources (`crates/microvms-cli/src/commands/lifecycle.rs:150-180`). Its run path owns a sandbox across the launch/interrupt race, then reads identifiers and performs teardown (`crates/microvms-cli/src/commands/lifecycle.rs:665-731`, `crates/microvms-cli/src/commands/lifecycle.rs:774-786`).
 
-**Recent activity.** 5 commits, `→ flat`.
+**Recent activity.** 15 commits; `↑ rising`, in the dated window above.
 
-**Owners.** Laith Al-Saadoon 60% (3 of 5); `bgagent` 40% (2 of 5).
+**Review ownership.** CLI lifecycle maintainers should review changes alongside the sandbox lifecycle implementation (`crates/microvms-app/src/sandbox.rs:1105`, `crates/microvms-app/src/sandbox.rs:1772`). The recorded activity is concentrated in one author during this window.
 
-**Findings.** 25 error, 0 warn, from 27 symbols with inbound dependents out of 33 total. The
-two the index ranks highest by dependent count are the lock-acquiring internals rather than
-the public methods — `Live::session` at 18 (`bindings/microvms-js/src/session.rs:472`) and the `live()`
-guard-taker at 17 (`bindings/microvms-js/src/session.rs:502`) — though both names are short enough that
-those counts are inflated by the name-resolution caveat above; `into_request` (3,
-`bindings/microvms-js/src/session.rs:281`), `in_sandbox` (3, `bindings/microvms-js/src/session.rs:492`) and
-`port` (3, `bindings/microvms-js/src/session.rs:587`) follow. Those two functions are where the
-"held for exactly one method call and no more" invariant in the doc comment at
-`bindings/microvms-js/src/session.rs:500-501` actually lives, and a lock-scope regression in them is
-the class of defect a dynamic suite detects only as a hang. `codegraph affected
-bindings/microvms-js/src/session.rs -d 1` does return two tests —
-`crates/agentd/tests/turmoil_transport.rs` and `crates/microvms-core/tests/turmoil_client.rs` — reached
-through the core types this file wraps, not through the binding surface itself.
+**Review focus.** Preserve the sandbox's ownership outside the cancellable launch future so the following code can read its recorded identifiers (`crates/microvms-cli/src/commands/lifecycle.rs:670-731`). Review result reporting and ledger updates together with teardown, because this adapter reads all of them after the race (`crates/microvms-cli/src/commands/lifecycle.rs:731-786`).
 
-### 4. `crates/microvms-domain/src/cost.rs`
+### 4. `bindings/microvms-py/src/session.rs`
 
-**What's there.** The cost engine proper, and the largest file in the workspace at 4,127
-lines: rate data carried as types rather than prose because MicroVMs publishes no standalone
-pricing page, with two invariants enforced by shape instead of at runtime — "seconds are
-measured, dollars are estimated" via a `DurationP` enum whose every variant names its
-provenance (COST-1), and "unknown is not zero" via `Amount::Unpriced` as a distinct variant
-that forces a match arm (COST-3), promoting to `Total::AtLeast` so a floor cannot be read
-without its reasons (COST-4) (`crates/microvms-domain/src/cost.rs:2-27`). Central types are
-`RateTable` with its `region`/`source_url`/`retrieved` provenance fields
-(`crates/microvms-domain/src/cost.rs:856`), `CalendarDate` (`crates/microvms-domain/src/cost.rs:209`),
-`LineItem` (`crates/microvms-domain/src/cost.rs:1447`), `CostReport`
-(`crates/microvms-domain/src/cost.rs:1485`) and `RunUsage` (`crates/microvms-domain/src/cost.rs:1737`).
+**What's there.** `PySession` wraps either an owned session or a session reached through a shared sandbox, and a lease holds the latter's mutex during an operation (`bindings/microvms-py/src/session.rs:451-489`, `bindings/microvms-py/src/session.rs:532-548`). The blocking and awaitable health methods drive the same operation future through different runtime entry points (`bindings/microvms-py/src/session.rs:568-572`, `bindings/microvms-py/src/session.rs:1001-1007`).
 
-**Recent activity.** 7 commits, `↑ rising`.
+**Recent activity.** 12 commits; `↑ rising`, in the dated window above.
 
-**Owners.** `bgagent` 71% (5 of 7); Laith Al-Saadoon 29% (2 of 7). The only top-5 file whose
-top owner is the bot, which means most of its 4,127 lines landed inside large squashed
-commits.
+**Review ownership.** Python binding maintainers should coordinate with session and runtime maintainers. Recorded contributions are concentrated: the leading author's share is 92%, with the remainder at 8%.
 
-**Findings.** 93 warn, 0 error — the largest warn count in the repository, and every one of
-them is a tier-reach statement rather than an absence of tests: the file carries 65 in-file
-`#[test]` functions, so no symbol qualifies for the error class. Highest-dependent uncovered
-symbols are `RateTable` (15 dependents, `crates/microvms-domain/src/cost.rs:856`), `CalendarDate`
-(14, `crates/microvms-domain/src/cost.rs:209`), `LineItem` (13, `crates/microvms-domain/src/cost.rs:1447`),
-`today_utc` (12, now `crates/microvms-core/src/prelude.rs:26`), `CostReport` (11,
-`crates/microvms-domain/src/cost.rs:1485`) and `RunUsage` (11, `crates/microvms-domain/src/cost.rs:1737`).
-`codegraph affected crates/microvms-domain/src/cost.rs -d 1` reaches 8 test files, the broadest of any
-file on this list. Two specifics deserve attention: `today_utc` reads the wall clock and floors
-on integer division, so it was the file's one ambient-time dependency and couldn't be exercised
-deterministically by a `turmoil` tier that controls virtual time only. Since #282 the clock read
-is in `crates/microvms-core/src/prelude.rs:26` and the floor is the pure
-`CalendarDate::from_unix_secs` (`crates/microvms-domain/src/cost.rs:255`), which takes the time.
-Second, `RateTable::retrieved` (`crates/microvms-domain/src/cost.rs:856`) makes rate freshness a data property, which the separate
-`tools/check-live-rates.py --twin-only` cross-check exists to verify (`.config/mise/tasks/live.toml:135-138`)
-rather than any Rust test tier.
+**Review focus.** Keep operation construction shared between blocking and awaitable methods, and preserve the lease's scope across awaited work (`bindings/microvms-py/src/session.rs:513-528`). The binding's async suite documents separate expectations for signature parity, wire behavior, event-loop progress, and cancellation (`bindings/microvms-py/tests/test_async.py:2-18`); use those categories when reviewing a new method.
 
-### 5. `bindings/microvms-py/src/exec.rs`
+### 5. `crates/microvms-cli/src/commands/attached.rs`
 
-**What's there.** One exec plus the SSE stream exposed as a Python iterator, which the module
-docs single out as the only shape on the surface that needed real work: `ExecStream::new`
-spawns a driver onto the shared runtime with an owned `ExecHandle` and a bounded `mpsc`
-sender, and `__next__` blocks on `recv` (`bindings/microvms-py/src/exec.rs:4-15`). The channel bound
-is deliberately 1, because the daemon's SSE body is the backpressure signal and an unbounded
-channel would buffer a fast producer's whole output inside the binding — the failure the
-core's byte-offset cursor exists to make unnecessary (`bindings/microvms-py/src/exec.rs:11-15`);
-dropping the iterator drops the receiver, the next `send` fails, and the drive ends on
-`ControlFlow::Break` (`bindings/microvms-py/src/exec.rs:18-20`).
+**What's there.** The attached exec handler obtains a session, branches to polling when requested, and builds new exec requests through the lifecycle adapter's request constructor (`crates/microvms-cli/src/commands/attached.rs:243-279`). Streaming execution translates events for output and records terminal information while consuming the stream (`crates/microvms-cli/src/commands/attached.rs:479-517`).
 
-**Recent activity.** 7 commits, `↑ rising` — tied with `bindings/microvms-py/src/cost.rs` for the
-hottest binding file.
+**Recent activity.** 12 commits; `↑ rising`, in the dated window above. Its tie with the Python session adapter is resolved by path order.
 
-**Owners.** Laith Al-Saadoon 71% (5 of 7); `bgagent` 29% (2 of 7).
+**Review ownership.** CLI session maintainers should coordinate with output maintainers for streaming changes. The recorded activity is concentrated in one author during this window.
 
-**Findings.** 22 error, 0 warn, covering all 22 of the file's symbols that have inbound
-dependents (58 symbols total, so most of the surface has no recorded dependent at all).
-`codegraph affected bindings/microvms-py/src/exec.rs -d 1 --json` returns an empty `affectedTests`
-array. Ranked by dependents: `PyExecResult` (5, `bindings/microvms-py/src/exec.rs:64`), a `wrap`
-constructor (5, `bindings/microvms-py/src/exec.rs:78`), the `seconds` getter (3,
-`bindings/microvms-py/src/exec.rs:629`), `PyStdinAck` (2, `bindings/microvms-py/src/exec.rs:173`), `data` (2,
-`bindings/microvms-py/src/exec.rs:236`) and `PyExecHandle` (2, `bindings/microvms-py/src/exec.rs:485`). The
-drop-and-break lifecycle described at `bindings/microvms-py/src/exec.rs:18-20` is the specific
-untested-at-Rust-tier surface worth attention, because a leaked driver task shows up as a
-hang or a stray thread rather than a failing assertion.
-`bindings/microvms-py/tests/test_exec.py` covers the behaviour dynamically with 29 pytest functions
-over 655 lines. `PyExecResult` keeping `exit_code` and `signal` as `Option<i32>` rather than
-sentinel integers (`bindings/microvms-py/src/exec.rs:64-68`) is the kind of distinction that a
-Python-only test can assert but no Rust tier here defends.
-
-## Reproduction
-
-Every number above traces to one of these, run from the repository root at commit
-`5e6f752a4c2a75f88522a38ce40d0a444f23ebc4`:
-
-- Trend and ownership — `git log --since=30.days.ago --name-only --pretty=format:'---%H|%an|%ae'`,
-  keeping `.rs`/`.py` paths outside `tests/`, `conformance/`, `tools/`, `examples/`,
-  `benches/` that still exist on disk (78 files; 15 touched paths have since been deleted,
-  including the retired `clients/python/` package).
-- Static-analysis baseline — `cargo clippy --all-targets --message-format=json` (0
-  diagnostics) and the semgrep invocation at `.config/mise/tasks/security.toml:20` (0 results).
-- Covering-test relation — reverse traversal of `calls`/`references`/`instantiates` edges in
-  `.codegraph/codegraph.db` at depth 1. The rule was validated against 126 markers harvested
-  from 33 `codegraph explore` calls: depth 1 agrees on 124 of 126, and the 2 disagreements are
-  test-glob edge cases (`bindings/microvms-js/__test__/*.mjs` is not treated as a test;
-  `bindings/microvms-py/examples/typed_usage.py` is). Aligning on those reproduces the tool at 126/126.
-- In-file unit-test census — count of `#[test]` and `tokio::test` attributes per
-  `*/src/**/*.rs`.
-- Per-file coverage cross-check — `codegraph affected <path> -d 1 --json`. Depth matters: at
-  the default `-d 5` every path returns the same saturated 19-file test set, so the default
-  invocation is not a discriminator.
+**Review focus.** Review polling, new execution, and streaming as distinct paths: polling returns before request construction (`crates/microvms-cli/src/commands/attached.rs:249-275`). Streaming emits events while it runs, so changes to completion and error handling also need to preserve the already-emitted output contract (`crates/microvms-cli/src/commands/attached.rs:497-517`).
 
 ## See also
 
-- [business logic](../insights/business-logic.md)
-- [impact analysis](../insights/impact-analysis.md)
-- [contract map](../insights/contract-map.md)
-- [public api](../reference/public-api.md)
-- [dead code](dead-code.md)
+- [module map](../architecture/module-map.md) — 12 shared source citations
+- [contract map](../insights/contract-map.md) — 8 shared source citations
+- [impact analysis](../insights/impact-analysis.md) — 6 shared source citations
+- [dead code](dead-code.md) — 4 shared source citations
+- [data flow](../architecture/data-flow.md) — 3 shared source citations

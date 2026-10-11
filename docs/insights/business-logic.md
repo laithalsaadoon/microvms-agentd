@@ -1,617 +1,125 @@
 # microvms-agentd · Business logic
 
-## What counts as business logic here, and why the shape is unusual
-
-There are no users, no orders, and no billing accounts in this codebase. The domain rules are
-**trap closures**: rules that exist because someone measured AWS Lambda MicroVMs behaving in a
-way that points away from its own cause, and paid for that measurement once so no caller pays
-again. A rule here is a refusal that costs a second, standing in for a service answer that
-costs a build cycle, a poll timeout, or an hour spent auditing a correct IAM policy.
-
-**Scope.** Everything in this file is application-layer. There is no database, no ORM, and no
-migration, so there are no DB-side invariants to surface. There is no UI, so there is no
-form-validation layer. Request validation performed by AWS is out of scope *except* where this
-client duplicates it deliberately — which it does in most places, for a measured reason: read
-2026-08-07 out of botocore's `validate.py`, `VALIDATED_METADATA_ATTRS` is
-`{'required', 'min', 'document', 'union'}`, so `max`, `pattern`, and `enum` violations are
-serialized, sent, and answered with a `ValidationException`
-(`crates/microvms-domain/src/constants.rs:11-23`). And this client never reaches that validator at all:
-it signs with `aws-sigv4` and sends with `reqwest`, so **every** model constraint including
-`min` is enforced by this crate or by nothing (`crates/microvms-domain/src/constants.rs:25-31`).
-Deleting a local guard on the assumption that the SDK covers the model reopens the constraint
-with no visible failure.
-
-### The rules are formal requirements first, code second
-
-`verify/spec/core.symspec.json` carries the EARS requirements for `microvms-core`, every one at
-`status: approved`, in these families:
-
-| Family | What it governs |
-| --- | --- |
-| `TRAP-*` | closures over platform behavior that misleads |
-| `STATE-*` | the VM lifecycle |
-| `COST-*` | cost honesty |
-| `CLI-*` | the binary's surface, its exit contract, and a reader that closes stdout or stderr |
-| `ARCH-*` | crate boundaries |
-| `BIND-*` | what a language binding may not weaken, and the core behavior the bindings expose: exec results, egress posture, sizing, preflight, and the agentd binary |
-| `IMAGE-*` | wrapping a task Dockerfile, and building or reusing the image it describes |
-
-`verify/spec/agentd.symspec.json` adds the daemon's own requirements. Its bootstrap and control-token
-ladder is still `status: draft` — accept a control request whose token equals the installed
-one, reject a differing one, reject any control request while none is installed, install on
-first bootstrap, accept an identical replay, reject a different token. The approved ones cover
-how a start request resolves its user, group, shell, and child environment, and what
-`/v1/health` reports about the image environment snapshot.
-
-The spec's `stateModel` names its variables: `vm_state` over
-`PENDING / RUNNING / SUSPENDING / SUSPENDED / TERMINATING / TERMINATED`, plus
-`token_installed`, `image_exists`, `was_terminated`, and `bootstrap_count` bounded `0..3`, all
-`frame: stable`. Lifecycle invariants over that model are proved in Z3 by
-`mise run spec:core`, whose run recorded 2026-08-08 reports 3 constraints proved under
-hypotheses, 0 violated, 0 unknown (`mise.toml:224-226` at 9c462f0) — that task needs a
-symspec v5 CLI at an absolute path, so it is deliberately outside `mise run check`
-(`.config/mise/tasks/trace.toml:15-28`). The runnable half is `stateright`, which restates the same invariants
-over every interleaving in
-`crates/model/src/client.rs:554-570` and passes under `cargo test -p agentd-model`. The waivers are all
-`GTWR_R6_MISSING_UNITS`: against TRAP-5, because the linter's unit list does not include bytes,
-and against BIND-6 and BIND-10, whose 124 and 128 are POSIX exit statuses that carry no unit.
-
-### The strength ladder, and how to read the failure-mode column
-
-Every closure is ranked, strongest first, at `crates/microvms-core/src/lib.rs:21-40`:
-
-- **S1, inexpressible** — the mistake cannot be written down: a closed enum, a newtype with no
-  conversion, an absent parameter. An S1 closure cannot regress without a compile error.
-- **S2, expressible but rejected** — the mistake can be written, and the client refuses it
-  locally before any control-plane call, with an error naming the `docs/PLATFORM.md` finding.
-  Weaker, because the guard is code that can regress, but the cost is seconds rather than a
-  build cycle. Every boundary where a bare integer or string still has to be judged lands here.
-- **S3, correct by default and overridable** — weakest, because it protects only the caller who
-  accepts the default. An S3 closure must state what the override costs, as
-  `Region::unlisted` does below.
-
-The ladder comes with conventions. **Every error message names its finding** rather than
-restating the constraint, because the guards exist so a reader can reach the measurement
-(`crates/microvms-core/src/lib.rs:42-48`). **Every guard has a demonstrated way to fail** — a named
-plausible edit that must turn a specific test red; "delete the feature and the test fails" does
-not count (`crates/microvms-core/src/lib.rs:50-57`).
+This index covers domain validation and calculations in `microvms-domain`, orchestration policies in `microvms-app`, and request and execution rules in `agentd`. It documents the checks this repository implements; service-side behavior beyond those checks is outside its scope. The sources separate pure sizing rules, image preflight, lifecycle transitions, and daemon handlers. `crates/microvms-domain/src/sizing.rs:153`, `crates/microvms-app/src/control/image.rs:273`, `crates/microvms-app/src/sandbox.rs:1584`, `crates/agentd/src/exec.rs:341`.
 
 ## Validations
 
-All row citations are the enforcement site. Where a rule is S1, the "failure mode" column says
-what a caller cannot write rather than what they are told.
-
-### Control-plane request shapes
-
-The `require_*` functions in `crates/microvms-app/src/control/mod.rs`, each guarding a member the
-pinned service model constrains and the SDK does not check.
+### microvms-domain
 
 | Rule | Domain | Citation | Failure mode |
 | --- | --- | --- | --- |
-| `maximumDurationInSeconds` outside `1..=28800` is refused | Launch | `crates/microvms-app/src/control/mod.rs:449-466`, constant at `crates/microvms-domain/src/constants.rs:263` | `ERR_INVALID_ARG` saying a longer session needs a second VM, not a larger number. 28800 is eight hours and the hard ceiling on any one VM's life |
-| `idlePolicy.maxIdleDurationSeconds` under 60 is refused | Launch | `crates/microvms-app/src/control/mod.rs:720-750`, constant at `crates/microvms-domain/src/constants.rs:241-258` | `ERR_INVALID_ARG`. The model states no maximum and the client adds none; the bound that ends a VM's life is `maximumDurationInSeconds` |
-| A `Version` value that is empty, over 2048 characters, or carries whitespace anywhere is refused | Image build, Launch | `crates/microvms-app/src/control/mod.rs:468-514`, constants at `crates/microvms-domain/src/constants.rs:121`, `:128` | Three separate `ERR_INVALID_ARG` messages. The pattern is `[^\s]+`, so a version pasted with a trailing newline satisfies "non-empty" and fails; the message names the character it found |
-| A `NonBlankString` member (`codeArtifact.uri`, `baseImageArn`, `nameFilter`, `imageVersion`, `buildId`) that is empty, over 2048 characters, or carries whitespace is refused | Image build | `crates/microvms-app/src/control/mod.rs:516-568`, constants at `crates/microvms-domain/src/constants.rs:141`, `:145` | `ERR_INVALID_ARG` naming the character. A blank `nameFilter` rides in the query string, where it either 400s or filters differently from what was meant |
-| An identifier that is empty or over 256 characters is refused | Every operation | `crates/microvms-app/src/control/mod.rs:570-623`, constants at `crates/microvms-domain/src/constants.rs:174`, `:183` | `ERR_INVALID_ARG`. An empty identifier is the case that pays for this guard: where the member is a URI parameter, an empty one collapses `/microvms/<id>` onto the listing and a `DELETE` on a collapsed path is worse |
-| A `RoleArn` under 20 characters, over 2048, or off-pattern is refused | Image build, Launch | `crates/microvms-app/src/control/mod.rs:625-680`, constants at `crates/microvms-domain/src/constants.rs:209`, `:212`, `:225` | Three messages. The short case says a value that short is almost always a role *name*; the pattern case names the twelve account digits |
-| A port of 0 is refused; there is no ceiling branch | Image build, Session | `crates/microvms-app/src/control/mod.rs:682-718`, constants at `crates/microvms-domain/src/constants.rs:232`, `:239` | `ERR_INVALID_ARG`. Zero means "let the kernel choose" to a listener and is not a port the platform can forward to. `PortNumber.max` equals `u16::MAX`, so a ceiling branch would be unreachable — pinned instead by `crates/microvms-domain/src/constants.rs:1240` |
-| A tag key that is empty, over 128 characters, or off-pattern is refused; a tag value over 256 or off-pattern is refused | Image build | `crates/microvms-app/src/control/mod.rs:752-818`, constants at `crates/microvms-domain/src/constants.rs:186`, `:189`, `:206` | `ERR_INVALID_ARG` naming the offending key. An empty tag *value* is legal and an empty key is not, and the two ceilings differ by 2x |
-| An image name that is empty, over 64 characters, or outside `[a-zA-Z0-9-_]+` is refused | Image build | `crates/microvms-app/src/control/mod.rs:820-850`, constants at `crates/microvms-domain/src/constants.rs:104`, `:112` | Three messages, because the pattern message ("no dots, no slashes") misleads for a 70-character name containing neither |
-| More than 10 network connectors on a launch is refused | Networking | `crates/microvms-app/src/control/microvm.rs:391-399`, constant at `crates/microvms-domain/src/constants.rs:290` | `ERR_INVALID_ARG`. The image-level egress list caps at **1**, not 10 (`crates/microvms-domain/src/constants.rs:292-304`), pinned by `crates/microvms-domain/src/constants.rs:897` |
+| A baseline memory request must match an entry in the size table. | Sizing | `crates/microvms-domain/src/sizing.rs:153` | Invalid-argument error; no rounding to a neighboring class. |
+| CPU requests must be finite and nonnegative; the selected class must cover both requested baseline resources. Zero or absent resources impose no requirement. | Sizing | `crates/microvms-domain/src/sizing.rs:179` | Invalid-argument error when no class covers the request; no requirements selects the default. |
+| A VM name must be nonempty, at most 128 bytes, use ASCII letters, digits, hyphen, or underscore, and avoid the `microvm-` and `mvm-` prefixes. | Names | `crates/microvms-domain/src/names.rs:33` | Descriptive validation error. |
+| Ordinary region parsing accepts the names in `MICROVM_REGIONS`. | Regions | `crates/microvms-domain/src/region.rs:168` | Invalid-argument error for an unlisted name. |
+| Run-family hook timeouts are 1–60 seconds; build-family timeouts are 1–3600 seconds. Hook ports are 1–65535. | Hooks | `crates/microvms-domain/src/hooks.rs:66`, `crates/microvms-domain/src/hooks.rs:89`, `crates/microvms-domain/src/hooks.rs:141` | Invalid-argument error naming the accepted range. |
+| A cost size must be finite, nonnegative, and convertible from its decimal string. | Cost | `crates/microvms-domain/src/cost.rs:138` | Invalid-argument error. |
+| Calendar inputs must describe a real civil date; Unix seconds must fit the calendar's supported range. | Cost | `crates/microvms-domain/src/cost.rs:229`, `crates/microvms-domain/src/cost.rs:254` | Invalid-argument error instead of normalization or clamping. |
+| A rate catalog must provide an unambiguous product with the expected unit for every required billing line. | Cost | `crates/microvms-domain/src/cost.rs:1198` | Invalid-argument error for absent, ambiguous, or differently denominated rates. |
 
-`ControlPlane::run_microvm` runs the identifier, duration, idle-duration, version, and role-ARN
-guards before it builds a wire body (`crates/microvms-app/src/control/microvm.rs:356-374`).
-
-### Image build and Dockerfile agreement
-
-The Dockerfile guards compare what this client sends against what the caller's Dockerfile declares.
-Every one of them defends against the same failure shape: a build that succeeds, a daemon that logs
-that it started, and an image that still lands in `CREATE_FAILED` naming nothing.
+### microvms-app
 
 | Rule | Domain | Citation | Failure mode |
 | --- | --- | --- | --- |
-| `inherit_workdir` against a base that declares no `WorkingDir` and a Dockerfile that sets none is refused | Image build | `crates/microvms-app/src/control/artifact.rs:234-262` | `ERR_INVALID_ARG`. Measured 2026-08-05: `al2023-minimal`, `python:3.12-slim`, and `node:20-slim` all leave `WorkingDir` empty, so inheritance inherits `/` and every relative path resolves somewhere the caller did not mean |
-| A Dockerfile whose `FROM` is not the selected base image's `docker_ref` is refused | Image build | `crates/microvms-app/src/control/artifact.rs:524-548` | `ERR_INVALID_ARG`. The build runs the Dockerfile on top of `baseImageArn`, so a mismatch builds against a base none of the measured platform behavior describes |
-| A Dockerfile whose `AGENTD_PORT` disagrees with the `hooks.port` this client sends is refused; an absent variable is checked against the daemon's own default of 9000 | Image build | `crates/microvms-app/src/control/artifact.rs:305-348` | `ERR_INVALID_ARG`. Silence is not neutral: the daemon keeps its default for an unset variable, so the absent variable produces the failure for a caller who never typed a port |
-| A Dockerfile `AGENTD_SSE_KEEPALIVE_SECS` at or above the client's stream idle timeout is refused | Image build | `crates/microvms-app/src/control/artifact.rs:405-445` | `ERR_INVALID_ARG`. Equality is refused too, since an interval equal to the timeout races. The failure it prevents reports the client's own 60s as though it were the keepalive interval |
-| A Dockerfile with no `CMD`, or with a non-empty `ENTRYPOINT`, is refused | Image build | `crates/microvms-app/src/control/artifact.rs:483-522` | `ERR_INVALID_ARG`. Weak-form on purpose: it does not check that the `CMD` names a copied path. The unenforceable half — a base image starting its own process before bootstrap — stays with whoever builds the image |
-| The daemon entry in the build artifact carries mode `0o755` explicitly | Image build | `crates/microvms-app/src/control/artifact.rs:1-13`, `:36-39` | Structural. A non-executable binary produces an image whose `CMD` fails, and the symptom is a run-hook timeout that says nothing about permissions |
-| The agent token has no path into the build artifact | Image build | `crates/microvms-app/src/control/artifact.rs:15-23` | Unwritable (S1). `build_artifact` has no parameter that could carry one. The artifact becomes a shared image snapshot, so a per-VM secret in it is a secret shared with every VM; a test scans the produced zip's raw bytes rather than reviewing the API |
+| Maximum VM duration must be 1–28800 seconds; an explicit idle duration must be at least 60 seconds. | Launch | `crates/microvms-app/src/control/mod.rs:560`, `crates/microvms-app/src/control/mod.rs:928` | Invalid-argument error. |
+| Versions and nonblank strings must be nonempty, at most 2048 bytes, and contain no ASCII whitespace. Identifiers must be nonempty and at most 256 bytes. | Request shapes | `crates/microvms-app/src/control/mod.rs:595`, `crates/microvms-app/src/control/mod.rs:648`, `crates/microvms-app/src/control/mod.rs:704` | Invalid-argument error naming the member. |
+| Role ARNs must satisfy the length limits and the structural role-ARN predicate; ports represented as `u16` must be nonzero. | Request shapes | `crates/microvms-app/src/control/mod.rs:753`, `crates/microvms-app/src/control/mod.rs:895` | Invalid-argument error; the ARN check does not establish that a role exists. |
+| Image names must be nonempty, at most 64 bytes, and use ASCII letters, digits, hyphen, or underscore. | Image build | `crates/microvms-app/src/control/mod.rs:1014`, `crates/microvms-domain/src/constants.rs:512` | Invalid-argument error. |
+| Tag keys must be nonempty and at most 128 bytes; values may be empty and are limited to 256 bytes. Both use the shared tag-character predicate. | Image build | `crates/microvms-app/src/control/mod.rs:961` | Invalid-argument error identifying the key or value. |
+| A serialized run-hook payload must fit within 4096 bytes. | Launch | `crates/microvms-app/src/control/microvm.rs:201`, `crates/microvms-domain/src/constants.rs:83` | Invalid-argument error. |
+| A configured log stream requires a log group. Its caller-supplied prefix reserves room for the per-attempt suffix and cannot contain `:` or `*`. | Image build | `crates/microvms-app/src/control/image.rs:311`, `crates/microvms-app/src/control/mod.rs:837` | Invalid-argument error during preflight. |
+| Inheriting the work directory requires the base image or Dockerfile to declare one. | Image build | `crates/microvms-app/src/control/artifact.rs:854` | Invalid-argument error. |
+| A supplied Dockerfile must agree with the selected base image and daemon port; its keepalive interval must be below the stream idle timeout. | Image build | `crates/microvms-app/src/control/image.rs:279`, `crates/microvms-app/src/control/artifact.rs:940`, `crates/microvms-app/src/control/artifact.rs:1027` | Invalid-argument error during preflight. |
+| Dockerfile validation rejects a nonempty `ENTRYPOINT` and requires a nonempty `CMD`. | Image build | `crates/microvms-app/src/control/artifact.rs:1105` | Invalid-argument error; this predicate checks command shape. |
+| A nonempty supplied daemon binary must pass the aarch64 binary check. | Image build | `crates/microvms-app/src/control/image.rs:355`, `crates/microvms-domain/src/provision.rs:48` | Precondition error during preflight. |
+| Keep-awake configuration requires an idle window of at least 60 seconds and a polling interval from one second through half that window. | Session | `crates/microvms-app/src/session/keepalive.rs:152` | Invalid-argument error before polling. |
+| Proxy-token refresh must occur before the 60-minute lifetime limit. | Session | `crates/microvms-app/src/session/proxy.rs:343` | Invalid-argument error at construction. |
 
-### Trap closures — control plane
-
-| Rule | Domain | Citation | Failure mode |
-| --- | --- | --- | --- |
-| TRAP-1: an image-create or run token is derived from a per-attempt nonce; there is no caller-supplied token parameter | Idempotency | `crates/microvms-app/src/control/token.rs:105`, `:116`, `:125-153` | Unwritable (S1). The parameter does not exist. Minted at `crates/microvms-app/src/control/image.rs:187-194` and `crates/microvms-app/src/control/microvm.rs:415` |
-| TRAP-1: the scope label is truncated at its **tail**, never its head, and the nonce is never truncated | Idempotency | `crates/microvms-app/src/control/token.rs:57-73`, `:155` | Silent truncation of the label only. 64-byte scope plus an 8-byte hex nonce stays under the 128-character `clientToken` ceiling (`crates/microvms-domain/src/constants.rs:423`) |
-| TRAP-2: an image in `CREATING` past the stall grace with builds listed, non-empty, and **every** build still `PENDING` fails the wait | Image build | `crates/microvms-app/src/control/image.rs:323-329`, `:343-395` | `ERR_BUILD_WEDGED`, naming the `clientToken` replay signature. A `clientToken` is a permanent idempotency key, so a replayed create is a no-op: the image sits in `CREATING`, cannot be deleted, and its only version cannot be dropped. Two images were wedged this way for ~15 hours |
-| TRAP-3: guest identity repair is a `bool` intent; the client injects the one accepted enum value `["ALL"]` | Image build | `crates/microvms-app/src/control/image.rs:181-185`, `crates/microvms-domain/src/constants.rs:276-280` | Unwritable (S1). There is no capability list a caller can populate, and no way to ask for `CAP_SYS_ADMIN` alone |
-| TRAP-4: a connector is an enumerated intent that derives a fully-qualified ARN for the request region | Networking | `crates/microvms-app/src/control/connector.rs:39-47`, `:60-83` | Unwritable (S1). Enumerated intents (`AllIngress`, `HttpIngress`, `ShellIngress`, `Egress`), no free-form string. `ConnectorIntent::ALL` at `:54` is the complete set a test can enumerate |
-| TRAP-5: a `runHookPayload` over 4096 bytes is refused locally before any control-plane call | Launch | `crates/microvms-app/src/control/microvm.rs:161-185`, constant at `crates/microvms-domain/src/constants.rs:83` | `ERR_INVALID_ARG` naming the service-model ceiling. Inclusive, measured 2026-08-07: 4096 passes, 4097 fails. Bytes, not characters. `docs/STRATEGY.md`, `docs/TRUST.md`, and the model's own documentation string all claim 16 KB (`crates/microvms-domain/src/constants.rs:97`), which is wrong by 4x in the dangerous direction — the shape `RunMicrovmRequestRunHookPayloadString` is the authority |
-| TRAP-6: a region outside the five that carry MicroVMs is refused before the first control-plane call | Region | `crates/microvms-domain/src/region.rs:38-63`, `:137-164` | S1 for a held `Region`, S2 at the `FromStr` boundary. `ERR_INVALID_ARG` naming the null-message `AccessDeniedException` finding |
-| TRAP-8: a VM reaching a state in `fail_on` before the wanted one fails the wait with state **and** `stateReason` attached | Launch | `crates/microvms-app/src/control/microvm.rs:461-466`, `:482-500` | `ERR_LAUNCH_DIED`. Fails fast rather than polling to the deadline. Both facts, because either alone is unactionable: the state says the VM is gone, the reason is the only evidence that survives it |
-| TRAP-10: a `minimumMemoryInMiB` that is not one of the five documented baselines is refused locally | Sizing | `crates/microvms-domain/src/sizing.rs:25-31`, `:146-161` | S1 for a held `SizeClass`, S2 at `from_baseline_mib`. Refused, never snapped to a neighbour: the two plausible service behaviors for 1500 differ in both the memory the guest gets and the rate it is billed at |
-| TRAP-11: `CreateMicrovmShellAuthToken` is never called and `SHELL_INGRESS` is never requested | Networking | `crates/microvms-app/src/control/connector.rs:16-28`, `crates/microvms-app/src/control/mod.rs:27-31` | Unwritable (S1). No enum variant renders it and no method on `ControlPlane` calls it. The test counts the calls a full lifecycle makes rather than asserting a refusal |
-| Two hook-timeout families cannot be interchanged: run/resume/suspend/terminate cap at 60s, ready/validate at 3600s | Hooks | `crates/microvms-domain/src/hooks.rs:56-82`, `:84-105`, constants at `crates/microvms-domain/src/constants.rs:268`, `:271` | Unwritable across families (S1) — no `From`, no shared trait. S2 within a family: `ERR_INVALID_ARG` naming **both** ceilings, because the caller who hits it nearly always picked a build-hook number |
-| A hook port outside `1..=65535` is refused | Hooks | `crates/microvms-domain/src/hooks.rs:141-149` | `ERR_INVALID_ARG` naming the model range and version |
-| An architecture other than `ARM_64` cannot be requested | Image build | `crates/microvms-app/src/control/image.rs:168-172`, `crates/microvms-domain/src/constants.rs:282-287` | Unwritable (S1). The enum has one value, so the field is injected rather than accepted — a field could only ever express a request AWS rejects, after the upload |
-| `ENABLED` on all six hooks is a typed enum value, not a `&str` literal | Image build | `crates/microvms-app/src/control/mod.rs:852-881` | Compile error. The literal appeared six times with no constant naming either value, so a typo in one was a `ValidationException` on a call made after the artifact upload |
-
-### Trap closures — in-VM session
+### agentd
 
 | Rule | Domain | Citation | Failure mode |
 | --- | --- | --- | --- |
-| TRAP-7: the proxy token is read out of the `authToken` **map**, never as a string | Session | `crates/microvms-app/src/control/microvm.rs:268-283`, `:300-326`, `crates/microvms-app/src/session/proxy.rs:14-19` | S1: `ProxyToken` exposes no `as_str`, no `Display`, no `Deref`; the auth value comes out through `auth_value()`, which names the header it reads (`crates/microvms-app/src/session/proxy.rs:177`). A missing key is `WireKind::AuthTokenMint`, which is retryable |
-| TRAP-7: every endpoint request sends **both** `X-aws-proxy-auth` and `X-aws-proxy-port` | Session | `crates/microvms-app/src/control/microvm.rs:328-337`, `crates/microvms-app/src/session/proxy.rs:401-407`, `:409-434` | Structural: `headers()` returns a two-element array. One without the other is rejected indistinguishably from a bad token, so the header that is wrong is not the header the error mentions |
-| A WebSocket handshake carries the same two facts as three subprotocols, minted through the same cache | Session | `crates/microvms-app/src/session/proxy.rs:39-52`, `:436-469` | Structural. The browser `WebSocket` constructor cannot set a header, so the platform moves both facts into `Sec-WebSocket-Protocol` and strips all three before forwarding. A second token path would be a second place TRAP-9 has to be got right |
-| TRAP-9: the token is minted inside the request path, through exactly one mint function | Session | `crates/microvms-app/src/session/proxy.rs:471-479`, `:481-533` | Structural: `headers`, `headers_for_port`, and `subprotocols` all reach the control plane through `token_for`. A cache miss is two conditions — stale, or out of scope for the requested port |
-| A refresh interval at or above the 60-minute ceiling is refused at construction | Session | `crates/microvms-app/src/session/proxy.rs:329-348`, constants at `:107`, `:109-111` | S2, `ERR_INVALID_ARG`. `DEFAULT_REFRESH_AFTER` is 30 minutes — **half** the ceiling, not just under it, because refreshing at fifty-nine minutes puts the expiry inside the window between building the headers and the proxy validating them |
-| A mint asks for every port already cached plus the new one | Session | `crates/microvms-app/src/session/proxy.rs:505-518` | A superset rather than a replacement. Measured 2026-08-15: a token minted for the agent port does not authorize 8080, and reusing it produces `403 Access to port denied` — whose WebSocket form is an unreasoned 1006 |
-
-### Cost inputs
-
-| Rule | Domain | Citation | Failure mode |
-| --- | --- | --- | --- |
-| COST-1: every duration carries a `measured` or `projected` provenance label; there is no unlabelled constructor | Cost | `crates/microvms-domain/src/cost.rs:426-432` | Unwritable (S1). `DurationP` is an enum whose every variant names its provenance; no `From<Duration>`, no `Default`, both pinned by `compile_fail` doctests at `:405-418` |
-| COST-2: an estimated dollar amount has no coercion to a bare float | Cost | `crates/microvms-domain/src/cost.rs:553-585` | Unwritable (S1). Private field, no `From`, no `Into<f64>`, no `Deref`. The `compile_fail` doctests at `:529-555` each pin their own error code |
-| COST-3: an unpriced quantity is a distinct `Unpriced` variant carrying a reason, never zero dollars | Cost | `crates/microvms-domain/src/cost.rs:621-632` | S1 by exhaustive `match`. Zero is a claim about the bill; unpriced is a claim about the documentation |
-| COST-6: `gb_decimal` is the only place an `f64` becomes a `Decimal`, and it is fallible | Cost | `crates/microvms-domain/src/cost.rs:138-152` | `ERR_INVALID_ARG`. A negative size would render as a credit; `NaN`, an infinity, and a magnitude past 28 digits have no decimal reading. `EstimatedUsd::new` takes a `Decimal` so it cannot become a third boundary (`:563-571`) |
-| COST-9: a rate catalog whose ARM compute line is missing is rejected rather than substituted | Cost | `crates/microvms-domain/src/cost.rs:1198-1206`, `:1210-1268`, `:1278-1312` | S1 for direct construction — the rate fields are private and the only doors are `pinned_rates` and `from_catalog`. S2 at `from_catalog`, which refuses a missing ARM line whose x86 sibling is present, a missing line with no sibling, a restated unit, and two products where there was one. The ARM message names the x86 rate it will not substitute and the ~18% error that substituting would introduce |
-| A calendar date arriving from outside the crate is validated against its month's real length | Cost | `crates/microvms-domain/src/cost.rs:232-241` | S2. `2026-02-30` would otherwise yield a day number for March 2nd and an age two days out |
-
-### Daemon authorization
-
-| Rule | Domain | Citation | Failure mode |
-| --- | --- | --- | --- |
-| A control request whose token equals the installed agent token is accepted | Daemon auth | `crates/agentd/src/state.rs:241-249`, `crates/agentd/src/auth.rs:75-79` | Constant-time byte comparison via `subtle::ConstantTimeEq` (`crates/agentd/src/auth.rs:28-33`) |
-| A control request whose token differs is rejected | Daemon auth | `crates/agentd/src/auth.rs:78` | 401 |
-| A control request while no token is installed is rejected **distinguishably** from a bad credential | Daemon auth | `crates/agentd/src/state.rs:241-249`, `crates/agentd/src/auth.rs:73`, `:76` | 503, never 401 and never 404 — a client maps 404 onto "file not found", turning a protocol error into a phantom missing artifact |
-| A bootstrap request presenting a token while none is installed installs it | Daemon auth | `crates/agentd/src/state.rs:202-212`, `crates/agentd/src/routes.rs:214-223` | 200 |
-| A bootstrap request presenting a token **identical** to the installed one is accepted | Daemon auth | `crates/agentd/src/state.rs:213-215`, `crates/agentd/src/routes.rs:224-229` | 200. The platform may retry its own hook, and answering 409 would fail a launch that is fine |
-| A bootstrap request presenting a **different** token is refused and changes nothing | Daemon auth | `crates/agentd/src/state.rs:216-218`, `crates/agentd/src/routes.rs:230-233` | 409, installed token unchanged |
-| A malformed run-hook body, an absent `runHookPayload`, or a payload that does not parse are each refused | Daemon auth | `crates/agentd/src/routes.rs:182-211` | 400, never 404. The token and the payload carrying it are never logged; the refusal is loggable because `RunHookError` names a key or a shape and never a value |
-| The `Authorization` header is parsed and compared on **raw bytes**, never decoded as UTF-8 first | Daemon auth | `crates/agentd/src/auth.rs:40-47` | No token extracted, or a mismatch. Never a crash — proved over arbitrary header bytes by `crates/agentd/tests/proptest_tar.rs:867`, `:905`, `:931`, `:955` |
-| Authorization is decided **before** the request body is polled, and a rejected body is drained under a cap | Daemon auth | `crates/agentd/src/auth.rs:62-89`, cap at `crates/agentd/src/config.rs:20-24` | An unauthenticated caller cannot make the daemon allocate. Draining lets a client's pooled connection survive an error response; draining without a cap is itself a denial-of-service vector |
-| An unmatched path falls through to the 404 fallback rather than being answered 401 | Daemon auth | `crates/agentd/src/routes.rs:61-76`, `:78-79` | 404. `route_layer` applies the guard only to matched routes: answering 401 for a typo sends a client chasing credentials |
-| `ready`, `validate`, `suspend`, and `terminate` hooks answer 200 without regard to bootstrap state | Daemon lifecycle | `crates/agentd/src/routes.rs:237-258`, `:292-295` | Always 200. `ready` and `validate` are image-*build* hooks called before any instance exists; gating them on a token fails the build rather than the run |
-
-### Daemon filesystem and resources
-
-Confinement here is **two layers**, and the second is the kernel's.
-
-| Rule | Domain | Citation | Failure mode |
-| --- | --- | --- | --- |
-| A tar member path that is rooted, carries a prefix component, or pops past depth zero is refused | File transfer | `crates/agentd/src/fs.rs:198-216`, refusal at `:682` | Member rejected, 400. Resolution is lexical component walking, never `realpath`/`canonicalize`. A leading `/` is refused rather than stripped: CPython strips it from a member name, but a caller learns nothing from a rewrite |
-| Every member is created relative to one root descriptor with `openat2` and `RESOLVE_BENEATH \| RESOLVE_NO_SYMLINKS \| RESOLVE_NO_MAGICLINKS` | File transfer | `crates/agentd/src/fs.rs:45-67` | `ELOOP` for a symlink component, `EXDEV` for a resolution leaving the root; both become a 400 naming the member. This is the layer the lexical one cannot cover: issue #15's `V/a/..` case is judged in-tree by name and lands one level shallower on disk |
-| An absolute symlink or hard-link target is refused outright | File transfer | `crates/agentd/src/fs.rs:228-231`, `:726-729` | Member rejected naming "absolute link target" |
-| A relative link target must resolve under the extraction root, from its own base depth | File transfer | `crates/agentd/src/fs.rs:218-245` | Member rejected. A symlink resolves from its own directory, a hard link from the archive root — different bases, both confirmed against CPython 3.14's `_get_filtered_attrs` |
-| An in-tree symlink is created as a symlink with its target preserved verbatim | File transfer | `crates/agentd/src/fs.rs:20-43` | Accepted. Refusing every link member would break `upload_dir` for any skills tree or test directory containing one — a worse outcome than the traversal hole it guarded |
-| Device and FIFO members are refused; member count and total uncompressed size are capped | File transfer | `crates/agentd/src/fs.rs:41-42`, `:664`, `:777`, caps at `crates/agentd/src/config.rs:37-40` | Member or archive rejected, 413. Boundary behavior proved exactly by `crates/agentd/tests/proptest_tar.rs:776` |
-| The extraction root must be absolute | File transfer | `crates/agentd/src/fs.rs:1433-1448` | 400. A relative root resolves against the daemon's own working directory, which the caller cannot see |
-| A write that would take the filesystem below the configured reserve is refused before it starts | Disk | `crates/agentd/src/disk.rs:66-80`, `crates/agentd/src/fs.rs:97-106`, `:804`, reserve at `crates/agentd/src/config.rs:63-69` | 507 naming the actual free space. Not 500: a 500 is indistinguishable from a daemon defect, so a client retries it — correct for a defect and actively harmful for a full disk. Zero disables the guard |
-| Every buffer, output capture, stdin write, linger, TTL, and stream window is bounded | Resources | `crates/agentd/src/config.rs:11-71` | Truncation with a marker, or a bounded refusal. A stdin write that blocks past its timeout gives up rather than pinning a connection for the life of the VM |
-
-Confinement is deliberately asymmetric, and the reasoning was argued with a reviewer
-(`crates/agentd/src/fs.rs:4-18`). The single-file routes `PUT`/`GET /v1/fs/file` are **not** confined
-to a root. The same bearer token authorizes `POST /v1/exec/start`, which runs arbitrary commands
-as root by design, so a root prefix would add no security while breaking real behavior:
-harnesses write credentials into home directories, drop config into `/etc`, and stage scratch in
-`/tmp`. The confinement that matters is on `PUT /v1/fs/tar`, where member paths come out of an
-uploaded archive rather than from a caller who named them. That gap is where the entire traversal
-class lives.
-
-### CLI parser closures
-
-| Rule | Domain | Citation | Failure mode |
-| --- | --- | --- | --- |
-| CLI-5: `--memory` is a closed value set over the five documented baselines | CLI | `crates/microvms-cli/src/cli.rs:364-383`, reasoning at `:4-19` | Unparseable (S1 at the parser). 1500 never reaches a handler. The difference between refusing it at the parser and refusing it in core is a build cycle |
-| CLI-5: `--region` is a closed value set over the five MicroVM regions | CLI | `crates/microvms-cli/src/cli.rs:417-435` | Unparseable. `--unlisted-region` is the named way out, declared `conflicts_with = "region"` once on a flattened struct so the relationship cannot be forgotten on a new command (`:466-499`) |
-| The domains are spelled out rather than generated, and a test asserts the enum equals the size table | CLI | `crates/microvms-cli/src/cli.rs:13-19`, `crates/microvms-cli/tests/manifest.rs:90` | A domain computed at runtime is invisible to `--help`, to shell completion, and to the manifest's `choices` field. A new size class that does not reach `cli.rs` fails the test rather than shipping unreachable |
-| No `--capabilities`, `--connector`, or `--architecture` flag exists; `--client-token` only on the launch commands `run` and `agent-up` | CLI | `crates/microvms-cli/src/cli.rs:21-31` | Unwritable. Core has no such parameter for those flags, so there is nothing to forward. Absence asserted by the manifest cross-check |
-| A `microvm cp --mode` conflicts with `--tar`; `--poll` conflicts with every writing flag; `--detach` conflicts with the shapes that must not return early | CLI | `crates/microvms-cli/src/cli.rs:1199`, `:1219`, `:1576` | Unparseable, pinned by `crates/microvms-cli/src/cli.rs:2651`, `:2703` |
+| Exec start requires a valid request body and a nonempty exec ID. An explicit timeout must be positive, finite, and representable as a duration. | Execution | `crates/agentd/src/exec.rs:341`, `crates/agentd/src/exec.rs:1171` | HTTP 400 with a malformed-request error. |
+| Direct execution requires a nonempty argument vector; named users, groups, and shells must resolve under the guest lookup rules. | Execution | `crates/agentd/src/exec_start.rs:218`, `crates/agentd/src/exec_start.rs:250`, `crates/agentd/src/exec_start.rs:275`, `crates/agentd/src/exec_start.rs:370` | HTTP 400 with the corresponding request error. |
+| A run-hook payload must be a JSON object with a nonempty string token; supplied environment values and identity fields must have their expected string shapes. | Bootstrap | `crates/protocol/src/hook.rs:145`, `crates/agentd/src/routes.rs:206` | HTTP 400 for an invalid payload. |
+| Archive extraction requires an absolute destination; escaping members, absolute or escaping links, device entries, and FIFOs are refused. | Files | `crates/agentd/src/fs.rs:1438`, `crates/agentd/src/fs.rs:705`, `crates/agentd/src/fs.rs:730`, `crates/agentd/src/fs.rs:746` | HTTP 400; configured archive-size and member limits return HTTP 413. `crates/agentd/src/fs.rs:158` |
+| Protected requests require the installed bearer token. | Authorization | `crates/agentd/src/auth.rs:62` | HTTP 503 before bootstrap; HTTP 401 for missing or mismatched credentials after bootstrap. |
 
 ## Invariants
 
-### VM lifecycle (the STATE requirements)
-
-Enforced in `crates/microvms-app/src/sandbox.rs`, whose `Lifecycle` enum is the spec's `vm_state`
-verbatim and which carries the other spec variables beside it. Every one of those fields is
-private and every mutation happens in one of the lifecycle methods, which is what makes the
-Z3 and `stateright` proofs proofs about *this struct's* reachable states
-(`crates/microvms-app/src/sandbox.rs:9-17`, `:121-135`, `:791-807`).
+### microvms-domain
 
 | Invariant | Where enforced | Citation |
 | --- | --- | --- |
-| STATE-1: an accepted launch moves the lifecycle to PENDING and records the image as existing | Application, `Sandbox::run`, after the wire call | `crates/microvms-app/src/sandbox.rs:1123-1131` |
-| STATE-2: the platform reporting a successful run hook is what marks the lifecycle RUNNING and the token installed — not the launch call | Application, `Sandbox::run`, after the wait | `crates/microvms-app/src/sandbox.rs:1198-1202` |
-| STATE-3: the agent token is installed at most once per VM lifetime | Application, both sides | `crates/microvms-app/src/sandbox.rs:1030-1042` (a second `run` on one sandbox is refused); `crates/agentd/src/state.rs:202-221` (the daemon's one-shot bootstrap) |
-| STATE-4: a suspend accepted from RUNNING moves the lifecycle to SUSPENDING before the wait, and after the call | Application, `Sandbox::suspend` | `crates/microvms-app/src/sandbox.rs:1462-1471` |
-| STATE-5: no suspend call is issued while the lifecycle is not RUNNING | Application, before the wire | `crates/microvms-app/src/sandbox.rs:1451-1460` |
-| STATE-6: the platform reporting suspension complete marks the lifecycle SUSPENDED; a VM that dies while suspending is recorded as terminated instead | Application, `Sandbox::suspend` | `crates/microvms-app/src/sandbox.rs:1483-1503`, wanted set at `crates/microvms-app/src/control/microvm.rs:652` |
-| STATE-7: a resume is issued only from SUSPENDED, reuses the installed token, and re-delivers **no** run-hook payload | Application, `Sandbox::resume` | `crates/microvms-app/src/sandbox.rs:1544-1549`, `:1554` |
-| STATE-8: a completed resume invalidates the cached proxy token, through the endpoint the service just reported | Application, `Session::rebind` | `crates/microvms-app/src/sandbox.rs:1570-1578`, `crates/microvms-app/src/session/mod.rs:251-262` |
-| STATE-9: an accepted terminate moves the lifecycle to TERMINATING and records the VM as terminated — **before** the call | Application, `Sandbox::terminate` | `crates/microvms-app/src/sandbox.rs:1652-1656` |
-| STATE-10: the platform reporting termination complete marks the lifecycle TERMINATED | Application, `Sandbox::terminate`, only when a wait was asked for | `crates/microvms-app/src/sandbox.rs:1679-1683` |
-| STATE-11: a terminated VM never returns to RUNNING, checked before the window check and before any call | Application, `Sandbox::resume` | `crates/microvms-app/src/sandbox.rs:1535-1543` |
-| STATE-12: a resume past the launch-time suspended window is refused with the elapsed window named | Application, before `ResumeMicrovm` | `crates/microvms-app/src/sandbox.rs:1551-1552`, `:1593-1626` |
-| The suspended-window clock is stamped after the suspend call and before the wait, and cleared on a successful resume | Application, `Sandbox` | `crates/microvms-app/src/sandbox.rs:1468-1471`, `:1579-1582` |
-| The Z3-proved invariants hold over every interleaving: bootstrap at most once, no suspend outside RUNNING, a terminated VM never reaches RUNNING | `stateright` model | `crates/model/src/client.rs:554-570` |
-| A locally refused call costs **zero** wire calls: resume after terminate, resume with the window closed, and the payload count matching the launch count are all checked as counters, not as end states | `stateright` model | `crates/model/src/client.rs:585-599`, `:625-642` |
-| The installed token is never replaced and survives a suspend/resume cycle | `stateright` model | `crates/model/src/client.rs:600-617` |
-| `image_exists` is true exactly when a launch was accepted, and a bootstrapped token implies one | `stateright` model | `crates/model/src/client.rs:571-583` |
+| Baseline, peak, and headroom accessors read the size table; headroom is the difference between its peak and baseline. | `SizeClass` accessors | `crates/microvms-domain/src/sizing.rs:218`, `crates/microvms-domain/src/sizing.rs:243` |
+| Run and build hook timeouts are distinct types with separately checked constructors. | `RunHookTimeout` and `BuildHookTimeout` | `crates/microvms-domain/src/hooks.rs:46`, `crates/microvms-domain/src/hooks.rs:52` |
+| Duration values carry measured or projected provenance. Planned usage is wrapped as projected before report generation. | `DurationP` and `estimate_run` | `crates/microvms-domain/src/cost.rs:391`, `crates/microvms-domain/src/cost.rs:1935` |
+| Unknown prices remain unpriced; a total containing them is a lower bound with the unpriced items attached. | `build_line` and `Total::of` | `crates/microvms-domain/src/cost.rs:1700`, `crates/microvms-domain/src/cost.rs:732` |
 
-### Daemon
+### microvms-app
 
 | Invariant | Where enforced | Citation |
 | --- | --- | --- |
-| The launch environment is installed only on the *first* bootstrap, under the token lock | Application, `AppState::bootstrap` | `crates/agentd/src/state.rs:196-210`. A racer that loses the token cannot win the environment: the winner's map is in place before any other caller can observe a token installed |
-| The agent token and the launch environment are separate parameters, so no code path can move a byte from one into the other | Application, by signature | `crates/agentd/src/state.rs:187-194`, `crates/agentd/src/routes.rs:166-177` |
-| An exec id already present in the registry returns success **without spawning a second child**, decided under the registry lock | Application, `agentd` exec | `crates/agentd/src/exec.rs:363-377` |
-| A poisoned lock is recovered rather than propagated, and the soundness argument is per-lock | Application, `agentd` state | `crates/agentd/src/state.rs:8-66`, `:76-92` |
-| An arbitrary archive never escapes its root and never panics | `proptest`, 256 cases | `crates/agentd/tests/proptest_tar.rs:566` |
-| A symlink cannot redirect a member that arrives after it | `proptest` | `crates/agentd/tests/proptest_tar.rs:600` |
-| Plain members and in-tree symlinks are always accepted | `proptest` | `crates/agentd/tests/proptest_tar.rs:720` |
-| The attacker is never authorized; bootstrap is one-shot; only the installed token is accepted; the control API is closed before bootstrap | `stateright` model | `crates/model/src/lib.rs:451-474` |
-| Output is never released before an ack; a retried start never spawns twice; there is one exec entry per id | `stateright` model | `crates/model/src/lib.rs:475-490` |
-| Every safety property has a `sometimes` property beside it, so a green run cannot mean a state space that never reached the interesting states | `stateright` model | `crates/model/src/lib.rs:494-525` |
+| Image creation uses the same preflight method available to callers. | `ControlPlane::create_image` | `crates/microvms-app/src/control/image.rs:188` |
+| Suspend is accepted locally only from `Running`; its settled result records either `Suspended` or `Terminated`. | `Sandbox::suspend` | `crates/microvms-app/src/sandbox.rs:1584` |
+| Resume requires `Suspended`, refuses a previously terminated VM, and rebinds the session after reaching `Running`. | `Sandbox::resume` | `crates/microvms-app/src/sandbox.rs:1668` |
+| Teardown records termination intent before calling the service. Waiting for completion changes the recorded lifecycle to `Terminated` only after that state is observed. | `Sandbox::terminate` | `crates/microvms-app/src/sandbox.rs:1788` |
 
-### Cross-crate and cost
+### agentd
 
 | Invariant | Where enforced | Citation |
 | --- | --- | --- |
-| COST-4: an unpriced line routes the whole total to a lower-bound variant that names its unpriced items | Application, one `Total::of` | `crates/microvms-domain/src/cost.rs:713-758`. `Total::AtLeast` holds the floor *beside* the reasons, and `Add` is implemented only `EstimatedUsd + EstimatedUsd`, so summing an `Amount` is a compile error |
-| COST-5: each compute line item is computed from the size-class **baseline**, never from the peak the guest reports | Application, by reachability | `crates/microvms-domain/src/cost.rs:1591-1623`, accessors at `crates/microvms-domain/src/sizing.rs:184-205`. `compute_lines` reaches only `baseline_gb`/`baseline_vcpu`; reading the peak would overstate the memory line exactly 4x |
-| COST-7: a rate table older than 90 days attaches a staleness warning to every report computed from it | Application, on the report | `crates/microvms-domain/src/cost.rs:90-95`, `:971-997`, `:1520-1522`. Carried on the report rather than logged, so a library caller with a log filter and a CLI writing only stderr do not each lose it |
-| COST-8: the one-week minimum retention floor applies to every snapshot storage line item | Application, a field on the rate row | `crates/microvms-domain/src/cost.rs:104-109`, `:1637-1667` |
-| COST-10: every duration in a plan estimate is marked `projected` | Application, by type | `crates/microvms-domain/src/cost.rs:1878-1887`, `:1918-1923`. `PlanUsage` fields are bare `f64` seconds, so there is no field a `Measured` duration could be written into |
-| ARCH-2: protocol drift between client and daemon fails compilation | Cargo dependency graph | `crates/microvms-cli/tests/dependency_direction.rs:180` |
-| ARCH-3 / ARCH-4 / BIND-1: `cli -> core -> protocol`, bindings depend only on core, core depends on neither | Test over `cargo_metadata` | `crates/microvms-cli/tests/dependency_direction.rs:69`, `:96`, `:220` |
-| ARCH-5: the CLI exports no library target at all | Test over `cargo_metadata` | `crates/microvms-cli/tests/dependency_direction.rs:127` |
-| CLI-2: the CLI reaches the control plane and the endpoint proxy only through core, and the guard names *which* seam door was entered | Injected refusing seam | `crates/microvms-cli/src/guards/thinness.rs:441`, `:534`; door bans in `crates/microvms-cli/clippy.toml` |
-| The CLI's direct dependency set contains none of the denylisted transport and signing crates | Test over `cargo_metadata` | `crates/microvms-cli/tests/thinness.rs:101` |
-| Only the envelope module and named exceptions in `main` write to stdout | Source scan | `crates/microvms-cli/tests/thinness.rs:446` |
-| CLI-4: one JSON envelope per invocation on stdout, on success, on failure, and on a stream that died before its first event | Spawned-binary test | `crates/microvms-cli/tests/exit_codes.rs:154`, `:198`, `:233` |
-| BIND-5: both bindings preserve provenance-labelled durations, estimate-typed dollars, and the distinct `Unpriced` value | Application, by absent constructors | `bindings/microvms-py/src/cost.rs:9`, `:23-27`, `:220-241`; `bindings/microvms-js/src/cost.rs:20-31`, `:52-57`. `new Duration(3600)` is a `TypeError`, `Amount.usd` is null for an unpriced line, and `to_json`/`to_dict` omit the key entirely rather than emitting a null anything permissive sums as zero |
-| Every constant in `constants::as_json` is checked against the pinned botocore service model by the build gate (TRAP-12), and the key set is pinned by a test | Build gate plus a key-set test | `crates/microvms-domain/src/constants.rs:33-46`, `:589`, `:693` |
-| `DEAD_STATES` is a strict subset of `TERMINAL_STATES`, and `SUSPENDED` is terminal but not dead | Application, pinned by test | `crates/microvms-domain/src/constants.rs:448`, `:455`, `:878` |
-| The model-backed and tolerated image-ready state sets are disjoint | Application, pinned by test | `crates/microvms-domain/src/constants.rs:431`, `:441`, `:941` |
-| A ledger file is removed only when nothing is outstanding; leaked identifiers are recorded **before** the delete is attempted | Application, on disk | `crates/microvms-cli/src/ledger.rs:1-22` |
-| CLI-3: every failure class exits with its own integer and `ERR_*` string, distinct from `ERR_UNEXPECTED` | Spawned-binary test plus a classification test | `crates/microvms-cli/src/exit.rs:78-101`, `crates/microvms-cli/tests/exit_codes.rs:29`, `crates/microvms-cli/src/guards/exit_codes.rs:25`, `:139`; published table cross-checked at `crates/microvms-cli/tests/manifest.rs:161` |
-| Retryability is derived from the error kind rather than stored, so the two cannot drift | Application, one `matches!` | `crates/microvms-domain/src/error.rs:111-118`, mapping at `:358-397` |
-
-The lifecycle is deliberately **runtime-checked rather than typestate**
-(`crates/microvms-app/src/sandbox.rs:19-32`). A `Sandbox<Running>` returning a `Suspended` handle
-would make STATE-5's wrong call a compile error, which is strictly stronger on the ladder. But a
-type whose Rust identity changes on every transition cannot be one `#[pyclass]`, so it would be
-re-erased into a runtime-checked enum at the binding boundary — and the binding's copy is the one
-most callers hit. The part of the typestate idea that costs nothing is kept: the check happens
-**before** the wire call, and the test asserts the control-plane call count, which is the
-observable that distinguishes the two designs.
+| First bootstrap installs the token and launch state; identical token replays succeed without replacing them; conflicting replays fail. | State bootstrap and run-hook handler | `crates/agentd/src/state.rs:340`, `crates/agentd/src/routes.rs:236` |
+| When an exec ID is already present, a validated repeat start returns without spawning another process. | Exec start handler | `crates/agentd/src/exec.rs:382` |
+| TTL collection removes only acknowledged exec records; an unacknowledged record remains eligible for retrieval. | `collect_expired` | `crates/agentd/src/exec.rs:975` |
 
 ## Calculations
 
+### Sizing and session timing
+
 | Calculation | Inputs | Output | Citation |
 | --- | --- | --- | --- |
-| Compute cost for a phase, as two separate line items | size class, labelled duration, rate table, phase | vCPU-seconds and GB-seconds line items with estimated dollars | `crates/microvms-domain/src/cost.rs:1591-1623` |
-| Snapshot storage for a hold, with the retention floor applied | phase, GB, labelled hold, rate table | GB-months line item, note naming the floor when it applied | `crates/microvms-domain/src/cost.rs:1634-1664` |
-| Snapshot transfer (write on suspend, read on launch or resume) | phase, line, GB, cycle count, rate table | GB line item, no time component | `crates/microvms-domain/src/cost.rs:1668-1690` |
-| Per-GB-month storage rate, derived from the API's per-GB-hour quote | catalog entry USD per GB-hour | Decimal USD per GB-month | `crates/microvms-domain/src/cost.rs:1242-1249`, `:88` |
-| A report's total | every line item's phase and amount | `Total::Exact`, or `Total::AtLeast` with named unpriced lines | `crates/microvms-domain/src/cost.rs:733-758` |
-| Residency ratio: how many times more a running VM costs than a suspended one | two cost reports | Decimal multiplier | `crates/microvms-domain/src/cost.rs:1994-1998` |
-| Per suspend/resume cycle cost | size class baseline GB, write rate, read rate | `EstimatedUsd` | `crates/microvms-domain/src/cost.rs:2000-2006` |
-| Break-even suspended hold | size class, rate table | Decimal seconds | `crates/microvms-domain/src/cost.rs:2020-2034` |
-| Rate table age and staleness verdict | retrieval date, today | days, bool, optional warning text | `crates/microvms-domain/src/cost.rs:968-994` |
-| Proleptic-Gregorian day number, for date subtraction without a date crate | year, month, day | `i64` days since 1970-01-01 | `crates/microvms-domain/src/cost.rs:282-285` |
-| Exact seconds from a `Duration`, without a lossy float step | `std::time::Duration` | `Decimal` seconds | `crates/microvms-domain/src/cost.rs:120-124` |
-| Idempotency token assembly | verb, scope label, 8 random bytes | `<verb>-<tail-64-of-label>-<16 hex>` | `crates/microvms-app/src/control/token.rs:125-153` |
-| Connector ARN | intent, region | fully-qualified ARN string | `crates/microvms-app/src/control/connector.rs:60-83` |
-| Available bytes on a write target's filesystem | path | `u64` bytes | `crates/agentd/src/disk.rs:66-80` |
+| Select the first size class whose baseline covers both resource requests. | Optional CPU and memory requests | Smallest covering class, or the default when neither resource is requested | `crates/microvms-domain/src/sizing.rs:179` |
+| Choose the lesser of one-third of the idle window and the default keep-awake interval. | Idle window, default polling interval | Initial polling interval | `crates/microvms-app/src/session/keepalive.rs:105` |
 
-### Compute cost per phase
+### Cost
 
-Both figures read the **baseline**, never the peak (`crates/microvms-domain/src/cost.rs:1600-1604`).
-`vcpu_quantity = baseline_vcpu × seconds`, priced at `rates.vcpu_second()`.
-`memory_quantity = baseline_gb × seconds`, priced at `rates.gb_second()`. They are two line items
-rather than one blended GB-second because that is how the pricing page prices them, and a blended
-figure cannot be reconciled against a Cost Explorer breakdown that keeps them apart
-(`crates/microvms-domain/src/cost.rs:947-951`). The guest reports the peak and bursts to it, but the peak
-is charged only for the seconds above baseline actually consumed; this client cannot observe those
-seconds, so the peak is left out rather than guessed at. The 2 GB class reports 8 GB in the guest
-(`crates/microvms-domain/src/sizing.rs:81-86`), so reading the peak would overstate the memory line exactly
-4x.
+| Calculation | Inputs | Output | Citation |
+| --- | --- | --- | --- |
+| Convert whole seconds plus nanoseconds divided by one billion into a decimal. | `Duration` | Decimal seconds | `crates/microvms-domain/src/cost.rs:120` |
+| Multiply baseline vCPU and baseline memory by seconds and their respective rates. | Size class, duration, rate table | Separate compute and memory line items | `crates/microvms-domain/src/cost.rs:1585` |
+| Use the greater of actual hold and minimum retention, then convert GB-seconds into GB-months. | Stored GB, hold, retention floor, monthly rate | Snapshot storage estimate | `crates/microvms-domain/src/cost.rs:1628` |
+| Multiply GB transferred by transfer count and the selected read or write rate. | Snapshot size, operation count, rate table | Snapshot transfer estimate | `crates/microvms-domain/src/cost.rs:1661` |
+| Multiply a per-hour catalog price by the configured hours-per-month conversion when needed. | Catalog line and unit | Rate-table value | `crates/microvms-domain/src/cost.rs:1234` |
+| Sum estimated amounts and retain every unpriced phase. | Report line items | Exact estimated total or an estimated lower bound | `crates/microvms-domain/src/cost.rs:732` |
+| Solve the running-versus-suspended break-even equation in the applicable retention regime. | Running rate, storage rate, retention floor, cycle transfer cost | Suspended hold in decimal seconds | `crates/microvms-domain/src/cost.rs:2048` |
+| Subtract the rate retrieval date from the supplied current date. | Civil dates | Rate-table age in days | `crates/microvms-domain/src/cost.rs:959` |
 
-A suspended VM gets **no compute line at all**, rather than a compute line multiplied by zero. A
-zeroed line would reappear the moment someone changed how a duration is derived
-(`crates/microvms-domain/src/cost.rs:1834-1842`).
+Compute cost is duration multiplied by the sum of baseline vCPU times its per-second rate and baseline GB times its per-second rate. Storage uses GB multiplied by the greater of held seconds and the retention floor, divided by 2,628,000 seconds per billing month, then multiplied by the monthly storage rate. These are the estimator's formulas. `crates/microvms-domain/src/cost.rs:1585`, `crates/microvms-domain/src/cost.rs:1634`, `crates/microvms-domain/src/cost.rs:80`.
 
-### Snapshot storage with the retention floor
+For break-even, let `r` be running cost per second, `s` storage cost per second, `f` minimum retention in seconds, and `c` the write-plus-read cost of one cycle. The first candidate is `(c + f × s) / r`. When that candidate exceeds `f`, the method uses `c / (r − s)` instead because storage now grows with the hold. `crates/microvms-domain/src/cost.rs:2048`.
 
-`billed_seconds = max(held_seconds, floor_seconds)` where the floor is one week
-(`crates/microvms-domain/src/cost.rs:1642-1644`). Then
-`quantity = gb × billed_seconds / SECONDS_PER_MONTH`, priced at `rates.storage_gb_month()`.
-`SECONDS_PER_MONTH` is `2628000`, which is `730 × 3600` — AWS's own month. It is spelled out
-because 30-day and calendar-month conventions both give plausible-looking answers that disagree
-with the worked examples by a few percent (`crates/microvms-domain/src/cost.rs:74-80`).
-
-When the floor applies, the note quotes the day count off the rate row rather than dividing by
-86,400 beside the message. The rate-row field is the only thing that knows how long the window is,
-so a division written beside the message would keep saying "7-day" after a rate row moved to a
-fortnight (`crates/microvms-domain/src/cost.rs:1646-1655`, `:928-937`). Not applying the floor would
-understate the one line item that dominates a create-and-destroy suite by four orders of
-magnitude: a 2 GB image deleted after sixty seconds still bills about four cents
-(`crates/microvms-domain/src/cost.rs:104-109`).
-
-### Break-even suspended hold
-
-The least trivial formula in the module (`crates/microvms-domain/src/cost.rs:2020-2034`).
-`running_per_sec = baseline_vcpu × vcpu_rate + baseline_gb × gb_rate`.
-`storage_per_sec = baseline_gb × storage_gb_month / SECONDS_PER_MONTH`.
-`churn = baseline_gb × (write_rate + read_rate)`.
-
-The solve is **piecewise**, because the storage charge behaves differently on each side of the
-minimum-retention window. Inside the window the storage charge is a constant, so the equation is
-linear in the hold and the candidate is
-`(churn + floor_sec × storage_per_sec) / running_per_sec`. Past the window, storage grows with the
-hold and the slope changes, so the answer is `churn / (running_per_sec − storage_per_sec)`
-instead. Solving only one branch returns a number in the wrong regime.
-
-This is the figure a pool scheduler needs, and a bare "100x cheaper" headline does not show it.
-Below the break-even hold, suspending and resuming costs more than leaving the VM running, so the
-conclusion the comparison supports is "avoid churn" rather than "avoid residency"
-(`crates/microvms-domain/src/cost.rs:2000-2002`).
-
-### Why the sizing table is data, not arithmetic (TRAP-13)
-
-Every documented peak is exactly four times its baseline, which makes `baseline × 4` look like
-the obvious simplification. The sizing module must not compute it that way. The regularity belongs
-to AWS's current table rather than to the service's contract, so a new row that broke the pattern
-would get the pattern applied to it, reporting a burst ceiling the service does not offer
-(`crates/microvms-domain/src/sizing.rs:13-23`).
-
-So `SIZE_CLASSES` (`crates/microvms-domain/src/sizing.rs:64-99`) is the only place any of the table's
-numbers appears, and every accessor reads a row out of it through one lookup. To make the guard
-falsifiable, `row_in` and `class_for_baseline_in` take the table as a **parameter**
-(`crates/microvms-domain/src/sizing.rs:247`, `:255`) so a test can drive the accessors over a table whose
-peak is *not* 4x its baseline. A test against the shipped table could not tell a lookup from an
-arithmetic derivation, because every shipped peak is 4x.
-
-### Two float boundaries, and only two (COST-6)
-
-`seconds_of` (`crates/microvms-domain/src/cost.rs:120-124`) is exact rather than a lossy conversion: a
-`Duration` is a whole-seconds count plus a nanosecond remainder, both integers, and the nanosecond
-division is by a power of ten.
-
-`gb_decimal` (`crates/microvms-domain/src/cost.rs:138-152`) is the **only** place an `f64` becomes a
-`Decimal`. It goes through the float's decimal *string* rather than its binary value, because
-`Decimal::try_from(0.1f64)` would carry the binary error into every downstream figure. It is
-fallible rather than lossy: `NaN`, an infinity, and a magnitude past 28 digits have no decimal
-reading, and a money figure derived from one of them would be a number nobody could reconcile.
-`EstimatedUsd::new` deliberately takes a `Decimal` and not an `f64`, so it cannot become a third
-boundary (`crates/microvms-domain/src/cost.rs:560-568`).
-
-### The day-number formula
-
-`CalendarDate::day_number` (`crates/microvms-domain/src/cost.rs:282-285`) is an era-based
-proleptic-Gregorian conversion so that date subtraction needs no date crate. The year is shifted to
-be March-based, which puts February's variable length last; `719468` is the day number of
-1970-01-01 in the era count. Rate-table age is `today.days_since(retrieved)` over that number
-(`crates/microvms-domain/src/cost.rs:969-972`).
+The report charges snapshot reads on launch, compute for a recorded running phase, storage for a suspended phase, and writes and reads for suspend/resume cycles. A supplied image size adds image storage and an unpriced image-build line; the default snapshot size is baseline memory. These are explicit estimation choices in the report builder. `crates/microvms-domain/src/cost.rs:1805`.
 
 ## Policy and gates
 
-- **Absent parameters are the primary policy mechanism.** The strongest closures are things that
-  do not exist: no `client_token` parameter (TRAP-1), no capability list (TRAP-3), no
-  `SHELL_INGRESS` variant and no `mint_shell_auth_token` method (TRAP-11), no architecture field,
-  no conversion between hook-timeout families, no `f64` accessor on a dollar figure (COST-2), no
-  unlabelled duration constructor (COST-1), no `Measured` field on a plan (COST-10). Where a
-  requirement is about an impl being *absent*, the check is a program that fails to build — as a
-  `compile_fail` doctest with a **pinned error code**, because a bare `compile_fail` passes for any
-  build failure including a typo in the test. `crates/microvms-domain/src/cost.rs:402-415`, `:529-555`.
-
-- **Local refusal before the wire, always.** Every S2 guard fires before the first control-plane
-  call, and where the distinction is observable the test asserts the control-plane **call count**
-  rather than just the error. `crates/microvms-app/src/sandbox.rs:29-32`; `crates/model/src/client.rs:585-590`
-  states it as a model property.
-
-- **One guard list, runnable before the artifact upload.** `create_image` runs after the caller
-  has already uploaded the artifact, so a locally-refusable request refused from inside it has
-  cost the caller the S3 PUT. `ControlPlane::preflight` is that same list extracted as a pure
-  function of the request, and `create_image` delegates to it rather than keeping a copy, so the
-  two cannot drift. A caller who skips preflight loses only the upload.
-  `crates/microvms-app/src/control/image.rs:144-158`, `:210-271`; asserted with a zero-call count at
-  `crates/microvms-cli/src/guards/build.rs:366`.
-
-- **Every refusal names its measurement.** A guard's error message cites the `docs/PLATFORM.md`
-  section rather than restating the constraint, because the guards exist so a reader can reach the
-  measurement. `crates/microvms-core/src/lib.rs:42-48`.
-
-- **The S3 escape hatch, and what it costs.** `Region::unlisted` accepts a region this client
-  has not seen carry MicroVMs, because AWS adds regions faster than the list is re-read and a
-  client that refuses a region AWS just launched in is its own kind of wrong. The override costs
-  the diagnostic: if the region does not carry MicroVMs, the first control-plane call answers
-  `AccessDeniedException` with a null message and the caller spends an hour reading a correct IAM
-  policy. It is a visible enum **variant** rather than a hidden flag, so a reader of a call site
-  can see someone opted in, and a supported name handed to it comes back as its proper variant so
-  nothing downstream handles two spellings. `crates/microvms-domain/src/region.rs:38-63`, `:94-113`.
-
-- **The region list can be wrong in two directions, and one direction is worse.** A *missing*
-  region refuses a launch AWS would have accepted — the safer direction, still wrong, and what
-  `unlisted` is for. An *extra* region is worse, because it re-opens the null-message trap for a
-  name nothing will reject. No API answers the question: `get_available_endpoints` returns an empty
-  list while `get_available_regions` returns all 34 Lambda regions, so the list is kept by hand and
-  keeping it right is the whole correctness condition. `eu-central-1` does not carry MicroVMs and
-  is one of three regions measured returning the null-message denial (2026-08-07).
-  `crates/microvms-domain/src/region.rs:20-31`.
-
-- **A best-effort probe only raises when it has the evidence.** TRAP-2's stall probe fires once,
-  past the grace, and raises only when builds are listed, the list is non-empty, and **every**
-  build is `PENDING`. A listing failure returns `Ok(())`, so the wait continues and the caller gets
-  a plain timeout. Unknown is not empty, and a wedge claim made on a throttled API call sends the
-  reader after the wrong cause. The state field read is `buildState`, not `state`, and the
-  deserializer refuses the other spelling. `crates/microvms-app/src/control/image.rs:343-395`.
-
-- **Fail-fast state sets are per-call-site, not global.** `wait_for_state` takes `fail_on` as a
-  parameter because different callers fail on different states. Suspend *wants* `SUSPENDED` and
-  tolerates `TERMINATED`; resume must pass the *dead* states only, because failing on `SUSPENDED`
-  would fail every resume — that is the state the call is made from. This is why `constants.rs`
-  carries both `TERMINAL_STATES` and `DEAD_STATES`.
-  `crates/microvms-app/src/control/microvm.rs:440-456`, `crates/microvms-app/src/sandbox.rs:1555-1568`.
-
-- **Token minting lives inside the retry path, and a mint failure is retryable.** A proxy token
-  capped at sixty minutes and minted once at construction expires mid-trial, and the rejection is
-  indistinguishable from a dead daemon. Refresh is at **half** the ceiling rather than just under
-  it, because refreshing at fifty-nine minutes puts the expiry inside the window between building
-  the headers and the proxy validating them. A control-plane throttle at minute thirty must not
-  kill a trial that is otherwise healthy. A credential failure during a mint keeps
-  `ERR_CREDENTIALS` (#280). `crates/microvms-app/src/session/proxy.rs:21-37`, `:107-111`,
-  `:520-533`.
-
-- **Credentials never reach a log line, by construction rather than by care.** `RunHookPayload`
-  and both `ProxyToken` types have hand-written `Debug` impls that print the byte count or the
-  header names instead of the value. Because `RunMicrovmRequest` keeps its derive, every struct and
-  error chain that formats one inherits the behavior. The values that do carry a credential — the
-  header pairs and the subprotocol strings — are returned to a caller and stored on nothing, so
-  there is no type whose `Debug` could leak one; a caller that logs what it was handed is outside
-  what the module can prevent, and both accessors say so.
-  `crates/microvms-app/src/control/microvm.rs:70-82`, `:285-298`,
-  `crates/microvms-app/src/session/proxy.rs:54-60`. The daemon logs the launch-env variable **count**,
-  never the keys or values (`crates/agentd/src/routes.rs:214-221`).
-
-- **Each authorization failure has its own status code.** The daemon answers 503 while no token is
-  installed, 401 for a wrong token, 409 for a bootstrap conflict, and 400 for a malformed hook. It
-  never answers 404, because clients map 404 onto "file not found" and turn a protocol error into a
-  phantom missing artifact. `crates/agentd/src/auth.rs:69-79`.
-
-- **A retried bootstrap of the identical token is success, not a conflict.** The platform may retry
-  its own hook, and answering 409 there would fail a launch that is fine.
-  `crates/agentd/src/state.rs:94-106`, `crates/agentd/src/routes.rs:224-229`.
-
-- **The bootstrap route is unauthenticated on purpose, and its defense is arity.** The platform has
-  no credential to present, and its request arrives over loopback indistinguishably from an in-VM
-  process. The defense is that the route can only succeed once.
-  `crates/agentd/src/routes.rs:166-171`.
-
-- **Build hooks are ungated on purpose.** `ready` and `validate` are image-*build* hooks called
-  before any instance exists and therefore before any token has been delivered. Gating them on
-  bootstrap state fails the build rather than the run, which is a confusing place to discover the
-  mistake. `crates/agentd/src/routes.rs:237-258`, `crates/microvms-app/src/control/mod.rs:852-858`.
-
-- **Health is reachable before bootstrap, and `busy` is the orchestrator's signal rather than a
-  keepalive.** A client needs the contract before it holds a token. And the platform measures
-  idleness by inbound traffic through the endpoint proxy, which terminates *outside* the guest, so
-  a request an in-VM process sends to this port never reaches the thing counting traffic — an
-  in-guest keepalive route would keep nothing alive and would be discovered as broken by a
-  multi-hour run auto-suspending mid-work. So an orchestrator outside the VM polls, which is real
-  inbound traffic, and reads `busy` to decide whether to keep polling. The assertion of liveness is
-  repeated and is the caller's. `crates/agentd/src/routes.rs:297-340`.
-
-- **A resume that finds no installed token is logged loudly rather than treated as routine.**
-  Measured 2026-08-05 in us-east-1: the in-memory agent token, the filesystem, exec records, and
-  backgrounded processes all survive a suspend/resume cycle, and the endpoint URL is unchanged. So
-  the normal case is a VM that needs nothing, and the absence of a token would mean the resume
-  behaved like a cold start. The one thing that does change is the guest's view of time: it
-  observes the whole suspension as a single jump, so any timeout, lease, or TLS session a running
-  command holds expires at once. `crates/agentd/src/routes.rs:260-290`.
-
-- **A poisoned lock is recovered rather than propagated, and the reasoning is per-lock.** The
-  daemon is the only channel into the VM — no SSH, no supervisor, no console — so `.expect()` on a
-  poisoned mutex converts one handler bug into a permanently unreachable VM. The `token` lock is
-  sound in the strong sense: every write is a whole-value assignment, and recovery cannot *install*
-  a token, so poisoning is not a bootstrap bypass. `launch_env` is the same argument and carries
-  nothing that authorizes anything. The `execs` lock is sound for a narrower reason — the map is
-  not left internally corrupt by a panic in a caller's closure, but one exec entry may be
-  semantically inconsistent, which limits the blast radius to one exec id.
-  `crates/agentd/src/state.rs:8-66`, `:76-92`.
-
-- **A panic is caught at the outermost layer, and that is narrow on purpose.** Without the catch, a
-  panicking handler drops the connection and the client sees a transport error it cannot
-  distinguish from a dead VM; with it the client gets a 500 and the connection survives. It does
-  not undo the panic, and any `std::sync::Mutex` the handler held is now poisoned — which is why it
-  pairs with the recovery above. `crates/agentd/src/routes.rs:86-95`.
-
-- **The version header is stamped outside `route_layer`, so it covers every response.** Handler
-  bodies, the 401/503 the auth middleware returns before a handler runs, the 413 the body-limit
-  layer injects, and the 404 fallback. A version header a client only sometimes receives is one it
-  cannot use as a precondition. `crates/agentd/src/routes.rs:78-85`.
-
-- **The extractor-level body limit is disabled and the wire-level layer is the real cap.**
-  `DefaultBodyLimit` does not apply to bodies consumed as a stream, so keeping both would silently
-  truncate JSON control bodies at 2 MiB while leaving tar uploads unbounded.
-  `crates/agentd/src/routes.rs:71-76`.
-
-- **Teardown never raises, and order matters.** `Sandbox::terminate` returns a `TeardownReport`
-  rather than a `Result`. It runs where a caller's `finally` would, and an error raised there
-  replaces the original failure, which is the one worth reading. The order is VM, then image
-  (retrying, because an image in `CREATING` refuses deletion), then the log group **last**, because
-  the service can recreate a group deleted before its image. The log group is *named* rather than
-  deleted: CloudWatch Logs is not in this crate's dependency set.
-  `crates/microvms-app/src/sandbox.rs:45-53`, `:1632-1635`, `:1693-1717`.
-
-- **There is no `Drop` that tears down.** Rust has no context manager and `Drop` cannot await. A
-  blocking `Drop` would deadlock inside a runtime and a spawning one would race process exit. So
-  `Drop` only warns, naming the id, and the rule is that a caller calls `terminate` explicitly,
-  or `detach` when another process takes the VM over; a detached sandbox drops without the
-  warning. `crates/microvms-app/src/sandbox.rs:55-60`, `:1774-1781`, `:1790-1791`.
-
-- **Leaked identifiers are recorded before the delete is attempted, not after.** Recording after
-  loses the identifier when the process dies inside the call, which is exactly the interrupt case
-  the ledger exists for. The file is removed only when nothing is outstanding, because a leftover
-  file is how `microvm ls` knows there is something to tell the operator about. For a wedged image
-  and a service-created log group the identifier **is** the remedy; there is no second way to find
-  them. `crates/microvms-cli/src/ledger.rs:1-22`; CLI-6's teardown-on-interrupt guarded at
-  `crates/microvms-cli/src/guards/interrupt.rs:36`, `:130`.
-
-- **Exec idempotency is opt-in, which deliberately inverts TRAP-1's shape.** The default is a
-  generated exec id, because `microvm exec` is one shot and an id reused by accident means the
-  second invocation is answered from the first's record. The *stable* id is the flag, and what it
-  buys is a retry that is safe across the caller's own restart. This differs from a control-plane
-  `clientToken`, whose replay wedges an image permanently and which this CLI does not have at all.
-  `crates/microvms-cli/src/cli.rs:1173-1191`, `crates/agentd/src/exec.rs:363-377`; both halves guarded at
-  `crates/microvms-cli/src/guards/exec.rs:60`, `:101`.
-
-- **Local constants are checked against the pinned service model in the build gate (TRAP-12), and
-  the key names are a contract with a script.** `constants::as_json` publishes every hardcoded
-  constraint keyed with the names `tools/check-model-drift.py` reads, and the key set is pinned by
-  a test — because a rename here does not fail compilation, it makes a check silently stop
-  comparing. The values no model states, `MICROVM_REGIONS` and `SIZE_CLASSES`, are compared
-  against pinned literals in the script instead, since a value compared only against itself passes
-  by construction. The gate hard-fails when `MODEL_API_VERSION` disagrees with the service directory
-  it resolves, rather than skipping: a constraint checked against a different API version is a
-  constraint that was not checked. `crates/microvms-domain/src/constants.rs:33-46`, `:52-57`, `:589`, `:693`.
-
-- **A disk write is refused before it starts rather than after ENOSPC.** ENOSPC arrives after the
-  filesystem is already full, so by then every other writer in the VM is broken too, including the
-  ones that cannot report anything. It also arrives as a generic io error, so the caller cannot
-  distinguish "the disk is full" from "the daemon is broken" — and retrying is correct for the
-  second case and makes the first worse. `crates/agentd/src/disk.rs:4-30`.
-
-- **A rate table's staleness warning is a fallback rather than the primary defence.** The warning
-  can only say that nobody has looked; a drift check against the Pricing API is what tells you
-  whether a rate moved. Ninety days is the same order as the interval at which AWS has historically
-  restructured Lambda pricing, and the cost of the warning when nothing changed is one line of
-  output. `crates/microvms-domain/src/cost.rs:50-56`, `:90-95`.
-
-- **A rate table is all-or-nothing, and a fetched one is authoritative on rates while still
-  hand-read on rules.** A partial table would price a run at less than it costs with no way for the
-  caller to see which field was left stale. The catalog prices line items and says nothing about the
-  one-week storage minimum, a per-request charge, a billing increment, or a free tier, so the
-  retention floor is carried from the constant rather than from the fetch — dropping it there would
-  understate a create-and-destroy suite by four orders of magnitude.
-  `crates/microvms-domain/src/cost.rs:1198-1206`, `:1263-1268`.
-
-- **`ProtocolError`, `NotFound`, `Conflict`, `StdinClosed`, and `TooLarge` collapse onto one exit
-  code deliberately, and `Unauthorized` is not one of them.** A shell cannot act differently on
-  "the daemon rejected the request on its merits" in each of those flavours, and a caller that
-  can reads `data.kind`. But a 401's remedy is a credential rather than
-  a wait, so it maps to `ERR_CREDENTIALS`: retrying a 401 forever and failing a launch that was
-  200 ms from ready are the two mistakes the classification exists to prevent. A `match` on a closed
-  enum has no ordering to get wrong. `crates/microvms-domain/src/error.rs:358-397`,
-  `crates/microvms-cli/src/exit.rs:8-9`, `:41`.
+- **Regions:** Environment resolution checks `AWS_REGION`, then `AWS_DEFAULT_REGION`, then defaults to `us-east-1`; an explicit `Region::unlisted` opts into another name and normalizes recognized names. `crates/microvms-domain/src/region.rs:139`, `crates/microvms-domain/src/region.rs:107`.
+- **Rates:** Missing ARM catalog entries are errors; an available x86 entry is not substituted. `crates/microvms-domain/src/cost.rs:1266`.
+- **Rate freshness:** Reports carry a warning when the rate-table age exceeds 90 days. `crates/microvms-domain/src/cost.rs:964`, `crates/microvms-domain/src/cost.rs:95`, `crates/microvms-domain/src/cost.rs:1890`.
+- **Image waits:** After the stall grace, the wait probes once; a readable, nonempty build listing containing only `PENDING` builds produces `BuildWedged`, while missing listing evidence leaves the ordinary wait running. `crates/microvms-app/src/control/image.rs:429`, `crates/microvms-app/src/control/image.rs:464`.
+- **Control-plane retries:** Requests use bounded exponential backoff with jitter only when the resulting error is retryable; throttling and server faults receive that classification. `crates/microvms-app/src/control/transport.rs:290`, `crates/microvms-app/src/control/transport.rs:374`.
+- **Session errors:** Transport, token-mint, not-bootstrapped, request-timeout, and server errors are retryable; authorization failures map to credential errors. `crates/microvms-domain/src/error.rs:388`.
+- **Proxy-token cache:** Minting is serialized and rechecks the cache under the lock; a refresh retains previously requested ports and adds the current port. Credential failures retain their classification. `crates/microvms-app/src/session/proxy.rs:502`.
+- **Keep-awake polling:** The loop stops on cancellation, a nonrunning probe, an enabled idle condition, or its duration limit; retryable errors consume the configured tolerance and other errors propagate. `crates/microvms-app/src/session/keepalive.rs:188`.
+- **Teardown:** `Sandbox::terminate` returns a report containing failures and undeleted resources, attempts VM termination before optional image deletion, and reports a requested log-group deletion for external cleanup. `crates/microvms-app/src/sandbox.rs:1772`.
+- **Route authorization:** Route metadata places bearer-protected endpoints behind token middleware and keeps open endpoints and platform hooks on their declared path. `crates/agentd/src/routes.rs:51`.
+- **Child environment:** Execution composes the optional image environment, passwd-derived identity, launch environment, and request environment in that order, with later layers overriding earlier values. `crates/agentd/src/exec_start.rs:350`, `crates/agentd/src/exec_start.rs:191`.
+- **Response behavior:** The router installs the version-stamping middleware and panic-response layer around the combined routes. `crates/agentd/src/routes.rs:78`.
 
 ## See also
 
-- [impact analysis](impact-analysis.md)
-- [contract map](contract-map.md)
-- [debugging guide](debugging-guide.md)
-- [processes](../behavior/processes.md)
-- [public api](../reference/public-api.md)
+- [module map](../architecture/module-map.md) — 18 shared source citations
+- [contract map](contract-map.md) — 17 shared source citations
+- [impact analysis](impact-analysis.md) — 14 shared source citations
+- [processes](../behavior/processes.md) — 11 shared source citations
+- [components](../diagrams/architecture/components.md) — 7 shared source citations

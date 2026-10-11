@@ -1,50 +1,6 @@
 # microvms-agentd · CLI
 
-The `microvm` binary's subcommands are declared as one `clap` `Subcommand` enum in `crates/microvms-cli/src/cli.rs` and built from `crates/microvms-cli/Cargo.toml:20-22`.
-
-## Global flags
-
-These are `global = true`, so they parse on either side of the subcommand. `microvm --json ls` and `microvm ls --json` are the same invocation. `crates/microvms-cli/src/cli.rs:65-82`.
-
-Flags:
-
-- `--json` — emit the typed JSON envelope on stdout instead of human output; wins over every other format, including an interactive terminal. `crates/microvms-cli/src/cli.rs:69-74`.
-- `--dense` — token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with `--json`. `crates/microvms-cli/src/cli.rs:76-78`.
-- `--quiet` — suppress progress on stderr; warnings still print. `crates/microvms-cli/src/cli.rs:80-82`.
-
-The output format depends only on `--json`, `--dense`, and whether stdout is a terminal. `--json` is checked first, then `--dense`; after that, a terminal gets a ratatui surface and a pipe gets plain text. `crates/microvms-cli/src/envelope.rs:342-349`.
-
-The manifest publishes them as `globalFlags` (#131), in the same parameter shape as a command's own, read off the root command's `global = true` arguments without building the tree — building would propagate each global into every subcommand's parameter list. `crates/microvms-cli/src/manifest.rs:91-95`. The generated Reference overview renders that array as its "Global flags" table.
-
-## Shared flag groups
-
-Flattened `Args` structs supply the flags that repeat across commands, so a relationship like the region conflict is declared once rather than per command. `RegionFlags`, `AttachFlags` and `InfraFlags` are described here; `ConfigFlags` (`--config` / `--no-config`, flattened into `run`, `egress-posture`, and `doctor`) is described under `run`. `crates/microvms-cli/src/cli.rs:584-585`, `crates/microvms-cli/src/cli.rs:622-623`, `crates/microvms-cli/src/cli.rs:668-669`, `crates/microvms-cli/src/cli.rs:719-720`.
-
-`RegionFlags` — flattened into every command that talks to AWS. `crates/microvms-cli/src/cli.rs:584-596`.
-
-Flags:
-
-- `--region <REGION>` — AWS region; defaults to `$AWS_REGION`, then `$AWS_DEFAULT_REGION`, then `us-east-1`. Closed set: `us-east-1`, `us-east-2`, `us-west-2`, `eu-west-1`, `ap-northeast-1`. `crates/microvms-cli/src/cli.rs:586-588`, domain at `crates/microvms-cli/src/cli.rs:536-548`.
-- `--unlisted-region <NAME>` — use a region this client has not seen carry MicroVMs; conflicts with `--region`. An unsupported region answers `AccessDeniedException` with a null message, which looks like an IAM denial, so the caller loses the real diagnostic. `crates/microvms-cli/src/cli.rs:590-595`.
-
-`AttachFlags` — the identifiers that address a VM this invocation did not launch: the explicit triple, or a registered name standing in for it. Carried by `agent-prompt`, `exec`, `wait`, `health`, `keepalive`, `ack`, `kill`, `ps`, `stdin`, `cp`, `exists`, `sync`, `adopt`, `tunnel`, and `port-forward`. `crates/microvms-cli/src/cli.rs`, `AttachFlags`.
-
-Flags:
-
-- `--endpoint <ENDPOINT>` — the VM's endpoint, as reported by `run`. Required unless `--name` is given.
-- `--agent-token <AGENT_TOKEN>` — the agent token delivered to the VM at launch. Required unless `--name` is given.
-- `--microvm-id <MICROVM_ID>` — the MicroVM id, needed to mint the endpoint proxy token. Required unless `--name` is given.
-- `--name <NAME>` — the name `run --keep --vm-name` registered, standing in for the whole triple. Resolved through the local name registry with zero AWS calls: the record carries the endpoint, the agent token, the MicroVM id, and the launch region. The record is read through core's name rule, the one `Sandbox.from_name` applies (`microvms_core::names::resolve_record`), so the record's region is the region: a `--region` or `--unlisted-region` that disagrees with it is refused with `ERR_INVALID_ARG` naming both regions, before any AWS call, and `$AWS_REGION` is never consulted. Conflicts with the explicit triple. A name this state directory never registered fails locally with `ERR_PRECONDITION`, and so does `tunnel --name <NAME> --verify-identity`, which used to answer a free name with "carries no identity material". A torn record (a file under `names/` that doesn't parse) is `ERR_PRECONDITION` naming the file, where it used to attach with empty fields. A name that breaks the name grammar, such as `a/b` or `mvm-1`, is `ERR_INVALID_ARG` with the grammar's reason, which is what `Sandbox.from_name` answers; it used to be the "never registered" `ERR_PRECONDITION`.
-- `--port <PORT>` — the daemon's port inside the guest.
-- `--state-dir <STATE_DIR>` — where the local state lives: the name registry, and exec's per-VM history. Defaults to `$MICROVM_STATE_DIR` or `~/.microvm/runs`.
-
-`InfraFlags` — the account-specific values the AWS commands need. Carried by `run`, `quickstart`, `build`, `agent-up`, and `doctor`. `crates/microvms-cli/src/cli.rs:719-732`.
-
-Flags:
-
-- `--bucket <BUCKET>` — S3 bucket for the build artifact; defaults to `$MICROVM_BUCKET`. `crates/microvms-cli/src/cli.rs:721-723`.
-- `--build-role-arn <BUILD_ROLE_ARN>` — build role ARN; defaults to `$MICROVM_BUILD_ROLE_ARN`. `crates/microvms-cli/src/cli.rs:725-727`.
-- `--execution-role-arn <EXECUTION_ROLE_ARN>` — execution role ARN; defaults to `$MICROVM_EXECUTION_ROLE_ARN`. `crates/microvms-cli/src/cli.rs:729-731`.
+The `microvm` CLI provides the following subcommands (`crates/microvms-cli/Cargo.toml:21-23`).
 
 ## run
 
@@ -52,57 +8,83 @@ Flags:
 microvm run [OPTIONS] [BINARY_OR_DIR]
 ```
 
-Builds an image, launches a VM, runs a command, reports the cost, and tears the VM down. Teardown is the default so that a closed laptop does not leave a billable VM.
+Build an image, launch a VM, run a command, report the cost, tear it down.
 
-`crates/microvms-cli/src/commands/lifecycle.rs:130`
+`crates/microvms-cli/src/commands/lifecycle.rs:475`
 
 Flags:
 
-- `[BINARY_OR_DIR]` — the aarch64 agentd binary to bake in as the image CMD (ignored when `--image` names an image to launch instead), or a directory to sync. The two readings cannot collide: a path is a directory or it is not. See "Sync mode" below. `crates/microvms-cli/src/cli.rs`, `RunArgs::binary`.
-- `--image <IDENTIFIER>` — launch this existing image instead of building one. Takes an ARN or a bare image name: a name is resolved to its ARN through the account's image listing (exact match, every page read) before the launch, with a progress line naming the resolved ARN. An identifier already shaped like an ARN passes through with zero extra calls. The envelope's `imageName` reports the launched image's own name (the ARN's last colon segment), never the per-invocation default a build would have used. A name that resolves to nothing fails locally with `ERR_PRECONDITION` naming the name and suggesting `microvm build` — the service's own answer to a bare name is HTTP 400 "Malformed ARN", which says nothing about names. `crates/microvms-cli/src/commands/lifecycle.rs:1034-1048`, resolution in `crates/microvms-app/src/control/image.rs:416-480`.
-- `--image-version <VERSION>` — launch this exact image version instead of the image's latest active one. Omitted takes whatever `latestActiveImageVersion` is at the moment the call lands, which is right for the ordinary case and wrong for the two that matter: a canary wants the version it just built rather than whatever became latest while it was starting, and a rollback wants the known-good version, which "latest" cannot name once a bad version is the latest one. A version the control plane has set `INACTIVE` refuses to launch when named here — measured, the answer is HTTP 404 `No active version found for MicroVM image <arn> and version <v>`, which is what makes a retire real rather than advisory. Free text rather than a closed set, because a version's legal values are an account fact only `ListManagedMicrovmImageVersions` can answer; the constraint that *is* knowable is checked before any call, so an empty version, one over 2048 characters, or one containing whitespace anywhere fails locally with `ERR_INVALID_ARG` and the reason. A version pasted from a terminal carries a trailing newline, which is that case. `crates/microvms-app/src/control/mod.rs`'s `require_valid_version`, wiring in `crates/microvms-cli/src/commands/lifecycle.rs`.
-- `--artifact-uri <S3_URI>` — where the build artifact already is. Nothing is uploaded to it, even with `--bucket` or `$MICROVM_BUCKET` set: the object there is the caller's and the image is built from it, and one progress line names the bucket that went unused (#249). With no binary given, no daemon is provisioned either: the caller's object already holds one, and the envelope reports none. `--dockerfile` is refused beside it at parse time, since it only shapes an artifact the CLI builds and would otherwise be dropped with nothing said. Leave it out and pass `--bucket` to have the CLI upload its own artifact to `s3://<bucket>/<name>.zip`. `crates/microvms-cli/src/cli.rs:752-753`, the upload decision in `crates/microvms-cli/src/commands/lifecycle.rs`'s `upload_artifact`.
-- `--exec <COMMAND>` — a shell command to run in the VM. When it is omitted, the run only launches and tears down, which is how you check that an image boots. `crates/microvms-cli/src/cli.rs:758-759`.
-- `--name <NAME>` — image name; defaults to a per-invocation name, because reusing a name can trigger a `clientToken` replay that wedges the image. `crates/microvms-cli/src/cli.rs:763-764`.
-- `--vm-name <NAME>` — register a local name for the kept VM, so later commands can say `--name <NAME>` (attached commands) or use the name as the positional (suspend, resume, terminate, history) instead of pasting identifiers. Requires `--keep`. The name is a purely local fact in the state directory's registry (`<state-dir>/names/<NAME>.json`, written owner-only because the record carries the agent token), costs zero AWS calls, and is released when a terminate is accepted. Names take ASCII letters, digits, `-` and `_`, at most 128 bytes, and never a MicroVM id prefix (`microvm-` is the service's real prefix, measured live; `mvm-` is the test fixtures') — that exclusion is what lets every identifier-taking command tell a name from a MicroVM id. A name registered to a live VM is refused locally with `ERR_NAME_TAKEN` (exit 14) before any billable call. `crates/microvms-cli/src/cli.rs`, `RunArgs::vm_name`; registry in `crates/microvms-cli/src/ledger.rs`, `Names`.
-- `--memory <MEMORY>` — baseline MiB, selecting a documented size class; default `2048`. Closed set: `512`, `1024`, `2048`, `4096`, `8192`. `crates/microvms-cli/src/cli.rs:771-772`.
-- `--cpus <VCPUS>`: vCPUs the workload needs, instead of `--memory`: the smallest size class whose baseline covers the request is used. Takes a fraction (`0.5`) and combines with `--memory-mib`; zero is no requirement, a request no class covers is refused before any AWS call naming the largest class, and the flag conflicts with `--memory`. `crates/microvms-cli/src/cli.rs:501-507`.
-- `--memory-mib <MIB>`: MiB of memory the workload needs, instead of `--memory`: any figure, which selects the smallest class whose baseline covers it (`1500` selects `2048`). Combines with `--cpus` and conflicts with `--memory`. `crates/microvms-cli/src/cli.rs:509-512`.
-- `--dockerfile <DOCKERFILE>` — a Dockerfile to use instead of the library's default; its `FROM` must match the base. `crates/microvms-cli/src/cli.rs:775-776`.
-- `--log-group <GROUP>` / `--log-stream <STREAM>` — build-log destination, applied when this invocation builds; same semantics as `build`'s flags (the stream is a prefix the client suffixes with `/<16 hex>` per build). Both are also `microvm.toml` keys (`log-group`, `log-stream`), with the flag winning per knob; a stream with no group from either layer is refused locally. `crates/microvms-cli/src/cli.rs`, merge in `crates/microvms-cli/src/commands/lifecycle.rs`'s `merge_config`.
-- `--repair-identity` — request identity repair and additional OS capabilities. Inspect health for `identity_degraded`; requested capabilities do not guarantee every repair succeeds.
-- `--egress` — request the managed `INTERNET_EGRESS` connector. Omission does not disable internet access. Also the `egress` config key. See [Networking](../NETWORKING.md).
-- `--egress-network-connector <ARN>` — attach an existing custom VPC connector; repeatable. Conflicts with `--egress`. Config key: `egress-network-connectors`; explicit flags replace the configured list. Internet isolation requires a VPC without an IGW or NAT gateway and no alternative internet path.
-- `--deny-egress` — set proxy variables pointing to an unreachable local proxy. Reports `best-effort`; workloads can bypass it. This is not network enforcement and conflicts with `--egress`. Also the `deny-egress` config key.
-- `--shell`: launch shell-capable, so `microvm shell` can attach later. Requests the ingress pair `[HTTP_INGRESS, SHELL_INGRESS]` instead of `ALL_INGRESS`; shell access cannot be added to a running VM, and a VM launched without this answers `microvm shell` with a `ValidationException` naming the connector. `crates/microvms-cli/src/cli.rs:945-952`.
-- `--launch-env <KEY=VALUE>` — set one launch-environment variable for every exec in the VM; repeatable. Delivered in the same `runHookPayload` as the agent token, at launch, so it never touches the shared image snapshot and never touches disk. The daemon applies it as the *base* environment of every exec, with `exec --env` on the same key winning. Same parser as `exec --env`, so the first `=` splits, an empty VALUE is legal, and a missing `=` or empty KEY is refused at parse time. The whole payload shares a 4096-byte ceiling with the token, checked locally before the launch: an over-budget env fails with the byte count and the env's share of it, rather than as an AWS `ValidationException` after the call. The total must fit after serialization; large credential sets belong on `microvm cp` after bootstrap or on a role the workload assumes. `crates/microvms-cli/src/cli.rs`, wiring in `crates/microvms-cli/src/commands/lifecycle.rs`.
-- `--user <USER>`: the user to run `--exec`'s command as, a name or a numeric uid; omitted runs as the daemon's own user. The daemon resolves it against the guest's `/etc/passwd`, as for `exec --user`, and the flag requires `--exec`. `crates/microvms-cli/src/cli.rs:975-984`.
-- `--group <GROUP>`: the group to run `--exec`'s command as, a name or a numeric gid; omitted keeps the daemon's own group, or a named user's primary group. Requires `--exec`. `crates/microvms-cli/src/cli.rs:986-991`.
-- `--keep` — retain the VM and image; the VM continues to incur charges until stopped, suspended, or terminated according to its lifecycle. `--keep` is also the only case in which the envelope's `agentToken` carries a value: a run that tears its VM down emits the key as `null`, because stdout outlives the process and the token would name a VM that no longer exists (#161). `crates/microvms-cli/src/cli.rs:880-881`, `crates/microvms-cli/src/render.rs`, `RunOutcome::to_data`.
-- `--no-wait`: return once the launch is accepted, with the VM still `PENDING`, instead of waiting for `RUNNING` and for its daemon; `microvm wait` finishes the launch later. Requires `--keep` and conflicts with `--exec`; an `exec` in `microvm.toml` and sync mode are refused too, since both need the VM answering. `crates/microvms-cli/src/cli.rs:997-1005`.
-- `--identity`: generate a per-VM identity, so `tunnel --verify-identity` can prove the far end. It adds to the launch payload, which shares its 4096-byte budget with `--launch-env`, and requires `--keep`. `crates/microvms-cli/src/cli.rs:1007-1021`.
-- `--client-token <KEY>`: idempotency key for this launch, 1-128 printable ASCII characters. Retrying with the same key and identical flags adopts the VM the first attempt launched, resuming it if it idle-suspended, instead of launching a second one. Persist the key before the first attempt and never reuse it for a different VM. The agent token must be the same on every attempt, so it is read from `$MICROVM_AGENT_TOKEN` rather than minted. Refused with `--identity`, and without `--image`, because a retried build would launch a different image. `crates/microvms-cli/src/cli.rs:742-751`.
-- `--vm-log-group <GROUP>`: CloudWatch log group for the VM's own logs, not the image build's. Omitted keeps the service's default destination; the execution role must allow writing to this group, and the flag conflicts with `--no-vm-logs`. `crates/microvms-cli/src/cli.rs:753-758`.
-- `--vm-log-stream <STREAM>`: exact log stream inside `--vm-log-group`; requires `--vm-log-group`. `crates/microvms-cli/src/cli.rs:760-762`.
-- `--no-vm-logs`: turn the VM's own logging off. `crates/microvms-cli/src/cli.rs:764-766`.
-- `--timeout <TIMEOUT>` — how long to wait for the exec, in seconds; default `300`. A negative, NaN or infinite value, or one too large for a duration, is refused with `ERR_INVALID_ARG` before any call; `0` is legal. `crates/microvms-cli/src/cli.rs:919-920`.
-- `--max-idle-sec <MAX_IDLE_SEC>` — suspend the VM after this much inbound-traffic idleness; default `600`. `crates/microvms-cli/src/cli.rs:923-924`.
-- `--suspended-sec <SUSPENDED_SEC>` — terminate the VM after this long suspended; a resume attempted after this window fails because the VM no longer exists. Default `600`. `crates/microvms-cli/src/cli.rs:927-928`.
-- `--auto-resume` — let the platform resume a suspended VM on an incoming request, instead of requiring an explicit `microvm resume`; omitted by default. Sets `idlePolicy.autoResumeEnabled` on the launch. Also a `microvm.toml` key (`auto-resume`). `crates/microvms-cli/src/cli.rs`, merge in `merge_config`.
-- `--max-duration-sec <MAX_DURATION_SEC>` — hard ceiling on the VM's life; refused above 28800 before any call. Default `3600`. `crates/microvms-cli/src/cli.rs:935-936`.
-- `--port <PORT>` — the daemon's port inside the guest. `crates/microvms-cli/src/cli.rs:939-940`.
-- `--state-dir <STATE_DIR>` — where the run ledger is written; defaults to `$MICROVM_STATE_DIR` or `~/.microvm/runs`. `crates/microvms-cli/src/cli.rs:943-944`.
-- `--config <PATH>` — read this project config file instead of `./microvm.toml`. Naming a file that does not exist is refused with `ERR_CONFIG`: a typed path that is wrong must not silently become "no config". Conflicts with `--no-config`. `crates/microvms-cli/src/cli.rs`, `ConfigFlags`.
-- `--no-config` — ignore any `microvm.toml`, even a malformed one; flags and built-in defaults apply. `crates/microvms-cli/src/cli.rs`, `ConfigFlags`.
-- Plus `RegionFlags` and `InfraFlags`. `crates/microvms-cli/src/cli.rs:956-960`.
+- `--image` — Launch this existing image instead of building one. Takes an ARN or a name. `crates/microvms-cli/src/cli.rs:839`.
+- `--image-version` — Launch this exact image version instead of the image's latest active one. `crates/microvms-cli/src/cli.rs:857`.
+- `--artifact-uri` — Where the build artifact already is, as an s3:// URI. `crates/microvms-cli/src/cli.rs:865`.
+- `--exec` — A shell command to run in the VM. `crates/microvms-cli/src/cli.rs:871`.
+- `--name` — Image name. Defaults to a per-invocation name, because reusing one is how a clientToken replay wedges an image. `crates/microvms-cli/src/cli.rs:876`.
+- `--memory` — Baseline MiB, which selects a documented size class. `crates/microvms-cli/src/cli.rs:884`.
+- `--cpus` — vCPUs the workload needs, instead of --memory: the smallest size class whose baseline covers the request is used. Takes a fraction (0.5) and combines with --memory-mib. `crates/microvms-cli/src/cli.rs:506`.
+- `--memory-mib` — MiB of memory the workload needs, instead of --memory: any figure, which selects the smallest class whose baseline covers it (1500 selects 2048). Combines with --cpus. `crates/microvms-cli/src/cli.rs:511`.
+- `--dockerfile` — A Dockerfile to use instead of the library's default. Its FROM must match the base. `crates/microvms-cli/src/cli.rs:891`.
+- `--log-group` — CloudWatch log group for the build's logs, instead of the service-created `/aws/lambda-microvms/<image-name>`. `crates/microvms-cli/src/cli.rs:900`.
+- `--log-stream` — Log stream name prefix inside --log-group. The client appends `/<16 hex>` per build attempt, and the resolved exact name is on the envelope as `logStream`. `crates/microvms-cli/src/cli.rs:912`.
+- `--repair-identity` — Widen the guest so `sethostname` and the boot_id bind mount work. `crates/microvms-cli/src/cli.rs:918`.
+- `--egress` — Request the managed INTERNET_EGRESS connector. `crates/microvms-cli/src/cli.rs:925`.
+- `--egress-network-connector` — Existing VPC network connector ARN. Repeat for multiple connectors. `crates/microvms-cli/src/cli.rs:934`.
+- `--deny-egress` — Set proxy environment variables that discourage outbound HTTP requests. `crates/microvms-cli/src/cli.rs:942`.
+- `--shell` — Launch shell-capable, so `microvm shell` can attach later. `crates/microvms-cli/src/cli.rs:951`.
+- `--launch-env` — Set one launch-environment variable for every exec in the VM, as KEY=VALUE. Repeatable. `crates/microvms-cli/src/cli.rs:972`.
+- `--user` — User to run --exec's command as: a name or a numeric uid. Omitted runs as the daemon's own user. `crates/microvms-cli/src/cli.rs:983`.
+- `--group` — Group to run --exec's command as: a name or a numeric gid. Omitted keeps the daemon's own group, or a named user's primary group. `crates/microvms-cli/src/cli.rs:990`.
+- `--keep` — Leave the VM and image running. You are then paying for them. `crates/microvms-cli/src/cli.rs:994`.
+- `--no-wait` — Return once the launch is accepted, with the VM still PENDING, instead of waiting for RUNNING and for its daemon. `microvm wait` finishes the launch later. `crates/microvms-cli/src/cli.rs:1004`.
+- `--identity` — Generate a per-VM identity, so `tunnel --verify-identity` can prove the far end. `crates/microvms-cli/src/cli.rs:1020`.
+- `--vm-name` — Register a local name for the kept VM, so later commands can say `--name <NAME>` instead of pasting the endpoint/agent-token/microvm-id triple. `crates/microvms-cli/src/cli.rs:1038`.
+- `--client-token` — Idempotency key for this launch: 1-128 printable ASCII characters. `crates/microvms-cli/src/cli.rs:750`.
+- `--vm-log-group` — CloudWatch log group for the VM's own logs (not the image build's). `crates/microvms-cli/src/cli.rs:757`.
+- `--vm-log-stream` — Exact log stream inside --vm-log-group. `crates/microvms-cli/src/cli.rs:761`.
+- `--no-vm-logs` — Turn the VM's own logging off. `crates/microvms-cli/src/cli.rs:765`.
+- `--timeout` — How long to wait for the exec, in seconds. `crates/microvms-cli/src/cli.rs:1045`.
+- `--max-idle-sec` — Suspend the VM after this much inbound-traffic idleness. `crates/microvms-cli/src/cli.rs:1049`.
+- `--suspended-sec` — Terminate the VM after this long suspended. A resume past it cannot work. `crates/microvms-cli/src/cli.rs:1053`.
+- `--auto-resume` — Let the platform resume a suspended VM on an incoming request. `crates/microvms-cli/src/cli.rs:1057`.
+- `--max-duration-sec` — Hard ceiling on the VM's life. Refused above 28800 (eight hours) before any call. `crates/microvms-cli/src/cli.rs:1061`.
+- `--port` — The daemon's port inside the guest. `crates/microvms-cli/src/cli.rs:1065`.
+- `--state-dir` — Where the run ledger is written. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs. `crates/microvms-cli/src/cli.rs:1069`.
+- `--config` — Read this project config file instead of ./microvm.toml. `crates/microvms-cli/src/cli.rs:675`.
+- `--no-config` — Ignore any microvm.toml, even a malformed one. Flags and defaults apply. `crates/microvms-cli/src/cli.rs:679`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--bucket` — S3 bucket for the build artifact. Defaults to $MICROVM_BUCKET. `crates/microvms-cli/src/cli.rs:722`.
+- `--build-role-arn` — Build role ARN. Defaults to $MICROVM_BUILD_ROLE_ARN. `crates/microvms-cli/src/cli.rs:726`.
+- `--execution-role-arn` — Execution role ARN. Defaults to $MICROVM_EXECUTION_ROLE_ARN. `crates/microvms-cli/src/cli.rs:730`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
-Precedence, when a config file is in play: a typed flag beats the file, and the file beats the built-in default. "Typed" is read off the parse (`clap`'s `value_source`), not off the value, so `--memory 2048` overrides a file that says `4096` even though 2048 is also the default. The merge happens in exactly one place (`merge_config` in `crates/microvms-cli/src/commands/lifecycle.rs`, per-knob precedence in `config::pick`) and its outcome is reported in the success envelope's `resolvedConfig` key — each knob's winning value and the source it came from (`flag`, `config`, `env`, or `default`; `env` appears only on the region, the one knob whose chain continues past the file into `$AWS_REGION`/`$AWS_DEFAULT_REGION`) — so a caller never has to re-derive which source won. `egress` and `denyEgress` are two of those knobs; the conservative assessment of internet isolation is a separate top-level envelope key, `egressPosture` (`open` | `unsealed` | `best-effort` | `sealed`), because a request flag is not an answer — see docs/TRUST.md, **Egress**. One deliberate pairing rule: a typed `BINARY` positional with no typed `--image` suppresses the file's `image`, because `run` builds exactly when the merged image is absent, and a file that silently won that pair would run the caller's tests against a stale pinned image. A positional that names a directory does not suppress it — sync mode launches, so the file's pinned image is exactly what `run .` wants. See "Project config" below for the file itself.
+## quickstart
 
-Sync mode (issue #72): a positional that names a directory switches `run` into a pack-run-collect round trip — `microvm run . --image ci-image --exec "make test"` is the headline spelling. The tree is packed locally (deterministic member order; `.git`, `target`, `node_modules`, and `.venv` skipped whole; sockets, fifos, and devices skipped individually; symlinks preserved as links, never followed), uploaded to `/workspace` in the guest, and the exec runs with `/workspace` as its working directory. The pack is budgeted against the daemon's own caps — 512 MiB of file bytes, 100 000 members — during the walk, so an over-budget tree is `ERR_SYNC` naming the offending subtree before any archive bytes are allocated or any AWS call is made.
+```
+microvm quickstart [OPTIONS]
+```
 
-Afterwards — including when the exec exited non-zero, because a failing run's report is the artifact CI most wants — the workdir comes back and the members matching the config file's `artifacts` globs are written into the directory. Only glob-matched regular-file members land, and never under `.git`: symlinks, hardlinks, specials, unmatched members, anything attempting traversal outside the directory, and any `.git` path are skipped, because the returned archive is the VM's word, the VM is where untrusted work runs, and a workload-written `.git/hooks/pre-commit` would execute on the host at the caller's next commit. With no `artifacts` globs configured the workdir is not downloaded at all, and the `sync` key says so in a `note`. A download failure does not fail the run — by then the exec's result is already in hand, and discarding a green test run because `make clean` removed the workdir would be the report lying — the error lands in `sync.error` and the exec's own exit code stands.
+Zero to a live exec: provision the daemon, build, launch, run, report, tear down.
 
-Sync mode launches an existing image (`--image`, or `image` pinned in microvm.toml); a directory with nothing supplying an image is refused with `ERR_PRECONDITION` before any call. A local pack or extraction failure is `ERR_SYNC` (exit 16). The envelope's `sync` key reports the workdir, uploaded bytes and member count, and each artifact brought back with its size — or `error` / `note` for the two no-artifact shapes. `crates/microvms-cli/src/sync.rs`; wiring in `crates/microvms-cli/src/commands/lifecycle.rs`.
+`crates/microvms-cli/src/commands/lifecycle.rs:990`
+
+Flags:
+
+- `--exec` — The command to run inside the first VM. `crates/microvms-cli/src/cli.rs:1097`.
+- `--state-dir` — Where the run ledger and the provisioned-daemon cache live. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs. `crates/microvms-cli/src/cli.rs:1106`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--bucket` — S3 bucket for the build artifact. Defaults to $MICROVM_BUCKET. `crates/microvms-cli/src/cli.rs:722`.
+- `--build-role-arn` — Build role ARN. Defaults to $MICROVM_BUILD_ROLE_ARN. `crates/microvms-cli/src/cli.rs:726`.
+- `--execution-role-arn` — Execution role ARN. Defaults to $MICROVM_EXECUTION_ROLE_ARN. `crates/microvms-cli/src/cli.rs:730`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
 ## build
 
@@ -110,36 +92,43 @@ Sync mode launches an existing image (`--image`, or `image` pinned in microvm.to
 microvm build [OPTIONS] [BINARY]
 ```
 
-Builds a MicroVM image and waits for it to be usable. Nothing is torn down afterward. The image is the durable artifact, and because its snapshot has a one-week minimum retention, deleting it early saves nothing.
+Build a MicroVM image and wait for it to be usable.
 
-`crates/microvms-cli/src/commands/lifecycle.rs:1375`
+`crates/microvms-cli/src/commands/lifecycle.rs:1464`
 
 Flags:
 
-- `[BINARY]` — the aarch64 agentd binary to bake in as the image CMD. Omitted, the CLI provisions its own version's release asset and caches it under the state directory; `$MICROVM_AGENTD` names a binary without touching the command line. `crates/microvms-cli/src/cli.rs:999-1000`.
-- `--state-dir <STATE_DIR>`: where the provisioned-daemon cache lives; defaults to `$MICROVM_STATE_DIR` or `~/.microvm/runs`, the same directory `run`'s ledger uses, so the two commands share one cache. `crates/microvms-cli/src/cli.rs:1136-1140`.
-- `--artifact-uri <S3_URI>` — where the build artifact already is, as an `s3://` URI. It's never uploaded over, even with a bucket set; the image is built from the object there, as with `run --artifact-uri`. With no `[BINARY]` it provisions no daemon, and the envelope's `agentd` is null. `--dockerfile` and `--project` are refused beside it at parse time, since both only shape an artifact the CLI builds. `crates/microvms-cli/src/cli.rs:1009-1010`.
-- `--name <NAME>` — image name; defaults to a per-invocation name. `crates/microvms-cli/src/cli.rs:1013-1014`.
-- `--memory <MEMORY>` — baseline MiB, selecting a documented size class; default `2048`. `crates/microvms-cli/src/cli.rs:1017-1018`.
-- `--cpus <VCPUS>`: vCPUs the workload needs, instead of `--memory`: the smallest size class whose baseline covers the request is used. Takes a fraction (`0.5`) and combines with `--memory-mib`; zero is no requirement, a request no class covers is refused before any AWS call naming the largest class, and the flag conflicts with `--memory`. `crates/microvms-cli/src/cli.rs:501-507`.
-- `--memory-mib <MIB>`: MiB of memory the workload needs, instead of `--memory`: any figure, which selects the smallest class whose baseline covers it (`1500` selects `2048`). Combines with `--cpus` and conflicts with `--memory`. `crates/microvms-cli/src/cli.rs:509-512`.
-- `--dockerfile <DOCKERFILE>` — a Dockerfile to use instead of the library's default. `crates/microvms-cli/src/cli.rs:1021-1022`.
-- `--project <DIR>` — bake an environment layer from the directory's dependency files (#74). Exactly one ecosystem's manifest+lockfile pair must be present — `pyproject.toml`+`uv.lock`, `package.json`+`package-lock.json`, or `Cargo.toml`+`Cargo.lock` — and only that pair enters the shared image snapshot, under names fixed by the ecosystem (nothing else in the directory can enter, which is what keeps a `.env` out of a snapshot every VM shares). The derived Dockerfile copies the pair into the working directory (`/project` when none is named) and installs from the lockfile with the lockfile-faithful spelling: `uv sync --locked`, `npm ci`, or `cargo fetch --locked`, each refusing a lockfile that disagrees with its manifest rather than quietly re-resolving. Launches from the image then start with dependencies already installed — the 31–48% env-init share of launch time `docs/STRATEGY.md` measures is paid once at build. A caller `--dockerfile` that never mentions the lockfile is refused before the upload, because it would bake no layer while building cleanly. Missing lockfile, missing manifest, and two-ecosystem directories are each refused naming their remedy. Measured launch delta, and why in-guest code should call `/project/.venv/bin/python` directly rather than `uv` (an exec sees no `PATH`): `docs/PLATFORM.md`, "A baked environment layer removes the guest's env init". The pairing rule is `crates/microvms-app/src/control/project.rs`'s `project_ecosystem`, which the bindings' `project_dir` shares, and the entries are in `crates/microvms-app/src/control/artifact.rs`.
-- `--base-image-version <VERSION>` — pin the managed base image to one version instead of taking the service's default. Without this a build floats: the managed base's version list is not static — `al2023-1` carried one version in June and two by July — so two builds of identical inputs weeks apart can sit on different bases and neither recorded which. The build succeeds either way; the difference shows up in the guest. The legal values come from `ListManagedMicrovmImageVersions`, which `microvm doctor` prints as its `base-image-versions` check, and they are bare integers for a managed base (`0`, `1`) where a custom image's versions are `1.0`. A bogus pin is refused by the service before anything is created (HTTP 400 `No managed MicroVM Image with arn <base-arn> and version 999 is available`), but it costs the artifact upload first, so the `Version` shape's own constraints — non-empty, at most 2048 characters, no whitespace anywhere — are checked locally before the upload. Note that the value comes back **normalised**: a build pinned with `1` reads back `baseImageVersion: "1.0"` from `GetMicrovmImageVersion`, so the echoed value cannot be fed back into a request. `crates/microvms-cli/src/commands/lifecycle.rs`'s `BuildSpec`, guard in `crates/microvms-app/src/control/image.rs`'s `create_image`.
-- `--log-group <GROUP>` — CloudWatch log group for the build's logs, instead of the service-created `/aws/lambda-microvms/<image-name>`. Letters, digits, and `_ - / . #` only, up to 512 characters, validated locally before the artifact upload. The build role must be able to write to whatever this names (`logs:CreateLogGroup`/`CreateLogStream`/`PutLogEvents`); a group outside a granted prefix builds with **no logs at all**, the same silent outcome as the wrong-prefix policy in `docs/PLATFORM.md`.
-- `--log-stream <STREAM>` — log stream name **prefix** inside `--log-group`; requires it. The platform's `logging.logStream` member is an exact stream name — prefixes are unsupported — and one image build is three VMs writing three streams (docker build, Graviton 3 snapshot, Graviton 4 snapshot), so a fixed configured name would collapse every build's logs into one indistinguishable stream. The client therefore appends `/<16 hex>` of fresh randomness per build attempt, and the envelope reports the resolved exact name as `logStream` — the only place it exists. No `:` or `*` (the shape's pattern is `[^:*]*`); up to 495 characters (the platform's 512 minus the suffix's 17). See `docs/PLATFORM.md`, "An image build is three VMs and three log streams".
-- `--repair-identity` — request identity repair and additional OS capabilities. Inspect health for `identity_degraded`; requested capabilities do not guarantee every repair succeeds.
-- `--tag <KEY=VALUE>`: a tag on the image, repeatable. Split at the first `=`, so a value may hold one; an empty value is legal. Checked at parse time by core's `require_valid_tags` (`TagKey` and `TagValue`), so a bad tag costs no upload, and a key given twice is refused rather than one of its values dropped (#264). `crates/microvms-cli/src/cli.rs`'s `parse_tag`.
-- `--base-image <NAME>`: the managed base image `baseImageArn` names, instead of `al2023-1`. Its registry reference is the `--dockerfile`'s first `FROM`, taken whole through core's `BaseImage::from_dockerfile`, so the two can't disagree; with `--artifact-uri` no Dockerfile is built here and only the name is sent. Requires `--dockerfile` or `--artifact-uri` at parse time, because the derived default Dockerfile's `FROM` is `al2023-1`'s (#264). Only `al2023-1` is measured (`docs/PLATFORM.md`).
-- `--inherit-workdir`: rely on the image's `WORKDIR`: an exec with no cwd runs there. Core refuses it before the upload when nothing declares one, neither the Dockerfile nor the base, because most public ARM64 bases leave it empty and every relative path would then resolve against `/` (#264). It's a local check, not a member of the create call.
-- `--run-hook-timeout-sec <SECONDS>`, `--build-hook-timeout-sec <SECONDS>`: the timeouts of the `run`, `resume`, `suspend` and `terminate` hooks, and of the `ready` and `validate` build hooks, in whole seconds. Each goes through its own core type (`RunHookTimeout`, `BuildHookTimeout`) at parse time, so a value past the family's ceiling is refused naming both ceilings; omitted, core's default (#264).
-- `--reuse`: build through core's `ensure_image` (#258) instead of always building. The image is named `<name>-<hash12>`, where the prefix is `--name` or the stable stem `microvm-cli`, and the hash covers the daemon binary's bytes, the Dockerfile, the `--project` pair, the base image, a pinned `--base-image-version`, the `--memory` size class, and the fields the service fixes when it creates the image: `--repair-identity`, `--inherit-workdir`, the hook timeouts and the log destination (#280). A ready image under that name is reused with `reused: true` and nothing uploaded; one still building is waited on; a failed one is deleted and rebuilt; otherwise the artifact is uploaded to `s3://<bucket>/[<--s3-key-prefix>/]<name>/artifact.zip` and the image built, and a sibling that wins the create race is joined. The hash is in the name because recreating an image under a previously-used fixed name can serve a stale snapshot (measured; the same hazard class as the clientToken replay in `docs/PLATFORM.md`). Content-keying gives both properties at once: unchanged inputs reuse their image, changed inputs get a fresh name and a fresh build. With `--project` that is #74's promise: two projects with identical dependency files share a layer, and a lockfile edit builds a fresh one. The tags reach the create but aren't part of the name: a reused image keeps its own. Refused with `--artifact-uri` at parse time (#249): the hash covers only local inputs, so an image built from a caller's object under that name would answer a later plain `--reuse` of the same binary. `crates/microvms-app/src/control/ensure.rs`'s `pinned_identity_hash`.
-- `--s3-key-prefix <PREFIX>`: under `--reuse`, a key prefix inside the bucket for the artifact.
-- `--force`: under `--reuse`, delete a ready image under the derived name and build it afresh.
-- `--port <PORT>` — the daemon's port inside the guest. `crates/microvms-cli/src/cli.rs:1091-1092`.
-- Plus `RegionFlags` and `InfraFlags`. `crates/microvms-cli/src/cli.rs:1094-1098`.
-
-The success envelope always carries `reused` (`false` for a plain build), `artifactUri` (the artifact's `s3://` URI, uploaded or found) and `logStream` (`null` when no `--log-stream` was configured; a reused image also reports `null`, because no build ran and no stream was resolved), so a consumer never guards for either key. `crates/microvms-cli/src/commands/mod.rs`.
+- `--state-dir` — Where the provisioned-daemon cache lives. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs — the same directory `run`'s ledger uses, so the two commands share one cache. `crates/microvms-cli/src/cli.rs:1139`.
+- `--artifact-uri` — Where the build artifact already is, as an s3:// URI. See `run --artifact-uri`. `crates/microvms-cli/src/cli.rs:1143`.
+- `--name` — Image name. Defaults to a per-invocation name. `crates/microvms-cli/src/cli.rs:1147`.
+- `--memory` — Baseline MiB, selecting a documented size class. `crates/microvms-cli/src/cli.rs:1151`.
+- `--cpus` — vCPUs the workload needs, instead of --memory: the smallest size class whose baseline covers the request is used. Takes a fraction (0.5) and combines with --memory-mib. `crates/microvms-cli/src/cli.rs:506`.
+- `--memory-mib` — MiB of memory the workload needs, instead of --memory: any figure, which selects the smallest class whose baseline covers it (1500 selects 2048). Combines with --cpus. `crates/microvms-cli/src/cli.rs:511`.
+- `--dockerfile` — A Dockerfile to use instead of the library's default. `crates/microvms-cli/src/cli.rs:1158`.
+- `--project` — A project directory whose dependency files bake an environment layer into the image (#74). `crates/microvms-cli/src/cli.rs:1172`.
+- `--base-image-version` — Pin the managed base image to one version instead of taking the service's default. `crates/microvms-cli/src/cli.rs:1190`.
+- `--log-group` — CloudWatch log group for the build's logs, instead of the service-created `/aws/lambda-microvms/<image-name>`. See `run --log-group`. `crates/microvms-cli/src/cli.rs:1195`.
+- `--log-stream` — Log stream name prefix inside --log-group. The client appends `/<16 hex>` per build attempt and the envelope reports the resolved exact name as `logStream`. See `run --log-stream`. Requires --log-group — `build` reads no config file, so the flag is the only place a group can come from. `crates/microvms-cli/src/cli.rs:1202`.
+- `--repair-identity` — Widen the guest so `sethostname` and the boot_id bind mount work. `crates/microvms-cli/src/cli.rs:1206`.
+- `--tag` — A tag on the image, repeatable. Split at the first `=`, so a VALUE may hold one, and checked against the model's `TagKey` and `TagValue` at parse time; an empty VALUE is legal. A KEY given twice is refused rather than one of its values dropped. `crates/microvms-cli/src/cli.rs:1212`.
+- `--base-image` — The managed base image `baseImageArn` names, instead of `al2023-1`. `crates/microvms-cli/src/cli.rs:1221`.
+- `--inherit-workdir` — Rely on the image's `WORKDIR`: an exec with no cwd runs there. `crates/microvms-cli/src/cli.rs:1229`.
+- `--run-hook-timeout-sec` — The timeout of the `run`, `resume`, `suspend` and `terminate` hooks, in whole seconds. `crates/microvms-cli/src/cli.rs:1237`.
+- `--build-hook-timeout-sec` — The timeout of the `ready` and `validate` build hooks, in whole seconds. `crates/microvms-cli/src/cli.rs:1244`.
+- `--reuse` — Reuse an existing image whose build inputs match, instead of building. `crates/microvms-cli/src/cli.rs:1265`.
+- `--s3-key-prefix` — Under --reuse, a key prefix inside the bucket for the artifact. `crates/microvms-cli/src/cli.rs:1269`.
+- `--force` — Under --reuse, delete a ready image under the derived name and build it afresh. `crates/microvms-cli/src/cli.rs:1273`.
+- `--port` — The daemon's port inside the guest. `crates/microvms-cli/src/cli.rs:1277`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--bucket` — S3 bucket for the build artifact. Defaults to $MICROVM_BUCKET. `crates/microvms-cli/src/cli.rs:722`.
+- `--build-role-arn` — Build role ARN. Defaults to $MICROVM_BUILD_ROLE_ARN. `crates/microvms-cli/src/cli.rs:726`.
+- `--execution-role-arn` — Execution role ARN. Defaults to $MICROVM_EXECUTION_ROLE_ARN. `crates/microvms-cli/src/cli.rs:730`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
 ## agent-up
 
@@ -147,40 +136,43 @@ The success envelope always carries `reused` (`false` for a plain build), `artif
 microvm agent-up [OPTIONS] --vm-name <NAME> [BINARY]
 ```
 
-Brings up a VM with a coding agent in it: image, launch, model credentials, non-root user. The L3 helper (`docs/AGENT-VMS.md`) composes `build --reuse`, `run --keep --egress --vm-name`, a Bedrock bearer token minted from the caller's own AWS credentials, and the file uploads and `chown` the coding-agents example performed by hand. Two paths, decided by one local registry read: a name this state directory has not registered means build (or reuse), launch, provision, register; a name it has registered means attach, mint a fresh token, re-install the same files, and report `vmReused: true`, with no build and no launch. That refresh path is how a 12-hour token is renewed on a long-lived VM. Teardown is `microvm terminate <NAME>`.
+Bring up a VM with a coding agent in it: image, launch, model credentials, non-root user.
 
-`crates/microvms-cli/src/commands/agent.rs`
+`crates/microvms-cli/src/commands/agent.rs:235`
 
 Flags:
 
-- `[BINARY]`: the aarch64 agentd binary to bake in. Omitted provisions this CLI's own release asset, the same chain `run` and `build` use; the envelope's `agentd` key reports the path and source. `crates/microvms-cli/src/cli.rs`, `AgentUpArgs::binary`.
-- `--vm-name <NAME>`: the local name to register for the VM, and the handle every later command uses. Required, because an agent VM is kept by definition. Same grammar as `run --vm-name`. A name already registered to a live VM is not a collision here: it selects the refresh path. A name registered to a torn record (empty MicroVM id, a process died mid-register) is refused with `ERR_NAME_TAKEN` and the record's path. `crates/microvms-cli/src/cli.rs`, `AgentUpArgs::vm_name`.
-- `--agent <AGENT>`: which agent to install. Closed set: `claude-code`, `codex`. Repeatable; omitted means `claude-code`; a repeated value collapses to one row. On the refresh path, omitted keeps the agents and models the guest marker names, and a typed `--agent` is the caller changing them. `crates/microvms-cli/src/cli.rs`, `AgentArg`.
-- `--claude-model <MODEL_ID>`: the Bedrock inference-profile id Claude Code uses; default `global.anthropic.claude-opus-5`, from the profile table. `crates/microvms-app/src/agents/profile.rs`, `CLAUDE_CODE`.
-- `--codex-model <MODEL_ID>`: the Bedrock model id Codex uses; default `global.openai.gpt-5.6-sol`, from the profile table. `crates/microvms-app/src/agents/profile.rs`, `CODEX`.
-- `--claude-version <VERSION>` / `--codex-version <VERSION>`: pin the agent's npm package to this version (`@anthropic-ai/claude-code@<V>`, `@openai/codex@<V>`). Unpinned, the image carries the registry's latest at build time. A pin changes the Dockerfile text and therefore the image's reuse hash. `crates/microvms-cli/src/cli.rs`, `AgentUpArgs::claude_version`.
-- `--project <DIR>`: a local directory to upload into `/workspace` after launch, packed the way `run <DIR>` packs: same skip list (`.git`, `target`, `node_modules`, `.venv`), same budgets, packed before any AWS call so an unreadable tree costs nothing. The upload lands before the install's `chown`, so the agent owns the tree. Bring results back with `microvm cp --tar vm:/workspace <LOCAL> --name <NAME>`. Also honored on the refresh path. `crates/microvms-cli/src/cli.rs`, `AgentUpArgs::project`.
-- `--memory <MEMORY>`: baseline MiB; default `1024`, not `run`'s `2048`: a 4 GiB always-present ceiling at half the floor cost, which fits peaky agent sessions. Closed set as for `run`. `crates/microvms-cli/src/cli.rs`, `AgentUpArgs::memory`; `crates/microvms-app/src/agents/mod.rs`, `DEFAULT_SIZE`.
-- `--cpus <VCPUS>`: vCPUs the workload needs, instead of `--memory`: the smallest size class whose baseline covers the request is used. Takes a fraction (`0.5`) and combines with `--memory-mib`; zero is no requirement, a request no class covers is refused before any AWS call naming the largest class, and the flag conflicts with `--memory`. `crates/microvms-cli/src/cli.rs:501-507`.
-- `--memory-mib <MIB>`: MiB of memory the workload needs, instead of `--memory`: any figure, which selects the smallest class whose baseline covers it (`1500` selects `2048`). Combines with `--cpus` and conflicts with `--memory`. `crates/microvms-cli/src/cli.rs:509-512`.
-- `--token-ttl-hours <HOURS>`: how long the Bedrock bearer token lives; default and ceiling `12`. Core refuses a lifetime outside `(0, 12 h]` with `ERR_INVALID_ARG`; the service additionally caps validity at the signing credentials' own expiry. `crates/microvms-app/src/agents/bedrock.rs`, `MAX_LIFETIME`.
-- `--max-idle-sec <MAX_IDLE_SEC>`: suspend the VM after this much inbound-traffic idleness; default `600`.
-- `--suspended-sec <SUSPENDED_SEC>`: terminate the VM after this long suspended; default `600`.
-- `--auto-resume`: let the platform resume a suspended VM on an incoming request; omitted by default.
-- `--max-duration-sec <MAX_DURATION_SEC>`: hard ceiling on the VM's life; refused above 28800 before any call. Default `3600`.
-- `--port <PORT>`: the daemon's port inside the guest.
-- `--state-dir <STATE_DIR>`: where the run ledger and name registry live; defaults to `$MICROVM_STATE_DIR` or `~/.microvm/runs`.
-- `--client-token <KEY>`: idempotency key for this launch, 1-128 printable ASCII characters. Retrying with the same key and identical flags adopts the VM the first attempt launched, resuming it if it idle-suspended, instead of launching a second one. Persist the key before the first attempt and never reuse it for a different VM. The agent token must be the same on every attempt, so it is read from `$MICROVM_AGENT_TOKEN` rather than minted. `crates/microvms-cli/src/cli.rs:742-751`.
-- `--vm-log-group <GROUP>`: CloudWatch log group for the VM's own logs, not the image build's. Omitted keeps the service's default destination; the execution role must allow writing to this group, and the flag conflicts with `--no-vm-logs`. `crates/microvms-cli/src/cli.rs:753-758`.
-- `--vm-log-stream <STREAM>`: exact log stream inside `--vm-log-group`; requires `--vm-log-group`. `crates/microvms-cli/src/cli.rs:760-762`.
-- `--no-vm-logs`: turn the VM's own logging off. `crates/microvms-cli/src/cli.rs:764-766`.
-- Plus `RegionFlags` and `InfraFlags`. The fresh path requires the bucket, the build role, and the execution role (`ERR_PRECONDITION` naming the missing one); the refresh path makes no control-plane call before the attach, and takes the region from the name record, which also picks the Bedrock token's region; a region flag that disagrees with the record is refused with `ERR_INVALID_ARG` before the attach.
-
-Egress is always requested, because neither agent reaches Bedrock without it. The image is named `agent-vm-<agents>-<hash12>`, the hash over the same inputs `build --reuse` covers, so an unchanged daemon and agent set reuse their image and a version pin builds a fresh one. Provisioning writes `/workspace/.agent-env` (mode `0600`; `HOME`, `PATH`, `AWS_REGION`, and each agent's credential and model lines), `/workspace/.codex/config.toml` when Codex is present, and the marker `/workspace/.agent-vm.json` (mode `0644`) naming the installed agents and models, then runs one root `chown -R 1000:1000 /workspace`. The token travels only as a file over the authenticated channel; it is never an argv element and never in the launch payload. `crates/microvms-app/src/agents/mod.rs`, `provisioning_files` and `install_access`.
-
-A failure after the launch and before the registration (token mint, project upload, credential install, or an interrupt) tears the VM down, because a VM with no name and no credentials is one nobody can use; the failure envelope carries `microvmId`, `imageIdentifier`, `leaked`, and `terminateAccepted`. The image stays, as the durable artifact. The name is registered last, over a VM every step succeeded on; a registry write failure is `ERR_PRECONDITION` with the identifier triple in `data`. No new exit row: every failure maps onto the existing table.
-
-The success envelope's type is `microvm.agent`; its keys are `vmName`, `microvmId`, `endpoint`, `agentToken`, `imageIdentifier`, `imageName`, `imageReused`, `vmReused`, `agents` (`[{agent, model, cliVersion, headlessCommand}]`), `credentialExpiresAt` (epoch seconds), `workdir`, `project` (`{workdir, uploadedBytes, uploadedMembers}` or `null`), `egressPosture`, and `agentd`. On the refresh path `imageIdentifier`, `imageName`, and `imageReused` are `null`, because no image was built or looked up. `egressPosture` reports what the VM has: `open` for a VM this command launched, since it launches with the egress connector, and on the refresh path the posture the name record carries, or `unsealed` when the record names none, as for a VM `attach` registered (`posture_of` in `crates/microvms-cli/src/commands/agent.rs`). `agents[].headlessCommand` is the exact template `agent-prompt` runs with `<TASK>` where the quoted task goes, so a caller who wants `exec --stream --user 1000 --group 1000` over it can spell the command without knowing the profile. `crates/microvms-cli/src/commands/mod.rs`, the `agent-up` row.
+- `--vm-name` — The local name to register for the VM, and the handle every later command uses. `crates/microvms-cli/src/cli.rs:2423`.
+- `--agent` — Which agent to install. Repeatable; defaults to `claude-code`. `crates/microvms-cli/src/cli.rs:2427`.
+- `--claude-model` — The Bedrock inference-profile id Claude Code uses. Defaults to the profile's. `crates/microvms-cli/src/cli.rs:2431`.
+- `--codex-model` — The Bedrock model id Codex uses. Defaults to the profile's. `crates/microvms-cli/src/cli.rs:2435`.
+- `--claude-version` — Pin the Claude Code npm package to this version. Changes the image's reuse hash. `crates/microvms-cli/src/cli.rs:2439`.
+- `--codex-version` — Pin the Codex npm package to this version. Changes the image's reuse hash. `crates/microvms-cli/src/cli.rs:2443`.
+- `--project` — A local directory to upload into /workspace after launch, packed the way `run <DIR>` packs. `crates/microvms-cli/src/cli.rs:2451`.
+- `--memory` — Baseline MiB. Default 1024: a 4 GiB always-present ceiling at half the floor cost of 2048, which fits peaky agent sessions (see `docs/AGENT-VMS.md`). `crates/microvms-cli/src/cli.rs:2456`.
+- `--cpus` — vCPUs the workload needs, instead of --memory: the smallest size class whose baseline covers the request is used. Takes a fraction (0.5) and combines with --memory-mib. `crates/microvms-cli/src/cli.rs:506`.
+- `--memory-mib` — MiB of memory the workload needs, instead of --memory: any figure, which selects the smallest class whose baseline covers it (1500 selects 2048). Combines with --cpus. `crates/microvms-cli/src/cli.rs:511`.
+- `--token-ttl-hours` — How long the Bedrock bearer token lives, in hours. Default and ceiling 12. `crates/microvms-cli/src/cli.rs:2463`.
+- `--max-idle-sec` — Suspend the VM after this much inbound-traffic idleness. `crates/microvms-cli/src/cli.rs:2467`.
+- `--suspended-sec` — Terminate the VM after this long suspended. A resume past it cannot work. `crates/microvms-cli/src/cli.rs:2471`.
+- `--auto-resume` — Let the platform resume a suspended VM on an incoming request. `crates/microvms-cli/src/cli.rs:2475`.
+- `--max-duration-sec` — Hard ceiling on the VM's life. Refused above 28800 (eight hours) before any call. `crates/microvms-cli/src/cli.rs:2479`.
+- `--port` — The daemon's port inside the guest. `crates/microvms-cli/src/cli.rs:2483`.
+- `--state-dir` — Where the run ledger and name registry live. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs. `crates/microvms-cli/src/cli.rs:2487`.
+- `--client-token` — Idempotency key for this launch: 1-128 printable ASCII characters. `crates/microvms-cli/src/cli.rs:750`.
+- `--vm-log-group` — CloudWatch log group for the VM's own logs (not the image build's). `crates/microvms-cli/src/cli.rs:757`.
+- `--vm-log-stream` — Exact log stream inside --vm-log-group. `crates/microvms-cli/src/cli.rs:761`.
+- `--no-vm-logs` — Turn the VM's own logging off. `crates/microvms-cli/src/cli.rs:765`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--bucket` — S3 bucket for the build artifact. Defaults to $MICROVM_BUCKET. `crates/microvms-cli/src/cli.rs:722`.
+- `--build-role-arn` — Build role ARN. Defaults to $MICROVM_BUILD_ROLE_ARN. `crates/microvms-cli/src/cli.rs:726`.
+- `--execution-role-arn` — Execution role ARN. Defaults to $MICROVM_EXECUTION_ROLE_ARN. `crates/microvms-cli/src/cli.rs:730`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
 ## agent-prompt
 
@@ -188,231 +180,489 @@ The success envelope's type is `microvm.agent`; its keys are `vmName`, `microvmI
 microvm agent-prompt [OPTIONS] <TASK>
 ```
 
-Hands a coding agent in a running agent VM one task, headless, as the non-root user. Runs the agent's headless command (`claude -p <TASK> --allowedTools Bash,Read,Edit,Write,Grep,Glob` or `codex exec --skip-git-repo-check -s workspace-write <TASK>`) as uid 1000, gid 1000, in `/workspace`, with `. /workspace/.agent-env &&` in front so the credentials `agent-up` installed are the environment; the request's own `env` map is empty, so the token never rides in a request body. By default it waits and acks, exactly as `exec` does; `--detach` starts and returns the exec id.
+Hand a coding agent in a running agent VM one task, headless, as the non-root user.
 
-`crates/microvms-cli/src/commands/agent.rs`
+`crates/microvms-cli/src/commands/agent.rs:764`
 
 Flags:
 
-- `<TASK>`: the task, as prose. Passed to the headless command single-quoted for `sh`. Required. An empty or whitespace-only task is refused locally with `ERR_INVALID_ARG` before the attach, so it costs zero calls. `crates/microvms-cli/src/cli.rs`, `AgentPromptArgs::task`.
-- `--agent <AGENT>`: which installed agent to prompt; closed set `claude-code`, `codex`. Omitted reads the guest marker `/workspace/.agent-vm.json` and takes the one agent it names; a marker naming two agents is refused with `ERR_PRECONDITION` listing both and suggesting `--agent`. A typed `--agent` still reads the marker when it can, so the prompt uses the model the VM was provisioned with; a VM with no marker and a typed agent runs the profile's defaults; a VM with no marker and no flag is `ERR_PRECONDITION` naming `agent-up`. `crates/microvms-cli/src/commands/agent.rs`, `choose_spec`; `crates/microvms-app/src/agents/mod.rs`, `installed_agents`.
-- `--permission-mode <PERMISSION_MODE>`: the guest agent's permission policy; default `agent-default`. Closed set: `agent-default`, `unrestricted`; `unrestricted` bypasses agent approvals, still as uid 1000. `crates/microvms-cli/src/cli.rs:2521-2523`, values at `crates/microvms-cli/src/cli.rs:2494-2500`.
-- `--execution-timeout <SECONDS>`: remote execution deadline in seconds, which persists after detach. Must be positive and finite. `crates/microvms-cli/src/cli.rs:2525-2527`.
-- `--reap-group-on-exit`: terminate residual process-group children when the main agent exits. `crates/microvms-cli/src/cli.rs:2529-2531`.
-- `--timeout <TIMEOUT>`: how long this process waits for the agent, in seconds; default `900`, because agent tasks run minutes, not seconds. A client-side deadline: the exec on the daemon's side is started with no wall-clock budget of its own. A negative, NaN or infinite value, or one too large for a duration, is refused with `ERR_INVALID_ARG` before any call; `0` is legal. `crates/microvms-cli/src/cli.rs`, `AgentPromptArgs::timeout`.
-- `--detach`: start the agent and return immediately, without waiting and without acking; the envelope reports `phase: running` and a `null` exit code. `microvm exec --poll <ID> --name <NAME>` reads it back and `microvm ack` releases it, as for `exec --detach`. `crates/microvms-cli/src/cli.rs`, `AgentPromptArgs::detach`.
-- `--exec-id <ID>`: use this exec id instead of a fresh one, making a retry idempotent. `crates/microvms-cli/src/cli.rs`, `AgentPromptArgs::exec_id`.
-- Plus `AttachFlags` and `RegionFlags`; `--name <NAME>` is the usual spelling, the name `agent-up --vm-name` registered.
-
-The success envelope's type is `microvm.agent.prompt`, under its own discriminant because a consumer that learned `microvm.exec` is reading a command it chose and this one ran a template it did not. Its keys are `exec`'s (`execId`, `phase`, `exitCode`, `stdout`, `stderr`, `truncated`, `outcome`, `signal`, `timedOut`, `posixExitCode`, `notes`, `synthesized`) plus what ran and how: `agent`, `model`, `agentVersion`, `permissionMode`, `uid`, `executionTimeoutSec`, and `reapGroupOnExit`. A non-zero agent exit earns `ERR_EXEC_FAILED` on a success envelope, as `exec` does. `crates/microvms-cli/src/commands/mod.rs`, the `agent-prompt` row; `crates/microvms-cli/src/commands/attached.rs`, `render_exec_as`; `crates/microvms-cli/src/commands/agent.rs:828-847`.
+- `--agent` — Which installed agent to prompt. Omitted reads the guest marker and takes the one it names. `crates/microvms-cli/src/cli.rs:2524`.
+- `--permission-mode` — Guest agent permission policy. Unrestricted bypasses agent approvals, still as uid 1000. `crates/microvms-cli/src/cli.rs:2528`.
+- `--execution-timeout` — Remote execution deadline in seconds; persists after detach. Must be positive and finite. `crates/microvms-cli/src/cli.rs:2532`.
+- `--reap-group-on-exit` — Terminate residual process-group children when the main agent exits. `crates/microvms-cli/src/cli.rs:2536`.
+- `--timeout` — Caller wait limit in seconds. Does not stop the agent when the wait expires. `crates/microvms-cli/src/cli.rs:2540`.
+- `--detach` — Start the agent and return immediately, without waiting and without acking. `crates/microvms-cli/src/cli.rs:2547`.
+- `--exec-id` — Use this exec id instead of a fresh one, making a retry idempotent. `crates/microvms-cli/src/cli.rs:2551`.
+- `--endpoint` — The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
+- `--agent-token` — The agent token delivered to the VM at launch. `crates/microvms-cli/src/cli.rs:629`.
+- `--microvm-id` — The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:633`.
+- `--name` — The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:644`.
+- `--port` — The daemon's port inside the guest. `crates/microvms-cli/src/cli.rs:648`.
+- `--state-dir` — Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs. `crates/microvms-cli/src/cli.rs:657`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
 ## exec
 
 ```
-microvm exec [OPTIONS] --endpoint <ENDPOINT> --agent-token <AGENT_TOKEN> --microvm-id <MICROVM_ID> [COMMAND]
+microvm exec [OPTIONS] [COMMAND]
 ```
 
-Runs one command in a MicroVM that is already running. The single subcommand covers several uses. It can start a command and wait for it, start one and stream its output (`--stream`), start one and feed its stdin (`--stdin`), or read an existing exec (`--poll`).
+Run one command in a MicroVM that is already running.
 
-`crates/microvms-cli/src/commands/attached.rs:192`
+`crates/microvms-cli/src/commands/attached.rs:243`
 
 Flags:
 
-- `[COMMAND]` — a shell command to run in the VM; omitted only with `--poll`. `crates/microvms-cli/src/cli.rs:1104-1105`.
-- `--timeout <TIMEOUT>` — how long to wait for the command, in seconds; default `300`. A negative, NaN or infinite value, or one too large for a duration, is refused with `ERR_INVALID_ARG` before any call; `0` is legal. `crates/microvms-cli/src/cli.rs:1108-1109`.
-- `--timeout-sec <SECONDS>`: the daemon's deadline for the command, in seconds, sent as `timeout_sec` on the start request. Past it the daemon sends the process group SIGTERM, then SIGKILL, and the result reads `timedOut: true`, `posixExitCode: 124` and `ERR_TIMEOUT`. Omitted, the daemon sets none; it refuses zero. Conflicts with `--poll`. `crates/microvms-cli/src/cli.rs:1298-1304`.
-- `--complete`: wait for exactly one result, the way the SDKs' `run_to_completion` does. The client deadline is `--timeout-sec` plus `--client-grace`, or the VM's maximum lifetime without `--timeout-sec`, so it replaces `--timeout`; past it the process group is killed and the result collected within the grace, and when even that fails the result is synthesized (`posixExitCode` 124, `synthesized: true`, `ERR_TIMEOUT`). Conflicts with `--poll`, `--detach`, `--stream`, `--timeout`, and `--kill-on-timeout`. `crates/microvms-cli/src/cli.rs:1306-1315`.
-- `--client-grace <SECONDS>`: with `--complete`, the seconds past `--timeout-sec` before the kill, and then for its result. Omitted, core's client grace (`DEFAULT_CLIENT_GRACE`, 60 seconds) applies; requires `--complete`. `crates/microvms-cli/src/cli.rs:1317-1323`.
-- `--cwd <CWD>` — working directory. When omitted, the command inherits the image WORKDIR, which is not the same as passing `/`. `crates/microvms-cli/src/cli.rs:1115-1116`.
-- `--env <KEY=VALUE>` — set one environment variable for the command; repeatable. These flags are the child's whole environment: the daemon starts every exec from an empty one and applies exactly this map, so there is no inherited PATH to append to. Split at the first `=`, so a value may itself contain `=`; an empty VALUE is legal (`--env EMPTY=`), and a missing `=` or an empty KEY is refused at parse time. `crates/microvms-cli/src/cli.rs:1132-1133`.
-- `--user <USER>` — a name or a numeric uid to run the command as; omitted runs as the daemon's own user. All digits is sent as an integer uid, anything else as a name the daemon resolves against the guest's `/etc/passwd` before it spawns; an unknown name is `unknown_user` (`ERR_PROTOCOL`) with nothing started. A user with a passwd row gets `HOME`, `USER` and `LOGNAME` from it, beneath `--env`; a named user also gets the row's primary group when `--group` is omitted. `crates/microvms-cli/src/cli.rs:1144-1145`.
-- `--group <GROUP>` — a name (resolved against the guest's `/etc/group`) or a numeric gid; omitted keeps the daemon's own group, or a named user's primary group. `crates/microvms-cli/src/cli.rs:1149-1150`.
-- `--shell <SHELL>` — run the command under this shell instead of `/bin/sh`, for example `bash`. The daemon resolves it on the child's `PATH`, the image's `PATH`, `/bin` and `/usr/bin`; a shell the guest does not have is `unknown_shell` (`ERR_PROTOCOL`) with nothing started, rather than an exit 127. `crates/microvms-cli/src/cli.rs:1159-1160`.
-- `--inherit-image-env` — start the command's environment from the image's `ENV` (the daemon's startup snapshot, minus `AGENTD_*`, never the token) as the lowest layer, beneath a demoted user's identity, the launch environment and `--env`. A daemon built before the flag ignores it; `microvm health` reports `imageEnvKeys` on one that honours it. `crates/microvms-cli/src/cli.rs:1170-1171`.
-- `--exec-id <ID>` — use this exec id instead of a fresh one, making a retry idempotent; the daemon returns success for a known id without spawning a second child. `crates/microvms-cli/src/cli.rs:1190-1191`.
-- `--poll <ID>` — read an existing exec's status and output instead of starting anything; read-only server-side, does not ack. Conflicts with `--exec-id`, `--stream`, `--stdin`, `--cwd`, `--detach`, `--env`, `--user`, `--group`. `crates/microvms-cli/src/cli.rs:1199-1200`.
-- `--detach` — start the command and return immediately, without waiting and without acking; prints the exec id and `phase: running`. Conflicts with `--stream` and `--stdin`. `crates/microvms-cli/src/cli.rs:1219-1220`.
-- `--stream` — stream output as it arrives rather than waiting for the whole thing; under `--json` or into a pipe this writes NDJSON. `crates/microvms-cli/src/cli.rs:1229-1230`.
-- `--from-offset <BYTES>` — resume a stream at this byte offset; requires `--stream`. `crates/microvms-cli/src/cli.rs:1237-1238`.
-- `--stdin` — give the command a stdin pipe, feed it this process's stdin, then close it. `crates/microvms-cli/src/cli.rs:1245-1246`.
-- `--reap` — signal the command's whole process group once its own child exits, so nothing it backgrounded outlives it (`reap_group_on_exit: true` on the wire). Off by default, and the default is a contract: a backgrounded grandchild that inherited the output pipe keeps running and keeps writing. With the flag, `ps` afterwards shows the group empty and the exec's `writersMayBeAlive` reads false because the linger saw EOF. Conflicts with `--poll`. `crates/microvms-cli/src/cli.rs:1257-1258`.
-- `--kill-on-timeout` — on `ERR_TIMEOUT`, send one `POST /v1/exec/{id}/kill` and put the daemon's verdict in the failure envelope's `data.killed`. A plain `--timeout` is a client-side deadline that abandons the exec and leaves it running in the guest; this turns it into a stop. The exit code stays `ERR_TIMEOUT`, because the deadline is still what ended the wait. Conflicts with `--poll`, `--detach`, and `--stream`. `crates/microvms-cli/src/cli.rs:1268-1269`.
-- Plus `AttachFlags` and `RegionFlags`. `crates/microvms-cli/src/cli.rs:1271-1275`.
+- `--timeout` — How long to wait for the command, in seconds. `crates/microvms-cli/src/cli.rs:1297`.
+- `--timeout-sec` — The daemon's deadline for the command, in seconds: `timeout_sec` on the start request. `crates/microvms-cli/src/cli.rs:1305`.
+- `--complete` — Wait for exactly one result, the way the SDKs' `run_to_completion` does (BIND-8 to BIND-10). `crates/microvms-cli/src/cli.rs:1316`.
+- `--client-grace` — With --complete, the seconds past --timeout-sec before the kill, and then for its result. `crates/microvms-cli/src/cli.rs:1324`.
+- `--cwd` — Working directory. `crates/microvms-cli/src/cli.rs:1331`.
+- `--env` — Set one environment variable for the command, as KEY=VALUE. Repeatable. `crates/microvms-cli/src/cli.rs:1348`.
+- `--user` — User to run the command as: a name or a numeric uid. Omitted runs as the daemon's own user. `crates/microvms-cli/src/cli.rs:1360`.
+- `--group` — Group to run the command as: a name (resolved against the guest's `/etc/group`) or a numeric gid. Omitted keeps the daemon's own group, or a named user's primary group. `crates/microvms-cli/src/cli.rs:1365`.
+- `--shell` — Run the command under this shell instead of `/bin/sh`, for example `bash` (AGENTD-14). `crates/microvms-cli/src/cli.rs:1375`.
+- `--inherit-image-env` — Start the command's environment from the image's `ENV` rather than from nothing (AGENTD-11). `crates/microvms-cli/src/cli.rs:1386`.
+- `--exec-id` — Use this exec id instead of a fresh one, making a retry idempotent. `crates/microvms-cli/src/cli.rs:1406`.
+- `--poll` — Read an existing exec's status and output instead of starting anything. `crates/microvms-cli/src/cli.rs:1415`.
+- `--detach` — Start the command and return immediately, without waiting and **without acking**. `crates/microvms-cli/src/cli.rs:1435`.
+- `--stream` — Stream output as it arrives rather than waiting for the whole thing. `crates/microvms-cli/src/cli.rs:1445`.
+- `--from-offset` — Resume a stream at this byte offset. Only with --stream. `crates/microvms-cli/src/cli.rs:1453`.
+- `--stdin` — Give the command a stdin pipe and feed it this process's stdin, then close it. `crates/microvms-cli/src/cli.rs:1461`.
+- `--reap` — Signal the command's whole process group once its own child exits. `crates/microvms-cli/src/cli.rs:1473`.
+- `--kill-on-timeout` — On `ERR_TIMEOUT`, stop the exec rather than leaving it running. `crates/microvms-cli/src/cli.rs:1484`.
+- `--endpoint` — The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
+- `--agent-token` — The agent token delivered to the VM at launch. `crates/microvms-cli/src/cli.rs:629`.
+- `--microvm-id` — The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:633`.
+- `--name` — The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:644`.
+- `--port` — The daemon's port inside the guest. `crates/microvms-cli/src/cli.rs:648`.
+- `--state-dir` — Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs. `crates/microvms-cli/src/cli.rs:657`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
-A timeout is not a stop. `ERR_TIMEOUT`'s suggestions say so in as many words and name `microvm kill <exec-id>` as the remedy, beside the older fact that the exec and its output are untouched and re-pollable. `crates/microvms-cli/src/exit.rs:402`.
+## wait
+
+```
+microvm wait [OPTIONS]
+```
+
+Wait until a kept MicroVM answers: RUNNING, and then its daemon.
+
+`crates/microvms-cli/src/commands/lifecycle.rs:2207`
+
+Flags:
+
+- `--timeout` — How long to wait for RUNNING, in seconds. The daemon wait after it is core's own bootstrap bound. `crates/microvms-cli/src/cli.rs:1567`.
+- `--endpoint` — The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
+- `--agent-token` — The agent token delivered to the VM at launch. `crates/microvms-cli/src/cli.rs:629`.
+- `--microvm-id` — The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:633`.
+- `--name` — The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:644`.
+- `--port` — The daemon's port inside the guest. `crates/microvms-cli/src/cli.rs:648`.
+- `--state-dir` — Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs. `crates/microvms-cli/src/cli.rs:657`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
 ## health
 
 ```
-microvm health [OPTIONS] --endpoint <ENDPOINT> --agent-token <AGENT_TOKEN> --microvm-id <MICROVM_ID>
+microvm health [OPTIONS]
 ```
 
-Asks a running MicroVM's daemon whether it is up and what its identity repair did. This is the one command that reports `identityDegraded` and `diskUnderPressure`, and either flag is a reason to drain the VM rather than keep scheduling onto it.
+Ask a running MicroVM's daemon whether it is up, and what its identity repair did.
 
-It also reports `busy` and `execs`, which is what makes this the command an orchestrator loops on to hold a long-running VM alive. The platform measures idleness by inbound traffic through the endpoint proxy, and that proxy terminates outside the guest, so a request sent from *inside* the VM cannot reset the idle timer — only a poll from outside counts, and this poll is that traffic. `busy` is what makes the loop informed rather than unconditional: it is true only while some exec is actually running, so an exec that exited and is waiting to be acked reads false. `execs` counts every registered entry in any phase, so `busy: false` with a non-zero count is a VM holding unacked output somebody still has to collect before terminating it. See `docs/PROTOCOL.md`, "Idle policy, and why liveness is a field rather than a route".
-
-And it reports `hooks`, the daemon's own record of every lifecycle-hook invocation it observed — `[{hook, firedAt}]`, oldest first, with `firedAt` in epoch seconds on the daemon's clock — beside `hooksDropped`, how many invocations the daemon's capped log discarded. The platform writes no CloudWatch logs for the validate hook, so this is the only place "did my validate hook even run?" is answerable; `validate` and `ready` fire in the snapshot VM before the snapshot is taken, so a launched VM commonly reports them from the memory image it restored from. Each observation the poll returns is also appended to the VM's local history as a `hookObserved` event, deduplicated on the (hook, firedAt) pair, so re-polling appends nothing and the record survives the VM. One caveat travels with the field: the daemon's hook routes are unauthenticated and reachable over loopback from inside the guest, so a hostile workload can forge *additional* observations by posting the hook paths itself — it can never remove or alter real ones, and the capped log keeps the earliest entries, which are the platform's. Both fields are empty/zero against a daemon that predates them.
-
-`crates/microvms-cli/src/commands/attached.rs:826`
+`crates/microvms-cli/src/commands/attached.rs:915`
 
 Flags:
 
-- `AttachFlags` and `RegionFlags` only; this command has no arguments of its own. `crates/microvms-cli/src/cli.rs:1303-1310`.
+- `--endpoint` — The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
+- `--agent-token` — The agent token delivered to the VM at launch. `crates/microvms-cli/src/cli.rs:629`.
+- `--microvm-id` — The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:633`.
+- `--name` — The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:644`.
+- `--port` — The daemon's port inside the guest. `crates/microvms-cli/src/cli.rs:648`.
+- `--state-dir` — Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs. `crates/microvms-cli/src/cli.rs:657`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
 ## keepalive
 
 ```
-microvm keepalive [OPTIONS] --endpoint <ENDPOINT> --agent-token <AGENT_TOKEN> --microvm-id <MICROVM_ID>
+microvm keepalive [OPTIONS]
 ```
 
-Holds a VM awake from outside while an exec works inside it. The platform counts only inbound requests through the endpoint as activity, so a long exec with no client traffic is suspended when `maxIdleDurationSeconds` passes (measured 2026-09-23 in us-east-1: a CPU-busy exec was suspended 60 to 70 seconds after the last request under a 60-second window). This polls the unauthenticated `/v1/health` until `--while-busy` sees no running exec, `--for` passes, or ctrl-c, then reports `microvmId`, `end` (`idle`, `elapsed`, `stopped`), `polls`, `lastBusy`, `elapsedSec`, `intervalSec`, and `idleWindowSec`. The poll policy is the core's `KeepAwake`, shared with the bindings' `Session.keep_awake` / `session.keepAwake`.
+Keep a running MicroVM awake while work runs inside it, by polling its health.
 
-The interval may be at most half the idle window, so one missed poll cannot let the VM suspend. The window is read from `GetMicrovm` unless `--idle-window` names it, in the region the session attached in: the record's region for `--name`, whatever `$AWS_REGION` says. When the lookup fails the command assumes the platform's 60-second minimum and says so on stderr.
+`crates/microvms-cli/src/commands/attached.rs:806`
 
 Flags:
 
-- `--interval <SECONDS>` — seconds between polls. Default: a third of the idle window, at most 20. Like `--for` and `--idle-window`, a negative, NaN or infinite value, or one too large for a duration, is refused with `ERR_INVALID_ARG` at parse time.
-- `--while-busy` — stop once the daemon reports no running exec.
-- `--for <SECONDS>` — stop after this long, busy or not.
-- `--idle-window <SECONDS>` — the VM's `maxIdleDurationSeconds`, instead of reading it from the control plane.
-- `--tolerated-errors <N>`: retryable poll failures in a row to retry, a second apart, before giving up; default `3`. `crates/microvms-cli/src/cli.rs:1510-1516`.
-- Plus `AttachFlags` and `RegionFlags`.
+- `--interval` — Seconds between health polls. Default: a third of the idle window, at most 20. `crates/microvms-cli/src/cli.rs:1497`.
+- `--while-busy` — Stop once the daemon reports no running exec. `crates/microvms-cli/src/cli.rs:1501`.
+- `--for` — Stop after this many seconds, busy or not. `crates/microvms-cli/src/cli.rs:1505`.
+- `--idle-window` — The VM's `maxIdleDurationSeconds`. Read from the control plane when omitted. `crates/microvms-cli/src/cli.rs:1509`.
+- `--tolerated-errors` — Retryable poll failures in a row to retry, a second apart, before giving up. `crates/microvms-cli/src/cli.rs:1513`.
+- `--endpoint` — The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
+- `--agent-token` — The agent token delivered to the VM at launch. `crates/microvms-cli/src/cli.rs:629`.
+- `--microvm-id` — The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:633`.
+- `--name` — The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:644`.
+- `--port` — The daemon's port inside the guest. `crates/microvms-cli/src/cli.rs:648`.
+- `--state-dir` — Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs. `crates/microvms-cli/src/cli.rs:657`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
 ## ack
 
 ```
-microvm ack [OPTIONS] --endpoint <ENDPOINT> --agent-token <AGENT_TOKEN> --microvm-id <MICROVM_ID> <EXEC_ID>
+microvm ack [OPTIONS] <EXEC_ID>
 ```
 
-Releases a finished exec's buffered output, which starts its collection clock. A second ack returns a 409 because the first one already released the output.
+Release a finished exec's buffered output, which starts its collection clock.
 
-`crates/microvms-cli/src/commands/attached.rs:1034`
+`crates/microvms-cli/src/commands/attached.rs:1123`
 
 Flags:
 
-- `<EXEC_ID>` — the exec whose output to release. Required. `crates/microvms-cli/src/cli.rs:1477-1478`.
-- Plus `AttachFlags` and `RegionFlags`. `crates/microvms-cli/src/cli.rs:1480-1484`.
+- `--endpoint` — The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
+- `--agent-token` — The agent token delivered to the VM at launch. `crates/microvms-cli/src/cli.rs:629`.
+- `--microvm-id` — The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:633`.
+- `--name` — The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:644`.
+- `--port` — The daemon's port inside the guest. `crates/microvms-cli/src/cli.rs:648`.
+- `--state-dir` — Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs. `crates/microvms-cli/src/cli.rs:657`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
 ## kill
 
 ```
-microvm kill [OPTIONS] --endpoint <ENDPOINT> --agent-token <AGENT_TOKEN> --microvm-id <MICROVM_ID> <EXEC_ID>
+microvm kill [OPTIONS] <EXEC_ID>
 ```
 
-Stops a running exec: SIGTERM to its whole process group, SIGKILL after the daemon's grace (`POST /v1/exec/{id}/kill`). This is the stop button `exec --timeout` is not — a client-side timeout abandons an exec and leaves it running in the guest (issue #156). The VM is addressed the way every attached command addresses it, by `--name` or the identifier triple, and the exec by its id, which `exec --detach`, `exec --exec-id`, and `ps` all print.
+Stop a running exec: SIGTERM its whole process group, SIGKILL after the daemon's grace.
 
-The envelope carries the daemon's own verdict. `killed: false` with exit 0 means the process group had already exited, which is the outcome a kill was asking for, so `microvm kill x-1 && collect` runs its second half either way. An unknown exec id is the daemon's 404, arriving as `ERR_PROTOCOL` with `data.kind: NotFound`.
-
-`crates/microvms-cli/src/commands/attached.rs:1075`
+`crates/microvms-cli/src/commands/attached.rs:1164`
 
 Flags:
 
-- `<EXEC_ID>` — the exec whose process group to signal. Required. `crates/microvms-cli/src/cli.rs:1490-1491`.
-- Plus `AttachFlags` and `RegionFlags`.
+- `--endpoint` — The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
+- `--agent-token` — The agent token delivered to the VM at launch. `crates/microvms-cli/src/cli.rs:629`.
+- `--microvm-id` — The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:633`.
+- `--name` — The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:644`.
+- `--port` — The daemon's port inside the guest. `crates/microvms-cli/src/cli.rs:648`.
+- `--state-dir` — Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs. `crates/microvms-cli/src/cli.rs:657`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
 ## ps
 
 ```
-microvm ps [OPTIONS] --endpoint <ENDPOINT> --agent-token <AGENT_TOKEN> --microvm-id <MICROVM_ID>
+microvm ps [OPTIONS]
 ```
 
-Lists every exec's process group and its live pids (`GET /v1/procs`). The daemon reads `/proc` itself, so this works against the al2023 base image, which ships no `ps` (issue #157); nothing needs installing in the image for this command. The row worth reading is `childExited: true` with a non-empty `pids`: a command that finished while something it backgrounded did not, which `health`'s `busy` cannot show because busy is about the exec's own child. The `execId` on that row is what `kill` takes.
+List what is running in a MicroVM: every exec's process group and its live pids.
 
-`data.procs` is one object per registered exec in any phase: `{execId, pgid, startedAt, childExited, reap, pids}`. `pgid` is `null` (never absent) when the daemon captured none; `startedAt` is epoch seconds on the daemon's clock; `reap` echoes `exec --reap`. Zombies are not live and are not listed. `--dense` prints one TSV row per group — exec id, pgid, childExited, pid count, startedAt — exec id first, so `cut -f1` feeds `kill`.
-
-`crates/microvms-cli/src/commands/attached.rs:1127`
+`crates/microvms-cli/src/commands/attached.rs:1216`
 
 Flags:
 
-- `AttachFlags` and `RegionFlags` only; this command has no arguments of its own. `crates/microvms-cli/src/cli.rs:1500-1507`.
+- `--endpoint` — The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
+- `--agent-token` — The agent token delivered to the VM at launch. `crates/microvms-cli/src/cli.rs:629`.
+- `--microvm-id` — The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:633`.
+- `--name` — The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:644`.
+- `--port` — The daemon's port inside the guest. `crates/microvms-cli/src/cli.rs:648`.
+- `--state-dir` — Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs. `crates/microvms-cli/src/cli.rs:657`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
 ## stdin
 
 ```
-microvm stdin [OPTIONS] --endpoint <ENDPOINT> --agent-token <AGENT_TOKEN> --microvm-id <MICROVM_ID> <EXEC_ID>
+microvm stdin [OPTIONS] <EXEC_ID>
 ```
 
-Writes to a running exec's stdin and optionally closes it. It only works on an exec started with `exec --stdin`, and it is the only way to close the pipe.
+Write to a running exec's stdin, and optionally close it.
 
-`crates/microvms-cli/src/commands/attached.rs:1218`
+`crates/microvms-cli/src/commands/attached.rs:1307`
 
 Flags:
 
-- `<EXEC_ID>` — the exec to write to; must have been started with `exec --stdin`. Required. `crates/microvms-cli/src/cli.rs:1512-1513`.
-- `--data <DATA>` — what to write; `-` reads this process's stdin, and omitting the flag writes nothing. The value is raw bytes either way, and core base64-encodes them for the wire. `crates/microvms-cli/src/cli.rs:1519-1520`.
-- `--eof` — close stdin after any `--data` is written, in the same request rather than a second one. `crates/microvms-cli/src/cli.rs:1527-1528`.
-- Plus `AttachFlags` and `RegionFlags`. `crates/microvms-cli/src/cli.rs:1530-1534`.
+- `--data` — What to write. `-` reads this process's stdin; omitted writes nothing. `crates/microvms-cli/src/cli.rs:1808`.
+- `--eof` — Close stdin after any --data is written. `crates/microvms-cli/src/cli.rs:1816`.
+- `--endpoint` — The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
+- `--agent-token` — The agent token delivered to the VM at launch. `crates/microvms-cli/src/cli.rs:629`.
+- `--microvm-id` — The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:633`.
+- `--name` — The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:644`.
+- `--port` — The daemon's port inside the guest. `crates/microvms-cli/src/cli.rs:648`.
+- `--state-dir` — Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs. `crates/microvms-cli/src/cli.rs:657`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
 ## cp
 
 ```
-microvm cp [OPTIONS] --endpoint <ENDPOINT> --agent-token <AGENT_TOKEN> --microvm-id <MICROVM_ID> <SRC> <DST>
+microvm cp [OPTIONS] <SRC> <DST>
 ```
 
-Copies a file or a tar archive between here and a running MicroVM: `cp ./local vm:/remote` writes, `cp vm:/remote ./local` reads.
+Copy a file or a tar archive between here and a running MicroVM.
 
-`crates/microvms-cli/src/commands/attached.rs:1385`
+`crates/microvms-cli/src/commands/attached.rs:1473`
 
 Flags:
 
-- `<SRC>` — source; `vm:/path` reads from the VM, anything else is a local path. Required. `crates/microvms-cli/src/cli.rs:1540-1541`.
-- `<DST>` — destination; `vm:/path` writes to the VM, anything else is a local path. Required. `crates/microvms-cli/src/cli.rs:1544-1545`.
-- `--tar` — move a whole directory tree as an uncompressed tar archive; the `vm:` side is a directory the daemon packs or extracts, the local side is a `.tar` file. `crates/microvms-cli/src/cli.rs:1568-1569`.
-- `--mode <OCTAL>` — permissions for an uploaded file, octal as a string; conflicts with `--tar`, since a tar carries its members' own modes. `crates/microvms-cli/src/cli.rs:1576-1577`.
-- `--lines <START:END>`: read only lines START through END of a file in the VM, 1-based and inclusive. Either side may be empty (`--lines 40:` reads from line 40 through EOF, `--lines :20` the first twenty), an END past the last line reads through EOF, line 0 and an END before START are refused before any request, and the flag conflicts with `--tar` and `--mode`. `crates/microvms-cli/src/cli.rs:1865-1873`.
-- Plus `AttachFlags` and `RegionFlags`. `crates/microvms-cli/src/cli.rs:1579-1583`.
+- `--tar` — Move a whole directory tree, as an uncompressed tar archive. `crates/microvms-cli/src/cli.rs:1856`.
+- `--mode` — Permissions for an uploaded file, octal as a string (`644`, `0755`). `crates/microvms-cli/src/cli.rs:1864`.
+- `--lines` — Read only lines START through END of a file in the VM, 1-based and inclusive. `crates/microvms-cli/src/cli.rs:1874`.
+- `--endpoint` — The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
+- `--agent-token` — The agent token delivered to the VM at launch. `crates/microvms-cli/src/cli.rs:629`.
+- `--microvm-id` — The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:633`.
+- `--name` — The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:644`.
+- `--port` — The daemon's port inside the guest. `crates/microvms-cli/src/cli.rs:648`.
+- `--state-dir` — Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs. `crates/microvms-cli/src/cli.rs:657`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
+
+## exists
+
+```
+microvm exists [OPTIONS] <PATH>
+```
+
+Say whether a path exists in a running MicroVM.
+
+`crates/microvms-cli/src/commands/attached.rs:1625`
+
+Flags:
+
+- `--endpoint` — The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
+- `--agent-token` — The agent token delivered to the VM at launch. `crates/microvms-cli/src/cli.rs:629`.
+- `--microvm-id` — The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:633`.
+- `--name` — The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:644`.
+- `--port` — The daemon's port inside the guest. `crates/microvms-cli/src/cli.rs:648`.
+- `--state-dir` — Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs. `crates/microvms-cli/src/cli.rs:657`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
 ## sync
 
 ```
-microvm sync [OPTIONS] --name <NAME> <DIR>
+microvm sync [OPTIONS] <DIR>
 ```
 
-Syncs a project directory into a running MicroVM's `/workspace`, incrementally: the first sync uploads the tree and writes a content manifest beside it in the guest; every later sync hashes the local tree, diffs against that manifest, and uploads only the members whose bytes differ. A second sync of an unchanged tree sends no archive — one manifest read, zero uploads. Locally deleted paths are removed in the guest by one argv `rm -rf --` exec rooted in `/workspace`, and deletion paths are validated first: the manifest is the VM's word, and it cannot order deletions outside the workspace. The incremental half of #71; `run <DIR>` is the launch-coupled batch half.
+Sync a project directory into a running MicroVM's /workspace, uploading only what changed.
 
-`crates/microvms-cli/src/commands/attached.rs`, `sync`
+`crates/microvms-cli/src/commands/attached.rs:1784`
 
 Flags:
 
-- `<DIR>` — the project directory; packed with `run <DIR>`'s rules (`.git`, `target`, `node_modules`, `.venv` stay home; symlinks travel as links; the daemon's budgets enforced during the walk). Required.
-- `--watch` — keep syncing on debounced filesystem changes until Ctrl-C, which resolves into the summary envelope. Events only wake a re-hash; the hash compare decides whether bytes move. With `microvm port-forward` in a second terminal, an edit here is a reload there.
-- `--full` — upload the whole tree even where the guest manifest claims members are unchanged; the recovery when a workload edited `/workspace` behind sync's back.
-- `--timeout <SECONDS>` — budget for the in-guest deletion exec; default `60`. A negative, NaN or infinite value, or one too large for a duration, is refused with `ERR_INVALID_ARG` before any call. `0` parses, but it goes to the daemon as the deletion's `timeout_sec`, which the daemon refuses with a 400 after the upload, so the useful range is positive.
-- Plus `AttachFlags` and `RegionFlags`.
-
-A disk-pressure refusal (the daemon's 507, with the byte counts in the body) surfaces as `ERR_PLATFORM` with the free-space remedy and `data.diskUnderPressure: true` — never `ERR_RETRYABLE`, because retrying an identical upload against a full disk cannot succeed.
+- `--watch` — Keep syncing on filesystem changes until Ctrl-C. `crates/microvms-cli/src/cli.rs:1898`.
+- `--full` — Upload the whole tree even when the guest manifest claims members are unchanged. `crates/microvms-cli/src/cli.rs:1906`.
+- `--timeout` — How long the in-guest deletion of locally-removed paths may take, in seconds. `crates/microvms-cli/src/cli.rs:1910`.
+- `--endpoint` — The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
+- `--agent-token` — The agent token delivered to the VM at launch. `crates/microvms-cli/src/cli.rs:629`.
+- `--microvm-id` — The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:633`.
+- `--name` — The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:644`.
+- `--port` — The daemon's port inside the guest. `crates/microvms-cli/src/cli.rs:648`.
+- `--state-dir` — Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs. `crates/microvms-cli/src/cli.rs:657`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
 ## attach
 
 ```
-microvm attach --from <FILE|-> [--name <NEW_NAME>] [--verify-identity] [--state-dir <DIR>]
-microvm attach --name <NAME> --microvm-id <ID> --endpoint <URL> --agent-token <TOKEN> [--region <R>] [--identity-host-seed <BASE64> --identity-vm-public-key <BASE64>] [--verify-identity]
+microvm attach [OPTIONS]
 ```
 
-Registers a name for a running MicroVM this state directory did not launch, so every later `--name` command here can act on it. Cross-machine adoption (issue #66): same-machine adoption already exists through the registry `run --keep --vm-name` writes, and what was missing was moving that record between machines. Two spellings of the same facts, mutually exclusive: `--from` reads a name record exactly as the registry writes it (`<state-dir>/names/<name>.json` on the launching machine — the export format is the existing file, so `microvm attach --from <(ssh other cat ~/.microvm/runs/names/ci.json)` needs no export command), and the explicit triple is for a caller holding a `run` envelope from another machine. Nothing is written until the VM has answered one authenticated request with the token being registered.
+Register a name for a running MicroVM this state directory did not launch.
 
-`crates/microvms-cli/src/commands/attached.rs`, `attach_vm`
+`crates/microvms-cli/src/commands/attached.rs:1973`
 
 Flags:
 
-- `--from <FILE>` — a name record file, or `-` for stdin. The record's own name is registered unless `--name` renames it; its region is the record's, and a region flag that disagrees with it is refused with `ERR_INVALID_ARG` before the probe, the answer every `--name` command gives. Identity material in the record is kept: the VM pin is what a later `tunnel --name <NAME> --verify-identity` checks against, and the host seed is in the same trust domain as the agent token beside it. Conflicts with the explicit triple.
-- `--name <NAME>` — the name to register. Required with the explicit triple; optional rename with `--from`. Validated like `run --vm-name`.
-- `--endpoint <URL>`, `--agent-token <TOKEN>`, `--microvm-id <ID>` — the explicit triple, from a `run` envelope. Required unless `--from` is given.
-- `--identity-host-seed <BASE64>`, `--identity-vm-public-key <BASE64>` — the pair from `run --identity`'s envelope, stored on the record for a later verified tunnel. Each requires the other: the Noise KK pattern proves this side too, so the pin alone cannot run a handshake.
-- `--verify-identity` — prove the far end is the VM the record was created for before writing anything, with the same Noise KK handshake `tunnel --verify-identity` runs (`crates/microvms-edges/src/session/tunnel.rs`, `verify_identity` — the tunnel's open-and-handshake step with no relay after it). Refused up front when the record carries no identity pair, naming the missing field.
-- `--port <PORT>` — the daemon's port inside the guest, for the probe. Not recorded.
-- `--state-dir <DIR>` — the registry the record is written into; defaults to `$MICROVM_STATE_DIR` or `~/.microvm/runs`.
-- Plus `RegionFlags`.
+- `--from` — A name record as the registry writes it (`<state-dir>/names/<name>.json`), or `-` for stdin. `crates/microvms-cli/src/cli.rs:1937`.
+- `--name` — The name to register. Required with the explicit triple; renames a `--from` record. `crates/microvms-cli/src/cli.rs:1950`.
+- `--endpoint` — The VM's endpoint, as reported by `run` on the machine that launched it. `crates/microvms-cli/src/cli.rs:1954`.
+- `--agent-token` — The agent token delivered to the VM at launch. Never echoed in the envelope. `crates/microvms-cli/src/cli.rs:1958`.
+- `--microvm-id` — The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:1962`.
+- `--identity-host-seed` — The launching host's identity secret, base64, from `run --identity`'s envelope. `crates/microvms-cli/src/cli.rs:1969`.
+- `--identity-vm-public-key` — The VM's public key, base64, from `run --identity`'s envelope. The pin. `crates/microvms-cli/src/cli.rs:1973`.
+- `--verify-identity` — Prove the far end is the VM the record was created for, before writing anything. `crates/microvms-cli/src/cli.rs:1985`.
+- `--port` — The daemon's port inside the guest, for the probe. Not recorded. `crates/microvms-cli/src/cli.rs:1989`.
+- `--state-dir` — Where the local state lives — the registry this record is written into. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs. `crates/microvms-cli/src/cli.rs:1994`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
-Refusals, each before anything is written:
+## adopt
 
-- A name already registered here to a *different* MicroVM id is `ERR_NAME_TAKEN` (14) before any AWS call, with `data.holder` naming the VM that holds it — the same row and the same reasoning as `run --keep --vm-name`, and a torn record reads as taken. The same VM under the same name is an idempotent success with `replaced: true` and a refreshed record.
-- The probe is one authenticated read (`GET /v1/fs/file?path=/dev/null`), not `/v1/health`: health is an open route on the daemon, so a probe that stopped there would accept a wrong token. A dead endpoint, a wrong token (`ERR_CREDENTIALS`, `data.kind: Unauthorized`), or an unbootstrapped daemon (`data.kind: NotBootstrapped`) surfaces with the daemon's own class and leaves the registry untouched.
-- `--verify-identity` without the pair, a VM launched without `--identity` (close 4401), or a record replayed from another VM (the daemon's reply does not verify against the pin) is `ERR_PRECONDITION`, and nothing is written.
+```
+microvm adopt [OPTIONS]
+```
 
-The envelope is `{name, microvmId, endpoint, region, verifiedIdentity, replaced, statePath}` — never the agent token, which is in the owner-only (0600 on Unix) record file at `statePath`. Text rendering is one line.
+Adopt a MicroVM this invocation didn't launch, through core's lifecycle guards, and report what they read.
 
-A `terminate` releases a name only in the state directory it ran against: a record adopted into a second machine stays there until that machine terminates by the name or deletes the file.
+`crates/microvms-cli/src/commands/attached.rs:124`
+
+Flags:
+
+- `--endpoint` — The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
+- `--agent-token` — The agent token delivered to the VM at launch. `crates/microvms-cli/src/cli.rs:629`.
+- `--microvm-id` — The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:633`.
+- `--name` — The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:644`.
+- `--port` — The daemon's port inside the guest. `crates/microvms-cli/src/cli.rs:648`.
+- `--state-dir` — Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs. `crates/microvms-cli/src/cli.rs:657`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
+
+## tunnel
+
+```
+microvm tunnel [OPTIONS] <LOCAL[:GUEST]>
+```
+
+Tunnel arbitrary TCP to a guest port, so `psql` or `ssh` here reaches a server in the VM.
+
+`crates/microvms-cli/src/commands/attached.rs:2465`
+
+Flags:
+
+- `--bind` — The local address to bind. Loopback by default, deliberately. `crates/microvms-cli/src/cli.rs:1615`.
+- `--max-connections` — Stop after this many connections, instead of running until Ctrl-C. `crates/microvms-cli/src/cli.rs:1622`.
+- `--verify-identity` — Prove the far end is the VM this record was created for, before relaying a byte. `crates/microvms-cli/src/cli.rs:1648`.
+- `--identity-host-seed` — The launching host's identity secret, base64, from `run --identity`'s envelope. `crates/microvms-cli/src/cli.rs:1655`.
+- `--identity-vm-public-key` — The VM's public key, base64, from `run --identity`'s envelope. The pin. `crates/microvms-cli/src/cli.rs:1659`.
+- `--endpoint` — The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
+- `--agent-token` — The agent token delivered to the VM at launch. `crates/microvms-cli/src/cli.rs:629`.
+- `--microvm-id` — The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:633`.
+- `--name` — The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:644`.
+- `--port` — The daemon's port inside the guest. `crates/microvms-cli/src/cli.rs:648`.
+- `--state-dir` — Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs. `crates/microvms-cli/src/cli.rs:657`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
+
+## port-forward
+
+```
+microvm port-forward [OPTIONS] <LOCAL[:GUEST]>
+```
+
+Serve a guest port on localhost, so a browser here reaches a server in the VM.
+
+`crates/microvms-cli/src/commands/attached.rs:2319`
+
+Flags:
+
+- `--bind` — The local address to bind. Loopback by default, deliberately. `crates/microvms-cli/src/cli.rs:1719`.
+- `--max-connections` — Stop after serving this many connections, instead of running until Ctrl-C. `crates/microvms-cli/src/cli.rs:1726`.
+- `--endpoint` — The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
+- `--agent-token` — The agent token delivered to the VM at launch. `crates/microvms-cli/src/cli.rs:629`.
+- `--microvm-id` — The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:633`.
+- `--name` — The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:644`.
+- `--port` — The daemon's port inside the guest. `crates/microvms-cli/src/cli.rs:648`.
+- `--state-dir` — Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs. `crates/microvms-cli/src/cli.rs:657`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
+
+## shell
+
+```
+microvm shell [OPTIONS]
+```
+
+Open an interactive root shell in a running MicroVM — a real PTY, with job control, signals, and resize.
+
+`crates/microvms-cli/src/commands/attached.rs:2753`
+
+Flags:
+
+- `--endpoint` — The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:1679`.
+- `--microvm-id` — The MicroVM id, needed to mint the shell token. `crates/microvms-cli/src/cli.rs:1683`.
+- `--name` — The name `run --keep --vm-name` registered, standing in for endpoint and id. `crates/microvms-cli/src/cli.rs:1691`.
+- `--state-dir` — Where the local state lives — the name registry. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs, the same resolution the attached commands use. `crates/microvms-cli/src/cli.rs:1697`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
 ## suspend
 
@@ -420,16 +670,21 @@ A `terminate` releases a name only in the state directory it ran against: a reco
 microvm suspend [OPTIONS] <MICROVM_ID>
 ```
 
-Freezes a MicroVM, which keeps its memory, filesystem, token, and endpoint. The operation is a freeze and restore rather than a stop and start.
+Freeze a MicroVM.
 
-`crates/microvms-cli/src/commands/lifecycle.rs:2019`
+`crates/microvms-cli/src/commands/lifecycle.rs:2052`
 
 Flags:
 
-- `<MICROVM_ID>` — the MicroVM to freeze: a MicroVM id, or a name `run --keep --vm-name` registered (resolved locally, zero extra calls; an unknown name fails with `ERR_PRECONDITION` before any call). A name also supplies the region: the call goes to the record's region whatever `$AWS_REGION` says, and a region flag that disagrees with the record is `ERR_INVALID_ARG`. Required.
-- `--timeout <TIMEOUT>` — how long to wait for the state transition, in seconds; default `300`. A negative, NaN or infinite value, or one too large for a duration, is refused with `ERR_INVALID_ARG` before any call; `0` is legal. `crates/microvms-cli/src/cli.rs:1713-1714`.
-- `--state-dir <STATE_DIR>`: where the VM's history is appended; defaults to `$MICROVM_STATE_DIR` or `~/.microvm/runs`. `crates/microvms-cli/src/cli.rs:2012-2014`.
-- Plus `RegionFlags`. `crates/microvms-cli/src/cli.rs:1720-1721`.
+- `--timeout` — How long to wait for the state transition, in seconds. `crates/microvms-cli/src/cli.rs:2011`.
+- `--state-dir` — Where the VM's history is appended. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs. `crates/microvms-cli/src/cli.rs:2015`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
 ## resume
 
@@ -437,16 +692,21 @@ Flags:
 microvm resume [OPTIONS] <MICROVM_ID>
 ```
 
-Thaws a suspended MicroVM and reports its endpoint. Past the launch-time `suspendedDurationSeconds` window the VM has been terminated, so the resume fails.
+Thaw a suspended MicroVM and report its endpoint.
 
-`crates/microvms-cli/src/commands/lifecycle.rs:2098`
+`crates/microvms-cli/src/commands/lifecycle.rs:2131`
 
 Flags:
 
-- `<MICROVM_ID>` — the MicroVM to thaw: a MicroVM id, or a registered name (resolved locally; the record's region is the call's, as for `suspend`). Required.
-- `--timeout <TIMEOUT>` — how long to wait for RUNNING, in seconds; default `300`. A negative, NaN or infinite value, or one too large for a duration, is refused with `ERR_INVALID_ARG` before any call; `0` is legal. `crates/microvms-cli/src/cli.rs:1731-1732`.
-- `--state-dir <STATE_DIR>`: where the VM's history is appended; defaults to `$MICROVM_STATE_DIR` or `~/.microvm/runs`. `crates/microvms-cli/src/cli.rs:2030-2032`.
-- Plus `RegionFlags`. `crates/microvms-cli/src/cli.rs:1738-1739`.
+- `--timeout` — How long to wait for RUNNING, in seconds. `crates/microvms-cli/src/cli.rs:2029`.
+- `--state-dir` — Where the VM's history is appended. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs. `crates/microvms-cli/src/cli.rs:2033`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
 ## terminate
 
@@ -454,20 +714,25 @@ Flags:
 microvm terminate [OPTIONS] <MICROVM_ID>
 ```
 
-Tears down a MicroVM and optionally its image and build log group. When part of the teardown fails, the command still exits successfully and reports the leaked identifier.
+Tear down a MicroVM, and optionally its image and build log group.
 
-`crates/microvms-cli/src/commands/lifecycle.rs:2176`
+`crates/microvms-cli/src/commands/lifecycle.rs:2252`
 
 Flags:
 
-- `<MICROVM_ID>` — the MicroVM to terminate: a MicroVM id, or a registered name (resolved locally; the record's region is the call's, as for `suspend`). An accepted terminate releases every name this state directory registered to the VM, whichever spelling addressed it — the launch's own and any `attach` alias — so the names are reusable. Required.
-- `--image-identifier <IMAGE_IDENTIFIER>` — the image to delete, if `--delete-image` is given. Omitted, the image is read off the kept run's record in the state directory: `run --keep` wrote the VM, the image, and the image's name there, so the flag is an override rather than a requirement (#160). `crates/microvms-cli/src/cli.rs`, `TerminateArgs::image_identifier`.
-- `--image-name <IMAGE_NAME>` — the image's name, needed to name its build log group; the service created that group, so `terraform destroy` never removes it. Omitted, it is read off the same record when one names the image. `crates/microvms-cli/src/cli.rs`, `TerminateArgs::image_name`.
-- `--delete-image` — also delete the image and name its build log group. With neither the flag nor a record naming an image, the command is refused locally with `ERR_INVALID_ARG` before any call. After the teardown the run record is narrowed to what is still outstanding — a kept image, a failed delete, and the build log group this CLI can only name — and removed when nothing is, so `ls` stops reporting a VM this command removed. `crates/microvms-cli/src/cli.rs`, `TerminateArgs::delete_image`; `crates/microvms-cli/src/commands/lifecycle.rs`, `terminate`; `crates/microvms-cli/src/ledger.rs`, `Ledger::open_for_vm`.
-- `--wait` — wait for TERMINATED rather than returning as soon as the call is accepted. `crates/microvms-cli/src/cli.rs:1770-1771`.
-- `--wait-sec <SECONDS>`: wait for `TERMINATED` for at most this many seconds; implies `--wait`. `crates/microvms-cli/src/cli.rs:2069-2071`.
-- `--state-dir <STATE_DIR>`: where the VM's history is appended; defaults to `$MICROVM_STATE_DIR` or `~/.microvm/runs`. `crates/microvms-cli/src/cli.rs:2073-2075`.
-- Plus `RegionFlags`. `crates/microvms-cli/src/cli.rs:1777-1778`.
+- `--image-identifier` — The image to delete, if --delete-image is given. Omitted, the image is read off the kept run's ledger record in the state directory. `crates/microvms-cli/src/cli.rs:2048`.
+- `--image-name` — The image's name, needed to name its build log group. Omitted, it is read off the same ledger record when one names the image. `crates/microvms-cli/src/cli.rs:2055`.
+- `--delete-image` — Also delete the image, and name its build log group. `crates/microvms-cli/src/cli.rs:2064`.
+- `--wait` — Wait for TERMINATED rather than returning as soon as the call is accepted. `crates/microvms-cli/src/cli.rs:2068`.
+- `--wait-sec` — Wait for TERMINATED for at most this many seconds. Implies --wait. `crates/microvms-cli/src/cli.rs:2072`.
+- `--state-dir` — Where the VM's history is appended. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs. `crates/microvms-cli/src/cli.rs:2076`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
 ## ls
 
@@ -475,21 +740,25 @@ Flags:
 microvm ls [OPTIONS]
 ```
 
-Lists the local ledger of a state directory: what this CLI could not confirm it deleted, not what exists in the account. It reads `~/.microvm/runs/*.json` rather than asking AWS, because the ledger still names the resources a killed process never got to delete, and an entry can outlive the resource it names — the measurement behind #159 was 68 entries with populated `leaked` lists in an account both `tools/verify-clean.py` and the live APIs showed empty. Every `microvm.runs` envelope therefore carries `source: "local-ledger"`, and the text and TUI header reads `local ledger of <state dir>: what this CLI could not confirm it deleted, not what exists in the account`. `crates/microvms-cli/src/commands/local.rs:32-52`.
+List what this CLI created and could not confirm it deleted; `--remote` asks the account too.
 
-`--remote` asks the other question. Through the same control plane every other command uses (`CoreSeam::control_plane`; one AWS service, no second client), it reads `ListMicrovms` and `ListMicrovmImages` to their last page and judges each identifier in a ledger entry's `leaked` list — the ledger's own statement of what is outstanding, which teardown narrows to what a delete did not report gone. An identifier found in either listing takes the listed state: alive is every MicroVM state but `TERMINATED` and every image state but `DELETING`/`DELETED`, the predicate `tools/verify-clean.py` uses, so the two tools cannot disagree about a leak. An identifier absent from both is `gone` only when it is spelled as a MicroVM id (`microvm-…`) or an image ARN (`…:microvm-image:<name>`), the two things the listings could have shown; any other spelling, a service-created `/aws/lambda-microvms/…` log group above all, is something neither listing can see, and its absence says nothing. The entry is then `live` if any identifier is, else `unjudged` if any is, else `gone`; a record written for another region or one that cannot be read is `unjudged` outright. A record whose `leaked` list is empty, the shape a run that created nothing leaves, is judged by its named `microvmId`/`imageIdentifier` instead. `data.remote` is null without the flag and otherwise `{region, microvms: [{microvmId, state, imageArn}], images: [{imageArn, name, state}], entries: [{runId, microvmId, imageIdentifier, microvmState, imageState, status}], unknownToLedger: {microvms, images}}`, where `unknownToLedger` is what is alive in the account that no entry names — the sibling-client case the issue measured. `crates/microvms-cli/src/commands/local.rs:256`.
-
-`--prune` (requires `--remote`) removes the ledger files of `gone` entries and lists their run ids in `data.pruned`, which is `[]` on every other invocation. Only `gone`: a live record is the one the ledger exists for, and an unjudged one names something these listings cannot answer for — for a leaked log group the ledger file is the only pointer there is (`crates/microvms-cli/src/ledger.rs:6-9`), so removing it on the strength of a `TERMINATED` VM beside it would lose the resource. The removal goes through `ledger::remove`, which checks the run id against the ledger's own grammar before it becomes a path component. `crates/microvms-cli/src/ledger.rs:208-220`.
+`crates/microvms-cli/src/commands/local.rs:52`
 
 Flags:
 
-- `--state-dir <STATE_DIR>` — where the ledgers live; defaults to `$MICROVM_STATE_DIR` or `~/.microvm/runs`. `crates/microvms-cli/src/cli.rs:1784-1785`.
-- `--remote` — list live MicroVMs and images from the account and mark each ledger entry `live`, `gone`, or `unjudged` by the identifiers in its `leaked` list; conflicts with `--watch`, which is ledger-only by contract. `crates/microvms-cli/src/cli.rs:1824-1825`.
-- `--prune` — remove the ledger files of `gone` entries; requires `--remote`. `crates/microvms-cli/src/cli.rs:1831-1832`.
-- `--region <REGION>` / `--unlisted-region <NAME>` — the region `--remote` lists; the shared `RegionFlags` group, ignored without `--remote`. `crates/microvms-cli/src/cli.rs:1834-1835`.
-- `--watch` — re-read the ledger on an interval until Ctrl-C, `port-forward` style: snapshots on stderr, one summary envelope at the end (`data.watch = {refreshes, intervalSeconds, interrupted, calls}`, `null` for a plain `ls`), Ctrl-C exits 0 (#78). The loop is **ledger-only**: zero platform calls per refresh — no `GetMicrovm`, no `/v1/health` — so it resets no idle timer, keeps no VM alive, and bills nothing; `data.watch.calls` states that flatly and the text carries the measurement behind it. The distinction matters because an outside `/v1/health` poll *does* reset the platform idle timer (`docs/PLATFORM.md`, idle-timer section: a polled VM stayed RUNNING through 311s of a 60s window while the unpolled control suspended at 66s), so a health-polling watcher would keep every watched VM billing. The corollary: what a watch shows is what this CLI last recorded, not the platform's live state — a VM the platform suspended at its idle window still reads as this ledger wrote it. `crates/microvms-cli/src/commands/local.rs`, `watch`.
-- `--interval-sec <SECONDS>` — seconds between ledger re-reads under `--watch`; default `2`, floor `0.1`. The default can be short *because* the loop is local-only; a health-polling watcher would instead need its interval judged against every watched VM's `maxIdleDurationSeconds`.
-- `--max-refreshes <N>` — stop after N snapshots instead of on Ctrl-C, for scripts; `0` is refused.
+- `--state-dir` — Where the ledgers live. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs. `crates/microvms-cli/src/cli.rs:2086`.
+- `--watch` — Re-read the ledger on an interval until Ctrl-C, port-forward style (#78). `crates/microvms-cli/src/cli.rs:2096`.
+- `--interval-sec` — Seconds between ledger re-reads under `--watch`; default 2. `crates/microvms-cli/src/cli.rs:2105`.
+- `--max-refreshes` — Stop after this many snapshots instead of on Ctrl-C. `crates/microvms-cli/src/cli.rs:2113`.
+- `--remote` — Ask the account too: list live MicroVMs and images and mark each ledger entry live, gone, or unjudged. `crates/microvms-cli/src/cli.rs:2126`.
+- `--prune` — Remove the ledger files of `gone` entries. Requires `--remote`. `crates/microvms-cli/src/cli.rs:2133`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
 ## history
 
@@ -497,20 +766,38 @@ Flags:
 microvm history [OPTIONS] <VM_ID>
 ```
 
-Prints what was asked of one MicroVM and what the platform reported back: `imageBuilt` (when `run`'s own invocation built the image — a standalone `build` has no VM id and writes no history), `launched`, `exec` per exec, `hookObserved` per lifecycle-hook firing the daemon reported, `suspended`, `resumed`, and `terminated` with the teardown's own verdict. The record is an append-only JSONL file at `<state-dir>/history/<vm-id>.jsonl`, one camelCase object per line with a per-VM `seq` counter and an epoch-seconds `at`, appended by `run`, `exec`, `health`, `suspend`, `resume`, and `terminate` with the same swallowed-failure discipline as the ledger — an unwritable state directory never fails a teardown.
+Print what was asked of one MicroVM and what the platform reported back.
 
-`hookObserved` events (issue #80) carry `hook` — the route's own spelling: `ready`, `validate`, `run`, `suspend`, `resume`, `terminate` — and `firedAt`, epoch seconds on the *daemon's* clock, distinct from the line's own `at` (when this CLI learned of it). They arrive by health poll rather than push: `run`'s teardown fetches health once before terminating, `resume` polls after RUNNING (the only moment a suspend-hook firing can become visible, since a frozen VM cannot answer), and `microvm health` appends whenever it knows the VM id. Every append deduplicates on the (hook, firedAt) pair, so polling twice appends nothing. The validate hook writes no CloudWatch logs, so this record is the only local answer to "did my validate hook even run?".
-
-Unlike the ledger `ls` reads, nothing ever deletes a history file: the record survives terminate on purpose, because a caller attesting over a run needs it precisely after the VM is gone. A VM with no history file is a clean empty result rather than an error — asking about a VM this state dir never saw is a question, not a mistake. A truncated last line (a process killed mid-append) is reported as an unreadable record rather than skipped.
-
-What the record does not prove: it shows what was asked of the VM and what the daemon and the control plane reported back — identifiers, endpoints, exit codes, teardown verdicts, hook firings — not what a process inside the guest did between execs. Every value is the platform's or the daemon's; nothing the guest printed ever reaches a history line, because a record built from guest output would be a record the workload can forge. `hookObserved` lines carry one additive caveat on top of that: the daemon's hook routes are unauthenticated and loopback-reachable from inside the guest, so a hostile workload can make the daemon observe *extra* firings by posting the hook paths itself — it cannot remove or alter real ones, because the daemon records before responding and its capped log keeps the earliest entries, which are the platform's. Read a hook line as "the daemon saw this hook fire", never as "only the platform could have fired it".
-
-`crates/microvms-cli/src/commands/local.rs`, storage in `crates/microvms-cli/src/history.rs`.
+`crates/microvms-cli/src/commands/local.rs:547`
 
 Flags:
 
-- `<VM_ID>` — the MicroVM whose history to print: a MicroVM id, or a registered name (resolved locally; an unregistered name reads as a clean empty history, this command's usual answer for an unseen VM). Required.
-- `--state-dir <STATE_DIR>` — where the histories live; defaults to `$MICROVM_STATE_DIR` or `~/.microvm/runs`.
+- `--state-dir` — Where the histories live. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs. `crates/microvms-cli/src/cli.rs:2147`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
+
+## names
+
+```
+microvm names [OPTIONS]
+```
+
+List the names this machine's registry holds, or delete one whose VM is gone.
+
+`crates/microvms-cli/src/commands/local.rs:633`
+
+Flags:
+
+- `--delete` — Delete this name's record first; repeat for more. A name the registry doesn't hold is refused, and then nothing is deleted. `crates/microvms-cli/src/cli.rs:2155`.
+- `--state-dir` — Where the registry lives. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs. `crates/microvms-cli/src/cli.rs:2159`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
 ## logs
 
@@ -518,18 +805,80 @@ Flags:
 microvm logs [OPTIONS] <IMAGE_NAME>
 ```
 
-Names an image's build log group, `/aws/lambda-microvms/<image-name>`, and prints the working `aws logs tail` invocation that reads it — a success, exit 0. That log group holds the only evidence a failed build leaves behind.
+Name an image's build log group and print the `aws logs tail` command that reads it.
 
-The envelope's `data` carries `tailCommand` (`aws logs tail <group> --since 1h --format short --region <region>`, pinned to the region this invocation resolved so the printed line is runnable regardless of the shell's default) and `tailRequires`: the command needs **AWS CLI v2** — `aws logs tail` does not exist in v1 (verified present in 2.35.7). The identity running the tail also needs `logs:FilterLogEvents`, `logs:GetLogEvents`, and `logs:DescribeLogStreams` on the group; the Terraform stack's `logs_read_policy_arn` output is exactly that grant, ready to attach. The CLI itself never reads CloudWatch — `lines` is explicitly `null`, never `[]`, so a consumer cannot mistake "this client did not read the group" for "the group has no events" (the wrong-prefix signature).
-
-`data` also carries `streams`: three objects labelling the build's log topology by role — `docker-build` (zip pull and docker image build), `snapshot-graviton3`, and `snapshot-graviton4` (the snapshot VMs are the ones that start the app, so application startup logs land there). One build is three VMs and three streams, with random service-chosen stream names by default; a configured `logStream` collapses all three into one exact stream, distinguished across builds only by the per-build `/<16 hex>` suffix this client appends, and the resolved name is on the build envelope's `logStream`. The point of returning the topology here is that an agent handed this envelope knows what to look for inside the group without measuring the platform itself. See `docs/PLATFORM.md`, "An image build is three VMs and three log streams".
-
-`crates/microvms-cli/src/commands/local.rs:705`
+`crates/microvms-cli/src/commands/local.rs:778`
 
 Flags:
 
-- `<IMAGE_NAME>` — the image whose log group to name. Required. `crates/microvms-cli/src/cli.rs:1852-1853`.
-- Plus `RegionFlags`. `crates/microvms-cli/src/cli.rs:1855-1856`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
+
+## image-versions
+
+```
+microvm image-versions [OPTIONS] <IMAGE>
+```
+
+List an image's versions: each one's build state, whether `RunMicrovm` launches it, and what it was built with.
+
+`crates/microvms-cli/src/commands/image.rs:18`
+
+Flags:
+
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
+
+## image-set-status
+
+```
+microvm image-set-status [OPTIONS] <IMAGE> <VERSION> <STATUS>
+```
+
+Retire an image version (`INACTIVE`) or restore it (`ACTIVE`), and read the change back.
+
+`crates/microvms-cli/src/commands/image.rs:50`
+
+Flags:
+
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
+
+## image-builds
+
+```
+microvm image-builds [OPTIONS] <IMAGE> <VERSION>
+```
+
+List an image version's builds, one per Graviton generation, or read one with `--build-id`.
+
+`crates/microvms-cli/src/commands/image.rs:83`
+
+Flags:
+
+- `--build-id` — Read this one build, with its snapshot sizes, rather than listing them all. `crates/microvms-cli/src/cli.rs:2212`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
 ## cost
 
@@ -537,25 +886,55 @@ Flags:
 microvm cost [OPTIONS]
 ```
 
-Reports what a run cost or what a plan will cost, with every figure labelled. Dollar figures are estimates derived from published rates, not invoice amounts. A line item with no published rate reads `unpriced` rather than `$0.00`.
+Estimate the cost of a run or a plan.
 
-`crates/microvms-cli/src/commands/cost.rs:27`
+`crates/microvms-cli/src/commands/cost.rs:29`
 
 Flags:
 
-- `--estimate` — treat the durations as a plan rather than as timings, so every duration is labelled projected. `crates/microvms-cli/src/cli.rs:1865-1866`.
-- `--compare` — also print running versus suspended for the same hold, with the break-even. `crates/microvms-cli/src/cli.rs:1869-1870`.
-- `--memory <MEMORY>` — baseline MiB, selecting a documented size class; default `2048`. `crates/microvms-cli/src/cli.rs:1873-1874`.
-- `--cpus <VCPUS>`: vCPUs the workload needs, instead of `--memory`: the smallest size class whose baseline covers the request is used. Takes a fraction (`0.5`) and combines with `--memory-mib`; zero is no requirement, a request no class covers is refused before any AWS call naming the largest class, and the flag conflicts with `--memory`. `crates/microvms-cli/src/cli.rs:501-507`.
-- `--memory-mib <MIB>`: MiB of memory the workload needs, instead of `--memory`: any figure, which selects the smallest class whose baseline covers it (`1500` selects `2048`). Combines with `--cpus` and conflicts with `--memory`. `crates/microvms-cli/src/cli.rs:509-512`.
-- `--running-sec <RUNNING_SEC>` — seconds the VM spent, or will spend, RUNNING; billed at baseline whether or not anything is executing. Default `0`. `crates/microvms-cli/src/cli.rs:1880-1881`.
-- `--suspended-sec <SUSPENDED_SEC>` — seconds spent suspended; storage only, no compute line. Default `0`. `crates/microvms-cli/src/cli.rs:1884-1885`.
-- `--build-sec <BUILD_SEC>` — seconds the image build took; appears as an unpriced line. Default `0`. `crates/microvms-cli/src/cli.rs:1891-1892`.
-- `--image-gb <IMAGE_GB>` — image size in GB; adds storage with its one-week minimum retention. `crates/microvms-cli/src/cli.rs:1895-1896`.
-- `--cycles <CYCLES>` — suspend/resume cycles, each paying a snapshot write plus a read. Left off, the report counts none, since a report claims only what happened, and `--compare` prices one, since its per-cycle figure is the point; a count given feeds both (#280). `crates/microvms-cli/src/cli.rs`, `CostArgs`.
-- `--hold-sec <HOLD_SEC>` — the hold to compare running against suspended over, in seconds; default `3600`. A negative, NaN or infinite value, or one too large for a duration, is refused with `ERR_INVALID_ARG` before any call; `0` is legal. `crates/microvms-cli/src/cli.rs:1903-1904`.
-- `--max-cost <USD>` — a budget the report's total is checked against (#77). The comparison is against the *priced* total, which is a lower bound whenever any line is unpriced — so a detected breach has already been exceeded by an unknown margin. The verdict lands in `data.budget` (`{maxUsd, onBreach, basis, breached, overageAtLeastUsd}`, `null` with no budget), in the text, and in the dense rendering; `basis` says whether the compared total was `exact` or `lower-bound`. A breach is always a stderr warning, `--quiet` included. Requires `--on-breach`. `crates/microvms-cli/src/commands/cost.rs`, budget gate.
-- `--on-breach <warn|abort>` — what a `--max-cost` breach does, and deliberately without a default: because the compared total can be a lower bound, whether a breach warns (exit 0) or aborts is the caller's judgement. `abort` exits `ERR_PRECONDITION` (12) *after* the full report is written — the same success-envelope-then-non-zero mechanism as `run`'s workload exit — so a CI gate branches on 12 while still receiving the figures. No new exit code: 12 is an existing row, and 12-vs-2 distinguishes "over budget" from "bad flag". `crates/microvms-cli/src/cli.rs`, `OnBreach`.
+- `--estimate` — Treat the durations as a plan rather than as timings. `crates/microvms-cli/src/cli.rs:2225`.
+- `--compare` — Also print running versus suspended for the same hold, with the break-even. `crates/microvms-cli/src/cli.rs:2229`.
+- `--memory` — Baseline MiB, selecting a documented size class. `crates/microvms-cli/src/cli.rs:2233`.
+- `--cpus` — vCPUs the workload needs, instead of --memory: the smallest size class whose baseline covers the request is used. Takes a fraction (0.5) and combines with --memory-mib. `crates/microvms-cli/src/cli.rs:506`.
+- `--memory-mib` — MiB of memory the workload needs, instead of --memory: any figure, which selects the smallest class whose baseline covers it (1500 selects 2048). Combines with --cpus. `crates/microvms-cli/src/cli.rs:511`.
+- `--running-sec` — Seconds the VM spent, or will spend, RUNNING. `crates/microvms-cli/src/cli.rs:2243`.
+- `--suspended-sec` — Seconds spent suspended. Storage only — no compute line at all. `crates/microvms-cli/src/cli.rs:2247`.
+- `--build-sec` — Seconds the image build took. `crates/microvms-cli/src/cli.rs:2254`.
+- `--image-gb` — Image size in GB. Adds storage with its one-week minimum retention. `crates/microvms-cli/src/cli.rs:2258`.
+- `--cycles` — Suspend/resume cycles, each paying a snapshot write plus a read. `crates/microvms-cli/src/cli.rs:2266`.
+- `--hold-sec` — The hold to compare running against suspended over, in seconds. `crates/microvms-cli/src/cli.rs:2270`.
+- `--max-cost` — A budget in USD the report's total is checked against (#77). `crates/microvms-cli/src/cli.rs:2280`.
+- `--on-breach` — What a `--max-cost` breach does: warn and exit 0, or abort with ERR_PRECONDITION (exit 12). `crates/microvms-cli/src/cli.rs:2289`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
+
+## egress-posture
+
+```
+microvm egress-posture [OPTIONS]
+```
+
+The egress posture `run` with these options would report, without launching.
+
+`crates/microvms-cli/src/commands/local.rs:862`
+
+Flags:
+
+- `--egress` — As `run --egress`: request the managed INTERNET_EGRESS connector. `crates/microvms-cli/src/cli.rs:1532`.
+- `--egress-network-connector` — As `run --egress-network-connector`: an existing VPC network connector ARN. Repeatable. `crates/microvms-cli/src/cli.rs:1536`.
+- `--deny-egress` — As `run --deny-egress`: the advisory proxy variables. Not isolation. `crates/microvms-cli/src/cli.rs:1540`.
+- `--config` — Read this project config file instead of ./microvm.toml. `crates/microvms-cli/src/cli.rs:675`.
+- `--no-config` — Ignore any microvm.toml, even a malformed one. Flags and defaults apply. `crates/microvms-cli/src/cli.rs:679`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
 ## doctor
 
@@ -563,29 +942,26 @@ Flags:
 microvm doctor [OPTIONS]
 ```
 
-Checks every prerequisite and says which one is wrong. The checks cover the project config file, credentials, the region, the Terraform outputs, whether the stack is applied, the managed base images AWS publishes, and whether the daemon binary is aarch64.
+Check every prerequisite and say which one is wrong.
 
-Every line reports on one region, the one `run` would launch in: the one `--region` or `--unlisted-region` names, then a `microvm.toml` `region`, then `$AWS_REGION` or `$AWS_DEFAULT_REGION`, then us-east-1. The region line says which of those set it (`; set by ./microvm.toml`, for one), the same answer `run` reports as `resolvedConfig.region.source`. Both commands resolve it through `crates/microvms-cli/src/config.rs`'s `merge_region`. A config file that doesn't load pins no region here; the config line is the fatal one. When that region doesn't resolve, the region line says why, the credentials check still runs against us-east-1 and says us-east-1 stood in, and `managed-bases` says the listing wasn't read.
-
-The config check runs first because it is the one check that is entirely local, and a malformed file fails `run` before anything else would. `doctor --config ci.toml` validates the exact file `run --config ci.toml` would read, through the same loader, so the two commands cannot disagree about which config applies. A broken file — unparseable, an unknown key, a value outside its flag's domain — is a fatal fail naming the reason; an absent `./microvm.toml` is an advisory pass, because a project configured by flags is not a finding. A valid file's pass line names which knobs it pins. `crates/microvms-cli/src/commands/doctor.rs`'s `check_config`.
-
-`crates/microvms-cli/src/commands/doctor.rs:32`
-
-The `managed-bases` and `base-image-versions` checks are about the managed base rather than about this machine, and both are advisory.
-
-`managed-bases` reads `ListManagedMicrovmImages` and answers whether AWS publishes a base this client does not know about. It reports rather than offers, and the reason is a limitation in the shape: `ManagedMicrovmImageSummary` carries an ARN and two timestamps and nothing else — no registry reference, no architecture, no working directory. A `BaseImage` in `microvms-core` pairs the ARN *with* the Dockerfile `FROM` and with whether the image declares a `WORKDIR`, because `require_matching_from` compares a caller's Dockerfile against the first and `require_workdir` refuses inheritance on the second. Neither guard has an input from this listing, and the registry ref is not derivable from the ARN — `al2023-1` pairs with `public.ecr.aws/amazonlinux/amazonlinux:2023-minimal` and nothing in the ARN says so. So a discovered base cannot be built from through this client, and the check says which one it knows.
-
-`base-image-versions` reads `ListManagedMicrovmImageVersions` and prints the values `build --base-image-version` may take. That is the actionable half: an unpinned build takes whatever the service currently defaults to, and that default has already moved once.
-
-Both are advisory because nothing about a build depends on either read succeeding, and a `doctor` that failed on a listing would add a way to be wrong rather than report one. `crates/microvms-cli/src/commands/doctor.rs`'s `check_managed_bases`.
+`crates/microvms-cli/src/commands/doctor.rs:33`
 
 Flags:
 
-- `--binary <BINARY>` — the agentd binary to check the architecture of. `crates/microvms-cli/src/cli.rs:1945-1946`.
-- `--infra-dir <INFRA_DIR>` — the Terraform stack directory; defaults to `./conformance/infra`. `crates/microvms-cli/src/cli.rs:1949-1950`.
-- `--config <PATH>`: read this project config file instead of `./microvm.toml`, as under `run`. Naming a file that does not exist is refused with `ERR_CONFIG`; conflicts with `--no-config`. `crates/microvms-cli/src/cli.rs:670-676`.
-- `--no-config`: ignore any `microvm.toml`, even a malformed one; flags and defaults apply. `crates/microvms-cli/src/cli.rs:678-680`.
-- Plus `RegionFlags` and `InfraFlags`. `crates/microvms-cli/src/cli.rs:1952-1959`.
+- `--binary` — The agentd binary to check the architecture of. `crates/microvms-cli/src/cli.rs:2312`.
+- `--infra-dir` — The Terraform stack directory. Defaults to ./conformance/infra. `crates/microvms-cli/src/cli.rs:2316`.
+- `--config` — Read this project config file instead of ./microvm.toml. `crates/microvms-cli/src/cli.rs:675`.
+- `--no-config` — Ignore any microvm.toml, even a malformed one. Flags and defaults apply. `crates/microvms-cli/src/cli.rs:679`.
+- `--region` — AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1. `crates/microvms-cli/src/cli.rs:587`.
+- `--unlisted-region` — Use a region this client has not seen carry MicroVMs. Costs you the diagnostic. `crates/microvms-cli/src/cli.rs:594`.
+- `--bucket` — S3 bucket for the build artifact. Defaults to $MICROVM_BUCKET. `crates/microvms-cli/src/cli.rs:722`.
+- `--build-role-arn` — Build role ARN. Defaults to $MICROVM_BUILD_ROLE_ARN. `crates/microvms-cli/src/cli.rs:726`.
+- `--execution-role-arn` — Execution role ARN. Defaults to $MICROVM_EXECUTION_ROLE_ARN. `crates/microvms-cli/src/cli.rs:730`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
 ## manifest
 
@@ -593,11 +969,17 @@ Flags:
 microvm manifest [OPTIONS]
 ```
 
-Emits the whole command surface, its exit codes, and its envelope schema. The manifest is generated from the registered clap tree rather than maintained by hand, so it cannot drift from what the binary accepts.
+Emit the whole command surface, its exit codes, and its envelope schema.
 
-`crates/microvms-cli/src/commands/local.rs:794`
+`crates/microvms-cli/src/commands/local.rs:931`
 
-The command takes no flags and always emits JSON, because the only consumer that asks for a manifest is one that parses it.
+Flags:
+
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
 ## constants
 
@@ -605,13 +987,18 @@ The command takes no flags and always emits JSON, because the only consumer that
 microvm constants [OPTIONS]
 ```
 
-Emits every service constraint this client believes, for the drift gate that `tools/check-model-drift.py` runs against the pinned botocore model.
+Emit every service constraint this client believes, for the drift gate.
 
-`crates/microvms-cli/src/commands/local.rs:817`
+`crates/microvms-cli/src/commands/local.rs:954`
 
 Flags:
 
-- `--emit-json` — emit the raw constants object without an envelope. This is the one stdout write in this binary that is not an envelope. `crates/microvms-cli/src/cli.rs:1970-1971`.
+- `--emit-json` — Emit the raw constants object, unwrapped by an envelope. `crates/microvms-cli/src/cli.rs:2337`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
 ## dockerfile
 
@@ -619,247 +1006,30 @@ Flags:
 microvm dockerfile [OPTIONS]
 ```
 
-Prints the Dockerfile stanza that wraps any base image with agentd. The stanza is what `microvm build` bakes when no `--dockerfile` is given, so appending your own `RUN` layers to this output and passing the result to `build --dockerfile` is the default build plus your layers. The text comes from `microvms-core`'s own generator rather than a copy, so it cannot drift from what a default build produces. `crates/microvms-cli/src/commands/local.rs:852`, reusing `crates/microvms-app/src/control/artifact.rs:470`.
+Print the Dockerfile stanza that wraps any base image with agentd.
 
-The output's comments name the platform constraints a hand-written wrapper hits. The `FROM` must match the managed base's `docker_ref`, because the build runs the Dockerfile on top of the base that `baseImageArn` names and `microvms-core` refuses a Dockerfile whose `FROM` disagrees. And a `WORKDIR` is required when the base declares none — the managed al2023 base does not, so without one every relative path resolves against `/`. `crates/microvms-app/src/control/artifact.rs:1168-1198`, `crates/microvms-app/src/control/artifact.rs:851-875`.
-
-This is a local command: no account is involved, and the stanza is built from compile-time constants.
+`crates/microvms-cli/src/commands/local.rs:992`
 
 Flags:
 
-- `--from <IMAGE_REF>` — the image ref for the `FROM` line; defaults to the managed al2023 base's pair, `public.ecr.aws/amazonlinux/amazonlinux:2023-minimal`. Only change this when you are also changing `baseImageArn`. `crates/microvms-cli/src/cli.rs:1976-1983`.
-- `--port <PORT>` — the port agentd listens on inside the guest; default `9000`. Reaches both `ENV AGENTD_PORT` and `EXPOSE`. `crates/microvms-cli/src/cli.rs:1985-1987`.
-- `--workdir <DIR>` — a working directory to create and set, as both a `RUN mkdir -p` and a `WORKDIR`. Strongly recommended, because the managed base declares no WorkingDir. `crates/microvms-cli/src/cli.rs:1989-1995`.
-- `--wrap <FILE>`: append the agentd stanza to this task Dockerfile rather than print the default one. The task's own `FROM` stays, a task whose last `USER` isn't root gets `USER root` before the stanza, core refuses a Dockerfile with no `FROM` or with an unfinished last instruction, and the flag conflicts with `--from` and `--agent`. `crates/microvms-cli/src/cli.rs:2358-2364`, the `--from` side at `crates/microvms-cli/src/cli.rs:2343`.
-- `--inherit-workdir`: with `--wrap`, the exec working directory is the image's own `WORKDIR`, so one must be declared, by the task or by `--workdir`. Requires `--wrap`. `crates/microvms-cli/src/cli.rs:2366-2369`.
-- `--agent <AGENT>`: print the Dockerfile of an agent VM image carrying this agent, the one `agent-up` builds; repeatable. Closed set: `claude-code`, `codex`; conflicts with `--wrap` and `--workdir`. `crates/microvms-cli/src/cli.rs:2371-2374`, values at `crates/microvms-cli/src/cli.rs:2388-2394`, the conflicts at `crates/microvms-cli/src/cli.rs:2355` and `crates/microvms-cli/src/cli.rs:2363`.
-- `--claude-version <VERSION>`: with `--agent`, pin the Claude Code npm package to this version; requires `--agent`. `crates/microvms-cli/src/cli.rs:2376-2378`.
-- `--codex-version <VERSION>`: with `--agent`, pin the Codex npm package to this version; requires `--agent`. `crates/microvms-cli/src/cli.rs:2380-2382`.
-
-The JSON envelope carries the stanza text plus the base image pair — `baseImageName` for deriving `baseImageArn` and `baseImageDockerRef` for the `FROM` — so a consumer holds both halves of the agreement the platform enforces. It also carries `port` and `workdir`: the `--workdir` given, the agent image's own under `--agent`, or `null`. `crates/microvms-cli/src/commands/mod.rs:542-552`, built in `dockerfile_rendered` (`crates/microvms-cli/src/commands/local.rs`).
-
-For the full recipe — appending tool layers, building, and driving the daemon from your own harness — see [docs/EMBEDDING.md](../EMBEDDING.md).
-
-## Project config: microvm.toml
-
-`run`, `doctor`, and `egress-posture` read an optional `./microvm.toml` beside the invocation (or the file `--config <PATH>` names). Every key except `artifacts` already exists as a `run` flag, so for those keys the file adds no capability, only persistence: `microvm run` in a configured project needs zero flags. `artifacts` has no flag spelling, so the file is the only place `run <DIR>`'s artifact globs are declared. `crates/microvms-cli/src/config.rs`, with the artifact merge at `crates/microvms-cli/src/commands/lifecycle.rs:406-416`.
-
-```toml
-image = "coding-agents"       # run --image
-binary = "target/agentd"     # run [BINARY]
-exec = "make test"           # run --exec
-memory = 4096                # run --memory; same closed set as the flag
-region = "us-west-2"         # run --region; the flag's closed set. An unlisted region is
-                             #   refused at load: pass --unlisted-region on the command line
-egress = true                # run --egress
-# deny-egress = true         # run --deny-egress; advisory. Refused beside egress = true,
-                             #   so this line and the one above are alternatives, never both
-# egress-network-connectors = ["arn:aws:lambda:us-east-1:123456789012:network-connector:isolated-vpc"]
-                             # run --egress-network-connector, as a list; a typed flag
-                             #   replaces the list. Refused beside egress = true
-shell = true                 # run --shell
-auto-resume = true           # run --auto-resume
-max-idle-sec = 600           # run --max-idle-sec
-suspended-sec = 600          # run --suspended-sec
-max-duration-sec = 3600      # run --max-duration-sec
-artifacts = ["dist/**"]      # run <DIR> artifact globs (issue #72); validated here
-log-group = "/aws/lambda-microvms/ci-builds"  # run --log-group; the build role must be able to write here
-log-stream = "ci-image"      # run --log-stream; a PREFIX — the client appends /<16 hex> per build (issue #98)
-[env]                        # run --launch-env, as a table; per-key merge, flag wins its key
-CI = "1"
-```
-
-Key names are the flag names, so the file reads like the command line it replaces. The exceptions are `binary` (the positional), `env` (`--launch-env` as a table), `egress-network-connectors` (the repeatable `--egress-network-connector` as a list), and `artifacts` (no flag). All keys are optional; an absent key means the flag or the built-in default decides. A relative `binary` path resolves against the config file's own directory, not the process cwd — `--config /repo/microvm.toml` exists precisely for the invoke-from-elsewhere case, and `target/agentd` must mean the same binary from anywhere. An unknown key is refused by name rather than silently ignored — `memroy = 4096` launching a 2 GB VM is the failure that closes. A value outside its flag's domain (`memory = 1500`, an artifact glob that will not compile) is refused with the same closed-set reasoning the parser enforces, so the file cannot be a side door past the flag domains.
-
-On Windows, two `binary` shapes are refused at load because they mean two things at once (issue #87): a rooted path with no drive (`/opt/agentd` — Windows parses it as relative, so the file-directory join would silently re-anchor it onto the config file's drive) and a drive with no root (`C:agentd` — resolves against that drive's current directory at spawn time). The remedy differs per intent — write the drive letter, or write a genuinely relative path — so the loader refuses rather than guesses. On Unix neither shape exists and `/opt/agentd` is simply absolute.
-
-`--timeout` is deliberately not a config key: it is a client-side wait, not a property of the VM the project wants to pin.
-
-A file that cannot be loaded (missing under `--config`, unparseable, an unknown key, or a value outside its flag's domain) is `ERR_CONFIG` (exit 15), refused locally before any billable call. The remedy differs from `ERR_INVALID_ARG`'s — edit (or `--no-config` bypass) a file the invocation may never have named, rather than edit the command line — which is why it has its own row. `crates/microvms-cli/src/config.rs:118-130`.
-
-A file that loads but asks for opposite things, `egress = true` beside `deny-egress = true` or beside `egress-network-connectors`, is refused by `run`'s merge as `ERR_INVALID_ARG` (exit 2), also before any billable call, by the same rule the flags follow. `crates/microvms-cli/src/commands/lifecycle.rs:299-331`.
-
-## The JSON envelope
-
-Each invocation writes exactly one JSON object on stdout. Progress always goes to stderr. `--quiet` suppresses progress but not warnings, so a leaked resource is still reported even in quiet mode. `crates/microvms-cli/src/envelope.rs:1-18`. `apiVersion` is `"1"`; it is bumped when a field's meaning changes, not when a command is added. `crates/microvms-cli/src/envelope.rs:67`.
-
-A success envelope carries `status`, `apiVersion`, `type`, and `data`. `type` is the discriminant to branch on first. `crates/microvms-cli/src/envelope.rs:355-362`.
-
-```
-{
-  "status": "ok",
-  "apiVersion": "1",
-  "type": "microvm.run",
-  "data": { }
-}
-```
-
-A failure envelope carries `status`, `apiVersion`, `error`, `code`, `exitCode`, `finding`, `suggestions`, and `data`. Every field is always present, so a consumer never has to guard against a missing key. `crates/microvms-cli/src/envelope.rs:367-386`.
-
-```
-{
-  "status": "error",
-  "apiVersion": "1",
-  "error": "human readable, may be reworded between releases",
-  "code": "ERR_PROTOCOL",
-  "exitCode": 5,
-  "finding": "",
-  "suggestions": [],
-  "data": { "kind": "Conflict" }
-}
-```
-
-Branch on `code` rather than `error`; the `error` text may be reworded between releases while `code` is stable. `crates/microvms-cli/src/manifest.rs:120-121`.
-
-### data.kind
-
-`data.kind` carries the daemon's own status name when the exit code is coarser than the failure. The `WireKind`s `Conflict`, `NotFound`, `ProtocolError`, `StdinClosed`, and `TooLarge` all map to `ERR_PROTOCOL`. Collapsing them is deliberate. A shell branching on `$?` cannot act differently on a 400 than on a 409, and a consumer that can act differently reads `data.kind` instead. `crates/microvms-cli/src/exit.rs:39-44`, inserted at `crates/microvms-cli/src/envelope.rs:370-372`, and pinned at `crates/microvms-cli/src/exit.rs:594-627`.
-
-A request rejected locally reports no `data.kind`, because nothing reached the daemon. `crates/microvms-cli/src/envelope.rs:489-494`.
-
-### Response types
-
-Each command declares its `type` discriminant and the `data` keys its success envelope carries. `crates/microvms-cli/src/commands/mod.rs:103-553`.
-
-| Command | `type` |
-| --- | --- |
-| `run` | `microvm.run` |
-| `quickstart` | `microvm.run` |
-| `build` | `microvm.image` |
-| `agent-up` | `microvm.agent` |
-| `agent-prompt` | `microvm.agent.prompt` |
-| `exec` | `microvm.exec` |
-| `wait` | `microvm.wait` |
-| `health` | `microvm.health` |
-| `keepalive` | `microvm.keepalive` |
-| `ack` | `microvm.exec` |
-| `kill` | `microvm.kill` |
-| `ps` | `microvm.procs` |
-| `stdin` | `microvm.stdin` |
-| `cp` | `microvm.copy` |
-| `exists` | `microvm.exists` |
-| `sync` | `microvm.sync` |
-| `attach` | `microvm.attach` |
-| `adopt` | `microvm.adopt` |
-| `tunnel` | `microvm.tunnel` |
-| `port-forward` | `microvm.port-forward` |
-| `shell` | `microvm.shell` |
-| `suspend` | `microvm.state` |
-| `resume` | `microvm.state` |
-| `terminate` | `microvm.teardown` |
-| `ls` | `microvm.runs` |
-| `history` | `microvm.history` |
-| `names` | `microvm.names` |
-| `image-versions` | `microvm.image.versions` |
-| `image-set-status` | `microvm.image.status` |
-| `image-builds` | `microvm.image.builds` |
-| `logs` | `microvm.logs` |
-| `cost` | `microvm.cost` |
-| `egress-posture` | `microvm.egress-posture` |
-| `doctor` | `microvm.doctor` |
-| `manifest` | `microvm.manifest` |
-| `constants` | `microvm.constants` |
-| `dockerfile` | `microvm.dockerfile` |
-
-## The NDJSON stream exception
-
-`exec --stream` is the one invocation that writes more than one object to stdout. Under `--json` (or into a pipe asking for it) it emits NDJSON, meaning one JSON object per event and then the envelope as the final line. This is a second, narrower contract that sits alongside the one-envelope rule. Three things keep the two contracts distinguishable. `crates/microvms-cli/src/envelope.rs:35-54`.
-
-First, the discriminant differs. A streamed exec's final envelope has `type` `microvm.exec.stream`, while a non-streamed exec has `microvm.exec`. A consumer branching on `type` learns which parse applies from the field it already reads first. `crates/microvms-cli/src/commands/mod.rs:486-512`.
-
-Second, the manifest publishes it. `exec`'s entry carries an `alternateResponse` object naming `when: "--stream"`, the `responseType`, the `responseKeys`, and a `stdout` description of the NDJSON shape. The entry is generated from the flag's presence in the command tree, so removing `--stream` from `exec` removes the entry too. `crates/microvms-cli/src/manifest.rs:50-71`.
-
-Third, the envelope is written compact once a stream has started, because "the last line is the envelope" is only true if the envelope is one line. A pretty-printed envelope at the end of an NDJSON stream would parse as several broken records. `crates/microvms-cli/src/envelope.rs:223-226`.
-
-```
-{"event":"output","stream":"stdout","offset":0,"bytes":12,"text":"hello world\n","lossy":false}
-{"event":"exit","exitCode":0,"signal":null,"truncated":false,"writersMayBeAlive":false,"offset":12}
-{"status":"ok","apiVersion":"1","type":"microvm.exec.stream","data":{"execId":"x-1","events":2,"bytes":12,"nextOffset":12,"gaps":0,"exitCode":0,"truncated":false}}
-```
-
-These event kinds reach a line: `output` (with `stream`, `offset`, `bytes`, `text`, `lossy`), `gap` (with `from` and `to`), and `exit` (with `exitCode`, `signal`, `timedOut`, `truncated`, `writersMayBeAlive`, `offset`). `crates/microvms-cli/src/commands/attached.rs:558-598`.
-
-Output arrives as lossy text beside the true byte count rather than as base64. `lossy` is set when the conversion actually replaced anything, so a consumer can tell when the text differs from the original bytes. The non-JSON path carries the exact bytes. `crates/microvms-cli/src/commands/attached.rs:546-577`.
-
-The stream envelope's keys summarize the stream. The output itself was the NDJSON events, and repeating it in the envelope would double a stream's memory cost for a consumer that has already seen every byte. `events` and `bytes` let a caller assert it read everything, and `nextOffset` is where a resume with `--from-offset` would continue. `crates/microvms-cli/src/commands/mod.rs:486-512`.
-
-The events are the command's output, not progress about it, so they cannot go to stderr even though that would preserve the simpler one-envelope rule. Sending a workload's stdout to the caller's stderr would make `microvm exec --stream build.sh > log` write an empty log. Buffering the events to keep stdout a single document would remove the only reason to stream. `crates/microvms-cli/src/envelope.rs:51-54`.
-
-The non-JSON formats emit no NDJSON at all. The raw child bytes go to stdout untouched, with no lossy string conversion applied. `crates/microvms-cli/src/envelope.rs:274-288`.
-
-A stream that fails part-way through has already written events and no envelope. On the JSON path the failure envelope becomes the stream's compact last line, because an NDJSON consumer reading line by line needs a terminating record saying why the events stopped. On the human paths the same failure goes to stderr instead, because appending an error message to the child's raw output would corrupt the file a caller was redirecting into. `crates/microvms-cli/src/main.rs:371-385`.
-
-A stream that ended without an exit event was cut. `exitCode` is reported as `null` rather than `0`, because reporting zero would turn a truncated stream into a passing build. The command exits `ERR_EXEC_FAILED`, unless the stream stopped because the reader of stdout went away: then it exits `ERR_INTERRUPTED`, and the exec keeps running in the VM. `crates/microvms-cli/src/commands/attached.rs:504-540`.
-
-## Exit codes
-
-The table is append-only because consumers branch on the values. The rows are split by what the caller should do next; a distinction that does not change the caller's next action does not get its own integer. `crates/microvms-cli/src/exit.rs:196-309`, with the enum's explicit discriminants at `crates/microvms-cli/src/exit.rs:76-133`.
-
-| Exit | Code | Meaning | `docs/PLATFORM.md` finding |
-| --- | --- | --- | --- |
-| 0 | — | the command did what it said | |
-| 1 | `ERR_UNEXPECTED` | an exception no handler claimed — a bug in this CLI, not the platform | |
-| 2 | `ERR_INVALID_ARG` | the request was refused locally, before any AWS call | |
-| 3 | `ERR_RETRYABLE` | a transient condition; run the identical command again | Endpoint authentication |
-| 4 | `ERR_CREDENTIALS` | an identity is wrong or absent; waiting will not fix it | |
-| 5 | `ERR_PROTOCOL` | the daemon rejected the request on its merits | |
-| 6 | `ERR_BUILD_WEDGED` | the image build was never scheduled — the clientToken replay signature | `clientToken` is a permanent idempotency key |
-| 7 | `ERR_LAUNCH_DIED` | the MicroVM reached a terminal state before RUNNING; read stateReason | `runHookPayload` arrives wrapped, not as the body |
-| 8 | `ERR_WINDOW_CLOSED` | the launch-time suspended window passed, so there is nothing to resume | `idlePolicy` |
-| 9 | `ERR_PLATFORM` | a control-plane failure with no more specific class | |
-| 10 | `ERR_TIMEOUT` | a client-side deadline elapsed; the VM and the exec are untouched | |
-| 11 | `ERR_INTERRUPTED` | interrupted before the command finished: after a launch, teardown ran and any leak is named in the payload; a streamed exec whose stdout reader left keeps running | The build log group survives Terraform |
-| 12 | `ERR_PRECONDITION` | a prerequisite is missing — run `microvm doctor` | |
-| 13 | `ERR_EXEC_FAILED` | the sandbox worked and the command in it exited non-zero | |
-| 14 | `ERR_NAME_TAKEN` | the VM name is registered to a live VM; refused locally, before any AWS call | |
-| 15 | `ERR_CONFIG` | the project config file is missing, malformed, or out of domain; refused locally — fix the file, or pass `--no-config` | |
-| 16 | `ERR_SYNC` | `run <DIR>` could not pack the directory or write an artifact back; the failure is on this machine's filesystem, not the platform's | |
-
-Row 0 is the only one with no `ERR_*` string, because a success envelope has no `code` field to put one in. `crates/microvms-cli/src/exit.rs:52-59`.
-
-`ERR_NAME_TAKEN`, `ERR_CONFIG`, and `ERR_SYNC` are the rows with no core `ErrorKind` behind them: the name registry, the config file, and `run <DIR>`'s pack/extract are the CLI's own filesystem work, so these refusals can only arise locally. Each is distinct from `ERR_INVALID_ARG` because the next actions differ — an invalid argument is fixed by editing the flag, a taken name by terminating the VM that holds it or picking another name, a broken config by editing (or `--no-config` bypassing) a file the invocation may never have named, and a sync failure by fixing the local file or disk the pack or extraction named. `ERR_SYNC` is also distinct from `ERR_EXEC_FAILED`: a CI caller needs to tell "the sync plumbing failed here" from "your tests failed" from "the platform failed".
-
-`ERR_EXEC_FAILED` has its own code because it is the one non-zero exit that means nothing is wrong with the platform, the credentials, or the CLI. A CI caller needs to tell "your tests failed" apart from "we never got a VM". `crates/microvms-cli/src/exit.rs:96-101`.
-
-A clap parse failure maps to exit 2 / `ERR_INVALID_ARG`, forwarding clap's own message verbatim including its did-you-mean line. This deliberately matches clap's own convention, so a caller who reads `$?` sees the same number either way. `crates/microvms-cli/src/exit.rs:434-442`, `crates/microvms-cli/src/cli.rs:58-61`.
-
-`--help` and `--version` are successes that print themselves and exit 0, never becoming envelopes. `crates/microvms-cli/src/main.rs:101-118`.
-
-### Suggestions
-
-The exit code comes from the failure class and nothing else. The CLI adds the suggestion on top. The library reports what went wrong, and the CLI names the flag or command that addresses it. Two failures sharing `ERR_CREDENTIALS` therefore get different remedies. A 401 names the agent token. An unresolvable credential chain names `microvm doctor` and the unsupported-region null-message signature. `crates/microvms-cli/src/exit.rs:369-426`.
-
-## Conventions
-
-`microvm manifest` publishes these conventions alongside the command tree. `crates/microvms-cli/src/manifest.rs:129-146`.
-
-- Exactly one envelope object on stdout per invocation; progress is on stderr.
-- Branch on `code`, never on `error`.
-- Dollar figures are estimates derived from published rates, never an invoice.
-- An unpriced line item omits `usd` rather than reporting zero.
-- `data.kind` carries the daemon's own status name when the exit code is coarser than the failure (`ERR_PROTOCOL` covers five).
-- `exec --stream` is the one exception to the first line: it writes NDJSON with the discriminant `microvm.exec.stream`. Every other invocation writes exactly one object.
-
-## Closed option domains
-
-`--memory` and `--region` carry a closed set rather than free text, and the parser refuses everything else before any handler runs. Refusing an off-table value in the parser reports the error immediately, while refusing it in `microvms-core` would cost a build cycle first. `crates/microvms-cli/src/cli.rs:4-19`.
-
-`--memory` accepts exactly `512`, `1024`, `2048`, `4096`, `8192`, the five documented size-class baselines. `crates/microvms-cli/src/cli.rs:372-384`.
-
-The open spelling is a request rather than a class: `--cpus` and `--memory-mib`, on `run`, `build`, `cost` and `agent-up` in place of `--memory`, go to core's `SizeClass::from_request`, which picks the smallest class whose baseline covers them (`--memory-mib 1500` selects 2048), as the SDKs' `SizeClass.from_request` does. A request no class covers is refused before any AWS call, naming the largest class. `SizeRequestFlags` in `crates/microvms-cli/src/cli.rs`.
-
-`--region` accepts exactly `us-east-1`, `us-east-2`, `us-west-2`, `eu-west-1`, `ap-northeast-1`, the five regions measured to carry MicroVMs. `eu-central-1` is excluded on measurement. `crates/microvms-cli/src/cli.rs:423-435`.
-
-The escape hatch is a separate flag rather than a permissive parser. `--unlisted-region <NAME>` conflicts with `--region` and carries its cost in its help text, so a reader of a command line can see that someone opted in. `crates/microvms-cli/src/cli.rs:33-39`.
-
-The option names `--capabilities`, `--connector`, and `--architecture` are deliberately absent. `--capabilities` and `--architecture` because `microvms-core` has no parameter for the values they would carry; `--connector` because the intent is spelled `--egress` (the managed connector) or `--egress-network-connector <ARN>` (an existing VPC connector, see above). `--client-token` exists only on the launch commands, `run` and `agent-up`, where core validates it and a retried launch adopts the VM the first attempt made; an image build never takes one, because a replayed create wedges the image in `CREATING`. A test asserts the absence of those names over every argument of every subcommand, and that exactly those commands carry `--client-token`. `crates/microvms-cli/src/cli.rs:21-31`, `crates/microvms-cli/src/cli.rs:3122-3157`.
-
-In the manifest, a boolean flag reports `type: "boolean"` and `choices: null` even though clap gives a `SetTrue` flag the possible values `["true", "false"]`. Publishing those would put a `choices` array on every flag and make the closed-domain field unreadable. `crates/microvms-cli/src/manifest.rs:151-170`.
+- `--from` — The image ref for the FROM line. Defaults to the managed al2023 base's pair. `crates/microvms-cli/src/cli.rs:2349`.
+- `--port` — The port agentd listens on inside the guest. `crates/microvms-cli/src/cli.rs:2353`.
+- `--workdir` — A working directory to create and set. Strongly recommended. `crates/microvms-cli/src/cli.rs:2361`.
+- `--wrap` — Append the agentd stanza to this task Dockerfile rather than print the default one. `crates/microvms-cli/src/cli.rs:2369`.
+- `--inherit-workdir` — With --wrap: the exec working directory is the image's own `WORKDIR`, so one must be declared, by the task or by --workdir. `crates/microvms-cli/src/cli.rs:2374`.
+- `--agent` — Print the Dockerfile of an agent VM image carrying this agent, the one `agent-up` builds. Repeatable. `crates/microvms-cli/src/cli.rs:2379`.
+- `--claude-version` — With --agent: pin the Claude Code npm package to this version. `crates/microvms-cli/src/cli.rs:2383`.
+- `--codex-version` — With --agent: pin the Codex npm package to this version. `crates/microvms-cli/src/cli.rs:2387`.
+- `--json` — Emit the typed JSON envelope on stdout instead of human output. `crates/microvms-cli/src/cli.rs:73`.
+- `--dense` — Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json. `crates/microvms-cli/src/cli.rs:77`.
+- `--quiet` — Suppress progress on stderr. Warnings still print. `crates/microvms-cli/src/cli.rs:81`.
+- `-h, --help` — Print help. `crates/microvms-cli/src/cli.rs:49`.
+- `-V, --version` — Print version. `crates/microvms-cli/src/cli.rs:52-53`.
 
 ## See also
 
-- [microvms-agentd · Processes](../behavior/processes.md)
-- [microvms-agentd · Contract map](../insights/contract-map.md)
-- [microvms-agentd · Debugging guide](../insights/debugging-guide.md)
-- [microvms-agentd · Data flow](../architecture/data-flow.md)
-- [microvms-agentd · Impact analysis](../insights/impact-analysis.md)
+- [processes](../behavior/processes.md) — 7 shared source citations
+- [contract map](../insights/contract-map.md) — 6 shared source citations
+- [module map](../architecture/module-map.md) — 5 shared source citations
+- [impact analysis](../insights/impact-analysis.md) — 5 shared source citations
+- [risk hotspots](../analysis/risk-hotspots.md) — 3 shared source citations

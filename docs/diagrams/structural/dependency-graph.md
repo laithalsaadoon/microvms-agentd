@@ -1,11 +1,22 @@
 # microvms-agentd · Dependency graph
 
-The workspace crates and the third-party crates that define each one's external interface. The
-workspace declares its members in `Cargo.toml:2-10` under `resolver = "3"` (`Cargo.toml:11`),
-and every member inherits `edition = "2024"` from `[workspace.package]` (`Cargo.toml:22-23`).
+Arrows point from a Rust crate to a direct dependency. The CLI and bindings use
+`microvms-core`; it composes the client layers, while `agentd` uses the shared wire
+crate (`crates/microvms-core/Cargo.toml:17-26`,
+`crates/microvms-cli/Cargo.toml:38`, `bindings/microvms-py/Cargo.toml:26-32`,
+`bindings/microvms-js/Cargo.toml:20-24`, `crates/agentd/Cargo.toml:20`).
 
-Internal nodes are plain rectangles; external crates are cylinders with a dashed stroke. Each
-external label carries the version `Cargo.lock` resolves, not the manifest's requirement string.
+The view covers normal dependencies of the workspace crates (`Cargo.toml:2-14`).
+Build and development dependencies are excluded. The test-only
+`model-conformance` crate has no normal dependencies (`crates/model-conformance/Cargo.toml:18-46`);
+its library is intentionally empty (`crates/model-conformance/src/lib.rs:2-7`).
+
+External nodes use dashed cylinders. Their selection follows the number of Rust
+source paths that reference each declared dependency's namespace; an external arrow
+starts at the crate with the most such paths, with ties resolved by path order.
+It is a representative consumer, not an exclusive one. Labels use dependency names,
+without implying a resolved package version. The inventory and edge counts below
+were measured on 2026-10-11 at commit `9729b82`.
 
 ```mermaid
 flowchart LR
@@ -14,280 +25,146 @@ flowchart LR
     app[microvms-app]
     edges[microvms-edges]
     domain[microvms-domain]
-    protocol[protocol]
+    protocol[microvms-protocol]
     agentd[agentd]
     py[microvms-py]
     js[microvms-js]
-    model[model]
+    model[agentd-model]
 
-    tokio[(tokio 1.53.1)]:::external
-    serde[(serde 1.0.229)]:::external
-    serdejson[(serde_json 1.0.151)]:::external
-    schemars[(schemars 1.2.2)]:::external
-    axum[(axum 0.8.9)]:::external
-    nix[(nix 0.31.3)]:::external
-    reqwest[(reqwest 0.13.4)]:::external
-    sigv4[(aws-sigv4 1.5.1)]:::external
-    clap[(clap 4.6.6)]:::external
-    ratatui[(ratatui 0.30.2)]:::external
-    pyo3[(pyo3 0.29.2)]:::external
-    napi[(napi 3.12.1)]:::external
-    stateright[(stateright 0.31.0)]:::external
+    ext_tokio[(tokio)]:::external
+    ext_serde_json[(serde_json)]:::external
+    ext_clap[(clap)]:::external
+    ext_pyo3[(pyo3)]:::external
+    ext_futures_util[(futures-util)]:::external
+    ext_serde[(serde)]:::external
+    ext_napi_derive[(napi-derive)]:::external
+    ext_base64[(base64)]:::external
+    ext_napi[(napi)]:::external
+    ext_tracing[(tracing)]:::external
 
+    agentd --> protocol
+    app --> protocol
+    app --> domain
     cli --> core
+    core --> protocol
+    core --> domain
     core --> app
     core --> edges
-    core --> domain
-    core --> protocol
+    domain --> protocol
     edges --> app
     edges --> domain
     edges --> protocol
-    app --> domain
-    app --> protocol
-    domain --> protocol
-    agentd --> protocol
-    py --> core
-    py --> protocol
     js --> core
     js --> protocol
+    py --> core
+    py --> protocol
 
-    app --> tokio
-    app --> serde
-    app --> serdejson
-    edges --> tokio
-    edges --> reqwest
-    edges --> sigv4
-    protocol --> schemars
-    agentd --> axum
-    agentd --> nix
-    cli --> clap
-    cli --> ratatui
-    py --> pyo3
-    js --> napi
-    model --> stateright
+    cli --> ext_tokio
+    cli --> ext_serde_json
+    cli --> ext_clap
+    py --> ext_pyo3
+    app --> ext_futures_util
+    app --> ext_serde
+    js --> ext_napi_derive
+    app --> ext_base64
+    js --> ext_napi
+    agentd --> ext_tracing
 
     classDef external stroke-dasharray: 3 3
 ```
 
 ## Legend (overflow)
 
-The diagram carries the workspace members and the externals chosen by role. Every other direct
-dependency is below, alphabetically, with the requirement string its manifest declares and the
-manifest lines that declare it.
+The omitted normal dependencies follow. Edges count source paths with a dependency namespace reference, before
+reducing external arrows to a representative consumer. Each declaration links to the manifest that admits the dependency.
+The `agentd-model` node's only normal dependency, `stateright`, appears here
+(`crates/model/Cargo.toml:13-14`).
 
-| Elided dependency | Declared by |
-| --- | --- |
-| aws-config 1.10 | `crates/microvms-edges/Cargo.toml:41-46` |
-| aws-credential-types 1.3 | `crates/microvms-edges/Cargo.toml:47` |
-| backon 1.6 | `crates/microvms-app/Cargo.toml:37`, `crates/microvms-edges/Cargo.toml:66` |
-| base64 0.23 | `crates/agentd/Cargo.toml:69`, `crates/microvms-app/Cargo.toml:46`, `crates/microvms-domain/Cargo.toml:48`, `crates/microvms-edges/Cargo.toml:106` |
-| bytes 1 | `crates/agentd/Cargo.toml:47` |
-| const-hex 1.19 | `crates/agentd/Cargo.toml:72`, `crates/microvms-app/Cargo.toml:48`, `crates/microvms-cli/Cargo.toml:99`, `crates/microvms-domain/Cargo.toml:50`, `crates/microvms-edges/Cargo.toml:107` |
-| futures-util 0.3 | `crates/agentd/Cargo.toml:63`, `crates/microvms-app/Cargo.toml:34`, `crates/microvms-edges/Cargo.toml:93` |
-| getrandom 0.4 | `crates/agentd/Cargo.toml:76`, `crates/microvms-edges/Cargo.toml:111` |
-| globset 0.4 | `crates/microvms-cli/Cargo.toml:81` |
-| http 1.5 | `crates/microvms-edges/Cargo.toml:64` |
-| http-body-util 0.1 | `crates/agentd/Cargo.toml:46` |
-| jiff 0.2 | `crates/microvms-domain/Cargo.toml:41` |
-| napi-build 2 | `bindings/microvms-js/Cargo.toml:70`, build-dependency |
-| napi-derive 3 | `bindings/microvms-js/Cargo.toml:48` |
-| notify 8 | `crates/microvms-cli/Cargo.toml:107` |
-| percent-encoding 2.3 | `crates/microvms-app/Cargo.toml:50` |
-| rust_decimal 1.42 | `crates/microvms-domain/Cargo.toml:38` |
-| rust_decimal_macros 1.40 | `crates/microvms-domain/Cargo.toml:42` |
-| sha2 0.11 | `crates/microvms-app/Cargo.toml:43`, `crates/microvms-cli/Cargo.toml:98`, `crates/microvms-edges/Cargo.toml:68` |
-| snow 0.10 | `crates/agentd/Cargo.toml:100-107`, `crates/microvms-edges/Cargo.toml:118-125` |
-| subtle 2.6 | `crates/agentd/Cargo.toml:53` |
-| tar 0.4.46 | `crates/agentd/Cargo.toml:52`, `crates/microvms-cli/Cargo.toml:87` |
-| tempfile 3 | `crates/agentd/Cargo.toml:60` |
-| thiserror 2.0.19 | `crates/microvms-domain/Cargo.toml:24` |
-| tokio-tungstenite 0.30 | `crates/microvms-edges/Cargo.toml:101-105` |
-| tokio-util 0.7 | `crates/agentd/Cargo.toml:64` |
-| toml 1 | `crates/microvms-cli/Cargo.toml:76` |
-| tower-http 0.7 | `crates/agentd/Cargo.toml:34` |
-| tracing 0.1 | `crates/agentd/Cargo.toml:61` |
-| tracing-subscriber 0.3 | `crates/agentd/Cargo.toml:62` |
-| unicode-width 0.2 | `crates/microvms-cli/Cargo.toml:92` |
-| x25519-dalek 3 | `crates/agentd/Cargo.toml:115`, `crates/microvms-domain/Cargo.toml:56` |
-| zip 8.6 | `crates/microvms-app/Cargo.toml:41` |
+| Dependency | Edges | Reason for elision | Declarations |
+| --- | --- | --- | --- |
+| aws-config | 2 | Too few edges | `crates/microvms-edges/Cargo.toml:41` |
+| aws-credential-types | 3 | Too few edges | `crates/microvms-edges/Cargo.toml:47` |
+| aws-sigv4 | 3 | Too few edges | `crates/microvms-edges/Cargo.toml:52` |
+| axum | 7 | Too few edges | `crates/agentd/Cargo.toml:25` |
+| backon | 2 | Too few edges | `crates/microvms-app/Cargo.toml:37`, `crates/microvms-edges/Cargo.toml:66` |
+| bytes | 2 | Too few edges | `crates/agentd/Cargo.toml:47` |
+| const-hex | 11 | Too few edges | `crates/agentd/Cargo.toml:72`, `crates/microvms-app/Cargo.toml:48`, `crates/microvms-domain/Cargo.toml:50`, `crates/microvms-edges/Cargo.toml:107` |
+| getrandom | 3 | Too few edges | `crates/agentd/Cargo.toml:76`, `crates/microvms-edges/Cargo.toml:111` |
+| globset | 1 | Too few edges | `crates/microvms-edges/Cargo.toml:130` |
+| http | 6 | Too few edges | `crates/microvms-edges/Cargo.toml:64` |
+| http-body-util | 2 | Too few edges | `crates/agentd/Cargo.toml:46` |
+| jiff | 1 | Too few edges | `crates/microvms-domain/Cargo.toml:41` |
+| nix | 5 | Too few edges | `crates/agentd/Cargo.toml:59` |
+| notify | 1 | Too few edges | `crates/microvms-cli/Cargo.toml:89` |
+| percent-encoding | 2 | Too few edges | `crates/microvms-app/Cargo.toml:50` |
+| ratatui | 2 | Too few edges | `crates/microvms-cli/Cargo.toml:50` |
+| reqwest | 5 | Too few edges | `crates/microvms-edges/Cargo.toml:58` |
+| rust_decimal | 1 | Too few edges | `crates/microvms-domain/Cargo.toml:38` |
+| rust_decimal_macros | 1 | Too few edges | `crates/microvms-domain/Cargo.toml:42` |
+| schemars | 6 | Too few edges | `crates/agentd/Cargo.toml:86`, `crates/protocol/Cargo.toml:24` |
+| sha2 | 5 | Too few edges | `crates/microvms-app/Cargo.toml:43`, `crates/microvms-edges/Cargo.toml:68` |
+| sigstore-trust-root | 1 | Too few edges | `crates/microvms-edges/Cargo.toml:84` |
+| sigstore-types | 1 | Too few edges | `crates/microvms-edges/Cargo.toml:85` |
+| sigstore-verify | 1 | Too few edges | `crates/microvms-edges/Cargo.toml:83` |
+| snow | 6 | Too few edges | `crates/agentd/Cargo.toml:100`, `crates/microvms-edges/Cargo.toml:118` |
+| stateright | 11 | Too few edges | `crates/model/Cargo.toml:14` |
+| subtle | 1 | Too few edges | `crates/agentd/Cargo.toml:53` |
+| tar | 2 | Too few edges | `crates/agentd/Cargo.toml:52`, `crates/microvms-edges/Cargo.toml:131` |
+| tempfile | 6 | Too few edges | `crates/agentd/Cargo.toml:60` |
+| thiserror | 1 | Too few edges | `crates/microvms-domain/Cargo.toml:24` |
+| tokio-tungstenite | 2 | Too few edges | `crates/microvms-edges/Cargo.toml:101` |
+| tokio-util | 1 | Too few edges | `crates/agentd/Cargo.toml:64` |
+| toml | 1 | Too few edges | `crates/microvms-cli/Cargo.toml:76` |
+| tower-http | 1 | Too few edges | `crates/agentd/Cargo.toml:34` |
+| tracing-subscriber | 1 | Too few edges | `crates/agentd/Cargo.toml:62` |
+| unicode-width | 1 | Too few edges | `crates/microvms-cli/Cargo.toml:81` |
+| x25519-dalek | 3 | Too few edges | `crates/agentd/Cargo.toml:115`, `crates/microvms-domain/Cargo.toml:56` |
+| zip | 3 | Too few edges | `crates/microvms-app/Cargo.toml:41` |
 
-The seated and elided crates together are the complete direct-dependency union across the
-workspace manifests.
+## Internal edges
 
-Few references do not mean a weak edge. Every `http` reference builds the `http::Request` that
-`aws-sigv4` signs and that `reqwest` 0.13 consumes through `TryFrom`, in
-`crates/microvms-edges/src/control/transport.rs`, `crates/microvms-edges/src/control/services.rs`, and
-`crates/microvms-edges/src/agents/bedrock.rs`. `thiserror`, `sha2`, and `backon` land at a handful of
-derive or call sites, and `aws-config`'s whole surface is a `defaults(..).region(..).load()`
-chain.
+The declarations and source references below establish the internal arrows. Core's
+re-exports preserve a common entry point for client consumers
+(`crates/microvms-core/src/lib.rs:93-101`).
 
-Which externals got a node therefore follows architectural role rather than reference count:
-one per member for the runtime, the wire codec, the schema generator, the HTTP server, the syscall
-layer, the HTTP client, the request signer, the argument parser, the TUI, and each binding's FFI
-crate. That seats `aws-sigv4` and drops `tracing`, though `tracing` has far more references.
+| Consumer | Dependencies | Declaration and source evidence |
+| --- | --- | --- |
+| microvms-cli | microvms-core | `crates/microvms-cli/Cargo.toml:38`; `crates/microvms-cli/src/commands/doctor.rs:17` |
+| microvms-core | microvms-domain, microvms-app, microvms-edges, protocol | `crates/microvms-core/Cargo.toml:20-26`; `crates/microvms-core/src/lib.rs:93-101` |
+| microvms-app | microvms-domain, protocol | `crates/microvms-app/Cargo.toml:22-24`; `crates/microvms-app/src/lib.rs:61-64` |
+| microvms-edges | microvms-app, microvms-domain, protocol | `crates/microvms-edges/Cargo.toml:23-27`; `crates/microvms-edges/src/agents/bedrock.rs:40`; `crates/microvms-edges/src/provision.rs:86`; `crates/microvms-edges/src/identity.rs:23` |
+| microvms-domain | protocol | `crates/microvms-domain/Cargo.toml:21`; `crates/microvms-domain/src/identity.rs:20` |
+| agentd | protocol | `crates/agentd/Cargo.toml:20`; `crates/agentd/src/exec_start.rs:50` |
+| microvms-py | microvms-core, protocol | `bindings/microvms-py/Cargo.toml:26-32`; `bindings/microvms-py/src/errors.rs:27`; `bindings/microvms-py/src/session.rs:98` |
+| microvms-js | microvms-core, protocol | `bindings/microvms-js/Cargo.toml:20-24`; `bindings/microvms-js/src/errors.rs:70`; `bindings/microvms-js/src/session.rs:147` |
 
-`napi-build` is declared but has no `napi_build::` path reference because its whole surface is
-one call in a build script, `napi_build::setup()` at `bindings/microvms-js/build.rs:12`. Omitting it does
-not warn — it produces undefined-symbol link failures (`bindings/microvms-js/build.rs:8-9`).
+The dependency-direction tests compare workspace edges against explicit expected
+sets (`crates/microvms-cli/tests/dependency_direction.rs:386-397`). This diagram does
+not show transitive edges or treat a re-export as a separate dependency.
 
-Dev-dependencies are out of the diagram's scope, which elides the test tiers: `proptest` 1.11
-in `crates/agentd/Cargo.toml:125`, `crates/microvms-domain/Cargo.toml:61` and `crates/microvms-app/Cargo.toml:61`,
-and `turmoil` 0.7.2 in `crates/agentd/Cargo.toml:128` and `crates/microvms-core/Cargo.toml:63`, alongside
-`hyper` 1.11, `hyper-util` 0.1 and `tower` 0.5 (`crates/agentd/Cargo.toml:126-129`). `stateright` is on
-the diagram because it is a normal dependency of `model` (`crates/model/Cargo.toml:13`), not a
-dev-dependency.
+## External nodes
 
-## Direction is asserted, not conventional
+The retained external nodes have these manifest declarations and representative
+source references. The overflow inventory carries the dependencies omitted for
+readability.
 
-`crates/microvms-cli/tests/dependency_direction.rs` reads `cargo metadata`'s resolved graph and
-asserts the edges among every workspace crate as **equalities** rather than absences, one row
-per member, so the app pointing at the edges or the domain at anything but `protocol` fails. The reason is written into the file: `assert!(no edge from
-A to B)` passes when A has no dependencies at all, which is what a stub crate looks like, so an
-equality is what fails both for a binding that grows an edge to the CLI and for a binding that
-never grows its edge to core (`crates/microvms-cli/tests/dependency_direction.rs:10-15`). The same file
-asserts `microvms-cli` exposes no `lib` target, making "nothing a binding needs lives in the
-CLI" a property rather than a request (`crates/microvms-cli/tests/dependency_direction.rs:17-22`,
-`crates/microvms-cli/Cargo.toml:13-22`).
-
-`microvms-core` depending on the CLI would make every consumer of the library, both bindings
-included, carry `clap`, `ratatui`, and a multi-thread tokio runtime
-(`crates/microvms-cli/tests/dependency_direction.rs:82-85`).
-
-## The CLI's dependency set is a denylist under test
-
-`microvms-cli` takes the maintained crates it needs (`crates/microvms-cli/Cargo.toml:35-128`), and
-nothing polices how many: the manifest's own comment
-states the rule as "dependencies are otherwise welcome" (`crates/microvms-cli/Cargo.toml:25-34`). What is
-under test is the hazard. `crates/microvms-cli/tests/thinness.rs:54` holds `const FORBIDDEN: [&str; 12]`,
-naming `reqwest`, `hyper`, `hyper-util`, `http`, `aws-config`, `aws-sdk-s3`, `aws-sdk-sts`,
-`aws-sigv4`, `aws-credential-types`, `aws-smithy-runtime`, `rusoto_core`, and `ureq`, and
-`no_direct_dependency_is_a_second_path_to_aws` (`crates/microvms-cli/tests/thinness.rs:101`) reads the
-manifest through `cargo metadata` and fails if any of them appears as a normal or dev dependency.
-The earlier allowlist, and the `RETIRED` record of `futures-util` leaving it, were
-removed with it: a cap on the manifest asserted a size, while the denylist asserts the property
-CLI-2 names, that every AWS call goes through `microvms-core`.
-
-## Absent edges that carry weight
-
-- **`microvms-cli` has no `protocol` edge.** The wire types are reached through
-  `microvms_core::protocol::`, core's re-export, so the CLI has one door to everything below it
-  (`crates/microvms-cli/Cargo.toml:48-51`). Confirmed in the source: `crates/microvms-cli/src` contains no
-  bare `protocol::` path — every reference is qualified through core, as at
-  `crates/microvms-cli/src/commands/attached.rs:191`.
-- **Both bindings do have a direct `protocol` edge**, and it is live rather than vestigial:
-  `bindings/microvms-py/src/session.rs:74` and `bindings/microvms-js/src/session.rs:144` name
-  `protocol::health::Health` directly, and both build `protocol::exec::StartRequest`
-  (`bindings/microvms-py/src/session.rs:339`, `bindings/microvms-js/src/session.rs:285`). Core's public signatures
-  already return these types, so a binding that mapped them without naming the crate would
-  re-declare their fields, which is the drift `protocol` was extracted to prevent
-  (`bindings/microvms-py/Cargo.toml:27-32`, `bindings/microvms-js/Cargo.toml:22-25`).
-- **`agentd` reaches no AWS crate and no HTTP client.** Its direct dependencies
-  (`crates/agentd/Cargo.toml:10-70`) contain no `reqwest` and no `aws-*`; it is a server, and the crate
-  that talks to AWS is `microvms-edges`, which runs on the developer host rather than in the
-  MicroVM image (`crates/microvms-edges/Cargo.toml:38-40`).
-- **`agentd` does not declare `http` either**, though it uses those types constantly. Every one
-  of its `http::` references is qualified through axum's re-export — `axum::http::StatusCode`
-  (`crates/agentd/src/routes.rs:6`), `axum::http::HeaderMap` (`crates/agentd/src/auth.rs:40`),
-  `axum::http::header::CONTENT_TYPE` (`crates/agentd/src/exec.rs:1582`) — so the daemon carries no
-  second path to the `http` version axum already fixes.
-- **`model` has no workspace edge at all.** `crates/model/src/client.rs:58` says it mirrors
-  `microvms_core::sandbox::Lifecycle` "by convention rather than by dependency". Its only
-  dependency is `stateright` (`crates/model/Cargo.toml:13`), which is why its only edge on the diagram
-  goes there.
-- **No library crate declares `axum`.** The `axum::serve::Listener` named at
-  `crates/microvms-app/src/session/http.rs:16` is a module comment drawing an analogy, not an import.
-
-## Shared substrate
-
-The seated dependencies below are declared by more than one member. Each gets one edge on the
-diagram, sourced at the member with the most references, so a single edge is not a claim of
-exclusivity. The members that declare each:
-
-| Dependency | Declared by |
-| --- | --- |
-| tokio | `agentd`, `microvms-app`, `microvms-edges`, `microvms-cli`, `microvms-py`, `microvms-js` |
-| serde_json | `agentd`, `microvms-domain`, `microvms-app`, `microvms-edges`, `microvms-cli`, `microvms-py`, `microvms-js`, `protocol` |
-| serde | `agentd`, `microvms-domain`, `microvms-app`, `microvms-edges`, `microvms-cli`, `protocol` |
-| schemars | `agentd`, `protocol` |
-
-The feature sets differ where the role differs, and the manifests say why. `microvms-cli` takes
-`rt-multi-thread` because it is the process and therefore the thing entitled to choose a
-runtime; `microvms-app` takes `rt` only to spawn its keep-awake task onto the caller's runtime
-and never builds one, and `microvms-edges` takes no runtime feature at all, because a library
-does not choose its caller's (`crates/microvms-cli/Cargo.toml:64-70`, `crates/microvms-app/Cargo.toml:28-33`,
-`crates/microvms-edges/Cargo.toml:92`).
-`microvms-js` takes only `time` and `sync` because napi owns the runtime
-(`bindings/microvms-js/Cargo.toml:50-53`), while `microvms-py` takes `rt-multi-thread` for one runtime
-blocked on with the GIL released (`bindings/microvms-py/Cargo.toml:39-42`).
-
-`schemars` is pinned to the identical version with the identical `derive` and `std` features in
-`protocol` and `agentd`, the crates that carry it, and `preserve_order` must stay off, because
-the committed `docs/schema.json` is byte-compared in CI and key order therefore has to be a
-function of the types rather than of derive order (`crates/protocol/Cargo.toml:12-16`,
-`crates/agentd/Cargo.toml:61-70`).
-
-## Version pins the manifests argue for
-
-Several externals carry a version floor with a defect behind it rather than a preference:
-
-- `tar = "0.4.46"` — at least 0.4.45 is required because RUSTSEC-2026-0068 fixed a PAX
-  size-header desync that let one archive parse differently across extractors
-  (`crates/agentd/Cargo.toml:41-43`).
-- `tower-http = "0.6"` and not 0.7 — axum 0.8.9 pins `^0.6.8` internally, so 0.6 keeps one
-  version of the middleware types in the tree. Its `catch-panic` layer is load-bearing: the
-  daemon is the only channel into the VM, so a panic that kills a connection makes the VM
-  unreachable for good (`crates/agentd/Cargo.toml:17-25`). That layer is implemented with
-  `catch_unwind`, which is why the release profile overrides `panic` back to `"unwind"`
-  (`Cargo.toml:39-57`).
-- `nix = "0.31"` — a caret on 0.31 is the widest safe range because nix is pre-1.0 and every
-  minor is a breaking change. Its features are each named for a call site: `signal` for the exec
-  kill path, `fs` for the `statvfs` disk-pressure guard, `mount` for the `MS_BIND` that shadows
-  the read-only procfs `boot_id`, `hostname` for `sethostname` (`crates/agentd/Cargo.toml:45-50`).
-- `aws-config` keeps `default-https-client` **on** — the credential chain does its own HTTP for
-  IMDS, SSO, and STS through smithy's client and panics at `load()` without one. The price is
-  two HTTP stacks, smithy for credentials and reqwest for service calls; both sit on rustls, so
-  it is one TLS implementation (`crates/microvms-edges/Cargo.toml:31-46`).
-- `aws-sigv4` rather than a generated SDK — `lambda-microvms` has no aws-sdk-rust crate, so the
-  choice was between vendoring smithy codegen and signing its rest-json operations by hand
-  (`crates/microvms-edges/Cargo.toml:32-34`).
-- `reqwest` with `rustls` and not `default-tls`, because the daemon ships to an aarch64 musl
-  target where a native-tls build needs an OpenSSL the image does not carry. `json` is off
-  deliberately, so the error path can read a raw body and see an `AccessDeniedException` whose
-  message field is null (`crates/microvms-edges/Cargo.toml:53-63`).
-- `zip = "8.6"` with `deflate` only — 9.0 exists only as `9.0.0-pre2`, and a pre-release in a
-  shipping manifest is a version that can change under you; the other compressors are C
-  libraries that would otherwise have to build for the musl target
-  (`crates/microvms-app/Cargo.toml:38-41`).
-- `rust_decimal` with `serde-with-str` — the ARM rates are figures like `0.0000276944` and
-  summing a few thousand in binary floating point drifts toward a bill nobody can reproduce
-  (`crates/microvms-domain/Cargo.toml:33-38`).
-- `napi` at `napi5` rather than `napi4`, forced rather than chosen: napi 3.12's `web_stream`
-  declares only `napi4`, but its `ReadableStream` finalizer calls `napi_add_finalizer`, which
-  `napi-sys` gates behind `napi5` (`bindings/microvms-js/Cargo.toml:37-43`).
-- `pyo3` with `abi3-py39` and **no** `extension-module` feature. That feature is deprecated, and
-  enabling it disables libpython linking for every target in the workspace, breaking
-  `cargo test` with undefined `_PyExc_*` symbols; maturin sets `PYO3_BUILD_EXTENSION_MODULE`
-  itself for a wheel build (`bindings/microvms-py/Cargo.toml:33-38`,
-  `bindings/microvms-py/pyproject.toml:5-9`).
-
-## Crate-type asymmetry between the bindings
-
-`microvms-py` is `crate-type = ["cdylib", "rlib"]`: the cdylib is what Python imports, the rlib
-is what lets `tests/` and doctests link the crate, and cdylib alone produces E0432/E0463 for
-anything that tries to `use` it (`bindings/microvms-py/Cargo.toml:13-19`). `microvms-js` is `cdylib`
-only, because a Node addon is loaded by the runtime and nothing in this workspace links it — the
-smoke test drives the built `.node` through `node --test` rather than through `cargo test`
-(`bindings/microvms-js/Cargo.toml:12-17`, `bindings/microvms-js/package.json:13`).
-
-Neither crate publishes. `publish = false` is inherited workspace-wide
-(`Cargo.toml:28-34`), the bindings restate it (`bindings/microvms-py/Cargo.toml:11`,
-`bindings/microvms-js/Cargo.toml:10`), and the npm side says the same thing with `"private": true`
-(`bindings/microvms-js/package.json:5`).
+| Dependency | Representative consumer | Declaration | Source reference |
+| --- | --- | --- | --- |
+| tokio | microvms-cli | `crates/microvms-cli/Cargo.toml:64` | `crates/microvms-cli/src/main.rs:148` |
+| serde_json | microvms-cli | `crates/microvms-cli/Cargo.toml:55` | `crates/microvms-cli/src/envelope.rs:58` |
+| clap | microvms-cli | `crates/microvms-cli/Cargo.toml:46` | `crates/microvms-cli/src/cli.rs:45` |
+| pyo3 | microvms-py | `bindings/microvms-py/Cargo.toml:45` | `bindings/microvms-py/src/errors.rs:28` |
+| futures-util | microvms-app | `crates/microvms-app/Cargo.toml:34` | `crates/microvms-app/src/control/services.rs:12` |
+| serde | microvms-app | `crates/microvms-app/Cargo.toml:26` | `crates/microvms-app/src/control/ops.rs:42` |
+| napi-derive | microvms-js | `bindings/microvms-js/Cargo.toml:48` | `bindings/microvms-js/src/hooks.rs:29` |
+| base64 | microvms-app | `crates/microvms-app/Cargo.toml:46` | `crates/microvms-app/src/session/sse.rs:24` |
+| napi | microvms-js | `bindings/microvms-js/Cargo.toml:43` | `bindings/microvms-js/src/errors.rs:71` |
+| tracing | agentd | `crates/agentd/Cargo.toml:61` | `crates/agentd/src/main.rs:44` |
 
 ## See also
 
-- [impact analysis](../../insights/impact-analysis.md)
-- [system overview](../../architecture/system-overview.md)
-- [contract map](../../insights/contract-map.md)
-- [tech debt](../../insights/tech-debt.md)
-- [business logic](../../insights/business-logic.md)
+- [system overview](../../architecture/system-overview.md) — 19 shared source citations
+- [contract map](../../insights/contract-map.md) — 13 shared source citations
+- [module map](../../architecture/module-map.md) — 12 shared source citations
+- [impact analysis](../../insights/impact-analysis.md) — 9 shared source citations
+- [ownership](../../analysis/ownership.md) — 7 shared source citations
