@@ -35,12 +35,12 @@ for 9000 could not access 8080. Guest loopback traffic bypasses this proxy.
 
 ## Local forwards
 
-`microvm port-forward` requires a Host naming its bound address and port;
-loopback bindings accept `localhost` and loopback IP literals. It attaches the
-session's proxy credential to the upstream request. The listener
-is available to other local users. Keep the guest application's own user
+`microvm port-forward` requires a `Host` header matching its bound address and
+port. Loopback bindings accept `localhost` and loopback IP literals. It attaches
+the session's proxy credential to the upstream request. The listener
+is available to other local users. Keep the guest app's own user
 authentication enabled; the proxy credential authenticates the upstream hop,
-not the user of that application. The code-server example uploads a protected
+not the user of that app. The code-server example uploads a protected
 password configuration before starting the IDE.
 
 ## Why source-address filtering is wrong, not merely weak
