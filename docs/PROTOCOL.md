@@ -34,8 +34,8 @@ never gets bootstrapped.
 | `GET /v1/schema` | none | this contract as a JSON Schema document: every route, shape, status, and limit |
 
 **Every hook invocation is recorded and reported on `/v1/health`.** The daemon
-records each invocation in memory — the hook's name and the daemon's clock, in
-arrival order — before the handler does any work or chooses a status, and
+records the hook's name and timestamp in memory, in arrival order, before the
+handler does any work or chooses a status, and
 `GET /v1/health` reports the log as `hooks` (`[{hook, fired_at}]`, oldest first)
 beside `hooks_dropped`, a count of invocations past the log's cap. A run hook
 that arrives malformed or answers 409 still leaves a `run` observation: the
@@ -50,8 +50,8 @@ unauthenticated and arrive over loopback indistinguishably from an in-VM
 process (see "Trust boundary" below), so a hostile workload can forge
 ADDITIONAL observations by posting the hook paths itself. It cannot remove or
 alter real ones: the daemon records before it responds, and the capped log
-keeps the *earliest* entries — the platform's real lifecycle firings, which
-arrive before anything runs in the guest — while later spam is dropped and
+keeps the *earliest* entries, the platform's real lifecycle firings, which
+arrive before anything runs in the guest, while later spam is dropped and
 counted in `hooks_dropped`. Read an observation as "the daemon saw this hook
 fire", never as "only the platform could have fired it". Both fields are
 `#[serde(default)]` like `busy` and `execs`, and for the same reason: an older
@@ -106,7 +106,7 @@ daemon runs it for the `run`, `suspend`, `resume`, and `terminate` hooks:
   The `run` handler runs once, after the winning bootstrap installs the token;
   a replayed or conflicting run hook runs none.
 - **Within a budget.** `AGENTD_HOOK_HANDLER_TIMEOUT_SECS` (default 20, clamped
-  to 1–55) is kept below the image's hook timeout, which the client sets to 30
+  to 1 to 55) is kept below the image's hook timeout, which the client sets to 30
   seconds. At the budget the handler's whole process group is killed.
 - **Always 200.** The hook answers 200 whatever the handler did. The platform's
   handling of a failing or slow hook is undocumented, and a VM that cannot
@@ -199,7 +199,7 @@ total size are capped. Modes are applied after content lands.
 **A symlink an archive wrote cannot redirect a later member, and the kernel is
 what enforces that.** The `normpath` rule above judges a member at the depth its
 name implies, and that is not the same as the depth the write reaches once a
-symlink is in the path. So the daemon opens the extraction root once and creates
+symlink is in the path. The daemon opens the extraction root once and creates
 every member relative to that descriptor with `openat2`, using
 `RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS`. A member whose
 path would traverse a symlink is refused with 400 rather than written somewhere
@@ -218,9 +218,9 @@ deadline bounds how long the daemon waits on grandchildren still holding the pip
 
 **A grandchild outlives its exec unless the caller asks otherwise, and
 `/v1/procs` is how anyone finds it.** Each exec runs in its own process group,
-and until now only `/v1/exec/{id}/kill` ever signalled that group: a command that
+and until now only `/v1/exec/{id}/kill` ever signaled that group: a command that
 backgrounded something and exited left it running with nothing able to enumerate
-it (issue #157, measured 2026-09-11 — a ticker still counting six seconds after
+it (issue #157, measured 2026-09-11, a ticker still counting six seconds after
 its exec reported exit 0). `GET /v1/procs` answers `{procs: [{exec_id, pgid,
 started_at, child_exited, reap, pids}]}`, one entry per registered exec in any
 phase. `pids` are the live pids whose process group is `pgid`, read from
@@ -229,7 +229,7 @@ zombies are not live and are not listed, and an entry whose `pgid` was never
 captured lists none. `child_exited` is read from the same write-once marker
 `busy` uses, never from the polled result, so an acked exec still reads exited.
 `started_at` is epoch seconds on the daemon's clock, like a hook's `fired_at`.
-The row worth reading is `child_exited: true` with a non-empty `pids`: that is
+Inspect the row with `child_exited: true` with a non-empty `pids`: that is
 the survivor, and its `exec_id` is what the kill route takes.
 
 `reap_group_on_exit: true` on `/v1/exec/start` is the opt-in that closes the gap
@@ -238,9 +238,8 @@ escalation against the group as soon as the child's exit is observed and before
 the linger begins, so the survivors die, the pipe closes, and
 `writers_may_be_alive` reads false because the linger saw EOF rather than its
 deadline. A timed-out exec is already escalated and is not escalated twice. The
-escalation's grace ends as soon as `/proc` shows no live member of the group —
-not when `killpg(pgid, 0)` fails, because the daemon is PID 1 in the guest and a
-signalled grandchild stays a zombie that still answers that probe. The
+escalation's grace ends as soon as `/proc` shows no live member of the group, not when `killpg(pgid, 0)` fails, because the daemon is PID 1 in the guest and a
+signaled grandchild stays a zombie that still answers that probe. The
 flag defaults to false and the default is the contract above: a backgrounded
 grandchild that keeps writing is a feature for the caller who did not set it.
 `reap` on a procs entry echoes what the start request asked.
@@ -262,7 +261,7 @@ and nothing else, exactly as before.
 
 **The agent token never becomes part of it.** `env_clear()` still runs, so the
 daemon's own environment reaches no child, and the launch env and the token are
-separate parameters through the whole install path — there is no field a refactor
+separate parameters through the whole install path, there is no field a refactor
 could forward one into. Proven by a test that spawns `/usr/bin/env` with a launch
 env installed and asserts the child's environment is *exactly* that map: an extra
 variable of any name fails it, which is what a leak would look like.
@@ -284,7 +283,7 @@ compatibility here is the difference between an ignored field and a dead launch.
 
 **The token and the env share one 4096-byte budget, measured in UTF-8 bytes and
 inclusive** (`PLATFORM.md`). The daemon cannot enforce what the platform already
-rejected — an over-ceiling payload never reaches the guest — so the check is on
+rejected, an over-ceiling payload never reaches the guest, so the check is on
 the *client* side, in `microvms-core`'s `RunHookPayload::for_launch`, and it fires
 before any control-plane call. botocore does not enforce the ceiling either, so
 without that local check there is no signal at all until AWS answers with a
@@ -343,7 +342,7 @@ from its highest layer:
 3. the launch environment;
 4. the request's `env`.
 
-The identity sits above the image so a user demoted from root does not keep the
+The identity is stored above the image layer so a user demoted from root does not keep the
 image's root `HOME`, and below the launch and the request so a caller who sets
 one of the three wins. Without the flag the first layer is empty and the
 child's environment is exactly what it was: the launch map, the request map, and
@@ -384,7 +383,7 @@ trailing newline has none to own and is returned as it is.
 **`start_line=0` and `end_line < start_line` are 400.** Neither is 416: 416 is
 about a range the file cannot satisfy, and both of these are ranges no file could,
 so a client sent to look at the file would be looking in the wrong place. A
-non-integer bound is also 400, and it does not masquerade as the missing-`path`
+non-integer bound is also 400, and it does not return the missing-`path`
 refusal.
 
 **A range still streams.** The read is filtered chunk by chunk and stops reading
@@ -405,22 +404,22 @@ mid-work. Multi-hour agent runs are the real case.
 
 **A guest-side request cannot fix this, and the daemon does not pretend
 otherwise.** The endpoint proxy terminates *outside* the VM and forwards over
-loopback — measured, `PLATFORM.md`, "The platform's own hook arrives over
+loopback, measured, `PLATFORM.md`, "The platform's own hook arrives over
 loopback". A request an in-VM process sends to the daemon's own port therefore
 never reaches the thing counting traffic. A "keep myself alive" route would be a
 keepalive that keeps nothing alive, and it would be discovered as broken by a
 multi-hour run auto-suspending mid-work, which is the failure it was added to
 prevent.
 
-**So `GET /v1/health` carries `busy` and `execs`, for an orchestrator outside the
-VM.** The orchestrator's own poll *is* the inbound traffic, and `busy` is what
+**`GET /v1/health` carries `busy` and `execs`, for an orchestrator outside the
+VM.** The orchestrator's own poll is the inbound traffic, and `busy` is what
 makes that poll informed rather than unconditional. The assertion of liveness is
 therefore repeated and is explicitly the caller's, which is the property that rules
 out the daemon self-keepaliving: a hung process would then bill to the 8-hour
 `maximumDurationInSeconds` ceiling with nobody having asked.
 
 **`busy` means producing, not unfinished.** An exec whose child has exited and
-whose result is waiting to be acked is not busy — nothing is running, and holding a
+whose result is waiting to be acked is not busy: nothing is running, and holding a
 VM alive at baseline billing for a command that is over is the mistake this
 distinction exists to prevent. `execs` counts every registered entry in any phase,
 so `busy: false` with a non-zero count is a VM holding unacked output somebody
@@ -468,8 +467,8 @@ child's copy of the handle, not the daemon's.
 
 ## Reconnect-at-cursor across a real suspend, measured
 
-The claim above — that resume by byte offset is what distinguishes this from a backend
-whose reattach loses the gap — was asserted from the daemon's side only. The cut under
+The claim above, that resume by byte offset is what distinguishes this from a backend
+whose reattach loses the gap, was asserted from the daemon's side only. The cut under
 unit test is a response body ending without an exit frame, which is the condition the
 reconnect keys on, but nothing had put a real platform suspend across a live exec.
 
@@ -481,36 +480,36 @@ record is an oracle independent of the stream under test:
 | --- | --- |
 | Before the suspend | `tick-1`, `tick-2`, `tick-3` delivered on the handle's `stdout` |
 | Suspend / resume | `SUSPENDED`, held ~20s, `RUNNING` |
-| The handle already held | Resumed at **`tick-4`** — contiguous, no restart, no duplicate |
+| The handle already held | Resumed at **`tick-4`**: contiguous, no restart, no duplicate |
 | Gaps recorded | **None**, on either the held handle or a fresh one |
 | A fresh handle at `offset: 0` | Replayed **200 of 200** ticks, indices contiguous `1..200` |
 | The guest's own file | Agreed with the stream at every point |
 
-So the property holds against the thing it was designed for, and it holds in both
+The property holds against the thing it was designed for, and it holds in both
 shapes: the handle a caller was already reading recovers at its cursor, and a *new*
 handle for the same `exec_id` replays the whole output across the suspension. The exec
 itself is untouched by the freeze, which is the `PLATFORM.md` finding this depends on.
 
 The other three `ExecProcess` properties were measured on the same VM. `stdout` and
 `stderr` arrive as separate streams carrying only their own bytes, from one interleaved
-SSE channel with a per-frame discriminator. `wait()` reports the daemon's real exit code
-— 0 for a success, 42 for `exit 42` — because it reads the exec record rather than
-inferring from the stream ending. `kill()` terminates the process group and a second
+SSE channel with a per-frame discriminator. `wait()` reads the exit code from
+the exec record: 0 for success, or 42 for `exit 42`. It does not infer completion by
+the stream ending. `kill()` terminates the process group and a second
 call succeeds rather than 404ing, and `wait()` afterwards reports `signal: 15` with no
 exit code, so a killed build cannot read as passing.
 
 ## Credentials for a caller's own connection
 
 `Session::connect_headers(port)` and `connect_subprotocols(port)` hand a caller what it
-needs to open its own connection to some other port on the same VM — the header pair for
-HTTPS, the three subprotocols for a WebSocket.
+needs to open a connection to another port on the same VM: the header pair for
+HTTPS or the subprotocols for a WebSocket.
 
-**Both mint a token scoped to the port they name, and that is load-bearing rather than an
+**Both mint a token scoped to the port they name, and that is required rather than an
 implementation detail.** The service scopes a proxy token at mint time, so a token minted
 for the agent port answers 403 `Access to port denied` for any other port and close code
 1006 with no reason on a WebSocket. An implementation that reused the session's cached
 token would therefore return a *correct-looking* port value behind a credential that does
-not authorize it — which is what this client did until the live run of 2026-08-15 caught
+not authorize it, which is what this client did until the live run of 2026-08-15 caught
 it. See `PLATFORM.md`, "`allowedPorts` is a union of three forms".
 
 The scope is extended rather than replaced: a mint for a new port asks for every port

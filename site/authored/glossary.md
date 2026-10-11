@@ -82,7 +82,7 @@ suspend and resume, the held handle resumed contiguously. See [Protocol](/intern
 
 The idempotency key on the service's create calls, and a permanent one. A token derived from a stable
 resource identity replays forever: after an image is deleted and recreated under the same name, the
-service replays the original create as a no-op and the image sits in `CREATING` with its builds never
+service replays the original create as a no-op and the image remains in `CREATING` with its builds never
 scheduled. The client scopes a create token to a single build attempt. See
 [Platform](/internals/platform/).
 

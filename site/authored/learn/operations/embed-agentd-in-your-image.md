@@ -22,7 +22,7 @@ The platform has no exec API: a MicroVM exposes one HTTPS endpoint and forwards 
 
 `ENTRYPOINT []` plus `CMD ["/agentd"]` is the deployment invariant the trust boundary rests on: no task workload runs before the platform's run hook lands, and an omitted `cwd` inherits the image `WORKDIR`. The `FROM` must match the managed base's registry ref, and a `WORKDIR` is required because the managed base declares none. Both are enforced by the client before any AWS call. No secret goes in the image; per-VM credentials travel through `runHookPayload` at launch.
 
-## 3. What your client implements
+## 3. Implement the client calls
 
 The full route table and request shapes are in [Protocol](/internals/protocol/), and the same contract is served as JSON Schema at `GET /v1/schema` on any running daemon, unauthenticated, so a client can fetch it before it holds a token. The committed copy is the [wire schema](/reference/wire-schema/). The shape of a client, in one line each:
 

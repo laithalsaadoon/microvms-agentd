@@ -204,7 +204,7 @@ Defined at: `crates/microvms-domain/src/region.rs:45-79`.
 
 ### Blast-radius notes
 
-- The supported region list is a measured client policy, not a service-model
+- The supported region list is a measured client policy, separate from the service-model
   enum. Updating it needs new platform evidence as well as a matching independent
   literal in the comparison script.
   `crates/microvms-domain/src/region.rs:65-73`, `tools/check-model-drift.py:949-965`
@@ -280,8 +280,8 @@ Defined at: `crates/microvms-cli/src/manifest.rs:51-117`.
 
 ## See also
 
-- [contract map](contract-map.md) — 41 shared source citations
-- [module map](../architecture/module-map.md) — 31 shared source citations
-- [processes](../behavior/processes.md) — 19 shared source citations
-- [business logic](business-logic.md) — 14 shared source citations
-- [debugging guide](debugging-guide.md) — 13 shared source citations
+- [contract map](contract-map.md): 41 shared source citations
+- [module map](../architecture/module-map.md): 31 shared source citations
+- [processes](../behavior/processes.md): 19 shared source citations
+- [business logic](business-logic.md): 14 shared source citations
+- [debugging guide](debugging-guide.md): 13 shared source citations

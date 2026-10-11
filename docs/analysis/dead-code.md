@@ -1,7 +1,6 @@
 # microvms-agentd · Dead code
 
-Reviewed at `9729b82` on 2026-10-11. These are source-level findings, not a
-whole-program reachability proof. An empty section means no candidate was confirmed
+Reviewed at `9729b82` on 2026-10-11. These source-level findings require further reachability analysis. An empty section means no candidate was confirmed
 in this review. Public library APIs may have downstream callers, and language
 bindings register exports that need no Rust caller: the Node binding describes its
 registration mechanism at `bindings/microvms-js/src/lib.rs:82-86`.
@@ -65,8 +64,8 @@ these uses.
 
 ## See also
 
-- [module map](../architecture/module-map.md) — 8 shared source citations
-- [contract map](../insights/contract-map.md) — 6 shared source citations
-- [impact analysis](../insights/impact-analysis.md) — 5 shared source citations
-- [risk hotspots](risk-hotspots.md) — 4 shared source citations
-- [system overview](../architecture/system-overview.md) — 4 shared source citations
+- [module map](../architecture/module-map.md): 8 shared source citations
+- [contract map](../insights/contract-map.md): 6 shared source citations
+- [impact analysis](../insights/impact-analysis.md): 5 shared source citations
+- [risk hotspots](risk-hotspots.md): 4 shared source citations
+- [system overview](../architecture/system-overview.md): 4 shared source citations

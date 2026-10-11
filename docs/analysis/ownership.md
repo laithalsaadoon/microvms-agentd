@@ -22,13 +22,13 @@ not followed across renames.
 
 Paths are grouped by their top-level folder, with separate entries for each crate,
 binding, verification area and site area. The selection starts with the largest current
-folder groups and includes the foundational domain, protocol, model and requirements
+folder groups and includes the shared domain, protocol, model and requirements
 areas. Rows are ranked by touch frequency. Share is a percentage of all matched touches,
 rounded to a whole percent; zero percent can represent a small nonzero share. Omitted
 folders and rounding mean the displayed shares need not sum to 100%.
 
 Churn measures repeated editing, not complexity, defects or reviewer coverage. In particular,
-a file moved out of core starts contributing to its destination's history at that path;
+a file moved out of core starts appearing in its destination's history at that path;
 use the current composition boundary when planning changes.
 `Cargo.toml:21-27`, `crates/microvms-core/src/lib.rs:63-82`
 
@@ -112,8 +112,8 @@ implementation boundary and evidence. Apply these mitigations during review:
 
 ## See also
 
-- [module map](../architecture/module-map.md) — 11 shared source citations
-- [system overview](../architecture/system-overview.md) — 9 shared source citations
-- [dependency graph](../diagrams/structural/dependency-graph.md) — 7 shared source citations
-- [dead code](dead-code.md) — 3 shared source citations
-- [impact analysis](../insights/impact-analysis.md) — 3 shared source citations
+- [module map](../architecture/module-map.md): 11 shared source citations
+- [system overview](../architecture/system-overview.md): 9 shared source citations
+- [dependency graph](../diagrams/structural/dependency-graph.md): 7 shared source citations
+- [dead code](dead-code.md): 3 shared source citations
+- [impact analysis](../insights/impact-analysis.md): 3 shared source citations

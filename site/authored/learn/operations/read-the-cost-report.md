@@ -14,7 +14,7 @@ microvm cost --estimate --memory 2048 --running-sec 3600 --max-cost 1.50 --on-br
 
 Every `run` reports a cost estimate, and `microvm cost` produces the same report over durations you supply. At the end of this page you will know what each figure is built from, what it means when a total says "at least", and how to put a budget on a run before it launches.
 
-## 1. Where the figures come from
+## 1. Check the rate sources
 
 Rates are pinned, dated, and per region, and only the ARM rates apply, because the service's architecture enum has one member. Dollar figures are estimates derived from published rates, never an invoice. `mise run live:rates` checks the pinned table against the AWS Pricing API, and the report carries a staleness note when the pinned date is old.
 
@@ -34,11 +34,11 @@ A total over any unpriced line is a different kind of total. It renders as `at l
 
 ## 4. Plan before you spend
 
-`--estimate` treats the durations as a plan rather than as timings, and every duration on such a report is labelled projected, so an estimate cannot print as a report of something that ran. `--running-sec`, `--suspended-sec`, and `--build-sec` are the phases; `--image-gb` adds storage with its one-week minimum retention; `--cycles` counts suspend/resume cycles, each paying a snapshot write plus a read. Left off, the report counts none, because a report claims only what you say happened, so a report of a run that suspended takes `--cycles`.
+`--estimate` treats the durations as a plan rather than as timings, and every duration on such a report is labeled projected, so an estimate cannot print as a report of something that ran. `--running-sec`, `--suspended-sec`, and `--build-sec` are the phases; `--image-gb` adds storage with its one-week minimum retention; `--cycles` counts suspend/resume cycles, each paying a snapshot write plus a read. Left off, the report counts none, because a report claims only what you say happened, so a report of a run that suspended takes `--cycles`.
 
-`--compare` also prints running versus suspended for the same hold, with the break-even, over `--hold-sec` (default 3600). The comparison prices one suspend/resume cycle when `--cycles` is left off, since its per-cycle figure is the point, and a `--cycles` you give feeds both the report and the comparison.
+`--compare` also prints running versus suspended for the same hold, with the break-even, over `--hold-sec` (default 3600). The comparison prices one suspend/resume cycle when `--cycles` is left off, to include the cost of that cycle, and a `--cycles` you give feeds both the report and the comparison.
 
-`--max-cost` is a budget in USD the report's total is checked against, and `--on-breach` says what a breach does: `warn` warns and exits 0, `abort` aborts with `ERR_PRECONDITION` (exit 12). The pair is required together, because whether a breach of a lower-bound total should stop a script is the caller's judgement and has no default. Under `--json` the `budget` key carries `maxUsd`, `onBreach`, `basis`, `breached`, and `overageAtLeastUsd`.
+`--max-cost` is a budget in USD the report's total is checked against, and `--on-breach` says what a breach does: `warn` warns and exits 0, `abort` aborts with `ERR_PRECONDITION` (exit 12). The pair is required together, because whether a breach of a lower-bound total should stop a script is the caller's judgment and has no default. Under `--json` the `budget` key carries `maxUsd`, `onBreach`, `basis`, `breached`, and `overageAtLeastUsd`.
 
 ## 5. Size for the bill
 

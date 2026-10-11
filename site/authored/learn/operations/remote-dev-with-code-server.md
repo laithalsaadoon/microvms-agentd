@@ -51,7 +51,7 @@ microvm exec "timeout 60 bash -c 'until echo > /dev/tcp/127.0.0.1/8080; do sleep
   --name "$VM_NAME" --region "$REGION" --json >/dev/null
 ```
 
-`--detach` starts code-server and returns; the second exec waits for the listener with bash's `/dev/tcp`, so nothing has to be installed for the wait. `--user 1000` because an IDE hands a terminal to whoever reaches it, and that terminal should not be root's.
+`--detach` starts code-server and returns; the second exec waits for the listener with bash's `/dev/tcp`, so nothing has to be installed for the wait. `--user 1000` because an IDE provides a terminal to whoever reaches it, and that terminal should not be root's.
 
 `--auth none` is sound here because other layers already gate the path. The local listener binds `127.0.0.1`, so nothing off your machine reaches the forward. Every request the forward relays crosses the endpoint proxy, which requires an auth token scoped to this MicroVM and port set, and `port-forward` mints and attaches it for you. Inside the guest, code-server binds loopback only. A password prompt on top would authenticate nothing the proxy token has not already authenticated.
 
@@ -67,7 +67,7 @@ microvm port-forward 8080:8080 --name code-server-dev
 
 Suspend is a freeze and restore. The filesystem, running processes, and the endpoint URL all survive a suspend/resume cycle, so unsaved buffers and the terminal you left open come back exactly as you left them.
 
-The loop wires itself. An open editor tab holds a live WebSocket, which is inbound traffic, and inbound traffic resets the platform's idle timer. So the VM stays `RUNNING` while you work, suspends about fifteen minutes after you close the tab, and, because the config sets `auto-resume`, resumes on the next request through the endpoint. Reload the tab with the forward still up, or re-run the script, and you are back. A suspended VM bills roughly snapshot storage alone.
+The loop wires itself. An open editor tab holds a live WebSocket, which is inbound traffic, and inbound traffic resets the platform's idle timer. The VM stays `RUNNING` while you work, suspends about fifteen minutes after you close the tab, and, because the config sets `auto-resume`, resumes on the next request through the endpoint. Reload the tab with the forward still up, or re-run the script, and you are back. A suspended VM bills roughly snapshot storage alone.
 
 One ceiling to plan around: the platform caps any single VM's life at eight hours (`--max-duration-sec`, refused above 28800 before any call). This is a work-session dev box, so get work out before the ceiling with git from inside the IDE, or from outside:
 

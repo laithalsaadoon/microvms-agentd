@@ -18,7 +18,7 @@ request shapes; only runtime measurements establish service behavior.
 ## Guiding policy
 
 Keep shared behavior in core and use thin CLI/Python/Node adapters. Validate
-requests before billable operations, preserve meaningful errors, and test
+requests before billable operations, preserve specific errors, and test
 failure paths. State limits directly: guest root is not isolated from the
 daemon, metadata exposes the execution role, and internet isolation requires
 a correctly configured VPC connector.
@@ -58,10 +58,9 @@ assumptions, reuse environments across launches, and upgrade packages without
 surprises between the CLI and language bindings. Live coverage remains scoped
 to the regions and paths actually exercised.
 
-## What the first draft got wrong
+## Corrections to the initial proposal
 
 The earlier strategy prioritized a turn-boundary suspend convention even
 though existing hooks and lifecycle APIs already covered it. It also mixed
-human interactive idle time with headless batch workloads. The lesson is to
-measure the target workload and check existing platform capabilities before
+human interactive idle time with headless batch workloads. Measure the target workload and check existing platform capabilities before
 adding an abstraction. Full research notes remain in git history.

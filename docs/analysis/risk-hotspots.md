@@ -1,8 +1,8 @@
 # microvms-agentd · Risk hotspots
 
-Risk here means maintenance attention suggested by recent changes. This is a dated measurement at commit `9729b82`, taken on 2026-10-11, using the UTC interval from 2026-09-11 inclusive to 2026-10-11 exclusive. The cohort is current implementation source under crates, bindings, tools, conformance, and the site's source and scripts; tests, fixtures, examples, generated declarations, and generated site content are excluded. Each changed path contributes its commit count. The median is 2 and the population standard deviation is 3.1185: `↑ rising` means at least 6 commits, `→ flat` means 1–5, and no touched path meets `↓ falling`. A rising path scores 1; ties use descending commit count, then path order.
+Risk here means maintenance attention suggested by recent changes. This is a dated measurement at commit `9729b82`, taken on 2026-10-11, using the UTC interval from 2026-09-11 inclusive to 2026-10-11 exclusive. The cohort is current implementation source under crates, bindings, tools, conformance, and the site's source and scripts; tests, fixtures, examples, generated declarations, and generated site content are excluded. Each changed path contributes its commit count. The median is 2 and the population standard deviation is 3.1185: `↑ rising` means at least 6 commits, `→ flat` means 1 to 5, and no touched path meets `↓ falling`. A rising path scores 1; ties use descending commit count, then path order.
 
-No current per-file diagnostic dataset supports warning or error totals, so this ranking uses activity alone and omits an open-findings column. The arrows compare paths within this window; they do not measure acceleration over time. Counts use current path spellings, so moves and broad refactors can affect the ranking. “Top owner” names a suggested review role, and the drill-down describes recorded contribution concentration without assigning maintainership to an author. The source citations identify what each path does; they do not establish test coverage or runtime reliability.
+No current per-file diagnostic dataset supports warning or error totals, so this ranking uses activity alone and omits an open-findings column. The arrows compare paths within this window; they do not measure acceleration over time. Counts use current path spellings, so moves and broad refactors can affect the ranking. “Top owner” names a suggested review role, and the detail describes recorded contribution concentration without assigning maintainership to an author. The source citations identify what each path does; they do not establish test coverage or runtime reliability.
 
 | File | Trend | Top owner | Citation |
 | --- | --- | --- | --- |
@@ -19,7 +19,7 @@ No current per-file diagnostic dataset supports warning or error totals, so this
 | `bindings/microvms-js/src/sandbox.rs` | ↑ rising | Node binding maintainers | `bindings/microvms-js/src/sandbox.rs:668` |
 | `bindings/microvms-py/src/agents.rs` | ↑ rising | Python binding maintainers | `bindings/microvms-py/src/agents.rs:464` |
 
-## Per-file drill-down
+## Per-file detail
 
 ### 1. `conformance/run_rs.py`
 
@@ -39,7 +39,7 @@ No current per-file diagnostic dataset supports warning or error totals, so this
 
 **Review ownership.** CLI interface maintainers should coordinate with the handler's review area. Recorded contributions are concentrated: the leading author's share is 90%, with the remainder at 10%.
 
-**Review focus.** Treat changes to accepted arguments as interface changes. The parser's size-request test checks both valid combinations and conflicts with the older memory option (`crates/microvms-cli/src/cli.rs:3843-3868`); the duration test separately checks the accepted domain for seconds-valued flags (`crates/microvms-cli/src/cli.rs:3872-3887`). These are source-level review anchors, not a claim that either test ran for this measurement.
+**Review focus.** Treat changes to accepted arguments as interface changes. The parser's size-request test checks both valid combinations and conflicts with the older memory option (`crates/microvms-cli/src/cli.rs:3843-3868`); the duration test separately checks the accepted domain for seconds-valued flags (`crates/microvms-cli/src/cli.rs:3872-3887`). These source references identify useful tests; this measurement did not run them.
 
 ### 3. `crates/microvms-cli/src/commands/lifecycle.rs`
 
@@ -73,8 +73,8 @@ No current per-file diagnostic dataset supports warning or error totals, so this
 
 ## See also
 
-- [module map](../architecture/module-map.md) — 12 shared source citations
-- [contract map](../insights/contract-map.md) — 8 shared source citations
-- [impact analysis](../insights/impact-analysis.md) — 6 shared source citations
-- [dead code](dead-code.md) — 4 shared source citations
-- [data flow](../architecture/data-flow.md) — 3 shared source citations
+- [module map](../architecture/module-map.md): 12 shared source citations
+- [contract map](../insights/contract-map.md): 8 shared source citations
+- [impact analysis](../insights/impact-analysis.md): 6 shared source citations
+- [dead code](dead-code.md): 4 shared source citations
+- [data flow](../architecture/data-flow.md): 3 shared source citations

@@ -304,8 +304,8 @@ Uploads and extracts an uncompressed tar archive into the requested directory. `
 
 ## See also
 
-- [module map](../architecture/module-map.md) — 11 shared source citations
-- [impact analysis](../insights/impact-analysis.md) — 7 shared source citations
-- [processes](../behavior/processes.md) — 4 shared source citations
-- [business logic](../insights/business-logic.md) — 4 shared source citations
-- [debugging guide](../insights/debugging-guide.md) — 4 shared source citations
+- [module map](../architecture/module-map.md): 11 shared source citations
+- [impact analysis](../insights/impact-analysis.md): 7 shared source citations
+- [processes](../behavior/processes.md): 4 shared source citations
+- [business logic](../insights/business-logic.md): 4 shared source citations
+- [debugging guide](../insights/debugging-guide.md): 4 shared source citations

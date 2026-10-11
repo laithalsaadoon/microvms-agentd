@@ -152,61 +152,61 @@ Entry point: `crates/agentd/src/fs.rs:1438`
 
 ## Minor flows
 
-- Daemon startup — entry at `crates/agentd/src/main.rs:14`. Initializes the runtime and image environment, starts periodic execution collection, assembles routes, and serves the listener; identity repair waits for the run hook.
-- Graceful shutdown — entry at `crates/agentd/src/serve.rs:19`. Serves with shutdown handling for termination or interrupt signals.
-- Build readiness and validation — entry at `crates/agentd/src/routes.rs:282`. Records build-hook invocations and acknowledges them without waiting for instance bootstrap.
-- Execution poll — entry at `crates/agentd/src/exec.rs:429`. Returns the execution phase and retained outcome without changing the entry.
-- Execution stdin — entry at `crates/agentd/src/exec.rs:706`. Writes requested bytes and optional EOF to an execution's stdin.
-- Execution acknowledgment — entry at `crates/agentd/src/exec.rs:855`. Takes completed output and records the acknowledgment time for later collection.
-- Execution kill — entry at `crates/agentd/src/exec.rs:929`. Signals the recorded process group and reports whether a signal reached it.
-- Expired-execution collection — entry at `crates/agentd/src/exec.rs:975`. Removes acknowledged entries after the configured TTL.
-- Process-group inspection — entry at `crates/agentd/src/exec.rs:1056`. Lists tracked executions and their process-group liveness.
-- Health — entry at `crates/agentd/src/routes.rs:373`. Reports daemon, disk, bootstrap, lifecycle-hook, identity, and execution-activity state.
-- Schema publication — entry at `crates/agentd/src/routes.rs:433`. Returns the schema used to assemble daemon routes.
-- Single-file read — entry at `crates/agentd/src/fs.rs:1097`. Reads a file or its requested inclusive line range.
-- Single-file write — entry at `crates/agentd/src/fs.rs:1187`. Writes a file with an optional parsed mode and disk-capacity checks.
-- Directory download — entry at `crates/agentd/src/fs.rs:1375`. Estimates and packs the requested directory into a tar response.
-- Guest TCP tunnel — entry at `crates/agentd/src/tunnel.rs:126`. Upgrades the connection and selects the plain or identity-verified relay to the requested guest port.
-- Client TCP relay — entry at `crates/microvms-edges/src/session/tunnel.rs:175`. Connects a local byte stream to the guest tunnel; the verified variant at `crates/microvms-edges/src/session/tunnel.rs:196` performs the identity handshake first.
-- Client HTTP forwarding — entry at `crates/microvms-edges/src/session/forward.rs:349`. Parses and forwards a local HTTP connection through the configured guest endpoint.
-- Client shell session — entry at `crates/microvms-edges/src/session/shell.rs:228`. Connects the platform shell WebSocket and drives input, output, and resize events.
-- Control-plane retry — entry at `crates/microvms-app/src/control/transport.rs:290`. Retries failures classified as retryable with jittered exponential backoff.
-- Session request — entry at `crates/microvms-app/src/session/mod.rs:129`. Prepares request headers, applies the request timeout, and calls the HTTP backend.
-- Readiness polling — entry at `crates/microvms-app/src/session/mod.rs:410`. Polls daemon health until bootstrap is reported, a fatal failure occurs, or the deadline expires.
-- Split output readers — entry at `crates/microvms-app/src/session/split.rs:157`. Creates stdout and stderr channels driven by a shared stream task with the selected gap policy.
-- Wait and acknowledge — entry at `crates/microvms-app/src/session/exec.rs:823`. Waits for completion and returns the acknowledgment result that owns the output.
-- Run to completion — entry at `crates/microvms-app/src/session/complete.rs:263`. Coordinates command execution, output delivery, completion, and cancellation policy.
-- Keep awake — entry at `crates/microvms-app/src/session/keepalive.rs:188`. Runs periodic probes until stopped or its failure policy ends the loop.
-- Adopt a VM — entry at `crates/microvms-app/src/sandbox.rs:1360`. Reads the service's VM state and rebuilds a lifecycle handle for an existing launch.
-- Detach for handoff — entry at `crates/microvms-app/src/sandbox.rs:1499`. Returns the existing VM connection record and makes the current sandbox inert without sending a lifecycle request.
-- Workspace synchronization — entry at `crates/microvms-app/src/workspace.rs:301`. Compares manifests, uploads changed paths, removes eligible deleted paths, and writes the new manifest.
-- Download selected artifacts — entry at `crates/microvms-app/src/workspace.rs:422`. Downloads the remote tar and asks the local-tree adapter to extract selected files.
-- Agent launch and prompt — entry at `crates/microvms-app/src/agents/mod.rs:898`. Uses the sandbox lifecycle, then exposes provisioning and command execution through the agent recipe.
-- Daemon release fetch — entry at `crates/microvms-app/src/provision.rs:158`. Fetches the release artifact and applies the release-verification policy before returning its bytes.
-- CLI dispatch — entry at `crates/microvms-cli/src/main.rs:80`. Parses arguments, dispatches the command, and renders the result with its exit status.
-- CLI run — entry at `crates/microvms-cli/src/commands/lifecycle.rs:475`. Composes build or reuse, launch, optional workspace transfer, execution, and cleanup.
-- CLI quickstart — entry at `crates/microvms-cli/src/commands/lifecycle.rs:990`. Resolves quickstart settings and delegates to the run workflow.
-- CLI build — entry at `crates/microvms-cli/src/commands/lifecycle.rs:1464`. Prepares an image without launching a VM.
-- CLI attached lifecycle — entry at `crates/microvms-cli/src/commands/lifecycle.rs:2052`. Adapts suspension for an existing VM; resume, readiness wait, and termination are sibling handlers at `crates/microvms-cli/src/commands/lifecycle.rs:2131`, `crates/microvms-cli/src/commands/lifecycle.rs:2207`, and `crates/microvms-cli/src/commands/lifecycle.rs:2252`.
-- CLI execution — entry at `crates/microvms-cli/src/commands/attached.rs:243`. Starts, polls, or streams a command through a session; sibling handlers provide acknowledgment at `crates/microvms-cli/src/commands/attached.rs:1123`, kill at `crates/microvms-cli/src/commands/attached.rs:1164`, process inspection at `crates/microvms-cli/src/commands/attached.rs:1216`, and stdin at `crates/microvms-cli/src/commands/attached.rs:1307`.
-- CLI health and keepalive — entry at `crates/microvms-cli/src/commands/attached.rs:915`. Renders daemon health; the keepalive handler at `crates/microvms-cli/src/commands/attached.rs:806` runs repeated probes through the shared policy.
-- CLI files and synchronization — entry at `crates/microvms-cli/src/commands/attached.rs:1473`. Resolves copy direction and uses session file operations; sibling handlers expose existence at `crates/microvms-cli/src/commands/attached.rs:1625` and incremental synchronization at `crates/microvms-cli/src/commands/attached.rs:1784`.
-- CLI attachment — entry at `crates/microvms-cli/src/commands/attached.rs:1973`. Imports or resolves a name record and attaches it to a live VM.
-- CLI durable adoption — entry at `crates/microvms-cli/src/commands/attached.rs:124`. Reconstructs an existing VM's lifecycle handle from its record.
-- CLI HTTP forwarding — entry at `crates/microvms-cli/src/commands/attached.rs:2319`. Binds a local listener and forwards connections to a guest port.
-- CLI TCP tunnel — entry at `crates/microvms-cli/src/commands/attached.rs:2465`. Binds a local listener and relays connections through the guest TCP tunnel.
-- CLI shell — entry at `crates/microvms-cli/src/commands/attached.rs:2753`. Resolves the VM and opens its platform shell session.
-- CLI agent workflows — entry at `crates/microvms-cli/src/commands/agent.rs:235`. Creates or refreshes a named agent VM; the prompt handler at `crates/microvms-cli/src/commands/agent.rs:764` submits a task to an installed agent.
-- CLI local records — entry at `crates/microvms-cli/src/commands/local.rs:52`. Lists outstanding runs; sibling handlers render lifecycle history at `crates/microvms-cli/src/commands/local.rs:547` and manage names at `crates/microvms-cli/src/commands/local.rs:633`.
-- CLI build logs — entry at `crates/microvms-cli/src/commands/local.rs:778`. Reports the log group and a command for reading it.
-- CLI image operations — entry at `crates/microvms-cli/src/commands/image.rs:18`. Lists image versions; sibling handlers change version availability at `crates/microvms-cli/src/commands/image.rs:50` and list builds at `crates/microvms-cli/src/commands/image.rs:83`.
-- CLI diagnostics and estimates — entry at `crates/microvms-cli/src/commands/doctor.rs:33`. Checks local and service prerequisites; the cost handler at `crates/microvms-cli/src/commands/cost.rs:29` and egress-posture handler at `crates/microvms-cli/src/commands/local.rs:862` render their respective reports.
-- CLI contract output — entry at `crates/microvms-cli/src/commands/local.rs:931`. Emits the command manifest; sibling handlers emit constants at `crates/microvms-cli/src/commands/local.rs:954` and a Dockerfile at `crates/microvms-cli/src/commands/local.rs:992`.
+- Daemon startup, entry at `crates/agentd/src/main.rs:14`. Initializes the runtime and image environment, starts periodic execution collection, assembles routes, and serves the listener; identity repair waits for the run hook.
+- Graceful shutdown, entry at `crates/agentd/src/serve.rs:19`. Serves with shutdown handling for termination or interrupt signals.
+- Build readiness and validation, entry at `crates/agentd/src/routes.rs:282`. Records build-hook invocations and acknowledges them without waiting for instance bootstrap.
+- Execution poll, entry at `crates/agentd/src/exec.rs:429`. Returns the execution phase and retained outcome without changing the entry.
+- Execution stdin, entry at `crates/agentd/src/exec.rs:706`. Writes requested bytes and optional EOF to an execution's stdin.
+- Execution acknowledgment, entry at `crates/agentd/src/exec.rs:855`. Takes completed output and records the acknowledgment time for later collection.
+- Execution kill, entry at `crates/agentd/src/exec.rs:929`. Signals the recorded process group and reports whether a signal reached it.
+- Expired-execution collection, entry at `crates/agentd/src/exec.rs:975`. Removes acknowledged entries after the configured TTL.
+- Process-group inspection, entry at `crates/agentd/src/exec.rs:1056`. Lists tracked executions and their process-group liveness.
+- Health, entry at `crates/agentd/src/routes.rs:373`. Reports daemon, disk, bootstrap, lifecycle-hook, identity, and execution-activity state.
+- Schema publication, entry at `crates/agentd/src/routes.rs:433`. Returns the schema used to assemble daemon routes.
+- Single-file read, entry at `crates/agentd/src/fs.rs:1097`. Reads a file or its requested inclusive line range.
+- Single-file write, entry at `crates/agentd/src/fs.rs:1187`. Writes a file with an optional parsed mode and disk-capacity checks.
+- Directory download, entry at `crates/agentd/src/fs.rs:1375`. Estimates and packs the requested directory into a tar response.
+- Guest TCP tunnel, entry at `crates/agentd/src/tunnel.rs:126`. Upgrades the connection and selects the plain or identity-verified relay to the requested guest port.
+- Client TCP relay, entry at `crates/microvms-edges/src/session/tunnel.rs:175`. Connects a local byte stream to the guest tunnel; the verified variant at `crates/microvms-edges/src/session/tunnel.rs:196` performs the identity handshake first.
+- Client HTTP forwarding, entry at `crates/microvms-edges/src/session/forward.rs:349`. Parses and forwards a local HTTP connection through the configured guest endpoint.
+- Client shell session, entry at `crates/microvms-edges/src/session/shell.rs:228`. Connects the platform shell WebSocket and drives input, output, and resize events.
+- Control-plane retry, entry at `crates/microvms-app/src/control/transport.rs:290`. Retries failures classified as retryable with jittered exponential backoff.
+- Session request, entry at `crates/microvms-app/src/session/mod.rs:129`. Prepares request headers, applies the request timeout, and calls the HTTP backend.
+- Readiness polling, entry at `crates/microvms-app/src/session/mod.rs:410`. Polls daemon health until bootstrap is reported, a fatal failure occurs, or the deadline expires.
+- Split output readers, entry at `crates/microvms-app/src/session/split.rs:157`. Creates stdout and stderr channels driven by a shared stream task with the selected gap policy.
+- Wait and acknowledge, entry at `crates/microvms-app/src/session/exec.rs:823`. Waits for completion and returns the acknowledgment result that owns the output.
+- Run to completion, entry at `crates/microvms-app/src/session/complete.rs:263`. Coordinates command execution, output delivery, completion, and cancellation policy.
+- Keep awake, entry at `crates/microvms-app/src/session/keepalive.rs:188`. Runs periodic probes until stopped or its failure policy ends the loop.
+- Adopt a VM, entry at `crates/microvms-app/src/sandbox.rs:1360`. Reads the service's VM state and rebuilds a lifecycle handle for an existing launch.
+- Detach for handoff, entry at `crates/microvms-app/src/sandbox.rs:1499`. Returns the existing VM connection record and makes the current sandbox inert without sending a lifecycle request.
+- Workspace synchronization, entry at `crates/microvms-app/src/workspace.rs:301`. Compares manifests, uploads changed paths, removes eligible deleted paths, and writes the new manifest.
+- Download selected artifacts, entry at `crates/microvms-app/src/workspace.rs:422`. Downloads the remote tar and asks the local-tree adapter to extract selected files.
+- Agent launch and prompt, entry at `crates/microvms-app/src/agents/mod.rs:898`. Uses the sandbox lifecycle, then exposes provisioning and command execution through the agent recipe.
+- Daemon release fetch, entry at `crates/microvms-app/src/provision.rs:158`. Fetches the release artifact and applies the release-verification policy before returning its bytes.
+- CLI dispatch, entry at `crates/microvms-cli/src/main.rs:80`. Parses arguments, dispatches the command, and renders the result with its exit status.
+- CLI run, entry at `crates/microvms-cli/src/commands/lifecycle.rs:475`. Composes build or reuse, launch, optional workspace transfer, execution, and cleanup.
+- CLI quickstart, entry at `crates/microvms-cli/src/commands/lifecycle.rs:990`. Resolves quickstart settings and delegates to the run workflow.
+- CLI build, entry at `crates/microvms-cli/src/commands/lifecycle.rs:1464`. Prepares an image without launching a VM.
+- CLI attached lifecycle, entry at `crates/microvms-cli/src/commands/lifecycle.rs:2052`. Adapts suspension for an existing VM; resume, readiness wait, and termination are sibling handlers at `crates/microvms-cli/src/commands/lifecycle.rs:2131`, `crates/microvms-cli/src/commands/lifecycle.rs:2207`, and `crates/microvms-cli/src/commands/lifecycle.rs:2252`.
+- CLI execution, entry at `crates/microvms-cli/src/commands/attached.rs:243`. Starts, polls, or streams a command through a session; sibling handlers provide acknowledgment at `crates/microvms-cli/src/commands/attached.rs:1123`, kill at `crates/microvms-cli/src/commands/attached.rs:1164`, process inspection at `crates/microvms-cli/src/commands/attached.rs:1216`, and stdin at `crates/microvms-cli/src/commands/attached.rs:1307`.
+- CLI health and keepalive, entry at `crates/microvms-cli/src/commands/attached.rs:915`. Renders daemon health; the keepalive handler at `crates/microvms-cli/src/commands/attached.rs:806` runs repeated probes through the shared policy.
+- CLI files and synchronization, entry at `crates/microvms-cli/src/commands/attached.rs:1473`. Resolves copy direction and uses session file operations; sibling handlers expose existence at `crates/microvms-cli/src/commands/attached.rs:1625` and incremental synchronization at `crates/microvms-cli/src/commands/attached.rs:1784`.
+- CLI attachment, entry at `crates/microvms-cli/src/commands/attached.rs:1973`. Imports or resolves a name record and attaches it to a live VM.
+- CLI durable adoption, entry at `crates/microvms-cli/src/commands/attached.rs:124`. Reconstructs an existing VM's lifecycle handle from its record.
+- CLI HTTP forwarding, entry at `crates/microvms-cli/src/commands/attached.rs:2319`. Binds a local listener and forwards connections to a guest port.
+- CLI TCP tunnel, entry at `crates/microvms-cli/src/commands/attached.rs:2465`. Binds a local listener and relays connections through the guest TCP tunnel.
+- CLI shell, entry at `crates/microvms-cli/src/commands/attached.rs:2753`. Resolves the VM and opens its platform shell session.
+- CLI agent workflows, entry at `crates/microvms-cli/src/commands/agent.rs:235`. Creates or refreshes a named agent VM; the prompt handler at `crates/microvms-cli/src/commands/agent.rs:764` submits a task to an installed agent.
+- CLI local records, entry at `crates/microvms-cli/src/commands/local.rs:52`. Lists outstanding runs; sibling handlers render lifecycle history at `crates/microvms-cli/src/commands/local.rs:547` and manage names at `crates/microvms-cli/src/commands/local.rs:633`.
+- CLI build logs, entry at `crates/microvms-cli/src/commands/local.rs:778`. Reports the log group and a command for reading it.
+- CLI image operations, entry at `crates/microvms-cli/src/commands/image.rs:18`. Lists image versions; sibling handlers change version availability at `crates/microvms-cli/src/commands/image.rs:50` and list builds at `crates/microvms-cli/src/commands/image.rs:83`.
+- CLI diagnostics and estimates, entry at `crates/microvms-cli/src/commands/doctor.rs:33`. Checks local and service prerequisites; the cost handler at `crates/microvms-cli/src/commands/cost.rs:29` and egress-posture handler at `crates/microvms-cli/src/commands/local.rs:862` render their reports.
+- CLI contract output, entry at `crates/microvms-cli/src/commands/local.rs:931`. Emits the command manifest; sibling handlers emit constants at `crates/microvms-cli/src/commands/local.rs:954` and a Dockerfile at `crates/microvms-cli/src/commands/local.rs:992`.
 
 ## See also
 
-- [contract map](../insights/contract-map.md) — 25 shared source citations
-- [module map](../architecture/module-map.md) — 20 shared source citations
-- [impact analysis](../insights/impact-analysis.md) — 19 shared source citations
-- [business logic](../insights/business-logic.md) — 11 shared source citations
-- [debugging guide](../insights/debugging-guide.md) — 11 shared source citations
+- [contract map](../insights/contract-map.md): 25 shared source citations
+- [module map](../architecture/module-map.md): 20 shared source citations
+- [impact analysis](../insights/impact-analysis.md): 19 shared source citations
+- [business logic](../insights/business-logic.md): 11 shared source citations
+- [debugging guide](../insights/debugging-guide.md): 11 shared source citations

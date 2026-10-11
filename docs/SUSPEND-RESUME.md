@@ -46,13 +46,13 @@ credentials keep expiring in wall-clock time while the VM is suspended.
 - **Idle means no inbound requests through the endpoint.** AWS (the service
   model's `IdlePolicy`). Work inside the guest does not count, and neither do
   loopback requests from the guest. Measured 2026-08-15 and 2026-09-23: a
-  CPU-busy exec was suspended 60–70 seconds after the last request with
+  CPU-busy exec was suspended 60 to 70 seconds after the last request with
   `maxIdleDurationSeconds=60`. External `/v1/health` polls kept a VM running,
   and so did a held-open exec output stream with steady output (150 seconds,
   2026-09-23). Whether the open connection or the data flowing through it is
   what counts is unknown.
 - **Explicit suspend is a control-plane call** (`SuspendMicrovm`), not a
-  daemon route. Measured 2026-09-23: `SUSPENDED` about 1–2 seconds after the call, and
+  daemon route. Measured 2026-09-23: `SUSPENDED` about 1 to 2 seconds after the call, and
   `RUNNING` about 1.5 seconds after a resume call.
 - **Auto-resume holds the request.** AWS: with `autoResumeEnabled`, Lambda holds
   an inbound request while the VM resumes, including the `/resume` hook.
@@ -71,7 +71,7 @@ The idle policy is set at `RunMicrovm` and cannot be changed afterward.
 
 ## Lifecycle hooks: the only control point
 
-Images declare `suspend` and `resume` hooks, each with a 1–60 second timeout
+Images declare `suspend` and `resume` hooks, each with a 1 to 60 second timeout
 (AWS, `MicrovmHooks`). agentd serves both and records each call on `/v1/health`.
 It does not yet run workload code on them;
 [#198](https://github.com/laithalsaadoon/microvms-agentd/issues/198) tracks

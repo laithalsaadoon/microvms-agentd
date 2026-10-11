@@ -14,7 +14,7 @@ its library is intentionally empty (`crates/model-conformance/src/lib.rs:2-7`).
 External nodes use dashed cylinders. Their selection follows the number of Rust
 source paths that reference each declared dependency's namespace; an external arrow
 starts at the crate with the most such paths, with ties resolved by path order.
-It is a representative consumer, not an exclusive one. Labels use dependency names,
+Other consumers may use the same dependency. Labels use dependency names,
 without implying a resolved package version. The inventory and edge counts below
 were measured on 2026-10-11 at commit `9729b82`.
 
@@ -163,8 +163,8 @@ readability.
 
 ## See also
 
-- [system overview](../../architecture/system-overview.md) — 19 shared source citations
-- [contract map](../../insights/contract-map.md) — 13 shared source citations
-- [module map](../../architecture/module-map.md) — 12 shared source citations
-- [impact analysis](../../insights/impact-analysis.md) — 9 shared source citations
-- [ownership](../../analysis/ownership.md) — 7 shared source citations
+- [system overview](../../architecture/system-overview.md): 19 shared source citations
+- [contract map](../../insights/contract-map.md): 13 shared source citations
+- [module map](../../architecture/module-map.md): 12 shared source citations
+- [impact analysis](../../insights/impact-analysis.md): 9 shared source citations
+- [ownership](../../analysis/ownership.md): 7 shared source citations

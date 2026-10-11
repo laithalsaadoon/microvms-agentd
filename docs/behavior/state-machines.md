@@ -6,7 +6,7 @@ Transition labels use source event or function identifiers. Payloads and guards 
 
 ## Boot
 
-The daemon model starts at `Uninitialized`. `RunHook` installs `Ready`; later hooks keep that state, with the response determined by the supplied value. There is no terminal boot state (`crates/model/src/lib.rs:247-256`, `crates/model/src/lib.rs:325-340`).
+The daemon model starts at `Uninitialized`. `RunHook` installs `Ready`; later hooks keep that state, with the response determined by the supplied value. The boot model has no terminal state (`crates/model/src/lib.rs:247-256`, `crates/model/src/lib.rs:325-340`).
 
 ```mermaid
 stateDiagram-v2
@@ -146,7 +146,7 @@ Defined at: `crates/model/src/image.rs:108-123`
 
 ## Platform
 
-The image model initializes the shared platform as `Absent`, `Building`, `Ready`, or `Failed`. A caller's `Step` can create an absent image or delete a ready or failed image; the platform's own events settle the build and finish deletion. There is no absorbing platform state because callers can reuse the name (`crates/model/src/image.rs:291-300`, `crates/model/src/image.rs:343-357`, `crates/model/src/image.rs:365-383`, `crates/model/src/image.rs:404-420`).
+The image model initializes the shared platform as `Absent`, `Building`, `Ready`, or `Failed`. A caller's `Step` can create an absent image or delete a ready or failed image; the platform's own events settle the build and finish deletion. The platform model has no absorbing state because callers can reuse the name (`crates/model/src/image.rs:291-300`, `crates/model/src/image.rs:343-357`, `crates/model/src/image.rs:365-383`, `crates/model/src/image.rs:404-420`).
 
 ```mermaid
 stateDiagram-v2
@@ -204,7 +204,7 @@ Defined at: `crates/model/src/preflight.rs:95-101`
 
 ## ProvisionPhase
 
-`provision::Phase` starts at `Idle`. A request answered by a supplied binary or cache entry stays idle; a request that needs a fetch enters `Fetching`. `Download` moves to `Downloaded`, and both `Verify` and the modeled `Crash` return to idle with an outcome. `Tamper` changes cache data without changing the phase. There is no terminal phase because subsequent requests are modeled (`crates/model/src/provision.rs:364-426`, `crates/model/src/provision.rs:429-462`, `crates/model/src/provision.rs:505-565`, `crates/model/src/provision.rs:568-606`).
+`provision::Phase` starts at `Idle`. A request answered by a supplied binary or cache entry stays idle; a request that needs a fetch enters `Fetching`. `Download` moves to `Downloaded`, and both `Verify` and the modeled `Crash` return to idle with an outcome. `Tamper` changes cache data without changing the phase. The model has no terminal phase because subsequent requests are modeled (`crates/model/src/provision.rs:364-426`, `crates/model/src/provision.rs:429-462`, `crates/model/src/provision.rs:505-565`, `crates/model/src/provision.rs:568-606`).
 
 ```mermaid
 stateDiagram-v2
@@ -331,8 +331,8 @@ Defined at: `crates/model/src/wrap.rs:256-263`
 
 ## See also
 
-- [module map](../architecture/module-map.md) — 9 shared source citations
-- [data flow](../architecture/data-flow.md) — 2 shared source citations
-- [system overview](../architecture/system-overview.md) — 2 shared source citations
-- [processes](processes.md) — 2 shared source citations
-- [components](../diagrams/architecture/components.md) — 2 shared source citations
+- [module map](../architecture/module-map.md): 9 shared source citations
+- [data flow](../architecture/data-flow.md): 2 shared source citations
+- [system overview](../architecture/system-overview.md): 2 shared source citations
+- [processes](processes.md): 2 shared source citations
+- [components](../diagrams/architecture/components.md): 2 shared source citations

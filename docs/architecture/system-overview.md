@@ -9,12 +9,12 @@ The CLI and bindings depend on core, while `agentd` shares the `microvms-protoco
 
 A typical workflow prepares an image, launches it through `Sandbox`, waits for the VM and daemon to become ready, and then uses the resulting `Session` for commands or file operations. `crates/microvms-app/src/sandbox.rs:917` `crates/microvms-app/src/sandbox.rs:1105` `crates/microvms-app/src/sandbox.rs:1262` `crates/microvms-app/src/session/mod.rs:448`
 A session starts a command without waiting for completion and returns an execution handle; callers can consume its event stream or use the synchronous-result helper, which awaits completion and acknowledges the output. `crates/microvms-app/src/session/mod.rs:443` `crates/microvms-app/src/session/exec.rs:421` `crates/microvms-app/src/session/mod.rs:476`
-Callers can also recover an execution handle from a known ID, separating the process identity from the lifetime of a particular client handle. `crates/microvms-app/src/session/mod.rs:471`
+Callers can also recover an execution handle from a known ID, separating the process identity from the lifetime of a client handle. `crates/microvms-app/src/session/mod.rs:471`
 File operations cover individual byte buffers and tar archives for directory trees, alongside remote existence queries and line-range reads. `crates/microvms-app/src/session/mod.rs:505` `crates/microvms-app/src/session/mod.rs:523` `crates/microvms-app/src/session/mod.rs:533` `crates/microvms-app/src/session/mod.rs:538`
 Lifecycle ownership is explicit: teardown returns a report of its outcome, and dropping a sandbox only warns about a live VM rather than initiating asynchronous cleanup. `crates/microvms-app/src/sandbox.rs:1772` `crates/microvms-app/src/sandbox.rs:1917`
 
 Each interface adapts that shared behavior to its caller: the CLI parses commands and renders results, Python exposes blocking calls and coroutine twins, and the Node binding maps asynchronous operations to JavaScript promises. `crates/microvms-cli/src/main.rs:80` `bindings/microvms-py/src/session.rs:1001` `bindings/microvms-py/src/session.rs:1006` `bindings/microvms-js/src/session.rs:708` `bindings/microvms-js/src/lib.rs:60`
-For automation, `microvm manifest` derives command and option descriptions from the parser; streaming execution describes its stdout as newline-delimited events followed by the final envelope, rather than an ordinary single JSON response. `crates/microvms-cli/src/manifest.rs:51` `crates/microvms-cli/src/manifest.rs:58`
+For automation, `microvm manifest` derives command and option descriptions from the parser; streaming execution describes its stdout as newline-delimited events followed by the final envelope. `crates/microvms-cli/src/manifest.rs:51` `crates/microvms-cli/src/manifest.rs:58`
 The daemon builds its router at startup and runs it on a current-thread Tokio runtime, keeping the guest entry point separate from the host applications' runtimes. `crates/agentd/src/main.rs:24` `crates/agentd/src/main.rs:77`
 
 The architecture supports tests that replace the application's ports with shared test doubles, while production construction remains in core's prelude. `crates/microvms-app/src/lib.rs:34` `crates/microvms-core/src/prelude.rs:136`
@@ -71,8 +71,8 @@ flowchart LR
 
 ## See also
 
-- [dependency graph](../diagrams/structural/dependency-graph.md) — 19 shared source citations
-- [module map](module-map.md) — 12 shared source citations
-- [ownership](../analysis/ownership.md) — 9 shared source citations
-- [impact analysis](../insights/impact-analysis.md) — 8 shared source citations
-- [contract map](../insights/contract-map.md) — 7 shared source citations
+- [dependency graph](../diagrams/structural/dependency-graph.md): 19 shared source citations
+- [module map](module-map.md): 12 shared source citations
+- [ownership](../analysis/ownership.md): 9 shared source citations
+- [impact analysis](../insights/impact-analysis.md): 8 shared source citations
+- [contract map](../insights/contract-map.md): 7 shared source citations

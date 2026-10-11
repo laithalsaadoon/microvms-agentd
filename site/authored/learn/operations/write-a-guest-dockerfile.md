@@ -71,7 +71,7 @@ The daemon itself stays root; demotion is per command, with `exec --user 1000 --
 
 ## 5. No secret goes in the image
 
-The image becomes a shared snapshot, so every VM launched from it sees the same bytes. Per-VM credentials travel through the platform's one-shot `runHookPayload` at launch: the agent token always, and anything you add with `run --launch-env KEY=VALUE`, which shares the payload's 4096-byte ceiling. Larger material goes in after bootstrap with `microvm cp --mode 0600` over the authenticated channel.
+The image becomes a shared snapshot, so every VM launched from it sees the same bytes. Per-VM credentials are delivered through the platform's one-shot `runHookPayload` at launch: the agent token always, and anything you add with `run --launch-env KEY=VALUE`, which shares the payload's 4096-byte ceiling. Larger material goes in after bootstrap with `microvm cp --mode 0600` over the authenticated channel.
 
 ## 6. The build context holds the Dockerfile and the daemon
 

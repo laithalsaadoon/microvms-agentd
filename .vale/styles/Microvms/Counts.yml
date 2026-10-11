@@ -1,0 +1,6 @@
+extends: existence
+message: "Replace this prose count with a maintained fact or a dated measurement tied to a commit."
+level: warning
+ignorecase: true
+tokens:
+  - '\b(?:[0-9][0-9,]*|one|two|three|four|five|six|seven|eight|nine|ten) (?:lines|files|modules|tests|checks|classes)\b'

@@ -3,7 +3,7 @@
 Report suspected vulnerabilities privately through
 [GitHub Security Advisories](https://github.com/laithalsaadoon/microvms-agentd/security/advisories/new).
 Include the version or commit, a reproduction, and the region/API version for
-AWS behavior. There is no guaranteed response time. Use public issues for
+AWS behavior. Response time is not guaranteed. Use public issues for
 non-sensitive bugs and design proposals.
 
 ## Threat model
@@ -29,7 +29,7 @@ processes before bootstrap violates the deployment requirement.
 
 `/v1/health` and `/v1/schema` are intentionally unauthenticated. An authorized
 caller can execute commands as root and read or change guest files. User
-demotion is a convenience, not a separate security boundary. Resource
+demotion provides convenience within the existing security boundary. Resource
 exhaustion by an authorized workload is constrained by VM limits.
 
 ## AWS credentials and networking

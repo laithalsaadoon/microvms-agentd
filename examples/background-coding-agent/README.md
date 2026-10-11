@@ -48,7 +48,7 @@ MicroVM API directly.
 
 The durable execution SDK for Python runs synchronous steps and doesn't support
 `await` ([Python SDK reference](https://docs.aws.amazon.com/durable-execution/sdk-reference/languages/python/)).
-So each step that reaches the VM is a coroutine over the `microvms` awaitables,
+Each step that reaches the VM is a coroutine over the `microvms` awaitables,
 the `_async` twin of each blocking method, and `on_loop` in
 [handler.py](handler.py) runs it with `asyncio.run`, one event loop per step:
 
@@ -109,7 +109,7 @@ requests** read/write and **Issues** read. `gh auth token` works too, but it
 grants everything your account can do. Changes under `.github/workflows/` also
 need **Workflows** write access; without it, publishing those changes fails.
 
-Set `TF_VAR_task_seconds` (600–3600, default 1800) to change the agent's time
+Set `TF_VAR_task_seconds` (600 to 3600, default 1800) to change the agent's time
 budget. The VM's maximum lifetime is 15 minutes longer.
 
 ## Submit and check jobs
@@ -144,7 +144,7 @@ comments are folded into the review body instead.
 
 ## Trust boundaries
 
-- Issue and PR text is untrusted. The prompt labels it as such, but prompt
+- Issue and PR text is untrusted. The prompt labels it as untrusted, but prompt
   injection is not solved; review every PR the agent opens before merging.
 - The GitHub token is read only by Lambda. The guest gets a source tarball and
   the task text, and publishing happens after the VM is terminated.
@@ -163,7 +163,7 @@ comments are folded into the review body instead.
 
 Normal completion and caught errors terminate the VM before publishing. Brief
 transport errors while polling are retried as long as the VM exists. `cancel`
-stops the workflow and terminates the VM; a job cancelled in the seconds before
+stops the workflow and terminates the VM; a job canceled in the seconds before
 its VM ID is recorded relies on the VM's maximum lifetime instead. Terminate a
 stray VM with `microvm terminate <id>`.
 

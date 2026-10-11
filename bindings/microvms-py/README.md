@@ -187,10 +187,10 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-`async with` terminates the VM on the way out, as `with` does. Cancelling a
-read, wait, transfer or command start stops it. Cancelling `run_async`,
+`async with` terminates the VM on the way out, as `with` does. Canceling a
+read, wait, transfer or command start stops it. Canceling `run_async`,
 `build_image_async`, `ensure_image_async`, `suspend_async`, `resume_async` or
-`terminate_async` lets the call finish, so a VM a cancelled launch started is
+`terminate_async` lets the call finish, so a VM a canceled launch started is
 still the sandbox's to terminate. Calls through the sandbox's own session take
 turns on the sandbox, as the blocking methods do, so a lifecycle call never
 interleaves with them; `Session.attach_async` gives a session whose calls run at

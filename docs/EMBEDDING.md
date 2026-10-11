@@ -2,10 +2,8 @@
 
 The platform has no exec API: a MicroVM exposes one HTTPS endpoint and forwards
 it to whatever the image's `CMD` is listening on. Every harness that wants to
-run commands inside a VM therefore ships a daemon in its task image, and before
-agentd each harness wrote its own — evaluation harnesses and session servers
-each carry a stdlib Python daemon baked into their images
-(`docs/HARNESS-CAPABILITIES.md`, gap 2). agentd supersedes those daemons. This
+run commands inside a VM needs a daemon in its task image. agentd provides
+that daemon for evaluation harnesses, session servers, and other clients. This
 document is the recipe for appending it to an arbitrary task image, and the
 orientation a harness client needs to drive it over the published wire
 protocol. The protocol itself is in `docs/PROTOCOL.md` and, machine-readably,
@@ -57,7 +55,7 @@ pair enters the artifact. Node spells them `baseImageVersion` and `projectDir`.
 
 `wrap_dockerfile` keeps the task text verbatim and appends the stanza the
 default `microvm build` bakes, rendered by the same function, so the two cannot
-drift: `wrap_dockerfile("FROM x\n")` *is* the default Dockerfile for a base
+drift: `wrap_dockerfile("FROM x\n")` is the default Dockerfile for a base
 whose ref is `x`. The stanza is `COPY agentd /agentd`, its chmod, `ENV
 AGENTD_PORT`, `EXPOSE`, `ENTRYPOINT []` and `CMD ["/agentd"]`, preceded by
 `USER root` when the task's last `USER` is anyone else (the daemon demotes each
@@ -78,14 +76,14 @@ build would accept and the guest would then fail on:
 - `inherit_workdir=True` when neither the task nor `workdir` declares a
   `WORKDIR`. A task with no `WORKDIR` runs its commands in `/`, as it would
   under Docker, so this guard is opt-in: set it when your harness relies on the
-  image `WORKDIR` being meaningful.
+  image `WORKDIR` being set to the project directory.
 
 `BaseImage.from_dockerfile` answers the pairing the other way round.
 `build_image` refuses a Dockerfile whose first `FROM` differs from the base's
 `docker_ref`, which is the right guard where the client derives the Dockerfile
 from the base (the build runs the Dockerfile on top of the base `baseImageArn`
 names). A task Dockerfile chooses its own `FROM`, so the derived base keeps the
-managed base's `name` — `baseImageArn` is unchanged — and takes the first
+managed base's `name` and unchanged `baseImageArn`, and takes the first
 `FROM`'s ref whole, digest pin included; the guard then compares the ref with
 itself. It raises `InvalidArgError` for a Dockerfile with no `FROM`.
 
@@ -139,14 +137,14 @@ The worked example is
 the stanza's lines, plus `dnf install` and `npm install -g` layers that put the Claude Code
 and Codex CLIs in the image, plus a `/workspace` WORKDIR.
 
-Two lines in the stanza are load-bearing and must survive any edit.
+Two lines in the stanza are required and must survive any edit.
 `ENTRYPOINT []` plus `CMD ["/agentd"]` is the deployment invariant the trust
 boundary rests on: it guarantees no task workload runs before the platform's
 run hook lands, and it is what makes an omitted `cwd` inherit the image
 `WORKDIR` (`docs/PROTOCOL.md`, "Trust boundary"). `wrap_dockerfile` writes them
 last, so a task's own `ENTRYPOINT` or `CMD` cannot displace them. A base image
 that starts its own background process before bootstrap breaks the invariant,
-and enforcing it belongs to whoever builds the image — the daemon cannot.
+and the image author must enforce that invariant.
 
 One thing never goes in the image: a secret. The image becomes a shared
 snapshot, so every VM launched from it sees the same bytes; per-VM credentials
@@ -194,7 +192,7 @@ warnings }`.
   carries mode `0755` if it has an execute bit and `0644` otherwise, so two hosts
   produce one artifact.
 - **The ARN** is built from the caller's account, looked up once per sandbox with
-  `GetCallerIdentity`. The service takes image ARNs, not bare names.
+  `GetCallerIdentity`. Pass the image ARN to the service.
 - **The upload** goes to `s3://<s3_bucket>/<s3_key_prefix>/<name>/artifact.zip`, and only
   when a build is needed. The zip carries fixed dates and modes, so equal inputs are
   one object.
@@ -224,19 +222,19 @@ sandbox's region.
 The full route table, request shapes, and the defect-driven rules are in
 `docs/PROTOCOL.md`; the same contract is served as JSON Schema at
 `GET /v1/schema`, unauthenticated, so a client can fetch it before it holds a
-token. What follows is the shape of the client, not the contract itself.
+token. The following example shows the client; the protocol document defines the contract.
 
 **Bootstrap.** The platform delivers your `runHookPayload` string to the
 daemon's `/run` hook; agentd parses it as JSON and installs `agent_token`
 (`crates/agentd/src/routes.rs:166-216`). The install is one-shot: a replay of the
 identical token answers 200 (the platform may retry its own hook), a different
 token answers 409 and changes nothing. Until it lands, every control route
-answers 503 — not 404, not a dropped connection — so a client can distinguish
+answers 503, not 404, not a dropped connection, so a client can distinguish
 "not yet bootstrapped" from "broken" (`crates/agentd/src/auth.rs:62-80`). The payload
 is capped at 4096 bytes (`crates/microvms-domain/src/constants.rs:83`).
 
 **Auth.** Every `/v1/` route except `/v1/health` and `/v1/schema` takes
-`Authorization: Bearer <agent_token>` — the same token the payload delivered.
+`Authorization: Bearer <agent_token>`, the same token the payload delivered.
 Comparison is constant-time over bytes (`crates/agentd/src/auth.rs:28`).
 
 **Exec.** The client mints the `exec_id` and sends it in `POST /v1/exec/start`.
@@ -259,8 +257,7 @@ a byte cursor. A reconnecting client passes the offset it read to and receives
 exactly what it has not seen; a reattach past the retained window gets an
 explicit `gap` event naming the missing byte range rather than silently
 skipping (`crates/agentd/src/exec.rs:436-524`). The stream ends with a typed `exit`
-event, which is what distinguishes a finished command from a cut connection —
-the reason this is SSE and not a chunked byte stream.
+event, which is what distinguishes a finished command from a cut connection, the reason this is SSE and not a chunked byte stream.
 
 **Files.** `PUT`/`GET /v1/fs/file` move one file, streamed, with a mode
 applied at open. `PUT`/`GET /v1/fs/tar` move directory trees; extraction is
@@ -272,7 +269,7 @@ under the disk reserve is refused with 507 naming the real free space
 freed first.
 
 **Health.** `GET /v1/health` is unauthenticated and reports version, bootstrap
-state, disk pressure, and the identity-repair flags — the conditions that are
+state, disk pressure, and the identity-repair flags, the conditions that are
 reasons to drain a VM rather than schedule more work onto it.
 
 ## Running one command to one result
@@ -301,7 +298,7 @@ def exec(self, command: str, timeout_sec: int | None = None) -> tuple[str, str, 
     return result.stdout, stderr, result.posix_exit_code
 ```
 
-What the call does, in order:
+The call follows these steps:
 
 1. **Start.** With `exec_id` omitted a fresh id is minted; pass your own to make
    a retried call address the same exec.
@@ -396,7 +393,7 @@ Each side holds one unread chunk, like a pipe, so read both at once.
 
 The daemon's endpoint sits behind the platform's proxy, and the proxy wants two
 headers on every request: `X-aws-proxy-auth` carrying a minted JWE, and
-`X-aws-proxy-port` naming which allowed port this request targets — omitting
+`X-aws-proxy-port` naming which allowed port this request targets. Omitting
 the second is rejected in a way that reads like a bad token
 (`crates/microvms-app/src/session/proxy.rs:5-13`). The token comes from
 `CreateMicrovmAuthToken`, and the response's `authToken` is a **map of header
@@ -407,7 +404,7 @@ The service caps a token at sixty minutes
 shorter than a long agent run, so a client that mints once at construction
 expires mid-run with a rejection indistinguishable from a dead daemon. The
 pattern that works is minting inside the request path with a refresh interval
-well under the ceiling — this repo's clients refresh at half of it, thirty
+well under the ceiling. These clients refresh at half of it, thirty
 minutes, so a request in flight across the rollover still holds a token with
 about thirty minutes of life (`crates/microvms-app/src/session/proxy.rs:29-37`). A
 mint failure is retryable; treat it that way, because a control-plane throttle
@@ -415,22 +412,21 @@ at minute thirty must not kill a healthy run. A credential failure during a mint
 is the exception: it stays `ERR_CREDENTIALS`, because the identical request is
 refused again until the identity is fixed.
 
-Token rotation costs nothing on the daemon side. All exec state — the records,
-the buffered output, the stream cursors — lives in the daemon, keyed by
+Token rotation costs nothing on the daemon side. Execution records, buffered
+output, and stream cursors are stored in the daemon, keyed by
 `exec_id`, so a detached exec started under one proxy token is polled and acked
 under the next one. Start, rotate, poll, ack is a normal sequence, not a
-recovery path. This is a tested contract, not an inference: the live suite's
+recovery path. The live suite's
 `reattach after token rotation` section starts a detached exec, drops every
 piece of client state except the endpoint, the agent token, and the MicroVM id,
 reattaches under freshly minted proxy tokens, and asserts that the output
-produced *before* the reattach comes back whole — nothing buffered under one
-token is lost to the next (`conformance/run_rs.py`, `drive_token_rotation`).
+produced *before* reattachment remains available under the new token (`conformance/run_rs.py`, `drive_token_rotation`).
 
 ## The idle keepalive is yours, and it must run outside the VM
 
 The platform measures idleness by inbound traffic through the endpoint proxy
-and suspends a VM whose window elapses without any. Your harness — the
-orchestrator outside the VM — owns the keepalive: poll `GET /v1/health` on an
+and suspends a VM whose window elapses without any. Your harness, the
+orchestrator outside the VM, owns the keepalive: poll `GET /v1/health` on an
 interval well under the launch's `maxIdleDurationSeconds`, and each poll is the
 inbound traffic that resets the timer. Measured, both halves: a polled VM
 outlives its idle window and the same VM suspends once the polling stops
@@ -438,22 +434,21 @@ outlives its idle window and the same VM suspends once the polling stops
 timer"; asserted every live run by `conformance/run_rs.py`,
 `drive_idle_keepalive`).
 
-An in-guest keepalive **cannot** work, and it is worth knowing why before
-someone builds one: the endpoint proxy terminates *outside* the VM and forwards
+An in-guest keepalive **cannot** reset this timer: the endpoint proxy terminates *outside* the VM and forwards
 over loopback, so a request a guest process sends to the daemon's own port is
 generated on the far side of the meter and never crosses it. A guest-side
 keepalive route would answer 200 and change nothing, and the failure would
 surface as a suspend during exactly the long run it was added to protect
-(`docs/HARNESS-CAPABILITIES.md`, gap 6). Neither does in-guest *work*: a VM
+([Harness capabilities](HARNESS-CAPABILITIES.md)). Neither does in-guest *work*: a VM
 running a multi-hour exec with no outside traffic is suspended mid-work at the
-idle window. The process survives — suspend is a freeze, not a kill — but
+idle window. Suspend freezes the process and preserves its state, but
 nothing external can reach it until someone resumes it. What survives the
 freeze, including clocks and outbound connections, is in
 [Suspend and resume](SUSPEND-RESUME.md).
 
 `/v1/health` is the right route for the poll: unauthenticated, one small
 request, and it carries `busy` and `execs` so the poll is informed rather than
-unconditional — an orchestrator can stop keeping a drained VM alive instead of
+unconditional. An orchestrator can stop keeping a drained VM alive instead of
 billing it to the duration ceiling.
 
 ### The supported keepalive
@@ -664,8 +659,8 @@ proceed, before any build. It runs these checks in order, and each check is in
 `report.ok` is true only when every fatal check passed. A check after a failure has
 `ran=False` and makes no call. `preflight` never raises, and nothing it does bills or changes
 the account. It does not check the execution or build role, the artifact bucket, quotas, or
-VPC connectors; `microvm doctor` reports what it can see of those. There is no boto3
-service-model check either, because the bindings are Rust and speak the API version they were
+VPC connectors; `microvm doctor` reports what it can see of those. The check does not inspect boto3
+service-model availability, because the bindings are Rust and speak the API version they were
 built against. The listing is the evidence that the endpoint accepts that version. A harness
 that also calls the service through boto3 must check its own boto3. `doctor` shares the
 region and credentials checks.
@@ -748,7 +743,7 @@ class LambdaMicrovmEnvironment:  # the harness's environment base class
         self.sandbox.terminate(wait_for_terminated=True)
 ```
 
-What each call replaces, and where its behavior is specified:
+Client calls and their behavior references:
 
 | Provider step | Call | Section above | Requirements |
 | --- | --- | --- | --- |
@@ -769,7 +764,7 @@ fields, which `provision_agentd()` guarantees because it fetches the daemon for 
 client's own version. With an older daemon, fall back to `["bash", "-c", command]` and a
 numeric `user`.
 
-## What the hand-rolled daemons needed, and where agentd covers it
+## Match client requirements to daemon capabilities
 
 The two daemon shapes this supersedes are described in
 `docs/HARNESS-CAPABILITIES.md`; neither project is a dependency of this repo,
@@ -831,8 +826,7 @@ library's rather than each harness's to rediscover.
 Every `AGENTD_*` variable is read at startup by `Config::from_env`
 (`crates/agentd/src/config.rs:116-152`); an unset or unparseable value keeps the
 default rather than refusing to boot, because a daemon that will not start
-strands the VM with no way in. Set them as `ENV` lines in your Dockerfile —
-the stanza already sets `AGENTD_PORT` and `AGENTD_LOG`.
+strands the VM with no way in. Set them as `ENV` lines in your Dockerfile. The stanza already sets `AGENTD_PORT` and `AGENTD_LOG`.
 
 | Variable | Default | What it bounds |
 | --- | --- | --- |
@@ -848,4 +842,4 @@ the stanza already sets `AGENTD_PORT` and `AGENTD_LOG`.
 | `AGENTD_MAX_STDIN_WRITE_BYTES` | 1 MiB | largest single decoded stdin write (`crates/agentd/src/config.rs:54-57`) |
 | `AGENTD_DISK_RESERVE_BYTES` | 256 MiB | free bytes a write target must keep; a write that would cross it is refused with 507. Zero disables the guard (`crates/agentd/src/config.rs:63-69`) |
 | `AGENTD_REPAIR_IDENTITY` | `true` | whether to replace image-derived identity at the first successful run hook, because N VMs restored from one snapshot share machine-id, hostname, and boot_id. `0`/`false`/`no`/`off` opt out (`crates/agentd/src/config.rs:70-78`) |
-| `AGENTD_HOOK_HANDLER_TIMEOUT_SECS` | `20` | how long one handler may run before its process group is killed; clamped to 1–55 so it stays under the image's hook timeout (`crates/agentd/src/config.rs:84-88`) |
+| `AGENTD_HOOK_HANDLER_TIMEOUT_SECS` | `20` | how long one handler may run before its process group is killed; clamped to 1 to 55 so it stays under the image's hook timeout (`crates/agentd/src/config.rs:84-88`) |

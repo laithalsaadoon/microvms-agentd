@@ -12,7 +12,7 @@ This index covers domain validation and calculations in `microvms-domain`, orche
 | CPU requests must be finite and nonnegative; the selected class must cover both requested baseline resources. Zero or absent resources impose no requirement. | Sizing | `crates/microvms-domain/src/sizing.rs:179` | Invalid-argument error when no class covers the request; no requirements selects the default. |
 | A VM name must be nonempty, at most 128 bytes, use ASCII letters, digits, hyphen, or underscore, and avoid the `microvm-` and `mvm-` prefixes. | Names | `crates/microvms-domain/src/names.rs:33` | Descriptive validation error. |
 | Ordinary region parsing accepts the names in `MICROVM_REGIONS`. | Regions | `crates/microvms-domain/src/region.rs:168` | Invalid-argument error for an unlisted name. |
-| Run-family hook timeouts are 1–60 seconds; build-family timeouts are 1–3600 seconds. Hook ports are 1–65535. | Hooks | `crates/microvms-domain/src/hooks.rs:66`, `crates/microvms-domain/src/hooks.rs:89`, `crates/microvms-domain/src/hooks.rs:141` | Invalid-argument error naming the accepted range. |
+| Run-family hook timeouts are 1 to 60 seconds; build-family timeouts are 1 to 3600 seconds. Hook ports are 1 to 65535. | Hooks | `crates/microvms-domain/src/hooks.rs:66`, `crates/microvms-domain/src/hooks.rs:89`, `crates/microvms-domain/src/hooks.rs:141` | Invalid-argument error naming the accepted range. |
 | A cost size must be finite, nonnegative, and convertible from its decimal string. | Cost | `crates/microvms-domain/src/cost.rs:138` | Invalid-argument error. |
 | Calendar inputs must describe a real civil date; Unix seconds must fit the calendar's supported range. | Cost | `crates/microvms-domain/src/cost.rs:229`, `crates/microvms-domain/src/cost.rs:254` | Invalid-argument error instead of normalization or clamping. |
 | A rate catalog must provide an unambiguous product with the expected unit for every required billing line. | Cost | `crates/microvms-domain/src/cost.rs:1198` | Invalid-argument error for absent, ambiguous, or differently denominated rates. |
@@ -21,7 +21,7 @@ This index covers domain validation and calculations in `microvms-domain`, orche
 
 | Rule | Domain | Citation | Failure mode |
 | --- | --- | --- | --- |
-| Maximum VM duration must be 1–28800 seconds; an explicit idle duration must be at least 60 seconds. | Launch | `crates/microvms-app/src/control/mod.rs:560`, `crates/microvms-app/src/control/mod.rs:928` | Invalid-argument error. |
+| Maximum VM duration must be 1 to 28800 seconds; an explicit idle duration must be at least 60 seconds. | Launch | `crates/microvms-app/src/control/mod.rs:560`, `crates/microvms-app/src/control/mod.rs:928` | Invalid-argument error. |
 | Versions and nonblank strings must be nonempty, at most 2048 bytes, and contain no ASCII whitespace. Identifiers must be nonempty and at most 256 bytes. | Request shapes | `crates/microvms-app/src/control/mod.rs:595`, `crates/microvms-app/src/control/mod.rs:648`, `crates/microvms-app/src/control/mod.rs:704` | Invalid-argument error naming the member. |
 | Role ARNs must satisfy the length limits and the structural role-ARN predicate; ports represented as `u16` must be nonzero. | Request shapes | `crates/microvms-app/src/control/mod.rs:753`, `crates/microvms-app/src/control/mod.rs:895` | Invalid-argument error; the ARN check does not establish that a role exists. |
 | Image names must be nonempty, at most 64 bytes, and use ASCII letters, digits, hyphen, or underscore. | Image build | `crates/microvms-app/src/control/mod.rs:1014`, `crates/microvms-domain/src/constants.rs:512` | Invalid-argument error. |
@@ -87,7 +87,7 @@ This index covers domain validation and calculations in `microvms-domain`, orche
 | Calculation | Inputs | Output | Citation |
 | --- | --- | --- | --- |
 | Convert whole seconds plus nanoseconds divided by one billion into a decimal. | `Duration` | Decimal seconds | `crates/microvms-domain/src/cost.rs:120` |
-| Multiply baseline vCPU and baseline memory by seconds and their respective rates. | Size class, duration, rate table | Separate compute and memory line items | `crates/microvms-domain/src/cost.rs:1585` |
+| Multiply baseline vCPU and baseline memory by seconds and their rates. | Size class, duration, rate table | Separate compute and memory line items | `crates/microvms-domain/src/cost.rs:1585` |
 | Use the greater of actual hold and minimum retention, then convert GB-seconds into GB-months. | Stored GB, hold, retention floor, monthly rate | Snapshot storage estimate | `crates/microvms-domain/src/cost.rs:1628` |
 | Multiply GB transferred by transfer count and the selected read or write rate. | Snapshot size, operation count, rate table | Snapshot transfer estimate | `crates/microvms-domain/src/cost.rs:1661` |
 | Multiply a per-hour catalog price by the configured hours-per-month conversion when needed. | Catalog line and unit | Rate-table value | `crates/microvms-domain/src/cost.rs:1234` |
@@ -118,8 +118,8 @@ The report charges snapshot reads on launch, compute for a recorded running phas
 
 ## See also
 
-- [module map](../architecture/module-map.md) — 18 shared source citations
-- [contract map](contract-map.md) — 17 shared source citations
-- [impact analysis](impact-analysis.md) — 14 shared source citations
-- [processes](../behavior/processes.md) — 11 shared source citations
-- [components](../diagrams/architecture/components.md) — 7 shared source citations
+- [module map](../architecture/module-map.md): 18 shared source citations
+- [contract map](contract-map.md): 17 shared source citations
+- [impact analysis](impact-analysis.md): 14 shared source citations
+- [processes](../behavior/processes.md): 11 shared source citations
+- [components](../diagrams/architecture/components.md): 7 shared source citations

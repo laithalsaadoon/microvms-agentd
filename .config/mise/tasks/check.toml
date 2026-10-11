@@ -39,6 +39,7 @@ depends = [
   "mutmut:check",
   "targets:check",
   "ci:parity",
+  "prose:check",
 ]
 
 ["targets:check"]

@@ -19,15 +19,15 @@ This page is for contributors. At the end of it you will know what `mise run che
 
 `mise run check` is the definition of done for a change: lint, security, every Rust test tier, the schema and stub freshness gates, the model-drift gate against the pinned botocore service model, the publish-set check, the live tier's own wiring check, and the release cross-compile. It creates no AWS resources. Tool installation, security rules, and advisory updates can require network access. The pre-push hook and CI both run it.
 
-`mise run live` is the set of suites that talk to real AWS. It creates real MicroVMs in your account and costs money whether it passes or fails, so it is never wired to a hook or to push. A gate that spends money on every push is a gate people disable with `--no-verify`, and `--no-verify` also skips the checks worth having. The hook does print an advisory when the daemon has changed since the last recorded live run.
+`mise run live` is the set of suites that talk to real AWS. It creates real MicroVMs in your account and costs money whether it passes or fails, so it is never wired to a hook or to push. A gate that spends money on every push is a gate people disable with `--no-verify`, and `--no-verify` also skips the local checks. The hook does print an advisory when the daemon has changed since the last recorded live run.
 
 Never pipe a gate into `head` or `tail`. The pipeline exits with the pager's status, so a failing tier reads as success. Run it bare, or read `${PIPESTATUS[0]}`.
 
-## 2. Why a green check is necessary and never sufficient
+## 2. Separate local checks from AWS verification
 
 The local gate proves the code agrees with itself; only a live run can prove it agrees with AWS. This repository's history is a list of things every local test passed while being wrong: the null-message unsupported-region trap, the `clientToken` replay that wedges an image, the proxy-token port scoping, and an id-prefix defect where fixtures spelled MicroVM ids `mvm-*`, the real service spells them `microvm-*`, and a resolution path keyed on the fixture prefix passed every unit test and refused every real VM on its first live run. A fixture convention is not a service fact.
 
-So a feature that touches the platform surface is not verified until it has run against real AWS, and the closing discipline is four steps: `mise run check` green; a live exercise of the new path itself, the full suite or a targeted round trip with the real binary; a permanent named check in `conformance/run_rs.py`, so the live tier covers the surface on every future run; and `mise run live:verify-clean` afterwards. A pull request that skips the second step says so in its body, in plain words, as an unverified claim. Purely local changes (rendering, docs, `ls`, `history`, `cost`) are exempt; when in doubt, it is not exempt.
+A feature that touches the platform surface is not verified until it has run against real AWS, and the closing discipline is four steps: `mise run check` green; a live exercise of the new path itself, the full suite or a targeted round trip with the real binary; a permanent named check in `conformance/run_rs.py`, so the live tier covers the surface on every future run; and `mise run live:verify-clean` afterwards. A pull request that skips the second step says so in its body, in plain words, as an unverified claim. Purely local changes (rendering, docs, `ls`, `history`, `cost`) are exempt; when in doubt, it is not exempt.
 
 ## 3. Before a live run
 
