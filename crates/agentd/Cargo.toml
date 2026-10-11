@@ -44,6 +44,9 @@ tokio = { version = "1.53", features = [
     "sync",
 ] }
 http-body-util = "0.1"
+# Explicit connection limits and deadlines, with the same HTTP stack axum uses.
+hyper = { version = "1.11", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["server", "tokio", "service"] }
 bytes = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

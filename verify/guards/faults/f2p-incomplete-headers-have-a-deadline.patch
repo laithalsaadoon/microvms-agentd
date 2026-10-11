@@ -1,0 +1,484 @@
+diff --git a/crates/agentd/src/auth.rs b/crates/agentd/src/auth.rs
+index 32a57e4..28a5a8e 100644
+--- a/crates/agentd/src/auth.rs
++++ b/crates/agentd/src/auth.rs
+@@ -3,9 +3,10 @@
+ //!
+ //! Two properties this module exists to hold:
+ //!
+-//! * Protected routes decide authorization before buffering a body. Rejected
+-//!   bodies are drained within byte and time bounds; hook bodies have separate
+-//!   limits because the platform does not authenticate them.
++//! * An unauthenticated caller cannot make the daemon allocate. The Python
++//!   predecessor buffered the body first and checked authorization second, so an
++//!   unauthorized request could force a 256 MB allocation on a VM whose baseline
++//!   can be 512 MiB.
+ //! * A hostile header cannot take the listener down. `hmac.compare_digest` raises
+ //!   `TypeError` on `str` inputs containing non-ASCII characters, which killed the
+ //!   predecessor's handler thread and returned `RemoteDisconnected` to the client
+@@ -86,37 +87,24 @@ pub async fn require_token(
+     };
+ 
+     let drain_cap = state.config().max_drain_bytes;
+-    let drained = tokio::time::timeout(
+-        std::time::Duration::from_secs(2),
+-        drain_bounded(request, drain_cap),
+-    )
+-    .await
+-    .unwrap_or(false);
+-    let mut response = status.into_response();
+-    if !drained {
+-        response.headers_mut().insert(
+-            header::CONNECTION,
+-            header::HeaderValue::from_static("close"),
+-        );
+-    }
+-    response
++    drain_bounded(request, drain_cap).await;
++    status.into_response()
+ }
+ 
+ /// Reads and discards up to `cap` bytes of a rejected request's body.
+-async fn drain_bounded(request: Request, cap: usize) -> bool {
++async fn drain_bounded(request: Request, cap: usize) {
+     let mut body = request.into_body();
+     let mut seen = 0usize;
+     while let Some(frame) = body.frame().await {
+-        let Ok(frame) = frame else { return false };
++        let Ok(frame) = frame else { return };
+         if let Some(data) = frame.data_ref() {
+             seen += data.len();
+             if seen >= cap {
+                 // Past the cap: stop reading and let the connection close.
+-                return false;
++                return;
+             }
+         }
+     }
+-    true
+ }
+ 
+ #[cfg(test)]
+diff --git a/crates/agentd/src/fs.rs b/crates/agentd/src/fs.rs
+index e61bc54..3afe3f1 100644
+--- a/crates/agentd/src/fs.rs
++++ b/crates/agentd/src/fs.rs
+@@ -419,18 +419,17 @@ impl Confined {
+ 
+     /// Creates and opens the file a data member's bytes go into.
+     ///
+-    /// The existing name is unlinked first and created with `O_EXCL`, for
++    /// `O_TRUNC` rather than `O_EXCL`, and the existing name is unlinked first, for
+     /// the reason the previous `remove_file` plus `File::create` had: an archive may
+     /// legitimately overwrite a name, and a retried partial extraction has to
+     /// converge. The unlink is `unlinkat` without `AT_REMOVEDIR`, so a directory in
+-    /// the way survives and the exclusive open reports that the name exists.
+-    /// Exclusivity also preserves any file installed between unlink and create.
++    /// the way survives and the open below reports `EISDIR`, which is the same
++    /// answer `File::create` gave.
+     fn create_file(&self, parts: &[OsString]) -> Result<std::fs::File, WalkError> {
+         let (parent, name) = self.parent_of(parts)?;
+         let last = parts.len() - 1;
+-        self.replace(parent.as_fd(), &name);
+         let how = OpenHow::new()
+-            .flags(OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_CLOEXEC)
++            .flags(OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_TRUNC | OFlag::O_CLOEXEC)
+             // 0o666 before umask, matching `File::create`. The archive's own mode
+             // is replayed later by `apply_deferred_modes`.
+             .mode(Mode::from_bits_truncate(0o666))
+@@ -517,8 +516,9 @@ impl Confined {
+ 
+     /// Unlinks `name` under `dir`, ignoring every failure.
+     ///
+-    /// A file or link member replaces the directory entry before creation, so
+-    /// other names for an existing inode keep their contents and permissions. Every error is ignored on purpose: the common one is
++    /// A link member replaces an existing name rather than failing on it, and
++    /// `symlinkat`/`linkat` have no truncating equivalent of `O_TRUNC`, so the old
++    /// name has to go first. Every error is ignored on purpose: the common one is
+     /// `ENOENT`, which means there was nothing to replace, and any other means the
+     /// create below fails and reports the real reason.
+     fn replace(&self, dir: BorrowedFd<'_>, name: &OsStr) {
+@@ -793,9 +793,6 @@ fn extract_into(
+                             ),
+                         })?;
+                 }
+-                // A later link replaces the member, so an earlier file's mode
+-                // must not be replayed onto the link's target.
+-                deferred.remove(&dest);
+             }
+ 
+             // Regular, contiguous, and anything else carrying data.
+diff --git a/crates/agentd/src/hook_handlers.rs b/crates/agentd/src/hook_handlers.rs
+index 1e4b63c..b7dcc5a 100644
+--- a/crates/agentd/src/hook_handlers.rs
++++ b/crates/agentd/src/hook_handlers.rs
+@@ -124,37 +124,28 @@ pub async fn execute(
+         Err(error) => return failed(format!("spawn failed: {error}")),
+     };
+     let pid = child.id();
+-    // Keep capture in this future: reaching the deadline drops both read ends,
+-    // including when a descendant has started a separate process group.
+-    let mut output = Vec::new();
+-    let mut errors = Vec::new();
+-    let mut stdout = Box::pin(capture(child.stdout.take(), &mut output));
+-    let mut stderr = Box::pin(capture(child.stderr.take(), &mut errors));
+-    let mut status = None;
+-    let deadline = tokio::time::Instant::now() + budget.saturating_sub(started.elapsed());
+-    let result = tokio::time::timeout_at(deadline, async {
+-        // Poll output while waiting so a full pipe cannot block the leader.
+-        let wait = async {
+-            status = child.wait().await.ok();
+-        };
+-        tokio::join!(wait, &mut stdout, &mut stderr);
+-    })
+-    .await;
+-    let timed_out = result.is_err();
+-    if timed_out {
+-        if let Some(pid) = pid.and_then(|pid| i32::try_from(pid).ok()) {
+-            let _ = nix::sys::signal::killpg(
+-                nix::unistd::Pid::from_raw(pid),
+-                nix::sys::signal::Signal::SIGKILL,
+-            );
++    let stdout = tokio::spawn(capture(child.stdout.take()));
++    let stderr = tokio::spawn(capture(child.stderr.take()));
++
++    let (status, timed_out) = match tokio::time::timeout(budget, child.wait()).await {
++        Ok(status) => (status.ok(), false),
++        Err(_) => {
++            // The group, not just the child: a handler that backgrounded work must
++            // not keep running past the moment the daemon answered the platform.
++            if let Some(pid) = pid.and_then(|pid| i32::try_from(pid).ok()) {
++                let _ = nix::sys::signal::killpg(
++                    nix::unistd::Pid::from_raw(pid),
++                    nix::sys::signal::Signal::SIGKILL,
++                );
++            }
++            (child.wait().await.ok(), true)
+         }
+-        status = child.try_wait().ok().flatten().or(status);
+-    }
+-    drop(stdout);
+-    drop(stderr);
+-    let stdout = String::from_utf8_lossy(&output);
+-    let stderr = String::from_utf8_lossy(&errors);
++    };
+     let duration_ms = started.elapsed().as_millis() as u64;
++    let (stdout, stderr) = (
++        stdout.await.unwrap_or_default(),
++        stderr.await.unwrap_or_default(),
++    );
+     if !stdout.is_empty() || !stderr.is_empty() {
+         tracing::info!(hook, stdout = %stdout, stderr = %stderr, "hook handler output");
+     }
+@@ -182,15 +173,17 @@ fn check_executable(path: &Path) -> Result<(), String> {
+ 
+ /// Reads a stream to its end, keeping the first [`LOGGED_OUTPUT_BYTES`]. The rest
+ /// is drained so a chatty handler never blocks on a full pipe.
+-async fn capture(stream: Option<impl AsyncRead + Unpin>, kept: &mut Vec<u8>) {
++async fn capture(stream: Option<impl AsyncRead + Unpin>) -> String {
+     let Some(mut stream) = stream else {
+-        return;
++        return String::new();
+     };
++    let mut kept = Vec::new();
+     let _ = (&mut stream)
+         .take(LOGGED_OUTPUT_BYTES)
+-        .read_to_end(kept)
++        .read_to_end(&mut kept)
+         .await;
+     let _ = tokio::io::copy(&mut stream, &mut tokio::io::sink()).await;
++    String::from_utf8_lossy(&kept).into_owned()
+ }
+ 
+ /// The handler path for `hook` under `dir`, for documentation and tests.
+diff --git a/crates/agentd/src/routes.rs b/crates/agentd/src/routes.rs
+index 6e50bf2..126fbb5 100644
+--- a/crates/agentd/src/routes.rs
++++ b/crates/agentd/src/routes.rs
+@@ -46,15 +46,15 @@ pub fn app(state: AppState) -> Router {
+     // usable. A daemon that omits them fails the build, not the run, which is a
+     // confusing place to discover the omission.
+     let mut open = Router::new();
+-    let mut hooks = Router::new();
+     let mut control = Router::new();
+ 
+     for endpoint in surface_docs() {
+         let handler = handler_for(&endpoint);
+         match endpoint.auth {
+             schema::Auth::Bearer => control = control.route(&endpoint.path, handler),
+-            schema::Auth::Open => open = open.route(&endpoint.path, handler),
+-            schema::Auth::PlatformHook => hooks = hooks.route(&endpoint.path, handler),
++            schema::Auth::Open | schema::Auth::PlatformHook => {
++                open = open.route(&endpoint.path, handler);
++            }
+         }
+     }
+ 
+@@ -75,71 +75,30 @@ pub fn app(state: AppState) -> Router {
+         .layer(DefaultBodyLimit::disable())
+         .layer(RequestBodyLimitLayer::new(max_body));
+ 
+-    open.merge(hooks.route_layer(middleware::from_fn_with_state(
+-        state.clone(),
+-        bound_hook_body,
+-    )))
+-    .merge(control)
+-    .fallback(not_found)
+-    // Applied last, and outside `route_layer`, so it covers every response the
+-    // application can produce: handler bodies, the 401/503 the auth middleware
+-    // returns before a handler runs, the 413 the body-limit layer injects, and
+-    // the 404 fallback. A version header a client only sometimes receives is
+-    // one it cannot use as a precondition, which is the whole reason to send it.
+-    .layer(middleware::from_fn(stamp_version))
+-    // Outermost, so it wraps every other layer including the version stamp and
+-    // the auth middleware — a panic inside one of those is exactly as fatal as a
+-    // panic in a handler, and a layer inside them could not catch it.
+-    //
+-    // What this buys is narrow and worth stating precisely. Without it a
+-    // panicking handler drops the connection, and the client sees a transport
+-    // error it cannot distinguish from a dead VM. With it the client gets a 500
+-    // and the connection survives. It does *not* undo the panic: whatever the
+-    // handler was doing is abandoned, and any `std::sync::Mutex` it held is now
+-    // poisoned — which is why this pairs with the poison recovery in `state.rs`.
+-    // Either half alone leaves the VM wedged in a different way.
+-    //
+-    // Requires `panic = "unwind"`; see the workspace release profile, which sets
+-    // it back from `abort` for exactly this reason.
+-    .layer(CatchPanicLayer::new())
+-    .with_state(state)
+-}
+-
+-/// Bound the platform envelope before JSON parsing. Escaping a 4096-byte payload
+-/// can expand each byte to six bytes, so 32 KiB leaves room for the outer object.
+-async fn bound_hook_body(
+-    State(state): State<AppState>,
+-    request: axum::extract::Request,
+-    next: middleware::Next,
+-) -> Response {
+-    let (parts, body) = request.into_parts();
+-    match tokio::time::timeout(
+-        std::time::Duration::from_secs(5),
+-        axum::body::to_bytes(body, 32 * 1024),
+-    )
+-    .await
+-    {
+-        Ok(Ok(bytes)) => {
+-            next.run(axum::extract::Request::from_parts(parts, bytes.into()))
+-                .await
+-        }
+-        result => {
+-            // Accepted bodies are observed by their handlers; a body refusal must
+-            // leave the same observation even though it never reaches a handler.
+-            state.record_hook(parts.uri.path().rsplit('/').next().unwrap_or(""));
+-            let status = if result.is_err() {
+-                StatusCode::REQUEST_TIMEOUT
+-            } else {
+-                StatusCode::PAYLOAD_TOO_LARGE
+-            };
+-            let mut response = status.into_response();
+-            response.headers_mut().insert(
+-                axum::http::header::CONNECTION,
+-                axum::http::HeaderValue::from_static("close"),
+-            );
+-            response
+-        }
+-    }
++    open.merge(control)
++        .fallback(not_found)
++        // Applied last, and outside `route_layer`, so it covers every response the
++        // application can produce: handler bodies, the 401/503 the auth middleware
++        // returns before a handler runs, the 413 the body-limit layer injects, and
++        // the 404 fallback. A version header a client only sometimes receives is
++        // one it cannot use as a precondition, which is the whole reason to send it.
++        .layer(middleware::from_fn(stamp_version))
++        // Outermost, so it wraps every other layer including the version stamp and
++        // the auth middleware — a panic inside one of those is exactly as fatal as a
++        // panic in a handler, and a layer inside them could not catch it.
++        //
++        // What this buys is narrow and worth stating precisely. Without it a
++        // panicking handler drops the connection, and the client sees a transport
++        // error it cannot distinguish from a dead VM. With it the client gets a 500
++        // and the connection survives. It does *not* undo the panic: whatever the
++        // handler was doing is abandoned, and any `std::sync::Mutex` it held is now
++        // poisoned — which is why this pairs with the poison recovery in `state.rs`.
++        // Either half alone leaves the VM wedged in a different way.
++        //
++        // Requires `panic = "unwind"`; see the workspace release profile, which sets
++        // it back from `abort` for exactly this reason.
++        .layer(CatchPanicLayer::new())
++        .with_state(state)
+ }
+ 
+ /// Maps a documented endpoint onto the handler that serves it.
+diff --git a/crates/agentd/src/schema.rs b/crates/agentd/src/schema.rs
+index d06a170..3cab117 100644
+--- a/crates/agentd/src/schema.rs
++++ b/crates/agentd/src/schema.rs
+@@ -716,26 +716,14 @@ pub const SCHEMA: &[Status] = &[Status::new(
+      it has a token, and none of it is secret.",
+ )];
+ 
+-const HOOK_BODY_TIMEOUT: Status = Status::new(
+-    StatusCode::REQUEST_TIMEOUT,
+-    "",
+-    "hook body collection exceeded its deadline; connection closes",
+-);
+-const HOOK_BODY_TOO_LARGE: Status = Status::new(
+-    StatusCode::PAYLOAD_TOO_LARGE,
++pub const HOOK_ACK: &[Status] = &[Status::new(
++    StatusCode::OK,
+     "",
+-    "hook envelope exceeded 32 KiB; connection closes",
+-);
+-
+-pub const HOOK_ACK: &[Status] = &[
+-    Status::new(StatusCode::OK, "", "acknowledged"),
+-    HOOK_BODY_TIMEOUT,
+-    HOOK_BODY_TOO_LARGE,
+-];
++    "acknowledged. The platform terminates the VM on any other status, so there is \
++     no failure a hook can usefully report.",
++)];
+ 
+ pub const HOOK_RUN: &[Status] = &[
+-    HOOK_BODY_TIMEOUT,
+-    HOOK_BODY_TOO_LARGE,
+     Status::new(
+         StatusCode::OK,
+         "",
+diff --git a/crates/agentd/src/serve.rs b/crates/agentd/src/serve.rs
+index c86da0d..bb7e3c6 100644
+--- a/crates/agentd/src/serve.rs
++++ b/crates/agentd/src/serve.rs
+@@ -1,118 +1,29 @@
+ // SPDX-License-Identifier: Apache-2.0
+-//! Serving the router over real or simulated sockets with bounded connections.
++//! Serving the router, over either a real socket or a simulated one.
++//!
++//! Since axum 0.8, `axum::serve` accepts anything implementing
++//! `axum::serve::Listener`. `tokio::net::TcpListener` already does, and a turmoil
++//! listener needs only a small newtype in the test tier. So the daemon's serve
++//! path is generic and the production binary never links the simulator.
+ 
+ use std::fmt::Debug;
+-use std::pin::Pin;
+-use std::sync::Arc;
+-use std::task::{Context, Poll};
+-use std::time::Duration;
+ 
+ use axum::Router;
+ use axum::serve::Listener;
+-use hyper_util::rt::{TokioIo, TokioTimer};
+-use hyper_util::service::TowerToHyperService;
+-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+-
+-const MAX_CONNECTIONS: usize = 128;
+-const HEADER_TIMEOUT: Duration = Duration::from_secs(5);
+ 
+ /// Serves `app` on `listener` until the process is asked to stop.
+ ///
+-/// Connection admission happens before reading headers or collecting a body.
+-/// HTTP upgrades keep their permit until the upgraded socket itself is dropped.
+-pub async fn serve<L>(mut listener: L, app: Router) -> std::io::Result<()>
++/// The `L::Addr: Debug` bound is required by axum 0.8: without it the returned
++/// `Serve` does not implement `Future`, and the compiler reports that rather than
++/// the missing bound.
++pub async fn serve<L>(listener: L, app: Router) -> std::io::Result<()>
+ where
+     L: Listener + Send + 'static,
+     L::Addr: Debug,
+ {
+-    let capacity = Arc::new(tokio::sync::Semaphore::new(MAX_CONNECTIONS));
+-    let mut connections = tokio::task::JoinSet::new();
+-    let (shutdown, _) = tokio::sync::watch::channel(false);
+-    let signal = shutdown_signal();
+-    tokio::pin!(signal);
+-    loop {
+-        while connections.try_join_next().is_some() {}
+-        tokio::select! {
+-            _ = &mut signal => break,
+-            _ = connections.join_next(), if !connections.is_empty() => {},
+-            (socket, _) = listener.accept() => {
+-                let Ok(permit) = capacity.clone().try_acquire_owned() else {
+-                    // Close excess connections without allocating a connection task.
+-                    drop(socket);
+-                    continue;
+-                };
+-                let service = TowerToHyperService::new(app.clone());
+-                let mut stopping = shutdown.subscribe();
+-                connections.spawn(async move {
+-                    let io = TokioIo::new(BoundedIo::new(socket, permit));
+-                    let mut builder = hyper::server::conn::http1::Builder::new();
+-                    builder.timer(TokioTimer::new())
+-                        .header_read_timeout(HEADER_TIMEOUT)
+-                        .max_buf_size(64 * 1024);
+-                    let connection = builder.serve_connection(io, service).with_upgrades();
+-                    tokio::pin!(connection);
+-                    tokio::select! {
+-                        result = &mut connection => {
+-                            if let Err(error) = result {
+-                                tracing::debug!(%error, "HTTP connection ended");
+-                            }
+-                        }
+-                        _ = stopping.changed() => {
+-                            connection.as_mut().graceful_shutdown();
+-                            let _ = connection.await;
+-                        }
+-                    }
+-                });
+-            }
+-        }
+-    }
+-    let _ = shutdown.send(true);
+-    while connections.join_next().await.is_some() {}
+-    Ok(())
+-}
+-
+-/// The permit stays with the socket through an HTTP upgrade, so a tunnel counts
+-/// toward connection admission until its I/O is dropped.
+-struct BoundedIo<T> {
+-    inner: T,
+-    _permit: tokio::sync::OwnedSemaphorePermit,
+-}
+-
+-impl<T> BoundedIo<T> {
+-    fn new(inner: T, permit: tokio::sync::OwnedSemaphorePermit) -> Self {
+-        Self {
+-            inner,
+-            _permit: permit,
+-        }
+-    }
+-}
+-
+-impl<T: AsyncRead + Unpin> AsyncRead for BoundedIo<T> {
+-    fn poll_read(
+-        mut self: Pin<&mut Self>,
+-        cx: &mut Context<'_>,
+-        buffer: &mut ReadBuf<'_>,
+-    ) -> Poll<std::io::Result<()>> {
+-        Pin::new(&mut self.inner).poll_read(cx, buffer)
+-    }
+-}
+-
+-impl<T: AsyncWrite + Unpin> AsyncWrite for BoundedIo<T> {
+-    fn poll_write(
+-        mut self: Pin<&mut Self>,
+-        cx: &mut Context<'_>,
+-        data: &[u8],
+-    ) -> Poll<std::io::Result<usize>> {
+-        Pin::new(&mut self.inner).poll_write(cx, data)
+-    }
+-
+-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+-        Pin::new(&mut self.inner).poll_flush(cx)
+-    }
+-
+-    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+-        Pin::new(&mut self.inner).poll_shutdown(cx)
+-    }
++    axum::serve(listener, app)
++        .with_graceful_shutdown(shutdown_signal())
++        .await
+ }
+ 
+ /// Resolves when the platform asks the VM to stop.

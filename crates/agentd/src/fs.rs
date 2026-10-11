@@ -419,17 +419,18 @@ impl Confined {
 
     /// Creates and opens the file a data member's bytes go into.
     ///
-    /// `O_TRUNC` rather than `O_EXCL`, and the existing name is unlinked first, for
+    /// The existing name is unlinked first and created with `O_EXCL`, for
     /// the reason the previous `remove_file` plus `File::create` had: an archive may
     /// legitimately overwrite a name, and a retried partial extraction has to
     /// converge. The unlink is `unlinkat` without `AT_REMOVEDIR`, so a directory in
-    /// the way survives and the open below reports `EISDIR`, which is the same
-    /// answer `File::create` gave.
+    /// the way survives and the exclusive open reports that the name exists.
+    /// Exclusivity also preserves any file installed between unlink and create.
     fn create_file(&self, parts: &[OsString]) -> Result<std::fs::File, WalkError> {
         let (parent, name) = self.parent_of(parts)?;
         let last = parts.len() - 1;
+        self.replace(parent.as_fd(), &name);
         let how = OpenHow::new()
-            .flags(OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_TRUNC | OFlag::O_CLOEXEC)
+            .flags(OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_CLOEXEC)
             // 0o666 before umask, matching `File::create`. The archive's own mode
             // is replayed later by `apply_deferred_modes`.
             .mode(Mode::from_bits_truncate(0o666))
@@ -516,9 +517,8 @@ impl Confined {
 
     /// Unlinks `name` under `dir`, ignoring every failure.
     ///
-    /// A link member replaces an existing name rather than failing on it, and
-    /// `symlinkat`/`linkat` have no truncating equivalent of `O_TRUNC`, so the old
-    /// name has to go first. Every error is ignored on purpose: the common one is
+    /// A file or link member replaces the directory entry before creation, so
+    /// other names for an existing inode keep their contents and permissions. Every error is ignored on purpose: the common one is
     /// `ENOENT`, which means there was nothing to replace, and any other means the
     /// create below fails and reports the real reason.
     fn replace(&self, dir: BorrowedFd<'_>, name: &OsStr) {
@@ -793,6 +793,9 @@ fn extract_into(
                             ),
                         })?;
                 }
+                // A later link replaces the member, so an earlier file's mode
+                // must not be replayed onto the link's target.
+                deferred.remove(&dest);
             }
 
             // Regular, contiguous, and anything else carrying data.
@@ -1698,6 +1701,64 @@ mod tests {
             Err(Refusal::Member { member, reason }) => format!("{member}: {reason}"),
             Err(other) => panic!("expected a member refusal, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn replacing_a_file_preserves_its_other_hard_links() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path().join("root");
+        std::fs::create_dir(&root).expect("root");
+        let original = dir.path().join("original");
+        std::fs::write(&original, b"original bytes").expect("original");
+        std::fs::set_permissions(&original, std::fs::Permissions::from_mode(0o600))
+            .expect("original permissions");
+        std::fs::hard_link(&original, root.join("member")).expect("hard link");
+        let archive = Archive::new().file("member", b"replacement bytes").bytes();
+        assert_eq!(
+            extract_into(&root, archive.as_slice(), OPEN, &roomy_guard()).unwrap(),
+            1
+        );
+        assert_eq!(std::fs::read(&original).unwrap(), b"original bytes");
+        assert_eq!(std::fs::metadata(&original).unwrap().mode() & 0o777, 0o600);
+        assert_eq!(
+            std::fs::read(root.join("member")).unwrap(),
+            b"replacement bytes"
+        );
+        assert_ne!(
+            std::fs::metadata(&original).unwrap().ino(),
+            std::fs::metadata(root.join("member")).unwrap().ino()
+        );
+    }
+
+    #[test]
+    fn a_later_hard_link_preserves_its_targets_permissions() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path().join("root");
+        std::fs::create_dir(&root).expect("root");
+        let original = dir.path().join("original");
+        std::fs::write(&original, b"original bytes").expect("original");
+        std::fs::set_permissions(&original, std::fs::Permissions::from_mode(0o600))
+            .expect("original permissions");
+        std::fs::hard_link(&original, root.join("target")).expect("hard link");
+        let archive = Archive::new()
+            .file("member", b"temporary bytes")
+            .link(EntryType::Link, "member", "target")
+            .bytes();
+        assert_eq!(
+            extract_into(&root, archive.as_slice(), OPEN, &roomy_guard()).unwrap(),
+            2
+        );
+        assert_eq!(
+            std::fs::read(root.join("member")).unwrap(),
+            b"original bytes"
+        );
+        assert_eq!(std::fs::metadata(&original).unwrap().mode() & 0o777, 0o600);
+        assert_eq!(
+            std::fs::metadata(&original).unwrap().ino(),
+            std::fs::metadata(root.join("member")).unwrap().ino()
+        );
     }
 
     #[test]

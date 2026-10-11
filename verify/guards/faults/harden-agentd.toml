@@ -1,0 +1,101 @@
+# ── harden-agentd: FAIL_TO_PASS entries tools/fail-to-pass.py emitted ──
+
+# FAIL_TO_PASS: fails on 9729b82a9b14 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-run-hook-envelopes-are-bounded-before-parsing"
+guard = "run_hook_envelopes_are_bounded_before_parsing"
+run = ["cargo", "test", "-p", "agentd", "--test", "server_limits", "--", "--exact", "run_hook_envelopes_are_bounded_before_parsing"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-run-hook-envelopes-are-bounded-before-parsing.patch"
+
+# FAIL_TO_PASS: fails on 9729b82a9b14 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-run-hook-body-collection-has-a-deadline"
+guard = "run_hook_body_collection_has_a_deadline"
+run = ["cargo", "test", "-p", "agentd", "--test", "server_limits", "--", "--exact", "run_hook_body_collection_has_a_deadline"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-run-hook-body-collection-has-a-deadline.patch"
+
+# FAIL_TO_PASS: fails on 9729b82a9b14 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-incomplete-headers-have-a-deadline"
+guard = "incomplete_headers_have_a_deadline"
+run = ["cargo", "test", "-p", "agentd", "--test", "server_limits", "--", "--exact", "incomplete_headers_have_a_deadline"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-incomplete-headers-have-a-deadline.patch"
+
+# FAIL_TO_PASS: fails on 9729b82a9b14 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-rejected-body-drain-has-a-deadline-and-closes-the"
+guard = "rejected_body_drain_has_a_deadline_and_closes_the_connection"
+run = ["cargo", "test", "-p", "agentd", "--test", "server_limits", "--", "--exact", "rejected_body_drain_has_a_deadline_and_closes_the_connection"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-rejected-body-drain-has-a-deadline-and-closes-the.patch"
+
+# FAIL_TO_PASS: fails on 9729b82a9b14 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-idle-keep-alive-connections-are-closed"
+guard = "idle_keep_alive_connections_are_closed"
+run = ["cargo", "test", "-p", "agentd", "--test", "server_limits", "--", "--exact", "idle_keep_alive_connections_are_closed"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-idle-keep-alive-connections-are-closed.patch"
+
+# FAIL_TO_PASS: fails on 9729b82a9b14 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-connections-past-the-capacity-are-closed"
+guard = "connections_past_the_capacity_are_closed"
+run = ["cargo", "test", "-p", "agentd", "--test", "server_limits", "--", "--exact", "connections_past_the_capacity_are_closed"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-connections-past-the-capacity-are-closed.patch"
+
+# FAIL_TO_PASS: fails on 9729b82a9b14 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-replacing-a-file-preserves-its-other-hard-links"
+guard = "fs::tests::replacing_a_file_preserves_its_other_hard_links"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "fs::tests::replacing_a_file_preserves_its_other_hard_links"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-replacing-a-file-preserves-its-other-hard-links.patch"
+
+# FAIL_TO_PASS: fails on 9729b82a9b14 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-a-later-hard-link-preserves-its-targets-permissions"
+guard = "fs::tests::a_later_hard_link_preserves_its_targets_permissions"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "fs::tests::a_later_hard_link_preserves_its_targets_permissions"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-a-later-hard-link-preserves-its-targets-permissions.patch"
+
+# FAIL_TO_PASS: fails on 9729b82a9b14 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-output-collection-and-surviving-group-members-share-the"
+guard = "hook_handlers::tests::output_collection_and_surviving_group_members_share_the_handler_budget"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "hook_handlers::tests::output_collection_and_surviving_group_members_share_the_handler_budget"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-output-collection-and-surviving-group-members-share-the.patch"
+
+# FAIL_TO_PASS: fails on 9729b82a9b14 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-output-collection-finishes-when-a-detached-writer-keeps"
+guard = "hook_handlers::tests::output_collection_finishes_when_a_detached_writer_keeps_the_pipe_open"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "hook_handlers::tests::output_collection_finishes_when_a_detached_writer_keeps_the_pipe_open"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-output-collection-finishes-when-a-detached-writer-keeps.patch"
+
+# This compatibility test keeps active reuse across the token lifetime while idle
+# connections have a deadline. An absolute connection lifetime must still fail it.
+[[fault]]
+id = "active-connection-has-an-absolute-lifetime"
+guard = "a_connection_survives_past_the_proxy_token_lifetime"
+run = ["cargo", "test", "-p", "agentd", "--test", "turmoil_transport", "--", "--exact", "a_connection_survives_past_the_proxy_token_lifetime"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/serve.rs", replace = "                    tokio::select! {\n                        result = &mut connection => {", with = "                    tokio::select! {\n                        _ = tokio::time::sleep(Duration::from_secs(60 * 60)) => {},\n                        result = &mut connection => {" }

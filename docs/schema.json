@@ -786,7 +786,17 @@
         {
           "code": 200,
           "error": "",
-          "meaning": "acknowledged. The platform terminates the VM on any other status, so there is no failure a hook can usefully report."
+          "meaning": "acknowledged"
+        },
+        {
+          "code": 408,
+          "error": "",
+          "meaning": "hook body collection exceeded its deadline; connection closes"
+        },
+        {
+          "code": 413,
+          "error": "",
+          "meaning": "hook envelope exceeded 32 KiB; connection closes"
         }
       ],
       "summary": "image-build readiness probe; answers 200 even before bootstrap, because the question is whether the daemon started. Every hook invocation is recorded and reported on /v1/health as `hooks`."
@@ -801,7 +811,17 @@
         {
           "code": 200,
           "error": "",
-          "meaning": "acknowledged. The platform terminates the VM on any other status, so there is no failure a hook can usefully report."
+          "meaning": "acknowledged"
+        },
+        {
+          "code": 408,
+          "error": "",
+          "meaning": "hook body collection exceeded its deadline; connection closes"
+        },
+        {
+          "code": 413,
+          "error": "",
+          "meaning": "hook envelope exceeded 32 KiB; connection closes"
         }
       ],
       "summary": "image-build validation probe; same reasoning as ready. Recorded on /v1/health's `hooks`, which is the only trace this hook leaves — the platform writes no CloudWatch logs for it."
@@ -818,6 +838,16 @@
       },
       "response": null,
       "statuses": [
+        {
+          "code": 408,
+          "error": "",
+          "meaning": "hook body collection exceeded its deadline; connection closes"
+        },
+        {
+          "code": 413,
+          "error": "",
+          "meaning": "hook envelope exceeded 32 KiB; connection closes"
+        },
         {
           "code": 200,
           "error": "",
@@ -846,7 +876,17 @@
         {
           "code": 200,
           "error": "",
-          "meaning": "acknowledged. The platform terminates the VM on any other status, so there is no failure a hook can usefully report."
+          "meaning": "acknowledged"
+        },
+        {
+          "code": 408,
+          "error": "",
+          "meaning": "hook body collection exceeded its deadline; connection closes"
+        },
+        {
+          "code": 413,
+          "error": "",
+          "meaning": "hook envelope exceeded 32 KiB; connection closes"
         }
       ],
       "summary": "acknowledged and logged"
@@ -861,7 +901,17 @@
         {
           "code": 200,
           "error": "",
-          "meaning": "acknowledged. The platform terminates the VM on any other status, so there is no failure a hook can usefully report."
+          "meaning": "acknowledged"
+        },
+        {
+          "code": 408,
+          "error": "",
+          "meaning": "hook body collection exceeded its deadline; connection closes"
+        },
+        {
+          "code": 413,
+          "error": "",
+          "meaning": "hook envelope exceeded 32 KiB; connection closes"
         }
       ],
       "summary": "acknowledged. Measured: the token, filesystem, exec records, and even backgrounded processes survive a suspend/resume cycle. What does not survive is the guest's view of time, which jumps — so any timeout or lease held by a running command expires at once on resume."
@@ -876,7 +926,17 @@
         {
           "code": 200,
           "error": "",
-          "meaning": "acknowledged. The platform terminates the VM on any other status, so there is no failure a hook can usefully report."
+          "meaning": "acknowledged"
+        },
+        {
+          "code": 408,
+          "error": "",
+          "meaning": "hook body collection exceeded its deadline; connection closes"
+        },
+        {
+          "code": 413,
+          "error": "",
+          "meaning": "hook envelope exceeded 32 KiB; connection closes"
         }
       ],
       "summary": "acknowledged after the terminate handler; process signals initiate shutdown"

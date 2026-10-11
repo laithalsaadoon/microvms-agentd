@@ -3,10 +3,9 @@
 //!
 //! Two properties this module exists to hold:
 //!
-//! * An unauthenticated caller cannot make the daemon allocate. The Python
-//!   predecessor buffered the body first and checked authorization second, so an
-//!   unauthorized request could force a 256 MB allocation on a VM whose baseline
-//!   can be 512 MiB.
+//! * Protected routes decide authorization before buffering a body. Rejected
+//!   bodies are drained within byte and time bounds; hook bodies have separate
+//!   limits because the platform does not authenticate them.
 //! * A hostile header cannot take the listener down. `hmac.compare_digest` raises
 //!   `TypeError` on `str` inputs containing non-ASCII characters, which killed the
 //!   predecessor's handler thread and returned `RemoteDisconnected` to the client
@@ -87,24 +86,37 @@ pub async fn require_token(
     };
 
     let drain_cap = state.config().max_drain_bytes;
-    drain_bounded(request, drain_cap).await;
-    status.into_response()
+    let drained = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        drain_bounded(request, drain_cap),
+    )
+    .await
+    .unwrap_or(false);
+    let mut response = status.into_response();
+    if !drained {
+        response.headers_mut().insert(
+            header::CONNECTION,
+            header::HeaderValue::from_static("close"),
+        );
+    }
+    response
 }
 
 /// Reads and discards up to `cap` bytes of a rejected request's body.
-async fn drain_bounded(request: Request, cap: usize) {
+async fn drain_bounded(request: Request, cap: usize) -> bool {
     let mut body = request.into_body();
     let mut seen = 0usize;
     while let Some(frame) = body.frame().await {
-        let Ok(frame) = frame else { return };
+        let Ok(frame) = frame else { return false };
         if let Some(data) = frame.data_ref() {
             seen += data.len();
             if seen >= cap {
                 // Past the cap: stop reading and let the connection close.
-                return;
+                return false;
             }
         }
     }
+    true
 }
 
 #[cfg(test)]

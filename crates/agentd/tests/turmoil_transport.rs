@@ -26,13 +26,11 @@
 //!
 //! # Two things a future maintainer will otherwise rediscover the hard way
 //!
-//! **Rejection closes the connection abortively, without `Connection: close`.**
-//! When the daemon stops draining, hyper does not negotiate a shutdown — it drops
-//! the connection, and turmoil turns a drop with unread bytes into a RST. So the
-//! observable is never a header: it is whether a *subsequent request on the same
-//! socket* is answered. Every drain-or-close assertion below is written that way,
-//! via [`still_usable`]. An assertion on `Connection: close` looks equivalent and
-//! silently never fires.
+//! **A refused body can close the connection before the response is read.**
+//! The daemon marks an incomplete drain with `Connection: close`. Dropping the
+//! connection with unread bytes can also become a RST in turmoil, so the stable
+//! observable is whether a *subsequent request on the same socket* is answered.
+//! Every drain-or-close assertion below checks that behavior via [`still_usable`].
 //!
 //! **Whether the RST beats the 401 to the client is a race the seed decides.**
 //! Across seeds, a rejected 256 KiB body sometimes yields a readable 401 and
@@ -1152,13 +1150,11 @@ fn keep_alive_reuse_does_not_desync_bodies() -> turmoil::Result {
 // 3. Keep-alive across the proxy-token boundary
 // ---------------------------------------------------------------------------
 
-/// A pooled connection survives longer than an endpoint auth token lives.
+/// An active pooled connection survives longer than an endpoint auth token lives.
 ///
-/// The platform caps `X-aws-proxy-auth` at 60 minutes, so any trial longer than
-/// an hour mints a fresh token mid-flight and reuses its existing connection to
-/// carry the next request. If the daemon aged that connection out, the retry path
-/// would meet a transport error at exactly the moment it was recovering from an
-/// expiry — the least debuggable moment available.
+/// The platform caps `X-aws-proxy-auth` at 60 minutes, so an active client can
+/// mint a fresh token and reuse its connection. Requests keep the connection
+/// below the idle deadline while virtual time crosses that token lifetime.
 #[test]
 fn a_connection_survives_past_the_proxy_token_lifetime() -> turmoil::Result {
     let mut sim = long_sim(0x5EED_0003);
@@ -1169,17 +1165,18 @@ fn a_connection_survives_past_the_proxy_token_lifetime() -> turmoil::Result {
         let (status, _) = client.send(run_hook(TOKEN)).await?;
         assert_eq!(status, StatusCode::OK);
 
-        // Virtual time, so this is free.
-        tokio::time::sleep(Duration::from_secs(70 * 60)).await;
-
-        let (status, body) = client.send(health()).await?;
-        assert_eq!(
-            status,
-            StatusCode::OK,
-            "the idle connection did not survive the token boundary"
-        );
-        let health: serde_json::Value = serde_json::from_slice(&body)?;
-        assert_eq!(health["bootstrapped"], serde_json::Value::Bool(true));
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(70 * 60);
+        while tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            let (status, body) = client.send(health()).await?;
+            assert_eq!(
+                status,
+                StatusCode::OK,
+                "the active connection did not survive the token boundary"
+            );
+            let health: serde_json::Value = serde_json::from_slice(&body)?;
+            assert_eq!(health["bootstrapped"], serde_json::Value::Bool(true));
+        }
 
         Ok(())
     });
@@ -1189,7 +1186,7 @@ fn a_connection_survives_past_the_proxy_token_lifetime() -> turmoil::Result {
     assert_eq!(
         accepted.load(Ordering::Relaxed),
         1,
-        "the client had to reconnect, so the daemon closed an idle connection"
+        "the client had to reconnect, so the daemon aged out an active connection"
     );
     Ok(())
 }
