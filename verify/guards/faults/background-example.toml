@@ -1,0 +1,119 @@
+# ── the background coding agent example (examples/background-coding-agent) ──────────────────
+# Its own uv project, run from the repository root as `background:check` runs it. Bytecode
+# caching is off: a fault that only reorders lines keeps the file's size, and a .pyc written in
+# the same second as the source then answers for the faulted file.
+
+# `prepare` awaits the boot and then the S3 download, so the boot no longer hides the download.
+[[fault]]
+id = "bg-prepare-boot-in-series"
+guard = "examples/background-coding-agent/tests/test_lifecycle.py::test_prepare_boots_the_vm_while_a_thread_reads_the_inputs"
+run = ["env", "PYTHONDONTWRITEBYTECODE=1", "uv", "run", "--project", "examples/background-coding-agent", "--frozen", "pytest", "-q", "-rA", "-p", "no:cacheprovider", "examples/background-coding-agent/tests/test_lifecycle.py::test_prepare_boots_the_vm_while_a_thread_reads_the_inputs"]
+expect = "test-failed"
+suite = "script"
+transform = { file = "examples/background-coding-agent/handler.py", replace = '''
+    session, (source, task) = await asyncio.gather(
+        boot(vm, token), asyncio.to_thread(read_inputs, job_id)
+    )
+''', with = '''
+    session = await boot(vm, token)
+    source, task = await asyncio.to_thread(read_inputs, job_id)
+''' }
+
+# The S3 download runs on the event loop's own thread, which stalls the boot it was meant to overlap.
+[[fault]]
+id = "bg-prepare-read-on-the-loop"
+guard = "examples/background-coding-agent/tests/test_lifecycle.py::test_prepare_boots_the_vm_while_a_thread_reads_the_inputs"
+run = ["env", "PYTHONDONTWRITEBYTECODE=1", "uv", "run", "--project", "examples/background-coding-agent", "--frozen", "pytest", "-q", "-rA", "-p", "no:cacheprovider", "examples/background-coding-agent/tests/test_lifecycle.py::test_prepare_boots_the_vm_while_a_thread_reads_the_inputs"]
+expect = "test-failed"
+suite = "script"
+transform = [
+  { file = "examples/background-coding-agent/handler.py", replace = '''
+boot(vm, token), asyncio.to_thread(read_inputs, job_id)''', with = '''
+boot(vm, token), inline(read_inputs, job_id)''' },
+  { file = "examples/background-coding-agent/handler.py", replace = '''
+def read_inputs(job_id):
+''', with = '''
+async def inline(function, *args):
+    return function(*args)
+
+
+def read_inputs(job_id):
+''' },
+]
+
+# The Bedrock token is minted before the uploads and the setup command, so its lifetime starts
+# before the agent's by however long they take.
+[[fault]]
+id = "bg-prepare-mint-before-setup"
+guard = "examples/background-coding-agent/tests/test_lifecycle.py::test_prepare_boots_the_vm_while_a_thread_reads_the_inputs"
+run = ["env", "PYTHONDONTWRITEBYTECODE=1", "uv", "run", "--project", "examples/background-coding-agent", "--frozen", "pytest", "-q", "-rA", "-p", "no:cacheprovider", "examples/background-coding-agent/tests/test_lifecycle.py::test_prepare_boots_the_vm_while_a_thread_reads_the_inputs"]
+expect = "test-failed"
+suite = "script"
+transform = [
+  { file = "examples/background-coding-agent/handler.py", replace = '''
+    await session.upload_tar_async("/workspace/project", source)
+''', with = '''
+    bedrock = await microvms.mint_bedrock_token_async(
+        region(), ttl_seconds=TASK_SECONDS + 600
+    )
+    await session.upload_tar_async("/workspace/project", source)
+''' },
+  { file = "examples/background-coding-agent/handler.py", replace = '''
+    bedrock = await microvms.mint_bedrock_token_async(
+        region(), ttl_seconds=TASK_SECONDS + 600
+    )
+    await microvms.install_agent_access_async(''', with = '''
+    await microvms.install_agent_access_async(''' },
+]
+
+# The baseline writes its ignore list before its commit, so a file the repository tracks under an
+# ignored name, such as a vendored node_modules/, drops out of the agent's change.
+[[fault]]
+id = "bg-baseline-ignores-before-commit"
+guard = "examples/background-coding-agent/tests/test_github.py::test_caches_and_dependencies_a_test_run_leaves_are_not_published"
+run = ["env", "PYTHONDONTWRITEBYTECODE=1", "uv", "run", "--project", "examples/background-coding-agent", "--frozen", "pytest", "-q", "-rA", "-p", "no:cacheprovider", "examples/background-coding-agent/tests/test_github.py::test_caches_and_dependencies_a_test_run_leaves_are_not_published"]
+expect = "test-failed"
+suite = "script"
+transform = [
+  { file = "examples/background-coding-agent/handler.py", replace = '''
+printf '%s\\n' '__pycache__/' '*.py[cod]' .pytest_cache/ .mypy_cache/ .ruff_cache/ \\
+  node_modules/ .venv/ >> .git/info/exclude
+''', with = '''
+''' },
+  { file = "examples/background-coding-agent/handler.py", replace = '''
+git init -q
+''', with = '''
+git init -q
+printf '%s\\n' '__pycache__/' '*.py[cod]' .pytest_cache/ .mypy_cache/ .ruff_cache/ \\
+  node_modules/ .venv/ >> .git/info/exclude
+''' },
+]
+
+# `collect` saves the agent's stdout and stderr only after the change export, so a failed export
+# loses the transcript.
+[[fault]]
+id = "bg-collect-transcript-after-export"
+guard = "examples/background-coding-agent/tests/test_lifecycle.py::test_collect_keeps_the_transcript_when_the_export_fails"
+run = ["env", "PYTHONDONTWRITEBYTECODE=1", "uv", "run", "--project", "examples/background-coding-agent", "--frozen", "pytest", "-q", "-rA", "-p", "no:cacheprovider", "examples/background-coding-agent/tests/test_lifecycle.py::test_collect_keeps_the_transcript_when_the_export_fails"]
+expect = "test-failed"
+suite = "script"
+transform = { file = "examples/background-coding-agent/handler.py", replace = '''
+    s3_put(job_id, "results/stdout.txt", result.stdout.encode())
+    s3_put(job_id, "results/stderr.txt", result.stderr.encode())
+''', with = '''
+''' }
+
+# `on_loop` builds the step's coroutine when the workflow names the step, so replay leaves one
+# unawaited for every finished step.
+[[fault]]
+id = "bg-on-loop-builds-the-coroutine-early"
+guard = "examples/background-coding-agent/tests/test_workflow.py::test_job_record_follows_the_workflow[None]"
+run = ["env", "PYTHONDONTWRITEBYTECODE=1", "uv", "run", "--project", "examples/background-coding-agent", "--frozen", "pytest", "-q", "-rA", "-p", "no:cacheprovider", "examples/background-coding-agent/tests/test_workflow.py::test_job_record_follows_the_workflow[None]"]
+expect = "test-failed"
+suite = "script"
+transform = { file = "examples/background-coding-agent/handler.py", replace = '''
+    return lambda _: asyncio.run(operation(*args))
+''', with = '''
+    coroutine = operation(*args)
+    return lambda _: asyncio.run(coroutine)
+''' }

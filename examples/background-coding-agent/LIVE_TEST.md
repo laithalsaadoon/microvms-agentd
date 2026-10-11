@@ -1,5 +1,41 @@
 # Live validation
 
+## 2026-10-11, us-east-1, API 2025-09-09: the async steps on microvms 0.12.0
+
+The workflow ran end to end with every VM step on the binding's awaitables. The
+Lambda was the arm64 build packaged from published wheels (`microvms` 0.12.0).
+The image was built with the 0.12.0 CLI and no daemon path, so `microvm build`
+fetched the `agentd` 0.12.0 release asset and verified its Sigstore attestation.
+Jobs ran against a private scratch repository and were driven only with
+`cli.py submit`, `list`, `show`, `fetch`, and `cancel`.
+
+| Job | Outcome | Wall time | Estimated VM cost |
+| --- | --- | --- | --- |
+| Issue asking for `clamp(value, low, high)` with tests, Claude Code | `SUCCEEDED`; a draft PR with `Closes #5` changing only `calc.py` and `test_calc.py`; its six tests pass from the PR branch | 2 min 2 s | about $0.007 |
+| Pull request whose `divide` uses `//` behind a test with evenly divisible arguments, Codex | `SUCCEEDED`; one `COMMENT` review with a line comment on `calc.py:10` naming the floor division | 1 min 56 s | about $0.007 |
+| The same pull request, Claude Code, cancelled while the agent worked | `CANCELLED`; the durable execution read back `STOPPED`, the VM `TERMINATED`, and no review was posted | | |
+
+Step durations for the first two jobs, from the durable execution history:
+`prepare`, which waits for the boot while the inputs download, took 9.3 s and
+8.9 s; the agent's durable wait took 91.5 s and 91.9 s; `cleanup` took 5.2 s
+each. There is no step-level baseline for the blocking version, so these
+are measurements, not a comparison.
+
+- The first issue run, on this branch before the fix, published two
+  `__pycache__/*.cpython-39.pyc` files the agent's test run had left in the
+  working tree; the scratch repository has no `.gitignore`. The baseline now
+  ignores test-run caches and dependencies after its commit, a test covers
+  both the caches and a tracked vendored file, and the rerun's PR had only
+  `calc.py` and `test_calc.py`.
+- Six VMs ran across the session, and each read back `TERMINATED` from the
+  control plane.
+- `cli.py fetch` returned the report, the transcripts, and for the issue the
+  patch and exported changes.
+- Teardown, checked independently: the stack destroyed, the image, its build
+  log group, and its build artifact deleted, and `tools/verify-clean.py` clean
+  of everything the project can name. Direct queries found no function, table,
+  bucket, role, secret, or log group left under the stack's name.
+
 ## 2026-09-24, us-east-1, API 2025-09-09: end to end against GitHub and AWS
 
 The current design ran end to end: a deployed stack, a coding-agent image built

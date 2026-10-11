@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.13"
 
 [[package]]
@@ -460,20 +460,20 @@ wheels = [
 
 [[package]]
 name = "microvms"
-version = "0.10.0"
+version = "0.12.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/b0/3b/4432815c390f36bd2ffcf380a71b0d851b533f893c6d214456f30c28842c/microvms-0.10.0.tar.gz", hash = "sha256:b1fa5654a217507d05c899de07a1bfa12efb086701575f3bdcaa9b4f0822a669", size = 868392, upload-time = "2026-09-25T02:25:05.337Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b0/7f/55b51a94bba1781d9155beeab4c6136a37bbee1a36994367fdbdd62ef0c9/microvms-0.12.0.tar.gz", hash = "sha256:ec7a3abf75c51c6d92eecea3b7bccbab7dca3192aa5f5393391713aab4f52cb3", size = 1129570, upload-time = "2026-10-11T02:09:01.897Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e5/8b/bb99a9d503384eff972c14079f92e8574a938f065398dd31b586d52efd4a/microvms-0.10.0-cp39-abi3-macosx_10_12_x86_64.whl", hash = "sha256:a738baa3f6f57ed1939f30f97156828fe5b45a3762e4136034ab3958bee1b4ae", size = 3263069, upload-time = "2026-09-25T02:24:57.371Z" },
-    { url = "https://files.pythonhosted.org/packages/69/eb/fb1858a4dc62cfcc137a33c71741e29154294c8f414816a836f12a989344/microvms-0.10.0-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:7092f9c2d9d422b9bae16072c0ac1b10910a53da223adc257b5b796adbb2dcdc", size = 3087127, upload-time = "2026-09-25T02:24:59.099Z" },
-    { url = "https://files.pythonhosted.org/packages/f3/19/eca735e4887185e9195e1cd7f679eeced0d224850d0c0683e2df4caa2e17/microvms-0.10.0-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:2c590d8f0999cc2b2511be03d31b99e498e2cdff50f59409843b2e5e7b63f28a", size = 3420357, upload-time = "2026-09-25T02:25:00.887Z" },
-    { url = "https://files.pythonhosted.org/packages/b2/7f/3efafb3c5532a8e414656a4d4ffb41cfe7e18c1b140dcbb37ea3bf4435fd/microvms-0.10.0-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:1fec9d17a5a6ebd705d41669340b25035d91ba55e81d067e9e5fdc650b5177dc", size = 3531565, upload-time = "2026-09-25T02:25:02.418Z" },
-    { url = "https://files.pythonhosted.org/packages/f4/d5/cb1ffc645a2bcac2ddb89679247cb8d6cb2f6640b0b57622c94ee64467bf/microvms-0.10.0-cp39-abi3-win_amd64.whl", hash = "sha256:1c1f4b62437e94d1912b32177e8e8234e95ecab3dc4c36723e9a14c8c7ee970b", size = 3366334, upload-time = "2026-09-25T02:25:03.834Z" },
+    { url = "https://files.pythonhosted.org/packages/ef/d9/c792b3d830aa65a24d4df087cbfc000581b740e06768d357850add266a40/microvms-0.12.0-cp39-abi3-macosx_10_12_x86_64.whl", hash = "sha256:1db7e08f4f3f3c4f6bb4f4679ad75385e3f60e68d7e9f3efea18dd26bad234e3", size = 4571465, upload-time = "2026-10-11T02:08:50.914Z" },
+    { url = "https://files.pythonhosted.org/packages/49/e3/440acd7f691a90c830cbe27ba1eac96fa8805c274315950931c04a50aede/microvms-0.12.0-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:8c449e76bf31207da601ef10e0ea9a04f83ba44a02213412ab925e254e4a9cd5", size = 4372176, upload-time = "2026-10-11T02:08:53.786Z" },
+    { url = "https://files.pythonhosted.org/packages/4a/16/0bed28232a2a7b72e4d6143ba104eae10276057486d63da27243acd106fd/microvms-0.12.0-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:72e9fd92b1fbaa5840891d53966dc462cba4ab017878f822a3b82d93df131bbf", size = 4823269, upload-time = "2026-10-11T02:08:55.905Z" },
+    { url = "https://files.pythonhosted.org/packages/a2/81/07185b50528c76a52ca3b283959d54b755ccf73ee2e7cba03cb01f829826/microvms-0.12.0-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:a2b9fbd77ad6a559627f855d235ce7351495083559ab19cc3f59200bd2a2e4ea", size = 4937677, upload-time = "2026-10-11T02:08:57.938Z" },
+    { url = "https://files.pythonhosted.org/packages/21/a5/6fa23fe7ef447d5853042ee320b4c980f9e9567879cff58180a03ca6862c/microvms-0.12.0-cp39-abi3-win_amd64.whl", hash = "sha256:11b354c6b2c18378e57447daa359d755b856af1ff15d7d6d0377cbc1bbd6312c", size = 4893431, upload-time = "2026-10-11T02:09:00.07Z" },
 ]
 
 [[package]]
 name = "microvms-background-coding-agent"
-version = "0.2.0"
+version = "0.3.0"
 source = { virtual = "." }
 dependencies = [
     { name = "aws-durable-execution-sdk-python" },
@@ -497,7 +497,7 @@ requires-dist = [
     { name = "aws-durable-execution-sdk-python", specifier = "==2.0.1" },
     { name = "boto3", specifier = "==1.43.101" },
     { name = "cyclopts", specifier = "==4.25.3" },
-    { name = "microvms", specifier = "==0.10.0" },
+    { name = "microvms", specifier = "==0.12.0" },
     { name = "pygithub", specifier = "==2.10.0" },
     { name = "pynamodb", specifier = "==6.1.0" },
     { name = "requests", specifier = "==2.34.2" },
