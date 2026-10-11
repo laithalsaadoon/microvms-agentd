@@ -151,6 +151,11 @@ expect = "exit-nonzero"
 suite = "script"
 
 [[family.fault]]
+id = "ci-parity-fixture-inherits-git-dir"
+message = "FAIL: test_an_inherited_git_dir_leaves_that_repo_alone ("
+transform = { file = "tools/test_check_ci_parity.py", replace = "        with mock.patch.dict(os.environ, clean_env(), clear=True):\n", with = "        with mock.patch.dict(os.environ, {}):\n" }
+
+[[family.fault]]
 id = "ci-parity-unit-uvx-valued"
 message = "FAIL: test_every_uvx_spelling_is_read ("
 transform = { file = "tools/check-ci-parity.py", replace = "    \"--cache-dir\", \"--refresh-package\", \"-p\", \"--python\", \"--color\",\n", with = "    \"--cache-dir\", \"--refresh-package\", \"-p\", \"--color\",\n" }

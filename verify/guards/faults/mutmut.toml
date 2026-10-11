@@ -384,3 +384,14 @@ transform = { file = ".github/workflows/ci.yml", replace = "      - name: every 
 id = "mutmut-job-aggregator-job-continue"
 message = "the aggregator job sets a key that can hide a red shard"
 transform = { file = ".github/workflows/ci.yml", replace = "    needs: mutmut\n    if: always() && github.event_name == 'pull_request'\n", with = "    needs: mutmut\n    if: always() && github.event_name == 'pull_request'\n    continue-on-error: true\n" }
+
+# The fixture's own git calls inherit a hook's `GIT_DIR`, so building a throwaway repo writes
+# into the repo that variable names.
+[[fault]]
+id = "mutmut-fixture-inherits-git-dir"
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_an_inherited_git_dir_leaves_that_repo_alone"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_inherited_git_dir_leaves_that_repo_alone ("
+transform = { file = "tools/test_check_mutmut.py", replace = "            cwd=self.root,\n            env=clean_env(),\n", with = "            cwd=self.root,\n" }
