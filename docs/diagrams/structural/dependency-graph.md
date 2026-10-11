@@ -161,6 +161,10 @@ readability.
 | napi | microvms-js | `bindings/microvms-js/Cargo.toml:43` | `bindings/microvms-js/src/errors.rs:71` |
 | tracing | agentd | `crates/agentd/Cargo.toml:61` | `crates/agentd/src/main.rs:44` |
 
+`napi` with `napi8` enables native type tags for class arguments, class-valued object
+fields, and getter receivers. The supported Node versions provide this API level
+(`bindings/microvms-js/Cargo.toml:36-43`).
+
 ## See also
 
 - [system overview](../../architecture/system-overview.md): 19 shared source citations
