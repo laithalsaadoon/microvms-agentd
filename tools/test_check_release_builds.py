@@ -382,13 +382,40 @@ class ReleaseBuildTests(unittest.TestCase):
             [{"run": policy.TAG_PATTERN, "env": {"TAG": "another tag"}}],
         ):
             self.workflow["jobs"]["guard"]["steps"] = steps
-            self.assert_refused("guard must validate")
+            self.assertIn(
+                "guard must validate the release tag before any other step",
+                self.problems(),
+            )
+        self.workflow["jobs"]["guard"] = {"steps": [{"run": policy.TAG_PATTERN}]}
+        self.assertIn(
+            "guard must validate the release tag before any other step", self.problems()
+        )
+        del self.workflow["jobs"]["guard"]
+        self.assertIn(
+            "guard must validate the release tag before any other step", self.problems()
+        )
         self.workflow["jobs"]["guard"] = original
         original_lock = copy.deepcopy(self.lock)
         for field, value in (("lockfileVersion", 2), ("packages", {})):
             self.lock[field] = value
             self.assert_refused("lock must")
             self.lock = copy.deepcopy(original_lock)
+        for field in ("packages", "lockfileVersion"):
+            del self.lock[field]
+            self.assertIn(
+                "the Node lock must match the package's development dependencies",
+                self.problems(),
+            )
+            self.lock = copy.deepcopy(original_lock)
+        self.lock["packages"].pop("node_modules/@napi-rs/cli")
+        self.assertIn("the Node lock must contain the generator", self.problems())
+        self.lock = copy.deepcopy(original_lock)
+        self.lock["packages"].pop("")
+        self.assertIn(
+            "the Node lock must match the package's development dependencies",
+            self.problems(),
+        )
+        self.lock = copy.deepcopy(original_lock)
         for resolved in (
             None,
             "http://registry.npmjs.org/cli.tgz",
@@ -401,6 +428,12 @@ class ReleaseBuildTests(unittest.TestCase):
                 entry["resolved"] = resolved
             self.assert_refused("registry integrity")
             self.lock = copy.deepcopy(original_lock)
+
+    def test_a_missing_generator_manifest_field_is_refused(self):
+        self.package = {}
+        self.assertIn("the Node generator must have an exact version", self.problems())
+        self.package = {"devDependencies": {}}
+        self.assertIn("the Node generator must have an exact version", self.problems())
 
     def test_node_tool_install_must_precede_build_in_its_directory(self):
         install = self.step("addons", "install the locked Node build tools")

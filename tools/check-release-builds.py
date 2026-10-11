@@ -132,15 +132,15 @@ def check(workflow: dict, package: dict, lock: dict) -> list[str]:
         problems.append(
             f"release workflow has no {tool} tool step"  # pragma: no mutate (diagnostic wording does not change the verdict)
         )
-    guard = jobs.get("guard", {}).get("steps", [])
+    guard = jobs.get("guard", {}).get("steps")
     first = guard[0] if guard else {}
     if (
-        TAG_PATTERN not in first.get("run", "")
+        TAG_PATTERN not in str(first.get("run"))
         or first.get("env", {}).get("TAG") != "${{ github.ref_name }}"
     ):
         problems.append("guard must validate the release tag before any other step")
     dependencies = package.get("devDependencies", {})
-    version = dependencies.get("@napi-rs/cli", "")
+    version = str(dependencies.get("@napi-rs/cli"))
     if not EXACT.fullmatch(version):
         problems.append("the Node generator must have an exact version")
     packages = lock.get("packages", {})
@@ -156,7 +156,7 @@ def check(workflow: dict, package: dict, lock: dict) -> list[str]:
     for name, entry in packages.items():
         if name and not (
             entry.get("integrity")
-            and entry.get("resolved", "").startswith("https://registry.npmjs.org/")
+            and str(entry.get("resolved")).startswith("https://registry.npmjs.org/")
         ):
             problems.append(
                 f"the Node lock needs registry integrity for {name}"  # pragma: no mutate (diagnostic wording does not change the verdict)
