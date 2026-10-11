@@ -1094,6 +1094,3 @@ name = "ExecHandle"
 
 [[type]]
 name = "NameRegistry"
-
-[exempt_names]
-ts = { __napiBindingTarget = "a napi-rs build artifact naming the addon's target, not API" }
