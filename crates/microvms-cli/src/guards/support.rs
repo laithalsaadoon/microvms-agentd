@@ -866,7 +866,8 @@ pub(super) async fn against_daemon(
         script: Arc::clone(script),
     };
     let mut out = Output::new(Format::Json, false, Vec::new(), Vec::new());
-    let env = |_: &str| None;
+    let home = tempfile::tempdir().expect("guard home");
+    let env = |name: &str| (name == "HOME").then(|| home.path().to_string_lossy().into_owned());
     let result = {
         let mut ctx = Ctx {
             seam: &seam,
