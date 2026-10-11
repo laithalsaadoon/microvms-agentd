@@ -33,15 +33,11 @@ protocol = { package = "microvms-protocol", version = "0.12.0", path = "../../cr
 # `futures-core` and `tokio-stream` *inside napi* and re-exports both, which is why this
 # crate still declares no `futures-util` of its own (see the note at the bottom of this file).
 #
-# `napi5` and not `napi4`, forced by `web_stream` rather than chosen: napi 3.12's
-# `web_stream` declares only `napi4`, but its `ReadableStream` finalizer calls
-# `napi_add_finalizer`, which `napi-sys` gates behind `napi5`. Building with `web_stream` and
-# `napi4` fails to compile inside napi itself (`napi_add_finalizer` not found in `sys`), so
-# this is an under-declared dependency in that crate rather than a level this addon wanted.
-# Node-API 5 shipped in Node 10.6; `package.json` already requires Node >= 22.13, which
-# supports Node-API 9, so the raise costs no reachable runtime.
+# Node-API 8 enables native type tags. napi checks declared class arguments,
+# class-valued object fields, and getter receivers against those tags before unwrapping.
+# `package.json` already requires Node >= 22.13, which supports Node-API 9.
 napi = { version = "3", default-features = false, features = [
-    "napi5",
+    "napi8",
     "async",
     "web_stream",
 ] }

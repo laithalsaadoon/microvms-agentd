@@ -1,0 +1,35 @@
+# Class conversion is selected by a Cargo feature, so each proof changes that feature
+# and rebuilds the addon before running the ordinary behavior test.
+
+[[fault]]
+id = "js-class-arguments"
+guard = "synchronous class arguments require their declared instance type"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/class_identity.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "bindings/microvms-js/Cargo.toml", replace = '    "napi8",', with = '    "napi5",' }
+
+[[fault]]
+id = "js-async-class-arguments"
+guard = "asynchronous class arguments require their declared instance type"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/class_identity.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "bindings/microvms-js/Cargo.toml", replace = '    "napi8",', with = '    "napi5",' }
+
+[[fault]]
+id = "js-class-getters"
+guard = "native getters require a receiver of their declaring class"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/class_identity.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "bindings/microvms-js/Cargo.toml", replace = '    "napi8",', with = '    "napi5",' }
