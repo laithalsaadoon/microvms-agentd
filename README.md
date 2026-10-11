@@ -237,6 +237,11 @@ one-week minimum retention charge; reuse them. See
 [costs](https://laithalsaadoon.github.io/microvms-agentd/learn/operations/read-the-cost-report/)
 and [recovery](https://laithalsaadoon.github.io/microvms-agentd/learn/operations/recover-a-leaked-vm/).
 
+## Stability
+
+From 1.0.0, the CLI, packages, published crates, and daemon wire protocol follow
+the [stability and deprecation policy](docs/STABILITY.md).
+
 ## Next steps
 
 - [Run a project and collect artifacts](https://laithalsaadoon.github.io/microvms-agentd/learn/tutorial/run-a-project/)
