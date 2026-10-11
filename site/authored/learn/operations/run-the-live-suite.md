@@ -8,7 +8,7 @@ sidebar:
 
 ```bash
 mise run install         # once per clone: the git hooks
-mise run check           # every local gate. Offline, free, no AWS.
+mise run check           # local code checks; creates no AWS resources
 mise run live            # the real-AWS suites. BILLABLE, about fifteen minutes. Deliberate only.
 mise run live:verify-clean
 ```
@@ -17,11 +17,15 @@ This page is for contributors. At the end of it you will know what `mise run che
 
 ## 1. Two tiers, split by cost
 
-`mise run check` is the definition of done for a change: lint, security, every Rust test tier, the schema and stub freshness gates, the model-drift gate against the pinned botocore service model, the publish-set check, the live tier's own wiring check, and the release cross-compile. It creates no AWS resources. Tool installation, security rules, and advisory updates can require network access. The pre-push hook and CI both run it.
+`mise run check` covers local code verification: lint, security, every Rust test tier, the schema and stub freshness gates, the model-drift gate against the pinned botocore service model, the publish-set check, the live tier's own wiring check, and the release cross-compile. It creates no AWS resources. Tool installation, security rules, and advisory updates can require network access. The pre-push hook runs it; CI runs the component tasks through its `ci:` jobs.
+Documentation, binding integration tests, and formal verification have
+additional tasks described in `CONTRIBUTING.md`.
 
 `mise run live` is the set of suites that talk to real AWS. It creates real MicroVMs in your account and costs money whether it passes or fails, so it is never wired to a hook or to push. A gate that spends money on every push is a gate people disable with `--no-verify`, and `--no-verify` also skips the local checks. The hook does print an advisory when the daemon has changed since the last recorded live run.
 
-Never pipe a gate into `head` or `tail`. The pipeline exits with the pager's status, so a failing tier reads as success. Run it bare, or read `${PIPESTATUS[0]}`.
+Preserve a check's exit status when saving its output. Redirect it to a log or
+use your shell's pipeline-status handling; the status of `head` or `tail` alone
+does not report whether the check passed.
 
 ## 2. Separate local checks from AWS verification
 

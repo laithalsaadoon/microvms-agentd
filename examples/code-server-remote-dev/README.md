@@ -1,107 +1,79 @@
-# Remote dev: code-server in a MicroVM, over `port-forward`
+# Use code-server in a MicroVM
 
-This example runs [code-server](https://github.com/coder/code-server), VS Code in a browser, inside a Lambda MicroVM and reaches it through
-`microvm port-forward`. You get a disposable, suspendable dev box whose whole
-lifecycle runs through the CLI, and whose idle time costs roughly snapshot
-storage instead of compute.
+Run [code-server](https://github.com/coder/code-server) in an AWS Lambda
+MicroVM and open it locally through `microvm port-forward`. The example builds
+an image, starts a named VM, starts the IDE as uid 1000, and forwards port 8080.
+The commands create billable AWS resources.
+
+## Start the example
+
+Complete the repository's [AWS setup](https://laithalsaadoon.github.io/microvms-agentd/learn/tutorial/first-run/).
+The script expects `microvm` on PATH and a locally built ARM64 daemon at
+`target/aarch64-unknown-linux-musl/release/agentd`, or a path in `AGENTD`.
+From the repository root:
 
 ```bash
-# from the repo root, with the Getting-started prerequisites in place:
+mise run build
 bash examples/code-server-remote-dev/run.sh
-# then open http://127.0.0.1:8080
+# Open http://127.0.0.1:8080
 ```
 
-The script builds the image on first use (several minutes, server-side),
-launches a named VM, starts code-server inside it, and forwards local
-port 8080. Re-running it reattaches to the same VM instead of launching a
-second one. Ctrl-C stops the forward and nothing else.
+The first image build takes minutes. On later runs, the script reuses the VM
+if its health request succeeds. Ctrl-C stops the local forward. The VM
+keeps running until you call `terminate` or its launch policy ends it.
 
-## The image
+## Image and launch settings
 
-`Dockerfile` starts from the platform's `al2023-1` base pair (same pinned
-digest and same `FROM` rules as
-[coding-agents-on-bedrock](../coding-agents-on-bedrock/README.md), which
-explains them), carries the agentd daemon exactly as the client's default
-Dockerfile does, then installs code-server from its release RPM. The RPM is
-self-contained and bundles its own Node, so the image adds only git and the
-shell basics beside it. The version is pinned by an `ARG` default; edit it to
-bump, and the content-hash-keyed image name makes the edited file build fresh
-under a new name.
+[Dockerfile](Dockerfile) installs a pinned code-server RPM and the guest
+runtime tools. It uses the managed base image, installs agentd, and creates a
+workspace for uid 1000. A changed Dockerfile changes the reusable image name.
 
-## The launch: named, kept, suspendable
+[microvm.toml](microvm.toml) configures a 2048 MiB memory baseline, outbound
+networking, shell access, auto-resume, and an idle window of 900 seconds.
+The launch environment supplies `HOME=/workspace` and an explicit `PATH`.
+
+The script starts code-server detached with `--auth none` and a guest
+loopback listener. The local forward also defaults to loopback and
+supplies the platform's port-scoped proxy credentials. Choose access controls
+appropriate for the host where the forward runs; the example is not a shared
+IDE service.
+
+## Work, suspend, and reconnect
+
+Use the registered name for later commands:
 
 ```bash
-microvm run --keep --vm-name code-server-dev --image "$IMAGE_ARN" --config microvm.toml
+microvm shell --name code-server-dev
+microvm suspend code-server-dev
+microvm resume code-server-dev
 ```
 
-`--vm-name` registers the name in the local registry, so everything after the
-later commands use `--name code-server-dev` to resolve the endpoint, token, and
-VM identifier. `microvm.toml` carries the choices that make this a dev box
-rather than a batch runner:
+Suspend preserves guest memory and disk. It can still interrupt network
+connections, so reload the browser and restart the local forward when needed.
+Inbound endpoint traffic resets the idle timer. An open browser tab alone is
+not a measured guarantee that traffic continues; save work and
+check VM state when returning to the session.
 
-- **`memory = 2048`.** An IDE with language servers is a steadier workload
-  than a peaky agent session, so this keeps the default baseline and its
-  8 GiB ceiling rather than the low minimum the coding-agents example picks.
-- **`egress = true`.** git, package registries, and the extension
-  marketplace all need outbound network.
-- **`shell = true`.** The VM launches with the `SHELL_INGRESS` connector, so
-  `microvm shell --name code-server-dev` opens a real PTY beside the IDE,
-  useful for anything the editor's own terminal is the wrong tool for, and it
-  works even while the browser tab is closed.
-- **`auto-resume = true` + `max-idle-sec = 900`.** The suspend loop, below.
+The example uses the default lifetime and suspended window. Its lifetime
+limit is one hour, and its suspended window is ten minutes, despite its
+fifteen-minute running idle window. Auto-resume
+cannot revive a VM after termination. Set the launch policy deliberately if a longer
+session is needed; the service supports a lifetime of up to eight hours.
+See [Suspend and resume](../../docs/SUSPEND-RESUME.md) for measured behavior.
 
-The `[env]` table sets `HOME=/workspace` (code-server runs demoted and needs
-somewhere uid 1000 can write settings and extensions) and an explicit `PATH`.
-The daemon starts execs with a minimal environment; the coding-agents example
-describes the required path entries.
+## Save results and clean up
 
-## The suspend/resume loop is what makes this cheap
-
-Suspend is a freeze followed by a restore: `docs/PLATFORM.md`
-measured that the filesystem, running processes, and the endpoint URL all
-survive a suspend/resume cycle. For a dev box that means unsaved buffers and
-the terminal you left open come back exactly as you left them.
-
-The loop wires itself: an open editor tab holds a live WebSocket, which is
-inbound traffic, and inbound traffic resets the platform's idle timer
-(`docs/PLATFORM.md` measured that even an outside health poll does). The
-VM stays `RUNNING` while you work, suspends about 15 minutes after you close
-the tab, and, because the config sets `auto-resume`, resumes on the next
-request through the endpoint. Reload the tab (with the forward still up, or
-re-run `run.sh`) and you are back. A suspended VM bills roughly snapshot
-storage alone, which is what makes leaving it suspended overnight reasonable.
-
-One ceiling to plan around: the platform caps any single VM's life at eight
-hours (`maximumDurationInSeconds`, max 28800, a service-model constraint
-recorded in `docs/PLATFORM.md`). Use this VM for temporary development sessions. Get work out before the ceiling with git from inside the IDE, or from
-outside with:
+Copy the files you need before the VM shuts down:
 
 ```bash
 microvm cp --tar vm:/workspace ./workspace-backup.tar --name code-server-dev
+microvm terminate code-server-dev --wait
 ```
 
-## Why `--auth none` is sound here
+The backup is a tar file. Review its contents before restoring it on the host.
+The reusable image remains after VM termination; delete it separately when
+retiring the environment. Snapshot storage is charged for at least one week. Check `microvm ls --remote` and cleanup reports for resources that
+remain.
 
-Other layers already gate the path to the IDE. The local listener binds
-`127.0.0.1`, so nothing off your machine reaches the forward. Every request
-the forward relays crosses the endpoint proxy, which requires a JWE auth
-token scoped to this specific MicroVM and port set
-(`docs/PLATFORM.md`, "Endpoint authentication"). `port-forward` mints and
-attaches it for you. And inside the guest, code-server itself binds loopback
-only. A password prompt on top of that would authenticate nothing the proxy
-token has not already authenticated, so the example turns it off rather than
-teach a password that does no work.
-
-The demotion matters more: `run.sh` starts code-server with `--user 1000`,
-because an IDE provides a terminal to whoever reaches it, and that terminal
-should not be root's.
-
-## Teardown
-
-```bash
-microvm terminate --name code-server-dev
-```
-
-The image persists deliberately (its snapshot has a one-week minimum
-retention, so reuse is cheaper than rebuild); delete it with
-`aws lambda-microvms delete-microvm-image` when you are done with the recipe.
+This documentation refresh checked the script and launch defaults locally.
+It did not repeat a live AWS or browser session.

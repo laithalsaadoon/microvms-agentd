@@ -13,7 +13,10 @@ microvm image-builds <image> <version>    # each build's state and the reason a 
 microvm history <microvm-id-or-name>      # what was asked, and what the platform said back
 ```
 
-A server-side build cycle is minutes long and its error surfaces point away from their causes. At the end of this page you will know which surface carries a build's reason, how to read the log, what `ERR_BUILD_WEDGED` means for the image name, and which of these failures the client refuses locally now.
+Start with the error envelope, then inspect the build record and its logs.
+Check prerequisites and image inputs before paying for another build. The
+steps below distinguish a rejected request, a failed image build, and a VM
+that failed after launch.
 
 ## 1. Read the exit code and the envelope first
 

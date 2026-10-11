@@ -9,7 +9,7 @@
 > its own coverage line from what ran (`expressed = passed + failed`, denominator
 > plus skips), so no document has to keep a quoted figure in step. As a result,
 > the "38 of 72" below describes the state on the day the plan was written and is
-> no longer accurate. Every figure below this note was measured at `83ef41b`, the
+> no longer accurate. Every figure below this note was measured on 2026-08-09 at `83ef41b`, the
 > commit that added this plan. The numerator is now complete. The denominator grew
 > past 72, because some of the original checks turned out to be weak
 > readings off the launch envelope and were split into real checks (see
@@ -42,7 +42,7 @@ against real AWS, which is why these paths need live coverage.
 | exec identity (`--exec-id`, `--poll`) + `microvm ack` | 6 | ack accepted; double-ack 409; unknown id 404; retried start accepted / spawned no second child; pre-suspend exec record survives resume |
 | `microvm health` | 5 | identity repair completed every step / actually ran; 8 MiB cap trio (noisy exit 0, `truncated` flag, daemon survived: survival is the health probe) |
 
-Totals reconcile: 13+5+5+6+5 = 34 (29 UNSUPPORTED entries + 4 hostile archives + the pre-suspend exec record noted inline at run_rs.py:1050).
+Totals reconcile: 13+5+5+6+5 = 34 (29 UNSUPPORTED entries + 4 hostile archives + the pre-suspend exec record in that historical revision).
 
 ## Design constraints that carry over (not negotiable)
 

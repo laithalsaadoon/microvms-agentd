@@ -17,7 +17,7 @@ never gets bootstrapped.
 | `POST HOOKS/run` | none (platform hook) | one-shot token bootstrap from `runHookPayload`, plus the optional launch environment; the winning bootstrap repairs identity and runs the workload's `run` handler |
 | `POST HOOKS/suspend` | none (platform hook) | runs the workload's `suspend` handler, then acknowledges |
 | `POST HOOKS/resume` | none (platform hook) | runs the workload's `resume` handler, then acknowledges; memory, processes, and the token survive a suspend ([Suspend and resume](SUSPEND-RESUME.md)) |
-| `POST HOOKS/terminate` | none (platform hook) | runs the workload's `terminate` handler; acknowledged; begins graceful shutdown |
+| `POST HOOKS/terminate` | none (platform hook) | runs the workload's `terminate` handler, then acknowledges; server shutdown is signal-driven |
 | `POST /v1/exec/start` | bearer | start a command under a caller-minted `exec_id` |
 | `GET /v1/exec/{id}` | bearer | poll status and output; never mutates |
 | `GET /v1/exec/{id}/stream?offset=` | bearer | follow output as SSE from a byte offset |
@@ -138,9 +138,9 @@ by the snapshot, and every VM launched from one image shared its machine-id
 
 ## Rules that exist because a defect proved them necessary
 
-Each of these rules comes from a real bug found during the Harbor PR #2469
-integration. They are part of the protocol contract, so implementations must
-follow them.
+These rules describe the daemon contract and are covered by the repository's
+model and regression tests. A client must preserve them when reconnecting or
+retrying an operation.
 
 **Bootstrap is one-shot, and a replay of the identical token succeeds.** A first
 `/run` installs the token and returns 200. A later `/run` carrying the same token

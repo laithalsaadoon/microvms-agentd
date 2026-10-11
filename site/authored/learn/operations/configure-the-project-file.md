@@ -26,7 +26,10 @@ RUST_LOG = "debug"
 CI = "1"
 ```
 
-Every knob in the file already exists as a `run` flag. The file adds no capability, only persistence, so `microvm run` in a configured project needs zero flags. At the end of this page you will have a `microvm.toml` that pins your project's launch, validated by `doctor`, and you will know which source won for each knob.
+Use `microvm.toml` to persist launch settings and artifact-selection globs.
+Most settings have a matching `run` flag; `artifacts` is configured only in the
+file. Validate the file with `doctor` before launching, and inspect
+`resolvedConfig` in the run result to see which source supplied each setting.
 
 ## 1. Where it is read
 
@@ -80,4 +83,5 @@ microvm doctor --config microvm.toml
 
 ## 6. The shipped examples
 
-Each example directory carries a `microvm.toml` that parses through the real loader, and a test pins that the coding-agents file still does. [coding-agents-on-bedrock](https://github.com/laithalsaadoon/microvms-agentd/blob/main/examples/coding-agents-on-bedrock/microvm.toml) pins `memory = 1024` with the sizing rule in its comments; [code-server-remote-dev](https://github.com/laithalsaadoon/microvms-agentd/blob/main/examples/code-server-remote-dev/microvm.toml) sets `egress`, `shell`, `auto-resume`, `max-idle-sec`, and an `[env]` table; [s3-prefetch-at-build](https://github.com/laithalsaadoon/microvms-agentd/blob/main/examples/s3-prefetch-at-build/microvm.toml) pins `egress = false` to prove a point. [Run a project through a VM](/learn/tutorial/run-a-project/) is where `artifacts` selects the output files, and [`run`](/reference/commands/run/) lists every flag the file persists.
+Each example directory carries a `microvm.toml` that parses through the real loader, and a test pins that the coding-agents file still does. [coding-agents-on-bedrock](https://github.com/laithalsaadoon/microvms-agentd/blob/main/examples/coding-agents-on-bedrock/microvm.toml) pins `memory = 1024` with the sizing rule in its comments; [code-server-remote-dev](https://github.com/laithalsaadoon/microvms-agentd/blob/main/examples/code-server-remote-dev/microvm.toml) sets `egress`, `shell`, `auto-resume`, `max-idle-sec`, and an `[env]` table; [s3-prefetch-at-build](https://github.com/laithalsaadoon/microvms-agentd/blob/main/examples/s3-prefetch-at-build/microvm.toml) uses `egress = false` while reading prefetched data. That value does not enforce
+internet isolation. [Run a project through a VM](/learn/tutorial/run-a-project/) is where `artifacts` selects the output files, and [`run`](/reference/commands/run/) lists every flag the file persists.

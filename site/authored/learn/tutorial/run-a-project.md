@@ -50,7 +50,9 @@ Only glob-matched regular-file members land, and never under `.git`. Symlinks, h
 
 ## 5. Bake the dependencies into the image
 
-Every launch of a plain image pays dependency installation inside the guest, and it needs `--egress` to do it. `build --project` moves that work into the image:
+If each task installs the same dependencies, `build --project` can move that
+work into the image. Package downloads require network access in whichever
+phase performs them:
 
 ```bash
 microvm build --project . --reuse --name ci --json
@@ -58,7 +60,7 @@ microvm build --project . --reuse --name ci --json
 
 Exactly one ecosystem's manifest and lockfile pair must be present in the directory: `pyproject.toml` with `uv.lock`, `package.json` with `package-lock.json`, or `Cargo.toml` with `Cargo.lock`. Only that pair is zipped into the build context beside the Dockerfile; nothing else in the directory enters the shared image snapshot. The derived Dockerfile copies the pair into `/project` and installs from the lockfile (`uv sync --locked`, `npm ci`, or `cargo fetch --locked`), each of which refuses a lockfile that disagrees with its manifest.
 
-With `--reuse`, the pair joins the content hash. The image name becomes `<name>-<hash12>`, an unchanged project reuses its image in well under a second with `reused: true`, and a lockfile-only edit builds a fresh image under a new name. The lockfile is the identity, and the layer follows it: [Platform](/internals/platform/) measured a launch-to-first-import delta of about twenty seconds for the smallest project `--project` accepts, paid for by a build about fifteen seconds longer.
+With `--reuse`, the pair joins the content hash. The image name becomes `<name>-<hash12>`, an unchanged project can reuse its image with `reused: true`, and a lockfile-only edit builds a fresh image under a new name. The lockfile is the identity, and the layer follows it: [Platform](/internals/platform/) measured a launch-to-first-import delta of about twenty seconds for the smallest project `--project` accepts, paid for by a build about fifteen seconds longer.
 
 Take the image identifier off the build envelope and launch the project against it:
 

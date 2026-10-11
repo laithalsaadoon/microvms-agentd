@@ -59,7 +59,9 @@ microvm cp --tar ./project.tar vm:/workspace --name dev
 microvm cp --tar vm:/workspace ./workspace-backup.tar --name dev
 ```
 
-`vm:/path` names the VM side; anything else is a local path. `--tar` moves a whole directory tree as an uncompressed tar archive, and extraction in the guest is confined so a hostile archive cannot write outside its target. `--mode` sets the permissions of an uploaded file, octal as a string (`644`, `0755`). The daemon runs as root, so an uploaded file is root-owned; a workload you run demoted with `--user` needs a `chown` exec before it can read one.
+`vm:/path` names the VM side; anything else is a local path. `--tar` moves a whole directory tree as an uncompressed tar archive, and extraction in the guest is confined so a hostile archive cannot write outside its target. `--mode` sets the permissions of an uploaded file, octal as a string (`644`, `0755`). The daemon writes as root. Choose a mode that permits the intended reader;
+change ownership when a demoted workload needs to write the file or read an
+owner-only file.
 
 ## 4. Freeze and thaw it
 
@@ -70,7 +72,9 @@ microvm resume dev
 
 `suspend`, `resume`, and `terminate` take the MicroVM id as their positional argument, and a registered name stands in for it: a bare name is resolved through the local registry with zero AWS calls, and anything shaped like an id passes through.
 
-Suspend freezes the VM. Memory, the filesystem, the agent token, and the endpoint survive, and a running process resumes mid-flight. A suspended VM pays snapshot storage only, and each suspend/resume cycle pays a snapshot write plus a read, so a long suspension is cheap and constant cycling is the habit to avoid.
+Suspend freezes the VM. Memory, the filesystem, the agent token, and the endpoint survive, and a running process resumes mid-flight. Suspended VMs incur snapshot storage charges, and each suspend/resume cycle
+adds a snapshot write and read. Compare those costs with remaining running
+before choosing a suspension policy.
 
 The platform also suspends on its own. `--max-idle-sec` (default 600) suspends the VM after that much inbound-traffic idleness, `--suspended-sec` (default 600) terminates it after that long suspended, and `--auto-resume` lets the platform resume a suspended VM on an incoming request. A resume past the suspended window cannot work: the platform terminates the VM, `microvm resume` fails with the service's error or on its dead-state wait, and no call extends the window once the VM is launched. The SDKs refuse such a resume up front with `ERR_WINDOW_CLOSED` when the same `Sandbox` launched the VM. `--max-duration-sec` (default 3600) is the hard ceiling on the VM's life and is refused above 28800 (eight hours) before any call.
 

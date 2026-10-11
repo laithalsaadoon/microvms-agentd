@@ -1,124 +1,87 @@
-# S3 prefetch at image build: pay the first S3 call once, in the build
+# Prefetch S3 data into an image
 
-Issue #81 records a measured 5 to 10 second penalty on a fresh VM's first S3
-call, endorsed in-channel by the platform team as suitable for this build pattern
-(that conversation is the figure's source; this repo's docs do not carry the
-measurement). For a workload that starts by pulling model weights, a dataset,
-or a toolchain from S3, that penalty, plus the whole transfer, lands on
-every launch.
+This example attempts to copy an S3 prefix into `/opt/prefetch` before the
+image snapshot is captured. A successful snapshot can then supply those files
+to later VMs without another startup download. The workflow is experimental:
+network access and credentials in the snapshot-build process have not been
+verified here against live AWS.
 
-This recipe moves both to image-build time. The build fetches the S3 prefix
-into `/opt/prefetch` while the snapshot VM is starting up, the snapshot is
-captured *after* that finishes, and every VM launched from the image starts
-with the data already on disk. The launched VM makes no S3 call. The
-demo launches without `--egress`, which requests no outbound connector, to
-show the data is already there. That omission is not a seal: the platform
-gives a connector-less VM outbound network anyway (`docs/PLATFORM.md`), and
-the run says so as `egressPosture: unsealed`. The demonstration is that no
-S3 call is needed, not that one could not be made.
+## Run the example
+
+Complete the repository's [AWS setup](https://laithalsaadoon.github.io/microvms-agentd/learn/tutorial/first-run/).
+The script expects `microvm` and a locally built ARM64 daemon, or its path in
+`AGENTD`. From the repository root:
 
 ```bash
-# from the repo root, with the Getting-started prerequisites in place:
+mise run build
 PREFETCH_URI=s3://my-bucket/models/ bash examples/s3-prefetch-at-build/run.sh
-# public bucket, zero credentials:
-PREFETCH_URI=s3://a-public-bucket/prefix/ PREFETCH_NO_SIGN=1 bash examples/s3-prefetch-at-build/run.sh
+# For a public bucket, skip request signing:
+PREFETCH_URI=s3://a-public-bucket/prefix/ PREFETCH_NO_SIGN=1 \
+  bash examples/s3-prefetch-at-build/run.sh
 ```
 
-## The mechanism, and why it is safe to rely on
+These commands create billable AWS resources. A public bucket avoids the need
+for credentials on the download, but still needs working network access in
+the build process.
 
-An image build boots the image in a snapshot VM, calls the build-time hooks
-(`/ready`, `/validate`) against the daemon, and captures the memory and disk
-snapshot only after they answer. These sources describe the ordering:
+## Startup wrapper
 
-- `crates/agentd/src/state.rs` (the hook log): "build-time hooks (validate, ready)
-  fire in the snapshot VM **before the snapshot is taken**, so their records
-  ride the memory image into every VM launched from it."
-- `crates/agentd/src/routes.rs` (`ready_hook`): "the snapshot is taken after this
-  fires."
-- `docs/PLATFORM.md` (failed-build shapes): a build whose ready hook timed
-  out has `codeInstallSizeInBytes` and **no snapshots**; the snapshot does
-  not exist until the hooks have answered.
+[Dockerfile](Dockerfile) installs AWS CLI v2 and creates `/start.sh`. That
+wrapper runs `aws s3 sync`, changes the downloaded files' ownership to uid
+1000, and then uses `exec /agentd`. Agentd cannot answer the build's readiness
+hook until the copy completes. The snapshot process follows readiness; the
+ordering is the reason to put this work before starting the daemon.
 
-Anything that completes before the daemon answers those hooks is inside
-the snapshot. This wrapper (`/start.sh`, materialized in the Dockerfile)
-runs the `aws s3 sync` first and only then `exec`s agentd, strictly
-ordered: the daemon cannot answer a hook until the sync is done, and the
-snapshot cannot be captured until the daemon answers.
+The image's `CMD` is the wrapper, which must finish initialization and hand
+control to agentd. It must not start task workloads before launch bootstrap.
+The repository's ordinary images use agentd directly as `CMD`.
 
-A note on the issue's phrasing, "prefetch inside the `/validate` hook":
-agentd's `/validate` handler is not user-extensible (it records the firing
-and answers 200, and per the platform-primitives constraint, agent- and
-workload-specific behavior stays out of platform code). Running the prefetch
-immediately before the daemon starts serving hooks uses the same build-time
-window and is captured by the same snapshot; if you ship your own daemon
-instead of agentd, running the prefetch inside your `/validate` handler is the
-equivalent placement, with up to 3600 seconds of budget
-(`docs/PLATFORM.md`, hook-timeout table).
+The wrapper runs with `set -e`, so a failed copy stops it instead of producing
+a supposedly ready daemon. Read the build record and logs to determine the
+actual failure. A timeout alone does not establish a credential failure.
+`microvm logs <image-name>` prints the log-reading command.
 
-The same rule shows up in practice, observed in `docs/PLATFORM.md`:
+## Build environment and time limits
 
-- **Budget.** The model allows build hooks 3600 seconds, but an observed
-  failure reads `Ready hook invocation timed out after PT5M`. Plan the
-  transfer to fit well inside five minutes, and measure before assuming the
-  full hour is reachable.
-- **Twice per build, never at launch.** One build runs the snapshot pass for
-  each chipset generation (Graviton 3 and 4), so the prefetch downloads
-  twice per image. A launch *restores* the snapshot rather than re-running
-  `CMD`, so it never prefetches.
+The repository has observed outbound package downloads during the container
+build phase. That does not establish the same network or credential behavior
+in the later snapshot phase. For a private bucket, the AWS CLI uses its
+credential chain, and the build role needs the intended read permission if
+its credentials are supplied there. Do not bake credentials into the image.
 
-## Fail loud, not empty
+[Platform](../../docs/PLATFORM.md) records an observed readiness timeout of
+five minutes, despite the larger hook limit present in the service model.
+Measure your transfer within the real build budget. The snapshot pass can
+run for multiple chipset variants, so do not assume one download per image.
 
-The wrapper is `set -e`: a failed sync means agentd never starts, the ready
-hook times out, and the **build fails with a named reason** instead of
-producing an image whose snapshot silently lacks the data. The failure
-signature is `stateReason: Ready hook invocation timed out after PT5M` on
-the **build** record (`docs/PLATFORM.md` documents which of the failed-build shapes
-carries the reason), and the wrapper's own log lines are in the build log
-group. `microvm logs` prints the `aws logs tail` command that reads them. An empty `PREFETCH_URI` skips the prefetch with a log line,
-so the Dockerfile also builds as checked in; `run.sh` refuses to run without
-a URI so the demo cannot "pass" by fetching nothing.
+A container `RUN` step is another place to prepare data when its build-time
+access is established. Its files also enter the image. Choose that placement
+when initialization does not require the snapshot process.
 
-## Verify credentials at build time
+## Verify the restored data
 
-The prefetch runs inside the build's snapshot VMs, under whatever network
-and credentials the build environment provides. What this repo has actually
-established: the build's **docker-build** VM demonstrably has outbound
-network (every `dnf install` and `npm install` in these examples runs
-there). Whether the **snapshot** VMs have the same egress, and whether the
-build role's credentials are visible to the app process there, has not been
-measured here.
+After a successful build, the script launches the image and inspects
+`/opt/prefetch` as uid 1000. Confirm the expected files and contents, rather
+than only checking that the directory exists.
 
-- `PREFETCH_NO_SIGN=1` (public bucket) is the zero-assumption mode: no
-  credential chain involved.
-- For a private bucket, the AWS CLI walks its default chain. Grant the
-  build role read on the prefix and try it; if the build fails with the
-  PT5M signature and the wrapper's log shows a credential or network error,
-  that is a real finding about the snapshot VMs and needs an issue.
+[microvm.toml](microvm.toml) leaves `egress` false. That omits the managed
+internet connector but does not enforce internet isolation. The example
+shows how to avoid a required startup S3 call; it does not establish that the
+VM cannot make one. See [Networking](../../docs/NETWORKING.md).
 
-An alternative with a proven network path: run the sync as a docker `RUN`
-step instead of in the wrapper. It executes in the docker-build VM (where
-outbound network is demonstrated), lands in the image filesystem, and
-reaches the launched VM through the same disk snapshot. The wrapper
-placement is the one the issue asks for and the one that generalizes to
-warm-up work that must happen at app start; the `RUN` placement is the
-conservative fallback if your build environment turns out not to give the
-snapshot VMs egress.
+## Reuse, changes, and cleanup
 
-## Do not prefetch secrets
+The script writes the URI and signing mode into the Dockerfile it builds.
+Those values affect the reusable image name. Content changing at the same S3
+URI does not change that name, so an existing image can retain old data. Use
+versioned input locations or deliberately rebuild when the data changes.
 
-The snapshot is shared by every VM launched from the image. Anything
-prefetched into it is readable by all of them. The platform docs give the same
-reasoning for delivering per-VM secrets through `runHookPayload`
-at launch instead of baking them into a shared snapshot
-(`docs/PLATFORM.md`, "Traffic ordering around the `/run` hook"). Prefetch
-data, models, and toolchains; deliver tokens and keys at launch, the way
-[coding-agents-on-bedrock](../coding-agents-on-bedrock/README.md) does.
+Shared snapshots must contain only data appropriate for every VM launched
+from them. Deliver per-VM credentials after launch. The downloaded bytes also
+increase snapshot storage and read costs; select only what the workload
+needs.
 
-## Rebuilds and cost
-
-`run.sh` bakes the URI into the Dockerfile it builds, so the image name, keyed to the Dockerfile's content hash, changes when the URI does: same
-URI reuses the already-prefetched image in seconds, new URI builds fresh.
-The prefetched bytes live in the image snapshot, which bills storage with a
-one-week minimum retention, and every launch pays a snapshot read scaled by
-its size, so prefetch what the workload reads at startup, not the whole
-bucket. Delete retired images with `aws lambda-microvms delete-microvm-image`.
+Inspect the script's cleanup result and check remaining resources. Images are
+retained for reuse and can be deleted when retired; their snapshot storage has
+a one-week minimum retention charge. This refresh was checked locally;
+AWS execution remains unverified.

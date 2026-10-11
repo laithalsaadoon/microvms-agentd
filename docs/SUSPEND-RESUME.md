@@ -73,10 +73,11 @@ The idle policy is set at `RunMicrovm` and cannot be changed afterward.
 
 Images declare `suspend` and `resume` hooks, each with a 1 to 60 second timeout
 (AWS, `MicrovmHooks`). agentd serves both and records each call on `/v1/health`.
-It does not yet run workload code on them;
-[#198](https://github.com/laithalsaadoon/microvms-agentd/issues/198) tracks
-that. Until then, a workload should treat every outbound connection as possibly
-dead after any pause and reconnect on error.
+Executable workload handlers in `/etc/agentd/hooks.d/` run for `run`, `suspend`,
+`resume`, and `terminate`. Their outcomes appear in the health response. See
+[Protocol](PROTOCOL.md#workload-hook-handlers) for budgets and invocation rules.
+Treat outbound connections as possibly dead after a pause and reconnect on
+error even when a handler is installed.
 
 ## Capacity and cost
 
@@ -97,7 +98,9 @@ says to generate unique IDs, secrets, and random values after a VM starts, in
 the `/run` hook, because every VM from an image starts from one memory
 snapshot. Measured 2026-09-23: two VMs from one image had an identical
 `boot_id` and `machine-id`, while the kernel random UUID differed. [#205](https://github.com/laithalsaadoon/microvms-agentd/issues/205)
-tracks per-VM identity.
+records the identity-repair work. The daemon now performs repair on the
+winning run hook; [Protocol](PROTOCOL.md#identity-repair-per-vm) describes the
+current health fields. The measurements above describe the earlier behavior.
 
 ## Unknowns
 

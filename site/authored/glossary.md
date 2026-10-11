@@ -88,20 +88,22 @@ scheduled. The client scopes a create token to a single build attempt. See
 
 ### Conformance suite
 
-The live tier of verification, run against real MicroVMs by `mise run live`. It exercises the whole
-surface through the `microvm` CLI, costs money, and takes roughly a quarter of an hour, which is why
-`mise run check` is the offline definition of done and says nothing about it. See
+The live tier of verification, run against real MicroVMs by `mise run live`. It exercises selected workflows through the `microvm` CLI and costs money.
+`mise run check` creates no AWS resources and does not establish live
+conformance. See
 [CLI coverage plan](/internals/cli-coverage-plan/) and [Strategy](/internals/strategy/).
 
 ### Control API
 
 The daemon's own routes under `/v1/`: exec, files, health, schema. They are distinct from the platform's
-lifecycle hooks, whose paths the platform fixes and which stay unversioned. Control routes answer 503
-before bootstrap, never 404 and never a dropped connection. See [Protocol](/internals/protocol/).
+lifecycle hooks, whose paths the platform fixes and which stay unversioned.
+Authenticated control routes answer 503 before bootstrap. Health and schema
+remain available without an agent token. See [Protocol](/internals/protocol/).
 
 ### Control plane and session plane
 
-The two halves of the client. The control plane, in `microvms-core`, wraps the service API: build,
+The control plane and session plane serve different endpoints. The control
+plane, re-exported through `microvms-core`, wraps the service API: build,
 launch, suspend, resume, terminate. The session plane talks to `agentd` through the VM's authenticated
 endpoint: exec, streaming, files, port forwarding. The CLI and the Python and Node bindings are thin
 shells over both. See [System overview](/internals/architecture/system-overview/).
@@ -234,8 +236,9 @@ answered in under a second with `reused: true`. See [Platform](/internals/platfo
 
 The string passed to `RunMicrovm` and delivered to the daemon's `/run` hook at launch, wrapped one JSON
 layer deeper than the caller wrote it. It carries the agent token, an optional launch environment, and
-the identity seed for a verified tunnel, and it is capped at 4096 bytes. It is the only per-VM secret
-channel: a secret baked into the image is shared by every VM restored from the snapshot. See
+the identity seed for a verified tunnel, and it is capped at 4096 bytes. Larger per-VM files can be delivered through the authenticated session after
+bootstrap. A secret baked into the image is shared by every VM restored from
+the snapshot. See
 [Platform](/internals/platform/).
 
 ### Snapshot
@@ -261,6 +264,7 @@ a symlink is refused with 400. It needs Linux 5.6 or newer, and the guest kernel
 
 ### Two tiers of document
 
-The standing rule about reliability under Internals. The hand-written documents carry measured
-findings and design rationale and win any disagreement; the generated categories carry `path:line`
-citations pinned to a commit, which is their value and their expiry date. See [Internals](/internals/).
+Internals includes dated platform observations and source analyses with
+commit-pinned citations. Check a claim against its evidence and revision. The
+current code and generated executable contracts take precedence
+when prose is stale. See [Internals](/internals/).
