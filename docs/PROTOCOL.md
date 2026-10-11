@@ -579,9 +579,9 @@ What each side does when the tunnel ends without the end of stream of a peer tha
 | Daemon | a close frame, a transport error, a hangup, or a frame that doesn't authenticate | the guest connection is reset rather than closed, so a guest reading to its EOF sees a broken stream |
 
 **Version compatibility.** Protocol 2 peers must use the shared prologue and ready message.
-A peer refuses a protocol 1 handshake. Both peers stop on a failed handshake without retrying
-an unbound handshake or a plain tunnel. Rebuild older guest images and update their clients together before using
-verified tunnels. Plain tunnels and unchanged HTTP shapes keep their existing behavior.
+A peer refuses a protocol 1 handshake. Both peers stop if the handshake fails. They do not retry
+with an unbound handshake or switch to a plain tunnel. Rebuild older guest images and update their
+clients together before using verified tunnels. Plain tunnels and unchanged HTTP shapes keep their existing behavior.
 A protocol 2 peer may omit the end-of-stream offer and end with `ClosedUnproven`. That
 optional offer does not relax the rules for the prologue and ready message.
 
