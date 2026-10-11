@@ -244,6 +244,24 @@ mod tests {
         assert!(store.put(&record("example", "microvm-1")).is_err());
     }
 
+    #[test]
+    fn explicit_state_settings_override_home_and_empty_settings_use_home() {
+        let home = TempDir::new("state-override");
+        let absolute = home.0.join("chosen-state");
+        for (setting, expected) in [
+            ("chosen-state".to_string(), PathBuf::from("chosen-state")),
+            (absolute.to_string_lossy().into_owned(), absolute),
+            (String::new(), home.0.join(".microvm").join("runs")),
+        ] {
+            let env = |key: &str| match key {
+                "MICROVM_STATE_DIR" => Some(setting.clone()),
+                "HOME" | "USERPROFILE" => Some(home.0.to_string_lossy().into_owned()),
+                _ => None,
+            };
+            assert_eq!(state_root(&env).expect("state root"), expected);
+        }
+    }
+
     struct TempDir(PathBuf);
 
     impl TempDir {

@@ -143,3 +143,19 @@ run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "provi
 expect = "test-failed"
 suite = "rust"
 patch = "verify/guards/faults/f2p-a-body-over-its-limit-is-refused.patch"
+
+[[fault]]
+id = "state-root-explicit-setting-precedence"
+guard = "names::tests::explicit_state_settings_override_home_and_empty_settings_use_home"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "names::tests::explicit_state_settings_override_home_and_empty_settings_use_home"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/names.rs", replace = "env(\"MICROVM_STATE_DIR\").filter(|dir| !dir.is_empty())", with = "env(\"MICROVM_STATE_DIR\").filter(|dir| dir.is_empty())" }
+
+[[fault]]
+id = "suspend-history-settled-state"
+guard = "guards::history::a_suspend_records_history_only_when_the_platform_reports_suspended"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::history::a_suspend_records_history_only_when_the_platform_reports_suspended"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "if settled.state == \"SUSPENDED\" {", with = "if settled.state != \"SUSPENDED\" {" }

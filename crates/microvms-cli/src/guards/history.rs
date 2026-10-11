@@ -23,10 +23,45 @@ use super::support::{
     DaemonScript, STARTED_BODY, ScriptedSeam, ScriptedTransport, TempDir, against_daemon,
     attach_flags, dispatch_with, exec_command, full_infra, microvm_body, poll_body, region_flags,
 };
-use crate::cli::{AttachFlags, Command, HealthArgs, ResumeArgs, TerminateArgs};
+use crate::cli::{AttachFlags, Command, HealthArgs, ResumeArgs, SuspendArgs, TerminateArgs};
 use crate::exit::Exit;
 use crate::seam::futures_util_shim::BoxFuture;
 use crate::seam::{Attach, CoreSeam};
+
+#[tokio::test]
+async fn a_suspend_records_history_only_when_the_platform_reports_suspended() {
+    for (state, exit, expected_events) in [
+        ("SUSPENDED", None, vec!["suspended"]),
+        ("TERMINATED", Some(Exit::Platform), vec![]),
+    ] {
+        let dir = TempDir::new("history-suspend");
+        let transport = Arc::new(ScriptedTransport::new());
+        transport
+            .answer("GetMicrovm", 200, &microvm_body("RUNNING"))
+            .answer("SuspendMicrovm", 200, "{}")
+            .answer("GetMicrovm", 200, &microvm_body(state));
+        let seam = ScriptedSeam {
+            transport: Arc::clone(&transport),
+            clock: Arc::new(YieldingClock::default()),
+        };
+        let command = Command::Suspend(SuspendArgs {
+            microvm_id: "mvm-abc123".into(),
+            timeout: Duration::from_secs(30),
+            state_dir: Some(dir.0.clone()),
+            region: region_flags(),
+        });
+        let (result, _) = dispatch_with(&seam, &command, full_infra()).await;
+        let rendered = result.expect("the settled state is reported");
+        assert_eq!(rendered.data["state"], state);
+        assert_eq!(rendered.already_reported, exit);
+        let events = crate::history::read_events(&dir.0, "mvm-abc123");
+        let kinds: Vec<_> = events
+            .iter()
+            .map(|event| event["event"].as_str().expect("event name"))
+            .collect();
+        assert_eq!(kinds, expected_events, "settled state: {state}");
+    }
+}
 
 #[tokio::test]
 async fn a_terminate_appends_a_terminated_event_that_survives_the_command() {
