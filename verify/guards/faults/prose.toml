@@ -1,0 +1,43 @@
+# Prose gate: input coverage, error rejection, and independent warning ceilings.
+
+[[family]]
+guard = "tools/test_prose.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_prose.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+# No nonempty prose input.
+[[family.fault]]
+id = "prose-input-floor"
+message = "FAIL: test_empty_or_unreadable_scan_fails"
+transform = { file = "tools/prose.py", replace = "    if not names or not any(text.strip() for text in contents):\n", with = "    if False:\n" }
+
+# Unreadable file listing.
+[[family.fault]]
+id = "prose-unreadable-input"
+message = "FAIL: test_empty_or_unreadable_scan_fails"
+transform = { file = "tools/prose.py", replace = "    if result.returncode:\n", with = "    if False:\n" }
+
+# Errors are always rejected.
+[[family.fault]]
+id = "prose-error-sentinel"
+message = "FAIL: test_errors_always_fail"
+transform = { file = "tools/prose.py", replace = "    errors = [r for r in rows if r[\"Severity\"] == \"error\"]\n", with = "    errors = []\n" }
+
+# Warning budgets stay per rule.
+[[family.fault]]
+id = "prose-warning-per-rule"
+message = "FAIL: test_each_warning_rule_has_its_own_ceiling"
+transform = { file = "tools/prose.py", replace = "        if count > limits.get(rule, 0)\n", with = "        if count > sum(limits.values())\n" }
+
+# Warning ceilings cannot grow.
+[[family.fault]]
+id = "prose-baseline-growth"
+message = "FAIL: test_baseline_cannot_increase_from_base"
+transform = { file = "tools/prose.py", replace = "        if count > old.get(rule, 0)\n", with = "        if False\n" }
+
+# Authored site prose is in scope.
+[[family.fault]]
+id = "prose-authored-scope"
+message = "FAIL: test_all_maintained_areas"
+transform = { file = "tools/prose.py", replace = "    if name.startswith((\"docs/\", \"site/authored/\")):\n", with = "    if name.startswith(\"docs/\"):\n" }

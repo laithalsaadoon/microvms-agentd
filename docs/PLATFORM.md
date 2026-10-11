@@ -84,7 +84,7 @@ see [Networking](NETWORKING.md).
 
 ## `CreateMicrovmAuthToken` returns a header map
 
-Measured 2026-08-05. `authToken` is a header map, not a string. Read
+Measured 2026-08-05. `authToken` is a map of headers. Read
 `authToken["X-aws-proxy-auth"]`, and send `X-aws-proxy-port` with the target
 port. Preserve the header-map contract rather than assuming the response can
 never contain another header.
@@ -159,7 +159,7 @@ must use the guest's ceiling, not the requested baseline. Swap was absent.
 ## What actually costs money
 
 Queried 2026-08-07 from AWS Pricing in us-east-1, `ServiceCode="AWSLambda"`.
-These are dated USD rates, not a current invoice:
+The following dated USD rates support estimates:
 
 | Usage | Rate |
 |---|---|
@@ -194,7 +194,7 @@ The daemon remained reachable while processing 64 MiB of output and reported
 `truncated: true`. Unit tests cover signal reporting, but do not establish
 what AWS reports after a guest-wide OOM.
 
-## Suspend/resume is a freeze and restore, not a stop and start
+## Suspend and resume preserve execution state
 
 Measured 2026-08-05, `al2023-1`, 1024 MiB baseline, held suspended for 45
 seconds. Token, files, exec records, unread output, background process, and
@@ -300,7 +300,7 @@ loopback requests do not traverse the endpoint's idle accounting.
 
 ## Pagination cursors are URL-safe base64, and the padding still has to be encoded
 
-Measured 2026-08-15 over 28 cursors. Tokens were 688–800 bytes of URL-safe
+Measured 2026-08-15 over 28 cursors. Tokens were 688 to 800 bytes of URL-safe
 base64, including `=` padding in six samples. An encoded `%3D` request
 succeeded; the otherwise identical raw `=` request returned HTTP 400 with a
 null message. Treat cursors as opaque and percent-encode query values before
@@ -428,7 +428,7 @@ did not wake it. The JavaScript binding's `session.keepAwake` held a third busy 
 `RUNNING` for 170 seconds at a 15-second interval (12 polls); after `stop()` the
 same VM, still busy, was `SUSPENDED` within 150 seconds.
 
-## The 4096-byte `runHookPayload` ceiling is on the whole string, env map included
+## The 4096-byte `runHookPayload` ceiling applies to the complete string, env map included
 
 Measured 2026-08-15 using a payload containing both `agent_token` and an
 `env` map. Exactly 4096 serialized bytes passed length validation; 4097 failed
@@ -456,7 +456,7 @@ Ordinary HTTPS with the shell token returned 502.
 
 The session was a root PTY with job control; Ctrl-C produced status 130.
 Unknown control messages became literal shell input rather than errors.
-There is no structured per-command exit-status channel. This corrects the
+The build-log channel provides no structured per-command exit status. This corrects the
 original claim that the shell could not be driven programmatically; the
 package now exposes it through `microvm shell`.
 
@@ -474,7 +474,7 @@ RUNNING MicroVM. `TagResource` and `ListTags` both refused
 `ValidationException` before any authorization: the `resource` pattern the
 service enforces admits `function`, `layer`, `code-signing-config`,
 `event-source-mapping`, `capacity-provider`, and `network-connector` ARNs and
-no MicroVM form. So tag-based lookup of VMs is blocked by the platform, and
+no MicroVM form. Tag-based lookup of VMs is blocked by the platform, and
 finding a VM by name needs the caller's own record; `microvms_core::names`
 is that record, shared by the CLI and both bindings.
 
@@ -496,8 +496,7 @@ preserve absent dimensions as unknown rather than zero.
 
 Measured 2026-08-15. The managed-image listing returned `al2023-1`, with
 versions `"0"` and `"1"`. The version readback of a derived image normalized
-its base version to `"1.0"`. This is a dated listing, not a claim that AWS
-will always offer one image or two versions. Discover current versions and
+its base version to `"1.0"`. This listing records the versions available on that date; availability can change. Discover current versions and
 retain their service-provided strings rather than treating every version as
 an integer or a common semantic-version format.
 
@@ -509,7 +508,7 @@ Measured 2026-08-15. A healthy response contained `microvmId`, `state`,
 `egressNetworkConnectors`.
 
 `runHookPayload` was not echoed. `stateReason` was absent on the healthy VM.
-Memory sizing belongs to the image version, not the instance response. The
+Read memory sizing from the image version. The
 idle policy echoed `autoResumeEnabled`; the package exposes it through
 `--auto-resume`. See [AWS GetMicrovm](https://docs.aws.amazon.com/lambda/latest/microvm-api/API_GetMicrovm.html) for
 the complete current response shape, including optional fields.
@@ -557,7 +556,7 @@ Filling missing values with zero erases the distinction between an unbuilt
 image and installed code whose daemon never became ready. Both tested
 failures appeared in builds for Graviton 3 and 4.
 
-## `baseImageVersion` is accepted, validated, and normalised on the way back
+## `baseImageVersion` is accepted, validated, and normalized on the way back
 
 Measured 2026-08-16. `baseImageVersion: "999"` for `al2023-1` failed with
 HTTP 400 before creating an image. A build pinned to `"1"` read back as
@@ -586,7 +585,7 @@ one `attrs` dependency:
 | First `build --project --reuse` | 126.6 s |
 | Same dependency files, reused image | 0.48 s |
 | Lockfile-only edit, new build | 125.1 s |
-| Fresh VM importing from baked environment | 11.13–12.44 s running |
+| Fresh VM importing from baked environment | 11.13 to 12.44 s running |
 | Plain VM installing dependencies then importing | 31.85 s running |
 
 The lockfile edit changed the image hash and installed dependency version.
@@ -658,7 +657,7 @@ image, one sample per observation. Live requests; the summary is in
 
 | Observation | Result |
 |---|---|
-| Explicit suspend to `SUSPENDED` | about 1–2 s; `stateReason` null |
+| Explicit suspend to `SUSPENDED` | about 1 to 2 s; `stateReason` null |
 | Resume call to `RUNNING` / first health | about 1.5 s / 1.9 s |
 | Process, PID, in-memory nonce, `boot_id` | unchanged; ticker sequence had no gap |
 | `/tmp`, `/dev/shm`, `/workspace` files; endpoint; original agent token | unchanged and accepted |

@@ -138,7 +138,7 @@ offline test can reach the code (a network call only a live test makes, or code
 behind a feature `cargo test` doesn't enable), add an `exclude_re` entry to
 `.cargo/mutants.toml` with the measured miss and the check that covers the code
 instead. An entry drops only a function's `replace <function> -> ` mutants, so
-move any logic worth testing out of that function first. A mutant in
+extract the testable logic from that function first. A mutant in
 `timeout.txt` made the tests hang, and it's handled like a missed one.
 
 CI's `mutmut` job asks the same question of the gate scripts. `tools/check-mutmut.py` runs
@@ -261,6 +261,15 @@ doubles are `microvms_core::testing`, behind the `test-support` feature; a
 crate's `[dev-dependencies]` turns it on. The ratchet's port-impl collector reads
 the app and core as well as the adapters, so a port implementation there needs a
 decision in `verify/ratchet/decisions.toml`.
+
+## Prose checks
+
+`mise run prose:lint` reports all Vale findings in maintained Markdown and MDX.
+`mise run prose:check` rejects errors and increases to any rule's warning ceiling;
+it runs in `check` and CI's security job. The styles are committed under `.vale/`,
+so the check needs no style download. Fix errors before opening a pull request,
+and lower the affected entries in `.vale/warnings.json` when reducing warnings.
+[Prose maintenance](.vale/README.md) describes style updates and the scan scope.
 
 ## Generated contracts and API changes
 
@@ -405,11 +414,11 @@ what's still unverified, under the sections of `.github/PULL_REQUEST_TEMPLATE.md
 - **A soft cap of about 400 changed lines of product code.** Product code is the
   shipped source directories `tools/changelog.py` names in `SHIPPED`, less the
   generated type surfaces and the test-only files `NOT_SHIPPED` matches; the unit
-  tests inside a source file count, since they sit in the files a fix edits. Past
+  tests inside a source file count, because they are in the files a fix edits. Past
   the cap, the body has a line that opens `Size:` and says why the change can't
   be split, such as a move that can't land in halves, and review judges the
   reason.
-- **A follow-up is a tracker checkbox, not an issue.** A finding the change
+- **Record follow-ups as tracker checkboxes.** A finding the change
   doesn't need to be correct goes in the body's Follow-ups section and onto the
   parent tracker's checklist. It gets an issue of its own only when it's a
   security defect, a panic, data loss, or a question that needs a design

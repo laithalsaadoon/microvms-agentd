@@ -1,252 +1,85 @@
-# What agent harnesses require of this platform
+# Harness capabilities
 
-This document maps the sandbox contracts of three agent harnesses onto this
-platform's current surface, and ranks the gaps. The harnesses are Harbor
-(agent evaluation), Omnigent (server-managed agent sessions), and the Vercel
-Sandbox / eve shape (agent-tool sandboxes). None of them becomes a
-dependency: their contracts were read from their source and public docs, and
-what this platform ships stays generic: capabilities any workload can use,
-never integrations that track a harness's release cadence.
+Use the Rust client or the Python and Node bindings to add MicroVM execution to
+an agent harness. The shared client handles image preparation, launch, execution,
+file transfer, and teardown. Start with [Embedding](EMBEDDING.md) for the image
+and client contracts, or the [SDK tutorial](https://laithalsaadoon.github.io/microvms-agentd/learn/tutorial/from-code/)
+for runnable examples.
 
-Sources: Harbor read at `harbor-framework/harbor` (local checkout,
-`feat/lambda-microvm-environment`); Omnigent read at PR #2217's branch;
-Vercel Sandbox from vercel.com/docs/sandbox (retrieved 2026-08-14, SDK
-v2.9.2) and eve.dev/docs/sandbox; this repo read on `main` at d80150a.
+## Prepare and launch an environment
 
-## The three contracts, compressed
+`Sandbox::ensure_image` builds or reuses an image from its content-addressed
+inputs. `Sandbox::run` launches it and records the accepted VM. Readiness waiting
+is controlled by the request; a nonwaiting launch does not establish that the
+daemon can accept work yet. The production constructors are available through
+`microvms_core::prelude`.
 
-**Harbor** drives a sandbox through one abstract class: exec (shell command,
-cwd, per-exec env dict, run-as-user with HOME/groups fixup, timeout with
-process-group kill and code 124, full stdout/stderr capture), file transfer
-(single files with mode, directory trees with tar fidelity: modes, symlinks,
-empty dirs), lifecycle (build-from-Dockerfile with content-addressed reuse,
-readiness signal, terminate/suspend), and per-instance credential bootstrap
-that never bakes a secret into a shared image. Commands must be startable
-idempotently under retry and outlive any auth-token ceiling, which is why
-Harbor's own MicroVM provider hand-rolled a start/poll/ack daemon. Optional
-tiers Harbor degrades around: multi-container, GPUs, Windows, dynamic
-network policy, live output streaming.
+The shared implementation is in `crates/microvms-app/src/sandbox.rs` and
+`crates/microvms-app/src/control/ensure.rs`. The Python and Node request types
+convert to these same application requests.
 
-**Omnigent** needs lifecycle more than exec. Its host dials out to the
-server over a WebSocket tunnel, so the sandbox needs no inbound API at all;
-what it needs is: create (or reserve-an-id-then-create), idempotent
-terminate, suspend-to-snapshot that preserves the whole process tree,
-idempotent resume under the same identity, cheap liveness, a per-launch
-env/secret channel delivered before the workload starts, and a published
-lifetime cap so launch-token TTLs can be derived above it. Its provider plus
-a deploy shim hand-rolled a lifecycle-hooks HTTP server, a 16 KB
-`runHookPayload` env channel, idle-policy derivation math, and
-NotFound/Conflict-to-success mappings, all of which become deletable if the
-platform supplies those natively. An exec daemon also lets Omnigent use its simpler
-exec-model launcher, where repo clone and config injection are shared
-framework code instead of in-image shell scripts.
+For coding-agent workflows, `AgentImageSpec` describes the image and
+`AgentVm` composes launch and task execution. These helpers are defined in
+`crates/microvms-app/src/agents/mod.rs`. A harness-specific provider belongs in
+the consuming project; this repository supplies the reusable client and daemon.
 
-**Vercel Sandbox / eve** is an API shape rather than a consumer: named,
-persistent-by-default sandboxes (stop auto-snapshots; the next call
-resumes), blocking and detached exec with a durable command id, replayable
-buffered output, live log streaming, kill with signal, sudo, cwd/env, batch
-file writes as gzipped tarballs, a `node:fs/promises`-shaped metadata
-surface, declared ports mapping to public URLs, SNI-domain and CIDR egress
-policy applied to the live session, and snapshot/fork. Agent frameworks
-layered on it need far less: eve's backend adapter is a short list of session
-methods (run, spawn with byte streams and kill, read/write file, remove,
-resolve path, set network policy, stop), and the AI SDK's canonical
-sandbox tool needs only create, blocking exec with captured output, and
-teardown.
+## Run and observe commands
 
-## Where the platform already meets them
+The execution protocol supports shell commands or argv, a working directory,
+per-command environment, user and group, stdin, and an optional daemon timeout.
+Use a stable execution identifier when retrying the same start request.
+`Session::run` returns a handle that can poll, stream, write stdin, kill, wait,
+and acknowledge the result. `Session::run_to_completion` combines completion
+handling into a result for callers that do not need to manage the handle.
 
-The daemon and client cover more of these contracts than any of the three
-providers' hand-rolled daemons did, with proofs behind each behavior:
+Execution records and buffered output belong to the daemon. A fresh session can
+recover a handle by its identifier; rotating the endpoint credential does not
+itself discard the record. Streaming uses byte offsets and explicit gap events.
+A consumer must handle a gap when requested output is outside the retained
+window. Acknowledge completed results when the harness no longer needs them.
 
-- Idempotent detached exec: caller-minted exec id, retry-safe start,
-  read-only poll, explicit ack, TTL only after ack, so unread output is never
-  destroyed (`crates/agentd/src/exec.rs`). This is precisely the start/poll/ack
-  model Harbor's provider built, plus SSE streaming with byte-cursor resume
-  and explicit gap events, which Harbor's daemon lacks.
-- Per-exec `env`, `cwd`, `user`/`group`, `timeout_sec`, `stdin`, and shell
-  vs argv mode are all in the wire protocol and applied by the daemon
-  (`crates/protocol/src/exec.rs:116`, `crates/agentd/src/exec.rs:999-1019`), and exposed
-  by the Rust, Python, and Node clients.
-- Kill with SIGTERM-grace-SIGKILL to the process group; per-command timeout
-  enforced daemon-side when requested.
-- File transfer: streamed single-file read/write with mode-at-open, tar
-  upload/download with a confined extraction path (lexical resolution,
-  symlink and bomb defenses, member/size caps), disk-pressure refusal with
-  the real numbers (`crates/agentd/src/fs.rs`).
-- Per-VM secret bootstrap through `runHookPayload` with one-shot semantics
-  and traffic ordering guaranteed by the platform; the token never enters a
-  child's environment.
-- Suspend/resume that preserves memory, filesystem, token, running
-  processes, and exec records (measured, `docs/PLATFORM.md`); local
-  refusal of illegal transitions with zero billable calls.
-- Teardown that never raises, reports leaked identifiers, and a local
-  ledger (`microvm ls`) that records leaks before attempting deletes.
-- Image builds from a Dockerfile with local pre-flight of the platform
-  traps (FROM/base agreement, WORKDIR requirement) and clientToken replay
-  protection.
-- A machine-readable manifest, one JSON envelope per invocation, stable
-  error codes, and append-only exit codes: the agent-friendly CLI surface
-  none of the three harnesses' providers had to build against before.
+See `crates/protocol/src/exec.rs`, `crates/microvms-app/src/session/mod.rs`, and
+`crates/microvms-app/src/session/exec.rs`. [Protocol](PROTOCOL.md) defines the
+wire contract and [the execution reference](reference/rpc-tools.md) links to
+the daemon handlers.
 
-## The gaps, ranked
+## Transfer inputs and results
 
-Ranked by how many harnesses need it, times how much hand-rolled code it
-deletes, over the cost of building it here.
+Use single-file transfer for individual artifacts and tar transfer for directory
+trees. File reads support line ranges; file writes accept a creation mode.
+The daemon checks available disk space before writes and reports its disk state
+through health. The client also provides workspace synchronization over the
+file APIs.
 
-**1. Expose per-exec env (and user) through the CLI. Shipped.** The daemon
-applies `env` per request, the bindings expose it, and `microvm exec` now
-takes it too: a repeatable `--env KEY=VALUE`, `--user`/`--group` as a name or
-a numeric id, `--shell`, and `--inherit-image-env`
-(`crates/microvms-cli/src/cli.rs:1132-1171`), all copied into the start request
-(`crates/microvms-cli/src/commands/attached.rs:224-240`). The empty `env` in
-`StartSpec::command` is now only the default a caller overrides
-(`crates/microvms-cli/src/commands/lifecycle.rs:1924-1937`). Every harness passes
-env per exec (Harbor merges layers of it on every call), and the PATH
-failure the coding-agents example documents was this gap biting a real
-workload.
+These capabilities are implemented in `crates/microvms-app/src/session/files.rs`,
+`crates/microvms-app/src/workspace.rs`, and `crates/agentd/src/fs.rs`.
 
-**2. Ship the platform daemon as the reusable answer to "no exec API".**
-Harbor and Omnigent each carry a stdlib Python daemon
-baked into task images. agentd already does everything those daemons do,
-better tested. What is missing is packaging: a documented recipe (and a
-`Dockerfile` stanza helper) for appending agentd to an arbitrary task image,
-so a harness provider is a thin client over the published wire protocol
-instead of a daemon author. The coding-agents example is the seed; this is
-its generalization.
+## Keep a long-running environment available
 
-**3. Image name resolution and content-addressed reuse. Shipped.** The
-service rejects a bare image name in `RunMicrovm` ("Malformed ARN"), so both
-Harbor's provider and our example resolved ARNs by listing. Core's
-`Sandbox::run` now does that itself: a name is resolved to its ARN through
-the image listing (one read; an ARN costs none) after the launch's local
-refusals, and `run --image`, both bindings' `Sandbox.run` and
-`AgentVm.launch` all launch through it. Both harness shapes also key image
-names to content hashes to avoid the stale-snapshot-on-name-reuse hazard,
-which `build --reuse` and `ensure_image` do with the artifact's content hash.
+Endpoint credentials and VM lifetime are separate concerns. Refresh endpoint
+credentials when attaching again. For idle prevention, send requests through
+the endpoint from outside the VM: a guest request to its own daemon does not
+traverse the platform proxy. Health reports `busy` for active execution and
+`execs` for registered execution records, including retained results.
 
-**4. A per-launch environment channel. Shipped.** Omnigent's whole
-hooks-server shim existed because the platform offers no per-launch env
-vars; the `runHookPayload` is the only per-VM secret channel and it carried
-exactly one token. The run hook now accepts an optional `env` map in the
-same payload and the daemon applies it as the base environment of every
-later exec, with the per-request `env` winning on a shared key.
-`RunRequest::with_launch_env`, `run --launch-env KEY=VALUE`, and both
-bindings expose it. Two things the design pinned rather than left open: the
-token never becomes part of that base environment, proven by a test that
-asserts a child's whole environment equals the launch map; and only the
-first successful bootstrap sets it, so a caller who cannot win the token
-cannot rewrite the environment either. The payload budget is 4096 bytes and
-not 4 KB of headroom — it is shared with the token, and `microvms-core`
-refuses an over-budget payload locally, naming the env's share of it, since
-AWS's own answer arrives after the call and botocore does not check.
-Credential-scale material still belongs on the file path or a role.
+Suspend preserves the VM state described in [Suspend and resume](SUSPEND-RESUME.md).
+Respect the configured idle and maximum lifetime limits, and save results before
+termination. Teardown returns a report containing identifiers that could not be
+confirmed deleted; retain that report for cleanup rather than assuming success.
 
-**5. Session-lifetime alignment for long execs. Shipped.** Harbor's daemon
-exists partly because commands must outlive the 60-minute proxy-token ceiling.
-Our detached exec already survived it by design — state lives in the daemon; a
-re-minted token reattaches — and the design is now the tested contract this
-item asked for. The live suite's `reattach after token rotation` section
-(`conformance/run_rs.py`, `drive_token_rotation`) starts a detached exec,
-reattaches from nothing but the three identifiers a harness would have
-persisted — each attach minting a fresh proxy token, which is what a rotation
-*is* — and asserts under the check name `no output produced before the reattach
-was lost` that bytes buffered under one token are read whole under the next.
-What it deliberately does not do is wait the real hour: an expired token being
-refused is the platform's property, not this contract, and the mechanism the
-survival rests on is fully exercised without it. The doc half is
-`docs/EMBEDDING.md`, "The proxy-token reality", which names start, rotate,
-poll, ack as a normal sequence rather than a recovery path.
+## Choose the integration boundary
 
-**6. Idle-signal correctness for outbound-tunnel workloads. Shipped, with
-the naive half ruled out.** The platform measures idleness only by inbound
-endpoint traffic. Omnigent's host holds an outbound tunnel and receives
-none, so auto-suspend can freeze a VM mid-turn; multi-hour agent runs past
-400 minutes are the case that hurts.
+The CLI publishes its command, option, response, and exit-code contracts through
+`microvm manifest`. Under JSON output, ordinary commands return an envelope;
+streaming execution returns event lines followed by its final envelope. Read
+the manifest's alternate response when building a command consumer.
 
-The parenthetical above — "a trivial periodic authenticated request" — is
-the thing that does not work, and the reason is measured rather than
-argued. The endpoint proxy terminates *outside* the VM and forwards over
-loopback (`docs/PLATFORM.md`), so a request an in-VM process sends to the
-daemon's port is generated on the far side of the meter and never passes
-through it. A keepalive route inside the guest would answer 200 and change
-nothing, discovered as a suspend during exactly the long run it was added
-to protect.
+Use the SDK for reusable application code and the CLI for shell workflows.
+Neither the client nor a guest proxy variable establishes internet isolation.
+Use the network topology described in [Networking](NETWORKING.md), and review
+[Trust](TRUST.md) before selecting workload credentials and permissions.
 
-So `GET /v1/health` now carries `busy` and `execs`, and the consumer is an
-orchestrator outside the VM whose own poll *is* the inbound traffic. That
-also keeps the assertion repeated and explicitly the caller's, which is
-what rules out the daemon self-keepaliving: a hung process would otherwise
-bill silently to the 8-hour ceiling. `busy` is "producing", not
-"unfinished" — an exited exec awaiting an ack reads false — and `execs`
-counts every registered entry so a caller can tell a drained VM from one
-holding output nobody read. The one thing this section left unmeasured — that
-a poll from outside does in fact reset the timer — has since been measured,
-by hand in `docs/PLATFORM.md` ("An outside poll of `/v1/health`
-does reset the idle timer"), and on every live run by
-`conformance/run_rs.py`'s `drive_idle_keepalive`, which runs a VM to the edge
-of a 60-second idle window while polling and watches it survive under the
-check name `a VM polled from outside outlives its idle window` — then stops
-polling and watches the same VM suspend, which is the control that proves the
-survival was the polling.
-
-**7. An eve backend adapter (separate package, later).** Implementing eve's session
-methods over the Node binding make this platform a pinnable eve backend:
-real VMs where the consolidator today accepts a pure-JS bash interpreter.
-Worth doing as its own repo once 1-3 land; it depends on eve's types, so it
-can never live here.
-
-## Explicit non-goals
-
-- **Vercel wire compatibility.** The valuable seam is eve's adapter, not
-  Vercel's REST surface. Snapshot/fork-on-stop, the heart of Vercel's
-  persistence model, needs snapshot-to-image, which is the standing AWS
-  platform ask (`docs/STRATEGY.md`), not something this client can build.
-- **Multi-container.** `ResourcesList.max = 1` is a platform constant.
-  Harbor treats single-container as an accepted tier; Omnigent needs one
-  container; nothing here changes.
-- **Harness provider classes.** The Harbor `BaseEnvironment` subclass, the
-  Omnigent launcher, and the eve backend all import their harness's
-  packages, so they live in those ecosystems (or standalone adapter repos),
-  never here. This repo's deliverable is the daemon, the clients, and the
-  published behavior they can rely on. `docs/AGENT-VMS.md` now carries
-  agent profiles for Claude Code and Codex as the L3 layer such a class would
-  call: one function that builds, launches, and provisions the VM, one that
-  hands the agent a task. The non-goal still holds for the class itself,
-  because it imports the harness's packages and this repo does not.
-- **GPUs, Windows, dynamic network policy.** Not offered by the platform;
-  harnesses that need them reject the environment up front, which is the
-  correct degradation.
-
-## What this changes next
-
-Items 1 and 3 are CLI work measured in hours and unblock every harness
-equally. Item 2 is documentation plus a small helper. Item 7 waits for the
-first three.
-
-Items 4 and 6 have shipped, and the three design decisions this section
-predicted they would need were the right three. Payload budget: the token
-and the env share 4096 bytes, checked locally before the launch because
-neither AWS nor botocore gives a caller a signal in time. Env precedence:
-the launch env is the base and the per-request map is overlaid, which leaves
-the existing per-request contract unchanged for anyone who sends no launch
-env. Busy semantics: producing rather than unfinished, reported to an
-orchestrator *outside* the VM, because the guest-side keepalive this
-document floated cannot work against a proxy that terminates outside the
-guest. Item 5 has shipped too, and it cost no code: the
-reattach-after-token-rotation path always worked by design, and what this
-document asked for — a conformance check plus a doc section — is exactly what
-landed. `drive_token_rotation` and `drive_idle_keepalive` in
-`conformance/run_rs.py` are the checks; `docs/EMBEDDING.md` carries the
-operator-facing halves of both, the rotate-mid-run sequence and the
-outside-poll keepalive ownership.
-
-Reading `readTextFile` from the AI SDK sandbox contract while item 4 was
-being built turned up one gap this document had missed. That method takes
-1-based inclusive `startLine`/`endLine` and returns through EOF when
-`endLine` is past the end, and `GET /v1/fs/file` had no way to express it —
-a harness implementing it over this daemon would read whole files and slice
-them client-side, which on a multi-megabyte file is the transfer this route
-exists to avoid. The route now takes `start_line` and `end_line` with
-exactly those semantics, still streamed, with the un-ranged read
-byte-identical to what it was.
+Snapshot cloning, a replacement platform API, and provider classes tied to
+another framework are outside this repository's integration contract. Check
+[Platform](PLATFORM.md) for dated service observations. This page adds no new
+AWS measurement.

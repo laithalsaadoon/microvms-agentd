@@ -26,7 +26,7 @@ already performed in a shell script; what L3 adds is that the composition lives 
 library, so the CLI, the bindings, and a harness call one function instead of
 re-deriving the example's recipe and its measured traps.
 
-## The rule this changes, and how the cost is bounded
+## Bound cost while retaining a VM
 
 Until this document the rule was: platform code exposes only generic primitives, and
 agent-specific detail (CLI installs, model ids, credential wiring, config files) lives
@@ -52,9 +52,9 @@ L3 crosses that line on purpose, for Claude Code and Codex, with the churn conta
    it. Scheduling, retries across VMs, multi-agent coordination, and turn loops stay
    outside this repository, per `docs/STRATEGY.md`.
 
-The non-goals paragraph in `docs/HARNESS-CAPABILITIES.md` still holds for harness
-*provider classes* (a Harbor `BaseEnvironment`, an eve backend): those import the
-harness's packages and live in its ecosystem. L3 is the layer such a class would call.
+Harness provider classes import their framework's packages and belong in that
+framework's ecosystem. L3 is the layer such a class calls; see
+[Harness capabilities](HARNESS-CAPABILITIES.md).
 
 ## Requirements
 
@@ -91,7 +91,7 @@ Written in the EARS shapes the rest of `verify/spec/` uses. `AGENT-n` is the id.
   and shall refuse locally (zero wire calls) a task string that is empty.
 - **AGENT-8.** `agent-up` against a name that is already registered shall not build or
   launch; it shall attach, mint a fresh token, re-run `install_access`, and report
-  `reused: true`. This is how a 12-hour token is refreshed on a long-lived VM.
+  `reused: true`. This refreshes the 12-hour token on a long-lived VM.
 - **AGENT-9.** `agent-up` shall launch with egress requested, since neither agent can
   reach Bedrock without it, and shall register the name only after the launch succeeds
   and the credentials are installed.
@@ -236,7 +236,7 @@ reads the guest marker (AGENT-10). `--detach` starts and returns the exec id for
 exec carries no budget, as `exec` does) and acks. On the refresh path a `--project` tree is
 uploaded before the credential install, so the same `chown` hands it to the agent. Envelope type
 `microvm.agent.prompt`; keys `execId`, `agent`, `model`, `phase`, `exitCode`, `stdout`,
-`stderr`, `truncated`. A non-zero agent exit earns `ERR_EXEC_FAILED` on a success
+`stderr`, `truncated`. A non-zero agent exit produces `ERR_EXEC_FAILED` on a success
 envelope, as `exec` does.
 
 Teardown is `microvm terminate NAME`, which already exists. Streaming is

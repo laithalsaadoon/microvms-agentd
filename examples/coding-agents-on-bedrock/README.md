@@ -25,7 +25,7 @@ RUN dnf install -y nodejs22 npm python3 git tar gzip which findutils procps-ng
 RUN npm install -g @anthropic-ai/claude-code @openai/codex
 ```
 
-The `FROM` and `WORKDIR` constraints are load-bearing. The `FROM` must be the registry ref paired
+The `FROM` and `WORKDIR` constraints are required. The `FROM` must be the registry ref paired
 with the managed base (`microvms-core` refuses a Dockerfile whose `FROM`
 disagrees with the `baseImageArn`; a `@sha256:` digest suffix on that same
 ref is accepted, and this example pins one), and the image must declare a `WORKDIR`
@@ -45,14 +45,14 @@ it the guest cannot reach Bedrock.
 
 `microvm.toml` pins the size class, and the choice encodes the sizing rule
 for agent workloads. The minimum you request is your bill floor (25% of the
-provisioned capacity), and 4x the minimum is the guest's hard ceiling — both
+provisioned capacity), and 4x the minimum is the guest's hard ceiling; both
 fixed at provision time, with no scaling event and nothing app code can
 observe changing. Agent sessions are peaky: long stretches of a small steady
-state punctuated by bursts of build and test work. So the example picks
-`memory = 1024` — a 4 GiB always-present ceiling at half the floor cost of
-the 2048 default — and lets the peaks ride the headroom, which bills only by
+state punctuated by bursts of build and test work. The example picks
+`memory = 1024`, a 4 GiB always-present ceiling at half the floor cost of
+the 2048 default, and lets the peaks ride the headroom, which bills only by
 what is consumed. A steadier or heavier workload should keep the 2048
-default, whose 8 GiB ceiling survives a real test suite. Both agents would install fine and then
+default, whose 8 GiB ceiling survives the test suite. Both agents would install fine and then
 fail on their first model call. `--keep` leaves the VM running and reports
 the values every attached command needs (endpoint, agent token,
 MicroVM id). The image goes by ARN: `RunMicrovm` answers 400 "Malformed ARN"
@@ -67,7 +67,7 @@ agents consume the same token:
 
 - **Claude Code** has a native Bedrock mode: `CLAUDE_CODE_USE_BEDROCK=1`
   plus `AWS_BEARER_TOKEN_BEDROCK`, with the model chosen by
-  `ANTHROPIC_MODEL` (an inference-profile id, e.g.
+  `ANTHROPIC_MODEL` (an inference-profile id, for example
   `global.anthropic.claude-opus-5`).
 - **Codex CLI** has no Bedrock mode, but Bedrock exposes an
   OpenAI-compatible surface. Current Codex speaks only the Responses wire
@@ -84,7 +84,7 @@ agents consume the same token:
 The token never appears in the image, a command line, or a daemon log; it
 lives in `/workspace/.agent-env` inside one VM, and expires on its own.
 
-The env file also sets `PATH` explicitly, and that line is load-bearing. The
+The env file also sets `PATH` explicitly, and that line is required. The
 daemon spawns execs with a minimal environment, and Claude Code's Bash tool
 snapshots the shell it starts from: without an exported `PATH` the agent's
 subshells find no `ls`, `wc`, or `python3` (every command exits 127) even
@@ -93,8 +93,7 @@ when lookup fails, so it limps through; Claude Code does not.
 
 ## The user, and why root silently breaks the agent
 
-The Dockerfile creates uid/gid 1000 (by appending to `/etc/passwd` directly —
-`useradd` is not in the minimal base), `chown`s `/workspace` to it, and every
+The Dockerfile creates uid/gid 1000 (by appending to `/etc/passwd` directly, `useradd` is not in the minimal base), `chown`s `/workspace` to it, and every
 agent exec passes `--user 1000 --group 1000`. Omit that and the failure is
 worse than an error: Claude Code's `--dangerously-skip-permissions` refuses
 to run as root, and under `acceptEdits` the agent then denies its own Bash,

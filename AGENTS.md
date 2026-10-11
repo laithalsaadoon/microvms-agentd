@@ -242,7 +242,7 @@ past the cap. Dependabot's pull requests are skipped. The rest is review's.
 
 ## Code comments
 
-Comments document intent, constraints, invariants, and non-obvious tradeoffs—not syntax.
+Comments document intent, constraints, invariants, and non-obvious tradeoffs, not syntax.
 Add a comment when behavior is surprising, externally constrained, concurrency-sensitive, security-sensitive, performance-motivated, or likely to be "simplified" incorrectly by a future maintainer. Prefer clearer names, types, and structure when they can make the comment unnecessary.
 
 A useful threshold is: would a competent engineer reading this six months from now reasonably ask "why?" If yes, comment it. If they would only ask "what does this syntax do?", prefer clearer code instead.

@@ -146,8 +146,8 @@ The portable model crate expresses daemon and client behavior as state machines 
 
 ## See also
 
-- [contract map](../insights/contract-map.md) — 41 shared source citations
-- [impact analysis](../insights/impact-analysis.md) — 31 shared source citations
-- [processes](../behavior/processes.md) — 20 shared source citations
-- [business logic](../insights/business-logic.md) — 18 shared source citations
-- [risk hotspots](../analysis/risk-hotspots.md) — 12 shared source citations
+- [contract map](../insights/contract-map.md): 41 shared source citations
+- [impact analysis](../insights/impact-analysis.md): 31 shared source citations
+- [processes](../behavior/processes.md): 20 shared source citations
+- [business logic](../insights/business-logic.md): 18 shared source citations
+- [risk hotspots](../analysis/risk-hotspots.md): 12 shared source citations

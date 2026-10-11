@@ -58,9 +58,9 @@ adding independent assertions in each adapter (`tools/check-parity.py:34-43`,
 
 Shows up in:
 
-- `tools/check-parity.py:34-43` — classes and command options outside enrollment.
-- `tools/check-parity.py:72-86` — defaults that the comparison does not hold.
-- `CONTRIBUTING.md:210-216` — shared cases whose failing-first proof is still a review obligation.
+- `tools/check-parity.py:34-43`: classes and command options outside enrollment.
+- `tools/check-parity.py:72-86`: defaults that the comparison does not hold.
+- `CONTRIBUTING.md:210-216`: shared cases whose failing-first proof is still a review obligation.
 
 Cost: M. Extend the shared contract and prove the new comparison can fail.
 
@@ -74,9 +74,9 @@ findings does not make the tier part of the normal local workflow
 
 Shows up in:
 
-- `.config/mise/tasks/trace.toml:6-12` — strict mode and local-gate exclusions.
-- `.config/mise/tasks/trace.toml:15-28` — core verification's separate command and reachability budget.
-- `tools/check-spec.sh:15-24` — the external checker prerequisite.
+- `.config/mise/tasks/trace.toml:6-12`: strict mode and local-gate exclusions.
+- `.config/mise/tasks/trace.toml:15-28`: core verification's separate command and reachability budget.
+- `tools/check-spec.sh:15-24`: the external checker prerequisite.
 
 Cost: M for a reproducible optional environment; L to strengthen the verification verdict.
 
@@ -90,10 +90,10 @@ and the other requires synchronized edits during upgrades
 
 Shows up in:
 
-- `.config/mise/tasks/contracts.toml:293-306` — a declaration check that anticipates generator changes.
-- `bindings/microvms-js/package.json:51-54` — the package's own generator constraint.
-- `.config/mise/tasks/test.toml:83-98` — repeated Python build-tool version.
-- `tools/fail-to-pass.py:101-113` — binding build commands repeated in the proof runner.
+- `.config/mise/tasks/contracts.toml:293-306`: a declaration check that anticipates generator changes.
+- `bindings/microvms-js/package.json:51-54`: the package's own generator constraint.
+- `.config/mise/tasks/test.toml:83-98`: repeated Python build-tool version.
+- `tools/fail-to-pass.py:101-113`: binding build commands repeated in the proof runner.
 
 Cost: S. Establish a shared version source or an agreement check before the next upgrade.
 
@@ -108,9 +108,9 @@ without merging the formats merely because they share a state directory
 
 Shows up in:
 
-- `AGENTS.md:110-116` — the repository identifies CLI file formats as remaining layering work.
-- `crates/microvms-cli/src/ledger.rs:28-48` — the persistent invocation record.
-- `crates/microvms-cli/src/history.rs:5-14` — the reason history cannot share ledger retention.
+- `AGENTS.md:110-116`: the repository identifies CLI file formats as remaining layering work.
+- `crates/microvms-cli/src/ledger.rs:28-48`: the persistent invocation record.
+- `crates/microvms-cli/src/history.rs:5-14`: the reason history cannot share ledger retention.
 
 Cost: L. Move reusable behavior with compatibility coverage for existing records.
 
@@ -126,18 +126,18 @@ changing a contract requires finding copies that the type system does not connec
 
 Shows up in:
 
-- `crates/microvms-cli/src/commands/lifecycle.rs:10-18` — the old ownership rationale.
-- `crates/microvms-app/src/sandbox.rs:1335-1342` — the adoption workflow that requires a revised explanation.
-- `crates/microvms-app/src/control/mod.rs:118-119` — control's port default.
-- `crates/microvms-app/src/session/proxy.rs:84-85` — session's port default.
-- `crates/agentd/src/config.rs:101-104` — the daemon's port default.
+- `crates/microvms-cli/src/commands/lifecycle.rs:10-18`: the old ownership rationale.
+- `crates/microvms-app/src/sandbox.rs:1335-1342`: the adoption workflow that requires a revised explanation.
+- `crates/microvms-app/src/control/mod.rs:118-119`: control's port default.
+- `crates/microvms-app/src/session/proxy.rs:84-85`: session's port default.
+- `crates/agentd/src/config.rs:101-104`: the daemon's port default.
 
 Cost: S for the explanation and shared constant; preserve compatibility re-exports.
 
 ## See also
 
-- [debugging guide](debugging-guide.md) — 5 shared source citations
-- [contract map](contract-map.md) — 4 shared source citations
-- [impact analysis](impact-analysis.md) — 4 shared source citations
-- [module map](../architecture/module-map.md) — 3 shared source citations
-- [business logic](business-logic.md) — 3 shared source citations
+- [debugging guide](debugging-guide.md): 5 shared source citations
+- [contract map](contract-map.md): 4 shared source citations
+- [impact analysis](impact-analysis.md): 4 shared source citations
+- [module map](../architecture/module-map.md): 3 shared source citations
+- [business logic](business-logic.md): 3 shared source citations

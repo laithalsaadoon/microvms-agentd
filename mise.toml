@@ -39,6 +39,7 @@ rust = { version = "1.99.0", components = ["clippy", "rustfmt"], targets = ["aar
 # 2026-09-27.
 uv = "0.12.13"
 ruff = "0.15.22"
+vale = "3.24.0"
 semgrep = "1.176.1"
 betterleaks = "1.7.3"
 syft = "1.50.0"

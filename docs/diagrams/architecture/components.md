@@ -105,8 +105,8 @@ classDiagram
 
 ## See also
 
-- [contract map](../../insights/contract-map.md) — 9 shared source citations
-- [module map](../../architecture/module-map.md) — 8 shared source citations
-- [processes](../../behavior/processes.md) — 8 shared source citations
-- [business logic](../../insights/business-logic.md) — 7 shared source citations
-- [impact analysis](../../insights/impact-analysis.md) — 7 shared source citations
+- [contract map](../../insights/contract-map.md): 9 shared source citations
+- [module map](../../architecture/module-map.md): 8 shared source citations
+- [processes](../../behavior/processes.md): 8 shared source citations
+- [business logic](../../insights/business-logic.md): 7 shared source citations
+- [impact analysis](../../insights/impact-analysis.md): 7 shared source citations

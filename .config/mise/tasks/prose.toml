@@ -1,0 +1,10 @@
+["prose:lint"]
+description = "Show every Vale finding in maintained Markdown and MDX"
+run = "python3 tools/prose.py --lint"
+
+["prose:check"]
+description = "Reject prose errors and increases to any rule's warning ceiling"
+run = [
+  "uv run --locked pytest -q -p no:cacheprovider tools/test_prose.py",
+  "python3 tools/prose.py",
+]

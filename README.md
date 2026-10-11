@@ -159,7 +159,7 @@ then `microvm terminate dev --wait`.
 
 Copy `data.imageIdentifier` from the build output above into `MICROVM_IMAGE`.
 If you skipped that step, first run `microvm build --name agent-tools --json`.
-SDKs need the image ARN, rather than a name resolved by the CLI. They use the same AWS credentials and
+Pass an image ARN to the SDKs; the CLI can also resolve a name. They use the same AWS credentials and
 `MICROVM_EXECUTION_ROLE_ARN` configured above.
 
 ```bash

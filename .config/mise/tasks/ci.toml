@@ -78,6 +78,7 @@ run = [
   { task = "agents:check" },
   { task = "changelog:check" },
   { task = "pr-body:check" },
+  { task = "prose:check" },
   { task = "ci:parity" },
   { task = "ratchet:check" },
   { task = "trace:check" },

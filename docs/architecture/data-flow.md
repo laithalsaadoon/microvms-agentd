@@ -127,8 +127,8 @@ sequenceDiagram
 
 ## See also
 
-- [contract map](../insights/contract-map.md) — 11 shared source citations
-- [processes](../behavior/processes.md) — 10 shared source citations
-- [impact analysis](../insights/impact-analysis.md) — 10 shared source citations
-- [module map](module-map.md) — 9 shared source citations
-- [components](../diagrams/architecture/components.md) — 6 shared source citations
+- [contract map](../insights/contract-map.md): 11 shared source citations
+- [processes](../behavior/processes.md): 10 shared source citations
+- [impact analysis](../insights/impact-analysis.md): 10 shared source citations
+- [module map](module-map.md): 9 shared source citations
+- [components](../diagrams/architecture/components.md): 6 shared source citations

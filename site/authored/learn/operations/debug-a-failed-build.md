@@ -33,18 +33,18 @@ The codes a build produces:
 
 Then build the Dockerfile locally under arm64 with `docker buildx build --platform linux/arm64`. A `dnf` typo is free to find there. [Write a guest Dockerfile](/learn/operations/write-a-guest-dockerfile/) has the rules.
 
-## 3. Where the reason lives
+## 3. Inspect the reported reason
 
 A failed build's `stateReason` lives on the build record, and nowhere else. `GetMicrovmImage` reports `CREATE_FAILED` and structurally cannot say why; `ListMicrovmImageVersions` reports `FAILED` with a null reason; `ListMicrovmImageBuilds` carries the sentence. Expect a list: each failed version had two builds, one per chipset generation, with the same reason. `GetMicrovmImage`'s `latestFailedImageVersion` names which version to ask about. `microvm image-versions <image>` lists the versions, `microvm image-builds <image> <version>` lists that version's builds with their reasons, and `--build-id <id>` reads one build with its `snapshotBuild`.
 
-Observed reasons, worth reading for how much they vary:
+Observed reasons vary:
 
 ```text
 The container image build failed.                 (a RUN exiting non-zero)
 Ready hook invocation timed out after PT5M        (a daemon that never became ready)
 ```
 
-Read `snapshotBuild`'s shape beside the reason. Absent means the Dockerfile broke before anything installed. `codeInstallSizeInBytes` alone with no snapshots means code installed and the daemon never became ready, which points at the daemon or its `CMD` rather than at the build. The first reason names the failure without naming the cause inside the container, so the build log group is the only place the failing command's own output appears.
+Read `snapshotBuild`'s shape beside the reason. Absent means the Dockerfile broke before anything installed. `codeInstallSizeInBytes` alone with no snapshots means code installed and the daemon never became ready, which points at the daemon or its `CMD` rather than at the build. A generic build reason does not identify the failing command inside the container, so the build log group is the only place the failing command's own output appears.
 
 ## 4. Read the build log
 
@@ -60,7 +60,7 @@ One build is three VMs writing three streams: docker-build, then a snapshot pass
 
 ## 5. `ERR_BUILD_WEDGED` and the `clientToken`
 
-A `clientToken` is a permanent idempotency key. After an image is deleted and recreated under the same name with a token derived from that name, the service replays the original create as a no-op: the image sits in `CREATING` with its builds never scheduled, and `ListMicrovmImageBuilds` shows every build `PENDING` with `updatedAt` never advancing past `createdAt`. An image in `CREATING` cannot be deleted, and its only version cannot be deleted because it is the last one. Two images were wedged this way for roughly fifteen hours before the service timed them out.
+A `clientToken` is a permanent idempotency key. After an image is deleted and recreated under the same name with a token derived from that name, the service replays the original create as a no-op: the image remains in `CREATING` with its builds never scheduled, and `ListMicrovmImageBuilds` shows every build `PENDING` with `updatedAt` never advancing past `createdAt`. An image in `CREATING` cannot be deleted, and its only version cannot be deleted because it is the last one. Two images were wedged this way for roughly fifteen hours before the service timed them out.
 
 Waiting does not help. The suggestion on the envelope is the remedy: record the identifier and build under a fresh `--name`. The client's defaults are shaped by this trap. `run` and `build` default to a per-invocation image name, and `build --reuse` (and `run --name`) key the name to a hash of the build inputs, so unchanged inputs reuse their image and changed inputs get a fresh name and a fresh build. A `--reuse` build that finds a failed image under its name deletes it and builds again. Recreating an image under a previously used fixed name can also serve a stale snapshot, which is the same hazard class.
 

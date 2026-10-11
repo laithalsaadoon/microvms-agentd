@@ -34,7 +34,7 @@ The `run` envelope's `sync` key reports the workdir, the uploaded bytes, and the
 
 ## 4. Bring artifacts back
 
-Which members come back is declared in `microvm.toml` as `artifacts` globs. There is deliberately no flag spelling for a list this shape:
+Which members come back is declared in `microvm.toml` as `artifacts` globs. Declare this list in the project file:
 
 ```toml
 image = "ci-image"

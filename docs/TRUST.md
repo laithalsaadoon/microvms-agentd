@@ -12,12 +12,12 @@ hook paths. A process without the agent token must not gain control through
 an authentication bypass or a second bootstrap. The token lives in daemon
 memory and is not written to disk or logged by the daemon.
 
-An authorized caller can execute as root. A root workload can potentially read
+An authorized caller can execute as root. A root workload can read
 daemon memory with `ptrace` or `/proc/<pid>/mem`, change files, or exhaust guest
-resources. User demotion is a convenience, not a separate sandbox. The model
+resources. User demotion changes the workload UID within the same sandbox. The model
 and authentication tests do not prove isolation from guest root.
 
-## What the platform gives you for free
+## Platform isolation guarantees
 
 AWS documents two relevant properties:
 
@@ -225,7 +225,7 @@ Tested in-guest metadata blocks failed: the capability set lacked
 paths were read-only. No tested guest-side block was effective. VPC internet
 isolation does not remove metadata access or make an overprivileged role safe.
 
-## What this contract does not cover
+## Outside this contract
 
 **Internet isolation.** No internet egress requires a VPC without an internet
 gateway or NAT gateway, attached with a custom VPC connector. Check subnet
@@ -251,8 +251,8 @@ delivered once and is not a rotation channel. The client validates the full
 payload before calling AWS. Use an authenticated session or an external
 credential broker for subsequent delivery and refresh.
 
-**Workload confinement.** There is no seccomp or user-namespace boundary
-between workload and daemon. Single-file APIs intentionally accept arbitrary
+**Workload confinement.** The workload and daemon share the same seccomp and user namespace; these
+do not provide a boundary between them. Single-file APIs intentionally accept arbitrary
 guest paths because the same authorized principal can execute as root. Tar
 uploads are confined because member names originate in an archive and may
 not be paths its uploader intended; see [Protocol](PROTOCOL.md).

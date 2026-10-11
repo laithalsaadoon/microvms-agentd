@@ -24,8 +24,7 @@ protocol = { package = "microvms-protocol", version = "0.1.0" }
 ## Reading
 
 The wire contract is documented in [`docs/PROTOCOL.md`](https://github.com/laithalsaadoon/microvms-agentd/blob/main/docs/PROTOCOL.md),
-which is hand-written and authoritative — it wins any disagreement with generated
-documentation.
+which is authoritative. It takes precedence over generated documentation.
 
 ## License
 

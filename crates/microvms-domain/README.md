@@ -8,7 +8,7 @@ This crate performs no I/O. It doesn't read the network, the filesystem, the env
 the clock, or the OS random pool, and it doesn't start a subprocess. A rule that needs one
 of those takes it as a parameter: `Region::from_env` takes a lookup function,
 `CalendarDate::from_unix_secs` takes the time, and `LaunchIdentity::from_seeds` takes the
-seeds. So a rule gives the same answer on every machine, and a test passes its inputs in
+seeds. A rule gives the same answer on every machine, and a test passes its inputs in
 rather than faking global state.
 
 Most callers want [`microvms-core`](https://crates.io/crates/microvms-core) instead. It

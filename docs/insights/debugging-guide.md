@@ -101,8 +101,8 @@ comments beside the behavior they explain.
 
 ## See also
 
-- [contract map](contract-map.md) — 13 shared source citations
-- [impact analysis](impact-analysis.md) — 13 shared source citations
-- [processes](../behavior/processes.md) — 11 shared source citations
-- [module map](../architecture/module-map.md) — 10 shared source citations
-- [business logic](business-logic.md) — 7 shared source citations
+- [contract map](contract-map.md): 13 shared source citations
+- [impact analysis](impact-analysis.md): 13 shared source citations
+- [processes](../behavior/processes.md): 11 shared source citations
+- [module map](../architecture/module-map.md): 10 shared source citations
+- [business logic](business-logic.md): 7 shared source citations

@@ -17,7 +17,7 @@ A fresh VM's first S3 call carries a measured five-to-ten-second penalty, and a 
 
 ## 1. Why it works
 
-An image build boots the image in a snapshot VM, calls the build-time hooks against the daemon, and captures the memory and disk snapshot only after they answer. So anything that completes before the daemon answers those hooks is inside the snapshot. The wrapper here runs `aws s3 sync` first and only then hands the process to agentd, strictly ordered: the daemon cannot answer a hook until the sync is done, and the snapshot cannot be captured until the daemon answers.
+An image build boots the image in a snapshot VM, calls the build-time hooks against the daemon, and captures the memory and disk snapshot only after they answer. Anything that completes before the daemon answers those hooks is inside the snapshot. The wrapper here runs `aws s3 sync` first and only then hands the process to agentd, strictly ordered: the daemon cannot answer a hook until the sync is done, and the snapshot cannot be captured until the daemon answers.
 
 The same rule shows up in practice, observed in [Platform](/internals/platform/). The model allows build hooks an hour, and an observed failure reads `Ready hook invocation timed out after PT5M`, so plan the transfer to fit well inside five minutes and measure before assuming the full hour is reachable. And one build runs the snapshot pass once per chipset generation, so the prefetch downloads twice per image; a launch restores the snapshot rather than re-running `CMD`, so it never prefetches, which is the entire point.
 
@@ -61,7 +61,7 @@ The wrapper is `set -e`. A failed sync means agentd never starts, the ready hook
 
 ## 4. Credentials at build time
 
-The prefetch runs inside the build's snapshot VMs, under whatever network and credentials the build environment provides. What the repository has established: the build's docker-build VM has outbound network, because every `dnf install` in the examples runs there. Whether the snapshot VMs have the same egress, and whether the build role's credentials are visible to the app process there, has not been measured.
+The prefetch runs inside the build's snapshot VMs, under whatever network and credentials the build environment provides. The available evidence is limited: the build's docker-build VM has outbound network, because every `dnf install` in the examples runs there. Whether the snapshot VMs have the same egress, and whether the build role's credentials are visible to the app process there, has not been measured.
 
 `PREFETCH_NO_SIGN=1` for a public bucket is the zero-assumption mode. For a private bucket, the AWS CLI walks its default chain: grant the build role read on the prefix and try it, and if the build fails with the `PT5M` signature and the wrapper's log shows a credential or network error, that is a real finding about the snapshot VMs. The conservative fallback is to run the sync as a docker `RUN` step instead, which executes in the docker-build VM where outbound network is demonstrated and reaches the launched VM through the same disk snapshot.
 
@@ -81,4 +81,4 @@ The example's `microvm.toml` pins `egress = false` and `memory = 512`. The data 
 
 ## 7. Rebuilds and cost
 
-The prefetched bytes live in the image snapshot, which bills storage with a one-week minimum retention, and every launch pays a snapshot read scaled by its size. So prefetch what the workload reads at startup, and never the whole bucket. Delete retired images with `aws lambda-microvms delete-microvm-image`. [Read the cost report](/learn/operations/read-the-cost-report/) has the snapshot line items.
+The prefetched bytes live in the image snapshot, which bills storage with a one-week minimum retention, and every launch pays a snapshot read scaled by its size. Prefetch what the workload reads at startup, and never the whole bucket. Delete retired images with `aws lambda-microvms delete-microvm-image`. [Read the cost report](/learn/operations/read-the-cost-report/) has the snapshot line items.
