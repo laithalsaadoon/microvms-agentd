@@ -38,22 +38,56 @@ exec ID, branch name, and review marker make retrying launch, agent start, and
 publishing safe.
 
 Each step runs in a fresh process, so the VM is managed through the `microvms`
-SDK by its record: the launch step calls `Sandbox.run(client_token=…,
-agent_token=…, wait=False)`, every later step calls `Sandbox.adopt(region,
+SDK by its record: the launch step awaits `Sandbox.run_async(client_token=…,
+agent_token=…, wait=False)`, every later step awaits `Sandbox.adopt_async(region,
 microvm_id, endpoint, agent_token)`, and polling and cleanup use `ControlPlane`
-(`get`, `terminate`, `wait_for_state`). No step calls the MicroVM API directly.
+(`get_async`, `terminate_async`, `wait_for_state_async`). No step calls the
+MicroVM API directly.
+
+## Async steps in a synchronous workflow
+
+The durable execution SDK for Python runs synchronous steps and doesn't support
+`await` ([Python SDK reference](https://docs.aws.amazon.com/durable-execution/sdk-reference/languages/python/)).
+So each step that reaches the VM is a coroutine over the `microvms` awaitables,
+the `_async` twin of each blocking method, and `on_loop` in
+[handler.py](handler.py) runs it with `asyncio.run`, one event loop per step:
+
+```python
+def on_loop(operation, *args):
+    return lambda _: asyncio.run(operation(*args))
+
+vm = step(on_loop(launch, job_id, token), name="launch")
+```
+
+The awaitables run on the binding's own runtime, so the event loop keeps going
+while one waits. `prepare` uses that to wait for the VM to boot while a thread
+downloads the source and task archives from S3, so the inputs are in hand when
+the daemon first answers. It mints the Bedrock token last, after the workspace
+is set up, so the token's lifetime starts as close to the agent's as it can. A
+blocking AWS call (boto3, PynamoDB) moves to a thread only where it overlaps a
+VM call, as the S3 download does; elsewhere nothing else is in flight, so it
+runs on the loop.
+
+The coroutine is built when its step runs. Replay skips the body of a finished
+step, so building it earlier would leave a coroutine nobody awaits, and the
+tests fail on one. That also catches a missing `await` before an `_async`
+call, which would otherwise be a call that silently never happened.
+
+The agent's run is still a series of durable waits, with Lambda suspended
+between polls; async shortens the steps around them.
 
 ## Deploy once
 
 You need the repository's normal AWS and MicroVM prerequisites, Bedrock model
 access, Python 3.13, uv, and Terraform. The Lambda is arm64 and every dependency,
 the `microvms` binding included, installs from published wheels, so `deploy.sh`
-packages it on any OS. Building the agent image needs Cargo for the daemon. Build
-it from the neighboring example (from the repository root):
+packages it on any OS. Build the agent image from the neighboring example (from
+the repository root). With no daemon path given, `microvm build` fetches its own
+version's `agentd` release asset and verifies its Sigstore attestation, so no
+Cargo build is needed:
 
 ```bash
-microvm build target/aarch64-unknown-linux-musl/release/agentd \
-  --reuse --name coding-agents \
+microvm build --reuse --name coding-agents \
   --dockerfile examples/coding-agents-on-bedrock/Dockerfile --json
 ```
 
@@ -96,7 +130,10 @@ downloads `REPORT.md`, the agent's stdout and stderr, and for issues
 
 For an issue, the agent works on the default branch's current commit. Its
 changes become one commit on `agent/issue-<n>-<id>` and a draft PR whose body
-is the agent's report plus `Closes #<n>`. Repositories whose plan does not allow
+is the agent's report plus `Closes #<n>`. Caches and dependencies a test run
+leaves behind (`__pycache__/`, `*.pyc`, `.pytest_cache/`, `.mypy_cache/`,
+`.ruff_cache/`, `node_modules/`, `.venv/`) stay out of the commit, unless the
+repository already tracks them. Repositories whose plan does not allow
 drafts get a regular PR. No changes means no PR, and the job ends as
 `no-changes`.
 
@@ -140,6 +177,9 @@ Images are managed separately.
 Run `mise run background:check` from the repository root. The tests drive the
 real durable SDK through suspension and replay, the job table through moto, and
 the real change-export script through Git. They check that failures record the
-job and terminate the VM exactly once, that publishing retries do not duplicate
-PRs or reviews, and that deletions, executable bits, symlinks, and leaked tokens
-are handled. Live status is in [LIVE_TEST.md](LIVE_TEST.md).
+job and terminate the VM exactly once, that a retried async step runs again on
+replay, that publishing retries do not duplicate PRs or reviews, and that
+deletions, executable bits, symlinks, and leaked tokens are handled. The SDK
+fakes define only the `_async` methods, so a blocking call fails, and `prepare`'s
+test passes only when the boot and the S3 download overlap on separate threads. Live
+status is in [LIVE_TEST.md](LIVE_TEST.md).

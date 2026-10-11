@@ -1,12 +1,12 @@
 [project]
 name = "microvms-background-coding-agent"
-version = "0.2.0"
+version = "0.3.0"
 requires-python = ">=3.13"
 dependencies = [
     "aws-durable-execution-sdk-python==2.0.1",
     "boto3==1.43.101",
     "cyclopts==4.25.3",
-    "microvms==0.10.0",
+    "microvms==0.12.0",
     "pygithub==2.10.0",
     "pynamodb==6.1.0",
     "requests==2.34.2",
@@ -22,3 +22,9 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# A coroutine nobody awaits is a call that never happened: a forgotten `await` on an
+# `_async` method, or a step body built before replay skips it. Either fails the suite.
+filterwarnings = [
+    "error:coroutine .* was never awaited:RuntimeWarning",
+    "error::pytest.PytestUnraisableExceptionWarning",
+]

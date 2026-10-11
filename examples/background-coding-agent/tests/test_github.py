@@ -90,16 +90,17 @@ def git(path, *args):
     )
 
 
-def export(tmp_path, change) -> dict[str, bytes]:
-    """Run the workflow's real export script on a baseline repo after `change`."""
+def export(tmp_path, change, tracked=()) -> dict[str, bytes]:
+    """Run the workflow's real baseline and export scripts around `change`."""
     project, results = tmp_path / "project", tmp_path / "results"
     project.mkdir(parents=True)
     results.mkdir()
-    (project / "keep.py").write_text("old\n")
-    (project / "gone.py").write_text("bye\n")
-    git(project, "init", "-q")
-    git(project, "-c", "user.name=t", "-c", "user.email=t@t", "add", "-A")
-    git(project, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base")
+    for name in ("keep.py", "gone.py", *tracked):
+        (project / name).parent.mkdir(parents=True, exist_ok=True)
+        (project / name).write_text("old\n")
+    subprocess.run(
+        ["bash", "-c", handler.BASELINE], cwd=project, check=True, env=CLEAN_ENV
+    )
     change(project)
     script = handler.EXPORT.replace("/workspace/results", str(results))
     subprocess.run(["bash", "-c", script], cwd=project, check=True, env=CLEAN_ENV)
@@ -137,6 +138,30 @@ def test_changes_become_one_commit_and_a_retry_safe_draft(tmp_path, monkeypatch)
     assert github_ops.open_pull_request(JOB, META, bundle) == url
     assert len(repo.pulls) == 1
     assert repo.refs == {"refs/heads/agent/issue-7-01234567": "commit-2"}
+
+
+def test_caches_and_dependencies_a_test_run_leaves_are_not_published(tmp_path):
+    def run_tests(project):
+        (project / "keep.py").write_text("new\n")
+        (project / "node_modules/vendored/index.js").write_text("edited\n")
+        for leftover in (
+            "__pycache__/keep.cpython-39.pyc",
+            "pkg/__pycache__/mod.cpython-313.pyc",
+            ".pytest_cache/v/cache/nodeids",
+            "node_modules/left/index.js",
+            ".venv/bin/python",
+        ):
+            (project / leftover).parent.mkdir(parents=True, exist_ok=True)
+            (project / leftover).write_text("build output\n")
+
+    # A file the repository tracks under an ignored name, as a vendored action's
+    # node_modules/ is, still publishes its edit.
+    bundle = export(tmp_path, run_tests, tracked=["node_modules/vendored/index.js"])
+    entries = github_ops.parse_raw(bundle["changes.raw"])
+    assert [path for _, _, path in entries] == [
+        "keep.py",
+        "node_modules/vendored/index.js",
+    ]
 
 
 def test_private_plans_without_drafts_get_a_ready_pr(tmp_path, monkeypatch):
