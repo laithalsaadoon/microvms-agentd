@@ -31,6 +31,7 @@ fn adopt_command(endpoint: &str) -> Command {
         attach: AttachFlags {
             endpoint: Some(endpoint.into()),
             agent_token: Some("t".into()),
+            agent_token_file: None,
             microvm_id: Some("mvm-abc123".into()),
             name: None,
             port: None,

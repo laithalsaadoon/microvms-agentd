@@ -1232,11 +1232,20 @@
           {
             "choices": null,
             "default": null,
-            "help": "The agent token delivered to the VM at launch",
+            "help": "The agent token delivered to the VM at launch. Prefer --name or --agent-token-file",
             "name": "agent-token",
             "positional": false,
             "required": false,
             "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Read the agent token from a protected file, or from stdin with `-`. On Unix, the file must grant no permissions to group or other users",
+            "name": "agent-token-file",
+            "positional": false,
+            "required": false,
+            "type": "path"
           },
           {
             "choices": null,
@@ -1516,11 +1525,20 @@
           {
             "choices": null,
             "default": null,
-            "help": "The agent token delivered to the VM at launch",
+            "help": "The agent token delivered to the VM at launch. Prefer --name or --agent-token-file",
             "name": "agent-token",
             "positional": false,
             "required": false,
             "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Read the agent token from a protected file, or from stdin with `-`. On Unix, the file must grant no permissions to group or other users",
+            "name": "agent-token-file",
+            "positional": false,
+            "required": false,
+            "type": "path"
           },
           {
             "choices": null,
@@ -1623,11 +1641,20 @@
           {
             "choices": null,
             "default": null,
-            "help": "The agent token delivered to the VM at launch",
+            "help": "The agent token delivered to the VM at launch. Prefer --name or --agent-token-file",
             "name": "agent-token",
             "positional": false,
             "required": false,
             "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Read the agent token from a protected file, or from stdin with `-`. On Unix, the file must grant no permissions to group or other users",
+            "name": "agent-token-file",
+            "positional": false,
+            "required": false,
+            "type": "path"
           },
           {
             "choices": null,
@@ -1716,11 +1743,20 @@
           {
             "choices": null,
             "default": null,
-            "help": "The agent token delivered to the VM at launch",
+            "help": "The agent token delivered to the VM at launch. Prefer --name or --agent-token-file",
             "name": "agent-token",
             "positional": false,
             "required": false,
             "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Read the agent token from a protected file, or from stdin with `-`. On Unix, the file must grant no permissions to group or other users",
+            "name": "agent-token-file",
+            "positional": false,
+            "required": false,
+            "type": "path"
           },
           {
             "choices": null,
@@ -1861,11 +1897,20 @@
           {
             "choices": null,
             "default": null,
-            "help": "The agent token delivered to the VM at launch",
+            "help": "The agent token delivered to the VM at launch. Prefer --name or --agent-token-file",
             "name": "agent-token",
             "positional": false,
             "required": false,
             "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Read the agent token from a protected file, or from stdin with `-`. On Unix, the file must grant no permissions to group or other users",
+            "name": "agent-token-file",
+            "positional": false,
+            "required": false,
+            "type": "path"
           },
           {
             "choices": null,
@@ -1966,11 +2011,20 @@
           {
             "choices": null,
             "default": null,
-            "help": "The agent token delivered to the VM at launch",
+            "help": "The agent token delivered to the VM at launch. Prefer --name or --agent-token-file",
             "name": "agent-token",
             "positional": false,
             "required": false,
             "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Read the agent token from a protected file, or from stdin with `-`. On Unix, the file must grant no permissions to group or other users",
+            "name": "agent-token-file",
+            "positional": false,
+            "required": false,
+            "type": "path"
           },
           {
             "choices": null,
@@ -2070,11 +2124,20 @@
           {
             "choices": null,
             "default": null,
-            "help": "The agent token delivered to the VM at launch",
+            "help": "The agent token delivered to the VM at launch. Prefer --name or --agent-token-file",
             "name": "agent-token",
             "positional": false,
             "required": false,
             "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Read the agent token from a protected file, or from stdin with `-`. On Unix, the file must grant no permissions to group or other users",
+            "name": "agent-token-file",
+            "positional": false,
+            "required": false,
+            "type": "path"
           },
           {
             "choices": null,
@@ -2162,11 +2225,20 @@
           {
             "choices": null,
             "default": null,
-            "help": "The agent token delivered to the VM at launch",
+            "help": "The agent token delivered to the VM at launch. Prefer --name or --agent-token-file",
             "name": "agent-token",
             "positional": false,
             "required": false,
             "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Read the agent token from a protected file, or from stdin with `-`. On Unix, the file must grant no permissions to group or other users",
+            "name": "agent-token-file",
+            "positional": false,
+            "required": false,
+            "type": "path"
           },
           {
             "choices": null,
@@ -2280,11 +2352,20 @@
           {
             "choices": null,
             "default": null,
-            "help": "The agent token delivered to the VM at launch",
+            "help": "The agent token delivered to the VM at launch. Prefer --name or --agent-token-file",
             "name": "agent-token",
             "positional": false,
             "required": false,
             "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Read the agent token from a protected file, or from stdin with `-`. On Unix, the file must grant no permissions to group or other users",
+            "name": "agent-token-file",
+            "positional": false,
+            "required": false,
+            "type": "path"
           },
           {
             "choices": null,
@@ -2417,11 +2498,20 @@
           {
             "choices": null,
             "default": null,
-            "help": "The agent token delivered to the VM at launch",
+            "help": "The agent token delivered to the VM at launch. Prefer --name or --agent-token-file",
             "name": "agent-token",
             "positional": false,
             "required": false,
             "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Read the agent token from a protected file, or from stdin with `-`. On Unix, the file must grant no permissions to group or other users",
+            "name": "agent-token-file",
+            "positional": false,
+            "required": false,
+            "type": "path"
           },
           {
             "choices": null,
@@ -2520,11 +2610,20 @@
           {
             "choices": null,
             "default": null,
-            "help": "The agent token delivered to the VM at launch",
+            "help": "The agent token delivered to the VM at launch. Prefer --name or --agent-token-file",
             "name": "agent-token",
             "positional": false,
             "required": false,
             "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Read the agent token from a protected file, or from stdin with `-`. On Unix, the file must grant no permissions to group or other users",
+            "name": "agent-token-file",
+            "positional": false,
+            "required": false,
+            "type": "path"
           },
           {
             "choices": null,
@@ -2648,11 +2747,20 @@
           {
             "choices": null,
             "default": null,
-            "help": "The agent token delivered to the VM at launch",
+            "help": "The agent token delivered to the VM at launch. Prefer --name or --agent-token-file",
             "name": "agent-token",
             "positional": false,
             "required": false,
             "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Read the agent token from a protected file, or from stdin with `-`. On Unix, the file must grant no permissions to group or other users",
+            "name": "agent-token-file",
+            "positional": false,
+            "required": false,
+            "type": "path"
           },
           {
             "choices": null,
@@ -2764,11 +2872,20 @@
           {
             "choices": null,
             "default": null,
-            "help": "The agent token delivered to the VM at launch. Never echoed in the envelope",
+            "help": "The agent token delivered at launch. Prefer --from or --agent-token-file",
             "name": "agent-token",
             "positional": false,
             "required": false,
             "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Read the agent token from a protected file, or stdin with `-`. On Unix, the file must grant no permissions to group or other users",
+            "name": "agent-token-file",
+            "positional": false,
+            "required": false,
+            "type": "path"
           },
           {
             "choices": null,
@@ -2787,6 +2904,15 @@
             "positional": false,
             "required": false,
             "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Read the host identity secret from a protected file, or stdin with `-`. On Unix, the file must grant no permissions to group or other users",
+            "name": "identity-host-seed-file",
+            "positional": false,
+            "required": false,
+            "type": "path"
           },
           {
             "choices": null,
@@ -2878,11 +3004,20 @@
           {
             "choices": null,
             "default": null,
-            "help": "The agent token delivered to the VM at launch",
+            "help": "The agent token delivered to the VM at launch. Prefer --name or --agent-token-file",
             "name": "agent-token",
             "positional": false,
             "required": false,
             "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Read the agent token from a protected file, or from stdin with `-`. On Unix, the file must grant no permissions to group or other users",
+            "name": "agent-token-file",
+            "positional": false,
+            "required": false,
+            "type": "path"
           },
           {
             "choices": null,
@@ -3009,6 +3144,15 @@
           {
             "choices": null,
             "default": null,
+            "help": "Read the host identity secret from a protected file, or stdin with `-`. On Unix, the file must grant no permissions to group or other users",
+            "name": "identity-host-seed-file",
+            "positional": false,
+            "required": false,
+            "type": "path"
+          },
+          {
+            "choices": null,
+            "default": null,
             "help": "The VM's public key, base64, from `run --identity`'s envelope. The pin",
             "name": "identity-vm-public-key",
             "positional": false,
@@ -3027,11 +3171,20 @@
           {
             "choices": null,
             "default": null,
-            "help": "The agent token delivered to the VM at launch",
+            "help": "The agent token delivered to the VM at launch. Prefer --name or --agent-token-file",
             "name": "agent-token",
             "positional": false,
             "required": false,
             "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Read the agent token from a protected file, or from stdin with `-`. On Unix, the file must grant no permissions to group or other users",
+            "name": "agent-token-file",
+            "positional": false,
+            "required": false,
+            "type": "path"
           },
           {
             "choices": null,
@@ -3153,11 +3306,20 @@
           {
             "choices": null,
             "default": null,
-            "help": "The agent token delivered to the VM at launch",
+            "help": "The agent token delivered to the VM at launch. Prefer --name or --agent-token-file",
             "name": "agent-token",
             "positional": false,
             "required": false,
             "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Read the agent token from a protected file, or from stdin with `-`. On Unix, the file must grant no permissions to group or other users",
+            "name": "agent-token-file",
+            "positional": false,
+            "required": false,
+            "type": "path"
           },
           {
             "choices": null,

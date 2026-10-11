@@ -103,6 +103,7 @@ fn triple() -> AttachFlags {
     AttachFlags {
         endpoint: Some(ENDPOINT.into()),
         agent_token: Some("t".into()),
+        agent_token_file: None,
         microvm_id: Some("mvm-abc123".into()),
         name: None,
         port: None,
@@ -154,6 +155,7 @@ async fn run_no_wait_returns_at_acceptance_and_wait_finishes_the_launch() {
     let by_name = AttachFlags {
         endpoint: None,
         agent_token: None,
+        agent_token_file: None,
         microvm_id: None,
         name: Some("box".into()),
         port: None,

@@ -8,7 +8,7 @@
 [flag_groups]
 # Flags that every command attaching a Session shares, and the infra flags every command that
 # builds or launches shares. `@connection` in a CLI cell means "any attached command".
-connection = ["endpoint", "agent-token", "microvm-id", "name", "port", "state-dir", "region", "unlisted-region"]
+connection = ["endpoint", "agent-token", "agent-token-file", "microvm-id", "name", "port", "state-dir", "region", "unlisted-region"]
 infra = ["bucket", "build-role-arn", "execution-role-arn", "config", "no-config"]
 
 # ── sandbox lifecycle ────────────────────────────────────────────────────────
@@ -1094,3 +1094,18 @@ name = "ExecHandle"
 
 [[type]]
 name = "NameRegistry"
+
+# Host input adapters keep credential I/O in Rust. SDK callers already supply strings.
+[[capability]]
+id = "read-secret-file"
+core = "microvms_core::secret_input::read_secret_file"
+cli = "exec --agent-token-file"
+py = { exempt = "Python callers read host files through their runtime and supply credential strings." }
+ts = { exempt = "JavaScript callers read host files through their runtime and supply credential strings." }
+
+[[capability]]
+id = "read-secret-input"
+core = "microvms_core::secret_input::read_secret"
+cli = "exec --agent-token-file"
+py = { exempt = "Python callers own their input streams and supply credential strings." }
+ts = { exempt = "JavaScript callers own their input streams and supply credential strings." }

@@ -123,6 +123,7 @@ pub(super) fn attach_flags() -> AttachFlags {
     AttachFlags {
         endpoint: Some("https://mvm-1.example".into()),
         agent_token: Some("t".into()),
+        agent_token_file: None,
         microvm_id: Some("mvm-1".into()),
         name: None,
         port: None,

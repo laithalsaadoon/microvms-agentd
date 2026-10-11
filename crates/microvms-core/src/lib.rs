@@ -88,7 +88,7 @@ pub use microvms_domain::{constants, cost, duration, error, hooks, region, sizin
 
 // Whole modules that live in one crate below.
 pub use microvms_app::{defaults, sandbox};
-pub use microvms_edges::{env, provision};
+pub use microvms_edges::{env, provision, secret_input};
 
 // Re-exported so consumers name wire types through this crate rather than
 // depending on `protocol` directly — the CLI's thinness guard counts on that.

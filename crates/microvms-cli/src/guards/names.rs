@@ -265,6 +265,7 @@ async fn an_attached_command_by_name_carries_the_registered_triple() {
         attach: AttachFlags {
             endpoint: None,
             agent_token: None,
+            agent_token_file: None,
             microvm_id: None,
             name: Some("ci-runner".into()),
             port: None,

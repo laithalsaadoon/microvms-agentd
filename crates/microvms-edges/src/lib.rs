@@ -35,6 +35,7 @@ pub mod names;
 pub mod provision;
 #[cfg(test)]
 mod provision_fuzz;
+pub mod secret_input;
 pub mod session;
 pub mod workspace;
 
