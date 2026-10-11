@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // `for await` over `ExecHandle.stream()`, the loop the method's own docs show (#262).
-import type { ExecHandle, StreamEvent } from '@theagenticguy/microvms'
+import type { ExecHandle, StreamEvent } from 'microvms'
 
 export async function drain(handle: ExecHandle): Promise<StreamEvent[]> {
   const seen: StreamEvent[] = []

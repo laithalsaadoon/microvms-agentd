@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // `downloadDir` and `syncDir`, typed the way their docs show (#260).
-import type { DownloadedFile, Session, SyncReport } from '@theagenticguy/microvms'
+import type { DownloadedFile, Session, SyncReport } from 'microvms'
 
 export async function bringBack(session: Session, dir: string): Promise<string[]> {
   const written: DownloadedFile[] = await session.downloadDir('/workspace/dist', dir, ['**'])

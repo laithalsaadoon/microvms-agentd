@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // `downloadFile` with a line range and without one (#265).
-import type { Session } from '@theagenticguy/microvms'
+import type { Session } from 'microvms'
 
 export async function window(session: Session): Promise<Buffer> {
   return session.downloadFile('/var/log/app.log', { startLine: 40, endLine: 60 })

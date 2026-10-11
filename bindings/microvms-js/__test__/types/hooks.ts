@@ -4,7 +4,7 @@
 // classes are different types, and an object literal is neither one nor an `EstimatedUsd`.
 // Each `@ts-expect-error` is one claim. When the declarations let the mistake through, the
 // line compiles and the directive goes unused (TS2578), so each is also this probe's control.
-import { BuildHookTimeout, EstimatedUsd, RunHookTimeout } from '@theagenticguy/microvms'
+import { BuildHookTimeout, EstimatedUsd, RunHookTimeout } from 'microvms'
 
 export function runCeiling(timeout: RunHookTimeout): number {
   return timeout.maxSecs

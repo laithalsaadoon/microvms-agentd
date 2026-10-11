@@ -9,7 +9,7 @@
 [![crates.io](https://img.shields.io/crates/v/microvms-cli.svg?label=crates.io)](https://crates.io/crates/microvms-cli)
 [![docs.rs](https://img.shields.io/docsrs/microvms-core?label=docs.rs)](https://docs.rs/microvms-core)
 [![PyPI](https://img.shields.io/pypi/v/microvms.svg?label=PyPI)](https://pypi.org/project/microvms/)
-[![npm](https://img.shields.io/npm/v/%40theagenticguy%2Fmicrovms.svg?label=npm)](https://www.npmjs.com/package/@theagenticguy/microvms)
+[![npm](https://img.shields.io/npm/v/microvms.svg?label=npm)](https://www.npmjs.com/package/microvms)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 [![llms.txt](https://img.shields.io/badge/llms.txt-available-2ea44f)](https://laithalsaadoon.github.io/microvms-agentd/llms.txt)
@@ -35,7 +35,7 @@ The bundled `agentd` daemon handles commands inside each VM.
 |---|---|---|
 | CLI | `cargo binstall microvms-cli --no-confirm` | [Run an agent below](#run-a-coding-agent-in-a-sandbox) |
 | Python 3.9+ | `pip install microvms` | [Python quickstart](bindings/microvms-py/README.md) |
-| Node 22.13+ | `npm install @theagenticguy/microvms` | [JavaScript / TypeScript quickstart](bindings/microvms-js/README.md) |
+| Node 22.13+ | `npm install microvms` | [JavaScript / TypeScript quickstart](bindings/microvms-js/README.md) |
 | Rust | `cargo add microvms-core` | [Rust quickstart](crates/microvms-core/README.md) |
 
 The CLI command requires [cargo-binstall](https://github.com/cargo-bins/cargo-binstall).
@@ -137,7 +137,7 @@ export MICROVM_IMAGE='paste-the-image-ARN-here'
 `sandbox.mjs` and run `node sandbox.mjs`:
 
 ```js
-import { Region, Sandbox } from '@theagenticguy/microvms';
+import { Region, Sandbox } from 'microvms';
 
 const vm = await Sandbox.create(Region.parse(process.env.AWS_REGION ?? 'us-east-1'));
 try {

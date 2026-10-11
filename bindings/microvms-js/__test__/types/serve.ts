@@ -6,7 +6,7 @@ import type {
   Sandbox,
   Session,
   TunnelReport,
-} from '@theagenticguy/microvms'
+} from 'microvms'
 
 export async function verified(sandbox: Sandbox, session: Session): Promise<TunnelReport> {
   const identity = await sandbox.tunnelIdentity()

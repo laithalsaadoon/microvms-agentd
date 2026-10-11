@@ -2,7 +2,7 @@
 //
 // Image administration on `ControlPlane` (#264): a rollback reads the version back, and the
 // build listing hands `getImageBuild` its id.
-import type { ControlPlane, ImageBuild, ImageVersion } from '@theagenticguy/microvms'
+import type { ControlPlane, ImageBuild, ImageVersion } from 'microvms'
 
 export async function retire(plane: ControlPlane, arn: string, version: string): Promise<boolean> {
   const updated: ImageVersion = await plane.setImageVersionStatus(arn, version, 'INACTIVE')

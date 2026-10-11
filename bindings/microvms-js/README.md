@@ -1,4 +1,4 @@
-# @theagenticguy/microvms
+# microvms
 
 Run coding agents and their tools in sandboxed AWS Lambda MicroVMs. Give each
 task its own Linux workspace, execute commands, collect files, and terminate
@@ -8,7 +8,7 @@ through Amazon Bedrock; `Sandbox` supports your own agent or command runner.
 ## Install
 
 ```sh
-npm install @theagenticguy/microvms
+npm install microvms
 ```
 
 Requires Node.js **22.13.0+**. Native addons ship for Linux x64/ARM64 (glibc),
@@ -40,7 +40,7 @@ Shell examples use Bash or Zsh; in PowerShell, set variables with `$env:NAME='va
 Save as `hello.mjs`:
 
 ```js
-import { Region, Sandbox } from '@theagenticguy/microvms';
+import { Region, Sandbox } from 'microvms';
 
 const imageIdentifier = process.env.MICROVM_IMAGE;
 const executionRoleArn = process.env.MICROVM_EXECUTION_ROLE_ARN;
@@ -92,7 +92,7 @@ downloads that file before cleanup:
 
 ```js
 import { writeFile } from 'node:fs/promises';
-import { AgentVm, Region } from '@theagenticguy/microvms';
+import { AgentVm, Region } from 'microvms';
 
 const imageIdentifier = process.env.MICROVM_AGENT_IMAGE;
 const executionRoleArn = process.env.MICROVM_EXECUTION_ROLE_ARN;
