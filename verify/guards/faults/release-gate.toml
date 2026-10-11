@@ -23,7 +23,7 @@ transform = { file = ".github/workflows/release.yml", replace = "    needs: [dra
 [[family.fault]]
 id = "release-gate-draft-flag"
 message = "job `draft` publishes (`gh release create without --draft`) and doesn't name `live-gate`"
-transform = { file = ".github/workflows/release.yml", replace = "          --draft\n", with = "" }
+transform = { file = ".github/workflows/release.yml", replace = "              --draft \\\n", with = "" }
 
 [[family.fault]]
 id = "release-gate-status-override"

@@ -114,11 +114,10 @@ ADDON_WORKFLOWS = (
     ".github/workflows/release.yml",
 )
 
-#: A Rust triple in a `target:` key, told apart from maturin's by shape.
+#: A Rust triple in an addon `target:` key.
 #:
-#: `release.yml` also carries a wheel matrix whose `target:` values are maturin's own names —
-#: `x86_64`, `aarch64`, `x64` — and those are not Rust triples and must not be compared against
-#: `napi.targets`. Two or more hyphens is what separates them.
+#: The wheel matrix uses its own `triple:` key because its platforms differ from
+#: `napi.targets`. Only Rust triples, with two or more hyphens, enter this comparison.
 WORKFLOW_TARGET = re.compile(r"target:\s*([A-Za-z0-9_.-]+)")
 
 #: A matrix row that belongs to the host-CLI asset job (issue #76), not the addon matrix.

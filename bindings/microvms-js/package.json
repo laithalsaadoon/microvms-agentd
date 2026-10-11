@@ -50,7 +50,7 @@
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",
-    "@napi-rs/cli": "^3.8.2",
+    "@napi-rs/cli": "3.8.2",
     "publint": "0.3.25"
   },
   "engines": {

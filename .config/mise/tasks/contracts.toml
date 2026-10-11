@@ -272,7 +272,7 @@ description = "Regenerate bindings/microvms-js/index.d.ts from the napi-rs surfa
 # TypeScript shape at compile time and the CLI stitches them together, with the SPDX header from
 # `bindings/microvms-js/package.json`'s `napi.dtsHeader`. It also writes `index.js` and the platform `.node`
 # addon beside it, both gitignored; `bindings:js` builds the addon its tests load with this task.
-run = "npx -y -p @napi-rs/cli@3 napi build --manifest-path Cargo.toml --package microvms-js --platform --output-dir . --cwd bindings/microvms-js"
+run = "npx -y -p @napi-rs/cli@3.8.2 napi build --manifest-path Cargo.toml --package microvms-js --platform --output-dir . --cwd bindings/microvms-js"
 
 ["dts:check"]
 description = "Fail if the committed TypeScript declarations no longer match the napi-rs surface"
@@ -290,9 +290,8 @@ description = "Fail if the committed TypeScript declarations no longer match the
 # `[Symbol.asyncIterator]()`, byte-identical to the build, and `tsc` rejected the `for await` loop
 # `stream()` documents (#262).
 #
-# No `sources`, unlike the other generate-and-diff gates: npx resolves `@napi-rs/cli@3` to the
-# newest 3.x on each run, here and in every workflow, so a CLI release can make the committed file
-# stale while no file here changes, and a skip would pass it.
+# The declaration build and CI use the same exact generator version as the release.
+# `release:check` holds these pins to the binding's package manifest.
 #
 # The consumer check's unit tests run first, for `model:check`'s reason: its tsc locate runs under
 # the npx cache's lock and refuses a tsc npx didn't install (#348), and a fake npx proves both.
@@ -303,7 +302,7 @@ run = [
 set -euo pipefail
 out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
-npx -y -p @napi-rs/cli@3 napi build --manifest-path Cargo.toml --package microvms-js --platform --output-dir "$out" --cwd bindings/microvms-js >/dev/null
+npx -y -p @napi-rs/cli@3.8.2 napi build --manifest-path Cargo.toml --package microvms-js --platform --output-dir "$out" --cwd bindings/microvms-js >/dev/null
 if ! diff -u bindings/microvms-js/index.d.ts "$out/index.d.ts"; then
   echo "bindings/microvms-js/index.d.ts is stale: run \`mise run dts\` and commit the result" >&2
   exit 1

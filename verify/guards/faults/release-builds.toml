@@ -1,0 +1,104 @@
+# Release dependency inputs and tag identity stay explicit in the workflow.
+[[family]]
+guard = "tools/check-release-builds.py"
+run = ["./tools/check-release-builds.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "release-builds-cache"
+message = "release jobs cannot restore caches"
+transform = { file = ".github/workflows/release.yml", replace = "      - name: build the wheel\n", with = "      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6\n      - name: build the wheel\n" }
+
+[[family.fault]]
+id = "release-builds-credentials"
+message = "checkout must disable credential persistence"
+transform = { file = ".github/workflows/release.yml", replace = "          fetch-depth: 0\n          persist-credentials: false\n", with = "          fetch-depth: 0\n" }
+
+[[family.fault]]
+id = "release-builds-floating-cargo"
+message = "cargo install needs an exact version and --locked"
+transform = { file = ".github/workflows/release.yml", replace = "        if: matrix.zigbuild\n        run: cargo install cargo-zigbuild --version 0.23.4 --locked", with = "        if: matrix.zigbuild\n        run: cargo install cargo-zigbuild --locked" }
+
+[[family.fault]]
+id = "release-builds-floating-node"
+message = "Node needs an exact version"
+transform = { file = ".github/workflows/release.yml", replace = "          node-version: '24.21.0'\n          package-manager-cache: false\n          registry-url:", with = "          node-version: '24'\n          package-manager-cache: false\n          registry-url:" }
+
+[[family.fault]]
+id = "release-builds-floating-uv"
+message = "uv needs an exact version"
+transform = { file = ".github/workflows/release.yml", replace = "          version: \"0.12.13\"\n          enable-cache: false\n      - name: build the wheel", with = "          version: latest\n          enable-cache: false\n      - name: build the wheel" }
+
+[[family.fault]]
+id = "release-builds-floating-maturin"
+message = "maturin needs an exact version"
+transform = { file = ".github/workflows/release.yml", replace = "uvx maturin@1.14.1 sdist", with = "uvx maturin sdist" }
+
+[[family.fault]]
+id = "release-builds-tag-environment"
+message = "pass the tag through an environment variable"
+transform = { file = ".github/workflows/release.yml", replace = "          gh release create \"$TAG\"", with = "          gh release create ${{ github.ref_name }}" }
+
+[[family.fault]]
+id = "release-builds-tag-guard"
+message = "guard must validate the release tag before any other step"
+transform = { file = ".github/workflows/release.yml", replace = "^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$", with = "^v.*$" }
+
+
+[[family.fault]]
+id = "release-builds-lock-integrity"
+message = "the Node lock needs registry integrity"
+transform = { file = "bindings/microvms-js/package-lock.json", replace = "    \"node_modules/@napi-rs/cli\": {\n      \"version\": \"3.8.2\",\n      \"resolved\": \"https://registry.npmjs.org/@napi-rs/cli/-/cli-3.8.2.tgz\",\n      \"integrity\": \"sha512-iFmp3Lo/ipXoJI1I/6V/xU4hQV42bXS3A7j8C+Wt3LOtYY7HFCilkhyUkN1igLJFXWMICq95kNxhNcwzNRd+Kw==\",\n      \"dev\": true,\n      \"license\": \"MIT\",\n      \"dependencies\": {\n        \"@inquirer/prompts\": \"^8.5.2\",\n        \"@napi-rs/cross-toolchain\": \"^1.0.3\",\n        \"@napi-rs/wasm-tools\": \"^1.0.1\",\n        \"@octokit/rest\": \"^22.0.1\",\n        \"clipanion\": \"^4.0.0-rc.4\",\n        \"colorette\": \"^2.0.20\",\n        \"emnapi\": \"2.0.0-alpha.3\",\n        \"es-toolkit\": \"^1.47.0\",\n        \"js-yaml\": \"^4.2.0\",\n        \"obug\": \"^2.1.2\",\n        \"semver\": \"^7.8.2\",\n        \"typanion\": \"^3.14.0\",\n        \"typescript\": \"^6.0.3\"\n      },\n      \"bin\": {\n        \"napi\": \"dist/cli.js\",\n        \"napi-raw\": \"cli.mjs\"\n      },\n      \"engines\": {\n        \"node\": \"^20.17.0 || ^22.13.0 || >= 23.5.0\"\n      },\n      \"funding\": {\n        \"type\": \"github\",\n        \"url\": \"https://github.com/sponsors/Brooooooklyn\"\n      },\n      \"peerDependencies\": {\n        \"@emnapi/runtime\": \"2.0.0-alpha.3\"\n      },\n      \"peerDependenciesMeta\": {\n        \"@emnapi/runtime\": {\n          \"optional\": true\n        }\n      }\n    },", with = "    \"node_modules/@napi-rs/cli\": {\n      \"version\": \"3.8.2\",\n      \"resolved\": \"https://registry.npmjs.org/@napi-rs/cli/-/cli-3.8.2.tgz\",\n      \"dev\": true,\n      \"license\": \"MIT\",\n      \"dependencies\": {\n        \"@inquirer/prompts\": \"^8.5.2\",\n        \"@napi-rs/cross-toolchain\": \"^1.0.3\",\n        \"@napi-rs/wasm-tools\": \"^1.0.1\",\n        \"@octokit/rest\": \"^22.0.1\",\n        \"clipanion\": \"^4.0.0-rc.4\",\n        \"colorette\": \"^2.0.20\",\n        \"emnapi\": \"2.0.0-alpha.3\",\n        \"es-toolkit\": \"^1.47.0\",\n        \"js-yaml\": \"^4.2.0\",\n        \"obug\": \"^2.1.2\",\n        \"semver\": \"^7.8.2\",\n        \"typanion\": \"^3.14.0\",\n        \"typescript\": \"^6.0.3\"\n      },\n      \"bin\": {\n        \"napi\": \"dist/cli.js\",\n        \"napi-raw\": \"cli.mjs\"\n      },\n      \"engines\": {\n        \"node\": \"^20.17.0 || ^22.13.0 || >= 23.5.0\"\n      },\n      \"funding\": {\n        \"type\": \"github\",\n        \"url\": \"https://github.com/sponsors/Brooooooklyn\"\n      },\n      \"peerDependencies\": {\n        \"@emnapi/runtime\": \"2.0.0-alpha.3\"\n      },\n      \"peerDependenciesMeta\": {\n        \"@emnapi/runtime\": {\n          \"optional\": true\n        }\n      }\n    }," }
+
+[[family]]
+guard = "test_check_release_builds.py"
+run = ["uv", "run", "--locked", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_release_builds.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "release-builds-tag-behavior"
+message = "FAIL: test_release_tags_are_validated_before_work_starts"
+transform = { file = ".github/workflows/release.yml", replace = "^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$", with = "^v.*$" }
+
+
+[[family.fault]]
+id = "release-builds-npm-boundary"
+message = "FAIL: test_npm_version_boundary_is_checked_locally"
+transform = { file = ".github/workflows/release.yml", replace = "patch < 1", with = "patch < 0" }
+
+[[family.fault]]
+id = "release-builds-node-pin-agreement"
+message = "FAIL: test_node_build_commands_use_the_manifest_generator_pin"
+transform = { file = ".github/workflows/addons.yml", replace = "npx -y -p @napi-rs/cli@3.8.2 napi build", with = "npx -y -p @napi-rs/cli@3.8.1 napi build" }
+
+[[family.fault]]
+id = "release-builds-python-pin-agreement"
+message = "FAIL: test_python_build_commands_use_the_stub_generator_pin"
+transform = { file = ".config/mise/tasks/test.toml", replace = "uvx maturin@1.14.1 develop", with = "uvx maturin@1.14.0 develop" }
+
+[[family.fault]]
+id = "release-builds-draft-retry"
+message = "FAIL: test_draft_retry_reuses_the_first_complete_assets"
+transform = { file = ".github/workflows/release.yml", replace = "            cp retained/SHA256SUMS SHA256SUMS", with = "            : retained/SHA256SUMS SHA256SUMS" }
+
+[[family.fault]]
+id = "release-builds-uv-pin-agreement"
+message = "FAIL: test_uv_uses_the_repository_pin"
+transform = { file = ".github/workflows/release.yml", replace = "          version: \"0.12.13\"\n          enable-cache: false\n      - name: build the wheel", with = "          version: \"0.12.12\"\n          enable-cache: false\n      - name: build the wheel" }
+
+[[family.fault]]
+id = "release-builds-draft-completeness"
+message = "FAIL: test_draft_retry_reuses_the_first_complete_assets"
+transform = { file = ".github/workflows/release.yml", replace = "            cmp expected-files retained-files", with = "            : expected-files retained-files" }
+
+[[scanner]]
+id = "release-builds"
+guard = "tools/check-release-builds.py"
+run = ["./tools/check-release-builds.py"]
+suite = "script"
+inputs = [".github/workflows/release.yml", "bindings/microvms-js/package.json", "bindings/microvms-js/package-lock.json"]
+empty = "cannot read release build inputs"
+unreadable = "cannot read release build inputs"
+sentinel = { file = ".github/workflows/release.yml", replace = "          npm exec --offline -- napi build", with = "          echo napi build", message = "release workflow has no napi tool step" }

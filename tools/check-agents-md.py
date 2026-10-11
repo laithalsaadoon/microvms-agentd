@@ -28,7 +28,7 @@ nothing. What counts as a reference, all inside backticks:
   directory first and then the root. A `:line` or `:line:col` suffix is dropped first. A glob
   (`docs/*.md`) must match some file. A path .gitignore names (the live tier's Terraform
   state) is a local file on purpose and passes. Absolute paths, URLs, flags and package specs
-  (`@napi-rs/cli@3`) aren't paths.
+  (`@napi-rs/cli@3.8.2`) aren't paths.
 - A bare file name (`microvms.pyi`, `Cargo.toml`), against the names of the files in the tree:
   some file anywhere has it. That's all a bare name can promise, since `Cargo.toml` names one
   in every crate.
@@ -880,6 +880,7 @@ CENSUS_NOT_PATHS = {
     "staging/": "where release.yml's `draft` job gathers the release assets",
     "release-sums/": "where release.yml's `live-gate` and `github-release` jobs download the draft's SHA256SUMS",
     "draft/": "where release.yml's `github-release` job downloads the draft to check it",
+    "retained/": "where release.yml's `draft` job downloads an existing draft to verify and reuse its original checksums",
     "draft-release/": "where live-conformance.yml's tag run puts the draft release's assets and CLI",
     "lychee/": "where links.yml's lychee step writes its report",
     "mise/tasks": "a task directory mise reads by default; the tree has none",

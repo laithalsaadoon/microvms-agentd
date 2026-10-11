@@ -18,7 +18,7 @@ transform = { file = "bindings/microvms-py/src/session.rs", replace = "         
 id = "js-run-to-completion-drops-reap"
 guard = "reapGroupOnExit reaches the start, and is off by default"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/run_to_completion.mjs"],
 ]
 expect = "test-failed"

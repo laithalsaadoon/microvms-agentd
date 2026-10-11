@@ -26,7 +26,7 @@ transform = { file = "bindings/microvms-py/src/keepalive.rs", replace = "/// Wha
 id = "js-backpressure"
 guard = "a stream survives more events than the channel can hold"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/exec.mjs"],
 ]
 expect = "test-failed"
@@ -42,7 +42,7 @@ transform = { file = "bindings/microvms-js/src/exec.rs", replace = "match sender
 [[family]]
 guard = "a gap errors both streams by default and names the range to resume from"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/process.mjs"],
 ]
 expect = "test-failed"
@@ -63,7 +63,7 @@ transform = { file = "crates/microvms-app/src/session/split.rs", replace = "    
 id = "js-spawn-budget-code-chain"
 guard = "an exhausted reconnect budget rejects both streams with its code"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/process.mjs"],
 ]
 expect = "test-failed"
@@ -76,7 +76,7 @@ transform = { file = "bindings/microvms-js/src/process.rs", replace = "        .
 id = "js-spawn-refusal-code-chain"
 guard = "a refused reconnect rejects both streams with its code and wire kind"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/process.mjs"],
 ]
 expect = "test-failed"
@@ -89,7 +89,7 @@ transform = { file = "bindings/microvms-js/src/process.rs", replace = "        .
 id = "js-spawn-gap-stderr-message"
 guard = "a gap errors both streams by default and names the range to resume from"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/process.mjs"],
 ]
 expect = "test-failed"
@@ -101,7 +101,7 @@ transform = { file = "crates/microvms-app/src/session/split.rs", replace = "    
 id = "js-spawn-budget-message"
 guard = "an exhausted reconnect budget rejects both streams with its code"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/process.mjs"],
 ]
 expect = "test-failed"
@@ -113,7 +113,7 @@ transform = { file = "crates/microvms-app/src/session/split.rs", replace = "    
 id = "js-spawn-refusal-message"
 guard = "a refused reconnect rejects both streams with its code and wire kind"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/process.mjs"],
 ]
 expect = "test-failed"
@@ -125,7 +125,7 @@ transform = { file = "crates/microvms-app/src/session/split.rs", replace = "    
 id = "js-spawn-stderr-first-reader"
 guard = "a stderr reader gets the drive error while a stdout chunk sits unread"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/process.mjs"],
 ]
 expect = "test-failed"
@@ -153,7 +153,7 @@ transform = { file = "crates/microvms-app/src/control/artifact.rs", replace = " 
 id = "parity-ts-wrap-newline"
 guard = "wrap-dockerfile/no-trailing-newline"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
 expect = "test-failed"
@@ -195,7 +195,7 @@ transform = { file = "bindings/microvms-py/tests/test_parity_cases.py", replace 
 [[family]]
 guard = "every area and the sentinel run"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
 expect = "test-failed"
@@ -215,7 +215,7 @@ transform = { file = "bindings/microvms-js/__test__/parity_cases.mjs", replace =
 id = "parity-ts-no-handler"
 guard = "the corpus plans cleanly"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
 expect = "test-failed"
@@ -242,7 +242,7 @@ transform = { file = "bindings/microvms-py/tests/test_parity_cases.py", replace 
 id = "parity-ts-unjudged"
 guard = "every planned case was judged"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
 expect = "test-failed"
@@ -266,7 +266,7 @@ transform = { file = "verify/parity/cases/image-name/ensure-image-name.json", re
 id = "parity-ts-skip-without-reference"
 guard = "the corpus plans cleanly"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
 expect = "test-failed"
@@ -291,7 +291,7 @@ transform = { file = "verify/parity/cases/size-class/cpu-only.json", replace = "
 id = "parity-ts-refuses-known-drift"
 guard = "the corpus plans cleanly"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
 expect = "test-failed"
@@ -318,7 +318,7 @@ transform = { file = "bindings/microvms-py/src/cost.rs", replace = "        imag
 id = "parity-ts-suspended-dropped"
 guard = "cost/estimate-running-and-suspended"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
 expect = "test-failed"
@@ -373,7 +373,7 @@ transform = { file = "bindings/microvms-py/src/session.rs", replace = "        \
 id = "ts-session-constants-exec-wait"
 guard = "the wait defaults are published"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/session.mjs"],
 ]
 expect = "test-failed"
@@ -401,7 +401,7 @@ transform = { file = "crates/microvms-domain/src/names.rs", replace = "        &
 id = "parity-ts-names-region"
 guard = "names/region-mismatch"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
 expect = "test-failed"
@@ -427,7 +427,7 @@ transform = { file = "bindings/microvms-py/src/exec.rs", replace = "    microvms
 id = "ts-wait-refusal-names-a-credit"
 guard = "a wait refusal names no report"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/smoke.mjs"],
 ]
 expect = "test-failed"
@@ -454,7 +454,7 @@ transform = { file = "bindings/microvms-py/src/cost.rs", replace = "        labe
 id = "parity-ts-estimate-label-plan"
 guard = "cost/estimate-with-running-time"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
 expect = "test-failed"
@@ -478,7 +478,7 @@ transform = { file = "bindings/microvms-py/src/cost.rs", replace = "    plan.lau
 id = "parity-ts-estimate-launched-true"
 guard = "cost/estimate-suspended-only"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
 expect = "test-failed"
@@ -505,7 +505,7 @@ transform = { file = "bindings/microvms-py/src/cost.rs", replace = "cost::Estima
 id = "ts-budget-ignores-the-judgement"
 guard = "a breach aborts only when the caller said abort"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/cost.mjs"],
 ]
 expect = "test-failed"
@@ -545,7 +545,7 @@ transform = { file = "bindings/microvms-py/src/cost.rs", replace = "#[pymethods]
 id = "js-estimated-usd-value-of"
 guard = "BIND-5 EstimatedUsd does not coerce to a number"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/smoke.mjs"],
 ]
 expect = "test-failed"
@@ -557,7 +557,7 @@ transform = { file = "bindings/microvms-js/src/cost.rs", replace = "#[napi]\nimp
 id = "js-unpriced-usd"
 guard = "BIND-5 an unpriced line omits the usd key entirely"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/smoke.mjs"],
 ]
 expect = "test-failed"

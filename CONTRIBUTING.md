@@ -505,6 +505,11 @@ reviewer in the `release` environment. Then:
    `github-release` checks that the draft still holds what the live run tested
    and publishes it, and `crates-io`, `pypi` and `npm` publish the packages.
 
+Release builds use fresh dependency directories and exact build-tool versions. The Node
+build installs `bindings/microvms-js/package-lock.json` with `npm ci`; the wheel and source
+builds use the same pinned maturin version as the declaration generator. `release:check`
+checks these workflow inputs along with the publishing job graph.
+
 The live workflow needs the `live-aws` environment, with the repository's owner
 as its required reviewer and `main` and `v*` tags as the refs it deploys from,
 the `LIVE_CONFORMANCE_ROLE_ARN` secret naming the role the run assumes over
@@ -519,11 +524,17 @@ repository by numeric ID as well as by name, with `:environment:live-aws` at the
 end. Reading the repository's OIDC subject customization through the Actions
 API returns that prefix. The workflow's first job, `owner`, fails a run anyone
 else started, before the run asks for a review. A red live run publishes
-nothing, so the version isn't spent: delete the draft and its tag
-(`gh release delete vX.Y.Z --cleanup-tag`, then
-`git tag -d vX.Y.Z`), land the fix, and tag again. The draft job refuses a tag
-that already has a release, draft or published, so rerunning the whole workflow
-after a failed draft needs the stale draft deleted first.
+nothing, but its tag and attested assets still identify that attempt. Keep the tag and draft,
+land a source fix under a new patch version. Never move or delete and recreate a release tag.
+A retry can use the same immutable tagged commit. Keep the existing draft and tested
+assets when retrying the live gate or publishing jobs. Retrying the draft job reuses a complete
+draft's original assets and checksums. If an interrupted upload left an incomplete draft,
+inspect its assets and confirm that no successful live run used it. Check that
+`gh release view "$TAG" --json isDraft --jq .isDraft` returns `true`, then remove only that
+incomplete draft with `gh release delete "$TAG" --yes` and retry the failed job at the same
+tagged commit. Do not pass `--cleanup-tag`. Keep the tag unchanged. Keep a complete draft or one
+used by a successful live run. Configure a tag ruleset for `v*` that
+blocks updates and deletions without bypass actors so this identity persists.
 
 Keep scheduling and pooling in consumer applications; see
 [Strategy](docs/STRATEGY.md) for scope. Report suspected vulnerabilities through

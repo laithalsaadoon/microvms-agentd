@@ -32,7 +32,7 @@ fail() { echo "refusing: $*" >&2; exit 1; }
 # A tag name is reusable in git and immutable on a registry. Reusing one silently releases
 # whatever it already pointed at.
 git rev-parse -q --verify "refs/tags/$TAG" >/dev/null \
-  && fail "$TAG already exists locally (at $(git rev-parse --short "$TAG^{commit}")). Delete it with 'git tag -d $TAG' after confirming why it is there."
+  && fail "$TAG already exists locally (at $(git rev-parse --short "$TAG^{commit}")). Keep an existing release tag; changed sources require a new patch version."
 [[ -z $(git ls-remote --tags origin "refs/tags/$TAG") ]] \
   || fail "$TAG already exists on origin. A published version cannot be replaced."
 

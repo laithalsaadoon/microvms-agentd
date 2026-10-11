@@ -54,7 +54,7 @@ transform = { file = "bindings/microvms-py/src/names.rs", replace = "           
 id = "ts-import-record-skips-the-probe"
 guard = "an import writes only after the VM answers with the record token"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/names.mjs"],
 ]
 expect = "test-failed"

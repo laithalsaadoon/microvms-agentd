@@ -53,7 +53,7 @@ patch = "verify/guards/faults/f2p-test-launch-image-arn-names-the-image-the-laun
 id = "f2p-launchimagearn-names-the-image-the-launch-sent"
 guard = "launchImageArn names the image the launch sent"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/launch_by_name.mjs"],
 ]
 expect = "test-failed"
