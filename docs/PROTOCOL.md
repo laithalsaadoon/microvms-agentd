@@ -167,12 +167,12 @@ Rejected requests drain at most the configured byte cap within two seconds so
 clients can reuse pooled connections. Reaching either bound closes the connection.
 
 **Connections and hook bodies have fixed limits.** The daemon admits at most
-128 connections, including upgraded tunnels. Request headers have a five-second
-read deadline, including the next request on an idle keep-alive connection.
+128 connections, including upgraded tunnels. Headers must arrive within five
+seconds. This also applies to the next request on an idle keep-alive connection.
 A slot stays in use while a response stream is active or a tunnel is open. Hook
 envelopes have a 32 KiB cap and a five-second read deadline. The size cap allows
-for JSON escapes around the platform payload. Larger envelopes receive 413; unfinished bodies receive
-408. Both responses close the connection.
+for JSON escapes around the platform payload. Larger envelopes receive 413.
+Unfinished bodies receive 408. Both responses close the connection.
 
 **Token comparison happens on bytes, in constant time.** Comparing `str` values
 raises on non-ASCII input in some languages. Any caller controls the header, so
