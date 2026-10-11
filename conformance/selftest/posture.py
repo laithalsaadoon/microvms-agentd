@@ -69,7 +69,7 @@ def check_execution_role_policy(results: Results) -> None:
     }
 
     def verdict(statements: Any, **kwargs: Any) -> Results:
-        probe = Results()
+        probe = Results(probe=True)
         check_execution_role(FakeIam(statements, **kwargs), role, "us-east-1", probe)
         return probe
 
