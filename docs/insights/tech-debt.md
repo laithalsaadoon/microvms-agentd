@@ -1,265 +1,143 @@
 # microvms-agentd · Tech debt
 
-**The marker pass returns zero rows, and that is a fact about the convention rather than about
-the debt.** A case-sensitive grep for `\bTODO\b`, `\bFIXME\b`, `\bHACK\b`, and `\bXXX\b` across
-every tracked `.rs` and `.py` file produces no output. Widened to every tracked file type, the
-only hits are two documents describing the absence. Case-insensitive over `.rs` and `.py`, the
-single hit is the byte literal `b"xxxxxxxx"` in a stream test (`crates/agentd/src/exec.rs:3222`). The
-repo states the convention that replaced markers: comments record constraints and defects
-defended against, never narration. So the substitute for a `TODO` here is a doc-comment heading
-at the debt site that names the decision, its cost, and what would flip it — 345 such headings,
-carried by 77 of the 90 tracked `.rs` files. Reading "no markers" as "no debt" would invert the
-finding.
+This register was rebuilt from tracked source and configuration at `9729b82` on
+2026-10-11. The review combined explicit comment-marker searches, declared
+verification limits, dependency and generator pins, and comparisons between
+implementation and explanatory prose. A version pin is not evidence that a
+dependency is obsolete; entries below identify a specific maintenance cost.
 
-**Methodology.** Marker-grepping being empty, this register was assembled from six passes, each
-executed against source this session: (1) the marker grep above, kept as a negative result;
-(2) declined and open scope in `docs/STRATEGY.md`; (3) the twelve lessons an agent workflow
-tool had recorded in the tree, read for residual risk rather than for history (the tree no
-longer carries them: what still binds is stated at the code that defends against it, and the
-[debugging guide](debugging-guide.md#known-incident-patterns) indexes it); (4) version pins across
-`Cargo.toml`, `Cargo.lock`, `.cargo/deny.toml`, `mise.toml`, `bindings/microvms-js/package.json`,
-`bindings/microvms-py/pyproject.toml`, and `.github/workflows/`, on the principle that every pin is a
-deferred upgrade with an owner; (5) gate-coverage differencing — what `mise run check` runs
-against what CI runs, and what each omits; (6) prose-versus-code differencing, checking whether
-each acceptance paragraph still describes the code beneath it. Passes 5 and 6 produced the
-findings the earlier passes did not. Every count on this page was measured at `5e6f752`.
-
-**What this register is not about.** `mise run check` — lint, security, all six Rust tiers,
-`schema:check`, `stubs:check`, `model:check`, `live:check`, and the `aarch64-musl` cross-build
-(`.config/mise/tasks/check.toml:4-32`) — is green as of 2026-08-25. Nothing below is a failing build or a broken
-test. This is structural and deferred-maintenance debt: gates that exist in one place and not
-another, pins with a manual tracking obligation, one number written down in several places, and
-rationale paragraphs that have outlived the code they explain.
-
-**Deliberate is distinguished from accidental throughout.** Rows marked *deliberate* are
-documented refusals with a stated cost — `docs/STRATEGY.md:41-46` declines a turn-boundary
-suspend protocol, guest-side process-tree cloning, and "a scheduler, pool manager, or general orchestrator." A declined item is still debt in the sense that it is capability a
-reader may expect and will not find, but it is not rot, and calling it rot would misprice it. The
-accidental rows are the ones where nobody chose the current state.
-
-Ranking is `cost-to-fix × consequence-of-leaving`, so a row rises when the remedy is real work
-*and* leaving it costs something continuously. Cheap-and-consequential rows rank above
-expensive-and-bounded ones. Category vocabulary is closed — `marker`, `wrong abstraction`,
-`error handling`, `dead code adjacent`, `deprecated pattern`, `version pin`, `duplicated logic`,
-`missing tests` — and no `marker` row appears, because there are no markers.
+Rank reflects the expected consequence of leaving an item and the effort needed
+to address it. Costs are S for a local change, M for a coordinated change, and L
+for a change spanning contracts or verification layers. Categories are limited to
+`marker`, `wrong abstraction`, `error handling`, `dead code adjacent`,
+`deprecated pattern`, `version pin`, `duplicated logic`, and `missing tests`.
+Entries labeled *judgment call* describe intentional tradeoffs, not confirmed
+implementation defects.
 
 ## Ranked register
 
 | Rank | Debt item | Category | Cost to fix | Citation |
 | --- | --- | --- | --- | --- |
-| 1 | `spec:core`, the 51-requirement Z3 tier with a five-variable state model and an unbounded-reachability check, runs as `node ~/workplace/symspec/packages/symspec/dist/cli.mjs` — an absolute path into one developer's home directory. It is in neither `check`'s `depends` nor CI. The strongest claim the project makes about itself is verified on one machine, last recorded green 2026-08-08. The remedy lives outside this repo: symspec v5 is published nowhere, and the 0.1.0 package on npm cannot parse `core.symspec.json` at all. | missing tests | L | `.config/mise/tasks/trace.toml:15-28`, `.config/mise/tasks/check.toml:4-32`, `.github/workflows/ci.yml:377-385` |
-| 2 | The `crates/model/` crate's verification engine is `stateright = "0.31"`, resolving to 0.31.0 — pre-1.0 by its own book, with no upstream release in roughly thirteen months. Not deprecated and no successor exists, so this is dependency liveness rather than a defect: a load-bearing proof tier sits on an unmaintained-looking crate with no migration target. Cost is L because the only real remedies are vendoring or replacing the engine. | version pin | L | `crates/model/Cargo.toml:10` |
-| 3 | The Node binding has no lockfile of any kind — no `package-lock.json`, `pnpm-lock.yaml`, or `yarn.lock` exists anywhere in the tree. Its one devDependency is a caret range, and CI does not read that manifest at all: it runs `npx -y -p @napi-rs/cli@3`, a floating major with auto-install, inside the job that builds a shipped artifact. The Rust side commits `Cargo.lock` and the repo treats a committed lockfile as a supply-chain control. Dependabot watches npm weekly, but a caret range with no lockfile leaves it nothing to pin below 4.0.0. | version pin | M | `bindings/microvms-js/package.json:18`, `.github/workflows/ci.yml:343`, `.github/dependabot.yml:21-23` |
-| 4 | `cargo test --all` runs zero tests over the two binding crates. Measured this session: `cargo test -p microvms-py -p microvms-js` builds the crates' test targets and reports `running 0 tests` for each, against 7,616 lines of `src/` at `5e6f752`. The workflow states it — "`cargo test --workspace` reports 0 tests for these crates" — and the coverage is real but CI-only, under pytest and `node:test`. So the local definition of done compiles the bindings and asserts nothing about them. | missing tests | M | `.github/workflows/ci.yml:299-301`, `.config/mise/tasks/test.toml:3-5`, `.github/workflows/ci.yml:302-344` |
-| 5 | The committed `Cargo.lock` at `5e6f752` pins `h2` 0.4.15, which carries a RUSTSEC advisory patched in 0.4.16. `cargo deny check` runs in `mise run security` and in CI, so the gate is red at HEAD; it is green here only because of an uncommitted `cargo update -p h2` → 0.4.19 in the working tree. That update also moved `windows-sys` 0.61.2 → 0.52.0, a transitive downgrade nobody asked for — evidence that a targeted lockfile bump is not a targeted change. | version pin | S | `Cargo.lock:1576-1577`, `.config/mise/tasks/security.toml:25`, `.github/workflows/ci.yml:173-177` |
-| 6 | A stale rationale is holding a test off a working code path. `exit_codes.rs` states in the present tense that core's `aws-config` is pinned `default-features = false`, that `ControlPlane::new` therefore panics with "a http_client is required", that the classified `ERR_CREDENTIALS` path is "currently unreachable", and closes "Restore the credential version once core's manifest is fixed." The manifest is fixed: `default-https-client` is in the feature list and the manifest comment records the repair, and the regression test exists. So a security-adjacent exit row has unit classification coverage and no process-level coverage, for a reason that no longer holds. | missing tests | S | `crates/microvms-cli/tests/exit_codes.rs:138-149`, `crates/microvms-cli/tests/exit_codes.rs:18`, `crates/microvms-core/Cargo.toml:52-64`, `crates/microvms-app/src/control/transport.rs:597` |
-| 7 | *Deliberate.* There is no `Sandbox::attach`, so `suspend`, `resume`, and `terminate` address the control plane directly rather than through the type `run` and `build` use. Refused on a stated ground: an attach constructor would manufacture a second initial state that neither `verify/spec/core.symspec.json`'s state model nor `crates/model/src/client.rs`'s `init_states` enumerates, so both proof suites would silently stop covering it. The residual cost is that the attached lifecycle path lies outside both verification surfaces, and the module lists in full what it gives up. `microvm attach` (#66) does not reopen this: it is a CLI-level registry write that adopts a `NameRecord`, and the SDK still has no attach constructor. | wrong abstraction | L | `crates/microvms-cli/src/commands/lifecycle.rs:15-54`, `crates/model/src/client.rs`, `verify/spec/core.symspec.json` |
-| 8 | *Deliberate.* Every platform claim rests on one architecture and one region. `aarch64-unknown-linux-musl` is the shipping target because Lambda MicroVMs are ARM64-only, `agentd`'s tiers run on ubuntu only because the guest is a Unix process model, and the strategy memo says live coverage "remains scoped to the regions and paths actually exercised." Correct given the substrate; the cost is that a platform-behaviour change outside us-east-1 is invisible to every tier. | missing tests | L | `rust-toolchain.toml:10-12`, `.github/workflows/ci.yml:56-62`, `docs/STRATEGY.md:59-60` |
-| 9 | `mise run check` has no vulnerability tier. Its `depends` list is `lint, security, test, schema:check, stubs:check, model:check, live:check, build`; `vuln` — grype, trivy, osv-scanner — is absent, and those three are the scanners `.cargo/deny.toml` names as the owners of advisory scanning. So the only local CVE coverage is whatever `cargo deny` incidentally provides, and the delegated lane runs in CI or on a manual invocation. | missing tests | S | `.config/mise/tasks/check.toml:4-32`, `.config/mise/tasks/security.toml:42-67`, `.cargo/deny.toml:50-55` |
-| 10 | *Deliberate.* Every identity-repair failure in the daemon is logged and then ignored, because the daemon is the only channel into the VM and refusing to serve would strand a VM with work in it. The module lists five things it cannot do, including a `boot_id` bind mount that needs `CAP_SYS_ADMIN` and is refused outright in a container that did not ask for it. The accepted consequence is named in the trust contract: failures "leave the daemon serving and set `identity_degraded`; callers that require repaired identity must check it." | error handling | M | `crates/agentd/src/identity.rs:27-49`, `crates/agentd/src/identity.rs:51-55`, `docs/TRUST.md:150-151` |
-| 11 | `mise.toml` floats twelve tool versions to `latest` — `uv`, `ruff`, `semgrep`, `betterleaks`, `syft`, `grype`, `trivy`, `osv-scanner`, `terraform`, `lefthook`, `cargo-deny`, `actionlint` — while CI installs the same scanners at an exact version verified by `sha256sum -c -`. The local gate and the CI gate share a name and run different binaries, so a finding can appear in one and not the other, and neither result reproduces later. `rust = "stable"` floats too, with its reason recorded. | version pin | M | `mise.toml:12-52`, `.github/workflows/ci.yml:150-151`, `.github/workflows/ci.yml:201-206`, `.github/workflows/ci.yml:227-228` |
-| 12 | `.cargo/deny.toml`'s `[advisories]` block asserts a delegation its own config version cannot express: "Advisory scanning is grype/trivy/osv-scanner's lane … Running RustSec here too would give findings a fourth place to be silenced." Under `version = 2` cargo-deny has no key that turns vulnerability scanning off — the v1 `vulnerability = "allow"` field was removed. Verified this session with cargo-deny 0.20.2: `cargo deny check advisories` reports `advisories ok` and exits 0, so the check is live. That mismatch is why row 5's advisory surfaced as a `cargo deny` failure rather than as a scanner finding. | deprecated pattern | S | `.cargo/deny.toml:50-57`, `.config/mise/tasks/security.toml:25` |
-| 13 | maturin's version is pinned at three sites that must move together, and the next release breaks the gate. The stub generator pins `maturin@1.14.1` exactly, CI installs `uvx maturin@1.14` twice (a minor pin that floats the patch), and `pyproject.toml` names the exact patch a fourth time in prose. maturin 1.15.0 moved `generate-stubs` output into the module's package directory, so the pin is load-bearing: bumping it breaks `mise run stubs:check`. The pin is correct; the debt is that it is a manual tracking obligation with no alarm, and neither maturin nor `pyo3-stub-gen` offers a check mode. | version pin | S | `tools/generate-py-stubs.py:84-89`, `.github/workflows/ci.yml:306`, `.github/workflows/ci.yml:337`, `bindings/microvms-py/pyproject.toml:36-42` |
-| 14 | The two bindings are enforced asymmetrically over one core. `bindings/microvms-py/microvms.pyi` and `py.typed` are committed and gated by `stubs:check` inside `check`, and a typed consumer is checked against the built wheel under `ty@0.0.72`. `bindings/microvms-js/index.d.ts` is gitignored, no `tsconfig.json` exists anywhere in the tree, and no gate reads the declarations — yet `package.json` still advertises `"types": "index.d.ts"` to downstream consumers. Not a staleness row, since `napi build` regenerates the file every run; what is unverified is whether the generated types are *usable*. The fix is one typed consumer, not a diff gate. | missing tests | S | `.gitignore:23-29`, `bindings/microvms-js/package.json:7`, `.config/mise/tasks/contracts.toml:188-238`, `.github/workflows/ci.yml:335-340` |
-| 15 | The daemon's default port, 9000, is written down three times and no assertion connects them. `microvms-core` declares `DEFAULT_AGENT_PORT` twice — once in `control/`, once in `session/` — each documented as matching the daemon, and `agentd` writes the literal itself in `Config::default`. The tests that touch these constants each compare a value to its *own* module's constant, so both stay green if either moves alone. This is the exact shape the repo's own lesson names ("a comment explaining a number in terms of a value owned elsewhere"), and the repo has already invented the remedy: a compile-time `const` block that makes disagreement a build error. | duplicated logic | S | `crates/microvms-app/src/control/mod.rs:96-97`, `crates/microvms-app/src/session/proxy.rs:82-83`, `crates/agentd/src/config.rs:84`, `crates/microvms-cli/src/commands/attached.rs:1164-1176` |
-| 16 | The two bindings' error contracts diverge, and nothing checks that the divergence stays where it is. napi types the async path over its own closed `Status` enum, so a custom `ERR_*` code survives a synchronous return and collapses to `GenericFailure` through a Promise rejection, measured with a probe addon. Nearly every method is async, so the Node rule is `err.cause.message` while the Python binding's `.code` is reliable everywhere. Upstream-forced and thoroughly documented; the debt is that each suite asserts only its own contract, so no gate would catch the two surfaces drifting apart. | duplicated logic | M | `bindings/microvms-js/src/errors.rs:10-45`, `bindings/microvms-py/tests/test_errors.py`, `bindings/microvms-js/__test__/errors.mjs` |
-| 17 | The guard over the CLI's dependency allowlist asserts `reason.len() > 25` and nothing else about any reason string, under a comment claiming "a new one cannot be added silently." Length is not meaning: the guard catches an empty justification and cannot catch one that has stopped being true. That is the enforcement ceiling for every prose-accepted debt in this register, and this repo has already shipped one reason that went stale under it. | missing tests | S | `crates/microvms-cli/tests/thinness.rs:192-198`, `crates/microvms-cli/tests/thinness.rs:58`, `crates/microvms-cli/tests/thinness.rs:71` |
-| 18 | *Deliberate.* `microvm logs` names an image's build log group and prints the working `aws logs tail` invocation that reads it (a success since the 0.6.0 ruling on #79; AWS CLI v2 only), still refusing to read CloudWatch itself. The reader was refused on three grounds, the decisive one being that the transport is single-service by construction — a `const` signing name and one `endpoint_for(region)` — so a CloudWatch reader in core would give the CLI a second path to AWS, which is what the thinness guard exists to forbid. The read grant ships as the Terraform stack's `logs_read_policy_arn`. | wrong abstraction | M | `crates/microvms-cli/src/commands/local.rs:228` (the handler), `crates/microvms-cli/src/commands/local.rs` `logs_succeeds_with_the_tail_command_and_refuses_to_imply_it_is_empty` (the pin) |
-| 19 | Action pinning is inconsistent inside one file. Two actions are pinned to a commit SHA with the version in a trailing comment; every other `uses:` across both workflows is a mutable tag, including `aquasecurity/trivy-action@v0.36.0` inside the job whose entire output is supply-chain assurance. The same job hash-verifies the binaries it downloads, so the discipline exists and stops at the action boundary. | version pin | S | `.github/workflows/ci.yml:174`, `.github/workflows/ci.yml:181`, `.github/workflows/ci.yml:216` |
-| 20 | Three rationale blocks describe code that is no longer there. The action-version header names `checkout@v5`, `upload-artifact@v6`, and `setup-node@v5` and argues at length that "checkout is on v5 rather than v7 … v5 is the smallest version that satisfies the actual requirement" — the file uses `@v7` for all three, so the paragraph argues against the line below it. A CI comment counts "the CLI's five test targets" where `crates/microvms-cli/tests/` holds four. The live workflow says the suite "reports the 34 checks it cannot express as SKIP", which the suite's own source contradicts by marking that list permanently empty. | dead code adjacent | S | `.github/workflows/ci.yml:29-39`, `.github/workflows/ci.yml:100`, `.github/workflows/live-conformance.yml:94`, `conformance/run_rs.py:448-452` |
-| 21 | The shipping binary is linked two different ways and only one of them is ever proven per environment. `.cargo/config.toml` selects `linker = "rust-lld"` for the aarch64-musl target, with a comment explaining that the alternative fails naming a missing `cc`. CI installs `gcc-aarch64-linux-gnu` and overrides the choice through `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER`, and the environment variable wins. So the cross-build gate never exercises the configuration the repo ships, and the local build never exercises CI's. | missing tests | S | `.cargo/config.toml:1-10`, `.github/workflows/ci.yml:358-365` |
-| 22 | *Deliberate.* The conformance suite keeps `Results.skipped` and its `skip()` primitive with no live caller — the list is documented as permanently empty and the primitive is exercised only by the offline self-test probe. Retained on the argument that a suite which removed its own ability to report a gap is a suite whose next gap is silent. Real dead code with a stated reason to stay. | dead code adjacent | S | `conformance/run_rs.py:444-457`, `conformance/run_rs.py:517-531`, `conformance/run_rs.py:2210` |
+| 1 | Parity enrollment excludes flags, positionals, global flags, and classes that no table row names. Extend enrollment before treating name parity as a complete API comparison. | missing tests | M | `tools/check-parity.py:34-43` |
+| 2 | Shared parity cases need a review-supplied failing-first proof: the automated proof finder recognizes language test functions rather than corpus entries. Add corpus support without duplicating each case across language suites. | missing tests | M | `CONTRIBUTING.md:210-216`, `tools/fail-to-pass.py:29-36` |
+| 3 | The CLI owns persistent ledger and history formats. Moving their reusable behavior below the CLI would let other adapters share it; preserve their different retention semantics. | wrong abstraction | L | `AGENTS.md:110-116`, `crates/microvms-cli/src/ledger.rs:28-48`, `crates/microvms-cli/src/history.rs:5-14` |
+| 4 | Default parity intentionally omits string, zero, and `None` defaults, while TypeScript defaults appear only in prose. Expand the contract representation before asserting option-level consistency. | missing tests | M | `tools/check-parity.py:72-86` |
+| 5 | Declaration generation resolves `@napi-rs/cli@3` afresh, so an upstream release can change the expected declarations without a repository change. Pin the generator used by the task and package build together. | version pin | S | `.config/mise/tasks/contracts.toml:270-295`, `bindings/microvms-js/package.json:51-54` |
+| 6 | Formal tasks deliberately omit strict verification; their success means no error-severity findings, not a fully verified specification. Reduce unresolved findings before strengthening the gate. | missing tests | L | `.config/mise/tasks/trace.toml:3-13`, `tools/check-spec.sh:4-9` |
+| 7 | *Judgment call:* formal requirements remain outside the local `check` task and need a separately installed checker. A reproducible optional verification environment would make this tier easier to run without changing the ordinary local gate. | missing tests | M | `.config/mise/tasks/trace.toml:11-28`, `.config/mise/tasks/check.toml:11-42`, `tools/check-spec.sh:15-24` |
+| 8 | The Maturin version is repeated in stub generation, binding builds, and proof-runner commands. Centralize its ownership or assert agreement to keep coordinated upgrades from drifting. | duplicated logic | S | `tools/generate-py-stubs.py:84-89`, `.config/mise/tasks/test.toml:83-98`, `tools/fail-to-pass.py:101-107` |
+| 9 | The daemon port default is independently declared by control, session, and daemon configuration. Give the shared default an owner while preserving the existing public paths. | duplicated logic | S | `crates/microvms-app/src/control/mod.rs:118-119`, `crates/microvms-app/src/session/proxy.rs:84-85`, `crates/agentd/src/config.rs:101-104` |
+| 10 | Lifecycle commentary says `Sandbox` cannot address a VM launched elsewhere, while `Sandbox::adopt` now supports that workflow. Rewrite the rationale around the current ownership model before using it to guide a refactor. | dead code adjacent | S | `crates/microvms-cli/src/commands/lifecycle.rs:10-18`, `crates/microvms-app/src/sandbox.rs:1335-1342` |
 
 ## Explicit markers
 
-There are no explicit markers in this tree. This section records the absence, the command that
-establishes it, and the convention that occupies the space a marker would.
+No explicit marker comments matched the source-and-configuration scan. The
+alternatives were `TODO`, `FIXME`, `HACK`, `XXX`, `// REFACTOR`, and
+`# DEPRECATED`. Historical analysis prose describing these searches was excluded.
+The scan can be repeated with:
 
-The grep, verbatim:
-
+```bash
+git ls-files -z -- '*.rs' '*.py' '*.ts' '*.mts' '*.js' '*.mjs' '*.sh' \
+  '*.toml' '*.yml' '*.yaml' | xargs -0 rg -n \
+  '\b(TODO|FIXME|HACK|XXX)\b|//[[:space:]]*REFACTOR\b|#[[:space:]]*DEPRECATED\b'
 ```
-grep -rnE '\b(TODO|FIXME|HACK|XXX)\b' --include='*.rs' --include='*.py' .
-```
 
-Zero lines. Widened to every tracked file type — excluding `.git`, `target`, `.codegraph`,
-`node_modules`, and `.venv` — the only two hits are prose *about* the absence. A
-case-insensitive sweep over `.rs` and `.py` returns exactly one line, and it is not a marker:
-
-- `` shared.publish(StreamKind::Stdout, b"xxxxxxxx").await; `` — `crates/agentd/src/exec.rs:3222`
-
-In place of markers, debt is accepted at the site under a doc-comment heading that names the
-decision. There are 345 such headings, carried by 77 of the 90 tracked `.rs` files. Quoted
-verbatim, the ones whose subject is a refusal, a limit, or an accepted cost:
-
-- `` //! # There is no `Sandbox::attach`, and adding one would cost the proofs `` — `crates/microvms-cli/src/commands/lifecycle.rs:15`
-- `//! # What this module cannot do, honestly` — `crates/agentd/src/identity.rs:27`
-- `//! # Why a failure is never fatal` — `crates/agentd/src/identity.rs:51`
-- `/// # The command choice is constrained by a core defect, and that is recorded rather than hidden` — `crates/microvms-cli/tests/exit_codes.rs:138`
-- `/// # Adding a reader to core was assessed and refused, and not on grounds of size` — `crates/microvms-cli/src/commands/local.rs:92`
-- `/// # Why this fails rather than returning an empty list` — `crates/microvms-cli/src/commands/local.rs:85`
-- `//! # A dollar string's trailing zeros may differ from the Python oracle's, and that is accepted` — `crates/microvms-cli/src/render.rs:27`
-- `//! # Runtime-checked rather than typestate, deliberately` — `crates/microvms-app/src/sandbox.rs:19`
-- `//! # Where the code lands, and why it is in two places rather than one` — `bindings/microvms-js/src/errors.rs:10`
-- `/// # Output arrives as text plus a byte count, not as base64, and that is a deliberate limit` — `crates/microvms-cli/src/commands/attached.rs:344`
-- `//! # TRAP-11: what is deliberately absent` — `crates/microvms-app/src/control/connector.rs:16`
-- `/// # What is deliberately not here` — `crates/microvms-app/src/control/mod.rs:216`
-- `//! # What is deliberately *not* an option` — `crates/microvms-cli/src/cli.rs:21`
-- `//! # Hand-rolled rather than a dependency` — `crates/microvms-app/src/session/sse.rs:16`
-
-Suppression files follow the same rule, stated in one of them:
-
-- `# Accepted findings, each with its reason. An ignore without a reason is a` / `# finding someone silenced; an ignore with one is a decision someone made.` — `.config/trivyignore.yaml:2-3`
-- `reason = "optional rust_decimal feature, never enabled; not compiled into any artifact"` — `osv-scanner.toml:13`
-
-Declined scope is written the same way, at document level rather than at a call site:
-
-- "A scheduler, pool manager, or general orchestrator." — `docs/STRATEGY.md:43`
-- "Guest-side process-tree cloning as a substitute for provider snapshots." — `docs/STRATEGY.md:44`
-- "A new turn-boundary suspend protocol" — `docs/STRATEGY.md:45`
-- `> **Implemented. This document is kept as history because the reasoning still` / `> applies; the numbers below are outdated.**` — `docs/CLI-COVERAGE-PLAN.md:3-4`
-
-One consequence of the convention is worth stating plainly: an acceptance paragraph is
-searchable only if you know the phrasing, whereas `TODO` is one token. Fourteen `#[allow(`
-attributes exist in the tracked Rust tree and every one carries a `reason =` string arguing its
-specific case, which is the convention working. Row 20 above is the convention failing, and
-nothing distinguishes the two states without reading both the prose and the code.
+The absence of marker comments does not establish absence of debt. Explicit
+limits in the parity checker and the formal tasks provide stronger signals for
+this register (`tools/check-parity.py:34-43`, `.config/mise/tasks/trace.toml:6-12`).
 
 ## Pattern-level smells
 
-### The enforcement stops exactly at the crate boundary the project most wants adopted
+### Parity covers only the surface represented in its table
 
-Every asymmetry in this register lands on the same two crates. The bindings are the surface the
-strategy memo exists to make adoptable, and they are the least-gated code in the workspace.
-`cargo test --all` runs zero tests against 7,616 lines of them at `5e6f752`. The Node side has no lockfile,
-advertises type declarations no gate reads, and gets its build toolchain from a floating major
-installed by `npx -y`. Neither binding's manifest is read by any test, so a dependency either
-could re-add — the CLI has a named guard against exactly this — would fail nothing. The Python
-side is the counter-example and shows the shape of the fix: a committed stub, a `py.typed`
-marker, a regenerate-and-diff gate inside `check`, and a typed consumer checked from outside the
-repo's own layout against a built wheel. That is four mechanisms on one binding and roughly zero
-on its twin, over one shared core.
+The checker holds named capabilities and selected defaults to shared contracts,
+but enrollment deliberately leaves out some API shapes. This is a boundary on
+what a green result proves; expanding the table and readers is more useful than
+adding independent assertions in each adapter (`tools/check-parity.py:34-43`,
+`tools/check-parity.py:72-86`).
 
 Shows up in:
 
-- `.github/workflows/ci.yml:299-301` — the workspace test runner reporting zero tests for both crates, stated in the file
-- `bindings/microvms-js/package.json:18` and `.github/workflows/ci.yml:343` — a caret range with no lockfile, and CI bypassing the manifest entirely
-- `.gitignore:23-29` and `bindings/microvms-js/package.json:7` — declarations advertised to consumers, gitignored, and read by nothing
-- `.config/mise/tasks/contracts.toml:188-238` and `.github/workflows/ci.yml:335-340` — the four mechanisms the Python side has
-- `crates/microvms-cli/tests/thinness.rs:58` — a manifest guard that exists for the CLI and has no binding equivalent
+- `tools/check-parity.py:34-43` — classes and command options outside enrollment.
+- `tools/check-parity.py:72-86` — defaults that the comparison does not hold.
+- `CONTRIBUTING.md:210-216` — shared cases whose failing-first proof is still a review obligation.
 
-Cost: M. The cheapest single item is one `tsconfig.json` and one typed `.mts` consumer, which
-closes row 14. A committed lockfile for `microvms-js` plus dropping `-y -p @napi-rs/cli@3` in
-favour of the manifest closes row 3 and is nearly as cheap.
+Cost: M. Extend the shared contract and prove the new comparison can fail.
 
-### Debt is accepted in prose, and prose is the only thing enforcing it
+### Verification tiers make different promises
 
-The acceptance-paragraph convention is genuinely better than a `TODO`: each paragraph names the
-cost, what would have to change for the answer to flip, and often where the counter-argument
-lives. What almost none of them have is a test that goes red when the acceptance stops being
-true. The measurable ceiling is one assertion: the dependency-allowlist guard checks
-`reason.len() > 25` and nothing else, under a comment claiming a new entry "cannot be added
-silently." Length is not meaning. Three sites in this register prove the mechanism fails in
-practice — an action-version paragraph arguing against the line below it, a test comment
-deferring work on a defect that has been repaired, and a workflow describing SKIP behaviour the
-suite's own source marks permanently empty. The pattern is not that the reasoning is wrong. It is
-that prose degrades silently while code does not, and this repo has already built the fix
-elsewhere: a compile-time `const` block, an exhaustive-match round-trip, a named `RETIRED` array
-whose failure message points at the replacement API.
+Formal verification is deliberately separate from `check`, and the formal task
+itself stops short of strict verification. Those are distinct boundaries: making
+the checker easy to install does not resolve specification findings, and reducing
+findings does not make the tier part of the normal local workflow
+(`.config/mise/tasks/trace.toml:6-12`, `.config/mise/tasks/check.toml:11-42`).
 
 Shows up in:
 
-- `crates/microvms-cli/tests/thinness.rs:192-198` — `reason.len() > 25`, the only assertion over any acceptance reason
-- `crates/microvms-cli/tests/exit_codes.rs:138-149` against `crates/microvms-core/Cargo.toml:52-64` — a rationale outliving the defect it describes, with a test still deferred on it
-- `.github/workflows/ci.yml:29-39` against `.github/workflows/ci.yml:69` — a header arguing for a version the next line does not use
-- `crates/microvms-cli/src/commands/attached.rs:1164-1176` — the remedy the repo already invented: a `const` block, so disagreement is a build error rather than a test failure
-- `crates/microvms-cli/tests/thinness.rs:58` — the other remedy: a named retirement whose failure message carries the replacement
+- `.config/mise/tasks/trace.toml:6-12` — strict mode and local-gate exclusions.
+- `.config/mise/tasks/trace.toml:15-28` — core verification's separate command and reachability budget.
+- `tools/check-spec.sh:15-24` — the external checker prerequisite.
 
-Cost: M per site, and the work is adding one assertion beside an existing paragraph rather than
-changing behaviour.
+Cost: M for a reproducible optional environment; L to strengthen the verification verdict.
 
-### The local gate and the CI gate share one name and are two different gates
+### Generator versions have multiple owners
 
-`mise run check` is documented as the definition of done, and it is not a subset or a superset of
-CI — the two overlap partially and each holds ground the other does not. `check` omits the
-vulnerability tier entirely, so grype, trivy, and osv-scanner never run locally even though
-`.cargo/deny.toml` names them as the owners of advisory scanning. `check` also omits the bindings, whose
-only tests live in a CI job. Going the other way, `check` runs `live:check`, `model:check`, and
-`stubs:check`. Where both do run the same gate, they run different binaries: `mise` resolves
-twelve tools including every scanner to `latest`, while CI installs the same scanners at exact
-versions verified against a SHA-256. Even the shipping binary is linked differently — the repo
-selects `rust-lld` and CI overrides it with `aarch64-linux-gnu-gcc` through an environment
-variable that takes precedence. A contributor who runs `check` green and a reviewer who reads a
-green CI badge are looking at two different claims.
+The declaration task deliberately resolves a moving major version, while the
+Python stub generator uses an exact version repeated in other build commands.
+Both choices create coordination work: one admits upstream changes between runs,
+and the other requires synchronized edits during upgrades
+(`.config/mise/tasks/contracts.toml:293-306`, `tools/generate-py-stubs.py:84-89`).
 
 Shows up in:
 
-- `.config/mise/tasks/check.toml:4-32` — `check`'s `depends`, with no `vuln` and no binding suite
-- `mise.toml:12-52` against `.github/workflows/ci.yml:201-206` — `latest` locally, exact version plus hash in CI, for the same scanners
-- `.cargo/config.toml:8-10` against `.github/workflows/ci.yml:358-365` — two linkers for one artifact, the env var winning
-- `.cargo/deny.toml:50-55` — advisory scanning delegated to three scanners that `check` does not run
-- `.github/workflows/ci.yml:302-344` — the binding tier that exists only here
+- `.config/mise/tasks/contracts.toml:293-306` — a declaration check that anticipates generator changes.
+- `bindings/microvms-js/package.json:51-54` — the package's own generator constraint.
+- `.config/mise/tasks/test.toml:83-98` — repeated Python build-tool version.
+- `tools/fail-to-pass.py:101-113` — binding build commands repeated in the proof runner.
 
-Cost: M. Adding `vuln` to `check` is one line and would make the local gate slower and honest;
-reconciling the linker choice is a comment or a removed environment variable. Reconciling the
-tool versions is the expensive half, because pinning `mise` tools reintroduces the manual refresh
-obligation row 13 already carries.
+Cost: S. Establish a shared version source or an agreement check before the next upgrade.
 
-### One number, written down in several places, guarded in one of them
+### Persistent formats live above the shared implementation
 
-The repo has diagnosed this class itself and written down the detection method: a comment
-explaining a number in terms of a value owned elsewhere is the signature, and the greps are
-"twice the", "four times", "matching the", "same as the daemon's". The pairs found that way got
-guards — the Dockerfile `AGENTD_PORT` against the client's port, and the SSE keepalive interval
-against the client's stream idle timeout, the latter refusing equality as well as excess. Running
-the same grep now still returns hits. The clearest is the default port itself: `microvms-core`
-declares `DEFAULT_AGENT_PORT = 9000` in two separate modules, each doc'd as matching the daemon,
-and `agentd` writes the literal a third time in `Config::default`. The tests that mention
-these constants each compare a value to its own module's constant, so both stay green if either
-moves alone. Nothing anywhere compares core's number to the daemon's.
+The ledger and history serve different purposes and must retain different
+lifetimes. Their placement in the CLI nevertheless makes reuse by other adapters
+a separate design effort. Moving ownership should preserve those semantics,
+without merging the formats merely because they share a state directory
+(`crates/microvms-cli/src/ledger.rs:18-22`,
+`crates/microvms-cli/src/history.rs:5-14`).
 
 Shows up in:
 
-- `crates/microvms-app/src/control/mod.rs:96-97` and `crates/microvms-app/src/session/proxy.rs:82-83` — the same constant declared twice in one crate
-- `crates/agentd/src/config.rs:84` — the third copy, as a bare literal in the type that owns the truth
-- `crates/microvms-app/src/control/artifact.rs:395-430` — the pair that *was* guarded, with equality refused and the failure naming both numbers
-- `crates/microvms-cli/src/commands/attached.rs:1164-1176` — the strongest available remedy, a compile-time bound rather than a runtime assertion
-- [The absent value that is not neutral](debugging-guide.md#known-incident-patterns), in the debugging guide: the repo's own detection method, which found the guarded pairs and has not been re-run
+- `AGENTS.md:110-116` — the repository identifies CLI file formats as remaining layering work.
+- `crates/microvms-cli/src/ledger.rs:28-48` — the persistent invocation record.
+- `crates/microvms-cli/src/history.rs:5-14` — the reason history cannot share ledger retention.
 
-Cost: S. One `const` block asserting the two core constants against each other, and one test
-comparing core's default to `agentd`'s `Config::default()`.
+Cost: L. Move reusable behavior with compatibility coverage for existing records.
 
-### The strongest verification tiers are the least reachable, and the newest one is unmaintained upstream
+### Explanations and repeated constants need an owner
 
-This project verifies itself unusually hard: a stateright model over every reachable state,
-proptest confinement properties, turmoil fault simulation, a panic guard, a schema-artifact
-check, and two Z3-backed symspec requirement documents. Reachability is inversely correlated with
-strength. The tiers inside `cargo test` run everywhere. The six-requirement daemon spec needs a
-global npm install plus a downloaded embedding model and sits outside `check`. The 51-requirement
-core spec — the only one with a state model and an unbounded-reachability tier — runs from an
-absolute path inside one developer's home directory, is in neither `check` nor CI, and its CI job
-was deleted rather than pointed at the registry package, on the sound argument that a green job
-labelled "requirements" verifying six of fifty-seven is worse than no job. Underneath the tier
-that *is* always reachable, the engine is pre-1.0 with no upstream release in thirteen months.
-Both exclusions are argued well and both leave the same hole: the claims this project most wants
-believed are checked by one person on one machine, or by a crate with no maintenance signal.
+The lifecycle module's launch-only explanation predates the supported adoption
+workflow. Independently, the daemon port default appears in control, session, and
+daemon configuration. These are different forms of the same maintenance cost:
+changing a contract requires finding copies that the type system does not connect
+(`crates/microvms-cli/src/commands/lifecycle.rs:10-18`,
+`crates/microvms-app/src/sandbox.rs:1335-1342`,
+`crates/microvms-app/src/control/mod.rs:118-119`).
 
 Shows up in:
 
-- `.config/mise/tasks/trace.toml:15-28` — the absolute home-directory path, the cooperative-cancellation timeout, and the "verified 2026-08-08" note
-- `.config/mise/tasks/trace.toml:3-13` — the 0.1.0 task, scoped to six requirements, also outside `check`
-- `.config/mise/tasks/check.toml:4-32` — `check`'s `depends`, with neither `spec` nor `spec:core`
-- `.github/workflows/ci.yml:377-385` — the deleted job and the stated condition for its return
-- `crates/model/Cargo.toml:10` — the engine, pinned at a pre-1.0 version with no successor
+- `crates/microvms-cli/src/commands/lifecycle.rs:10-18` — the old ownership rationale.
+- `crates/microvms-app/src/sandbox.rs:1335-1342` — the adoption workflow that requires a revised explanation.
+- `crates/microvms-app/src/control/mod.rs:118-119` — control's port default.
+- `crates/microvms-app/src/session/proxy.rs:84-85` — session's port default.
+- `crates/agentd/src/config.rs:101-104` — the daemon's port default.
 
-Cost: L. The remedy for the spec tier lives outside this repo — publishing symspec v5 to a
-registry, or vendoring its `dist/cli.mjs` — and the owner's stated preference is to publish. The
-remedy for the engine is to keep watching it, since vendoring or replacing a model checker is a
-larger project than the tier it serves.
+Cost: S for the explanation and shared constant; preserve compatibility re-exports.
 
 ## See also
 
-- [impact analysis](impact-analysis.md)
-- [contract map](contract-map.md)
-- [business logic](business-logic.md)
-- [debugging guide](debugging-guide.md)
-- [processes](../behavior/processes.md)
+- [debugging guide](debugging-guide.md) — 5 shared source citations
+- [contract map](contract-map.md) — 4 shared source citations
+- [impact analysis](impact-analysis.md) — 4 shared source citations
+- [module map](../architecture/module-map.md) — 3 shared source citations
+- [business logic](business-logic.md) — 3 shared source citations

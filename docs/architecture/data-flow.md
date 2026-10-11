@@ -1,194 +1,134 @@
 # microvms-agentd · Data flow
 
-Two surfaces trigger work in this system and nothing else does: a CLI invocation, dispatched
-through an exhaustive match (`crates/microvms-cli/src/main.rs:457-517`), and a daemon HTTP
-request, dispatched through a handler table walked from the same list `/v1/schema` publishes
-(`crates/agentd/src/routes.rs:110`). The bindings re-enter the same `microvms-core` surfaces the CLI
-uses, so they add no distinct flow, and the daemon's only recurring job is a 30-second
-expired-exec reaper rather than a request lifecycle (`crates/agentd/src/main.rs:67`,
-`crates/agentd/src/exec.rs:975`).
+## Flow 1: Build, launch, execute, and clean up
 
-The flows below are ranked by how much of the client-to-daemon boundary each exercises,
-tie-broken by whether it is named after one of the system's core verbs. Flow 1 is the only arm
-that launches a VM and the only one that touches the CLI, core, AWS, and the daemon. Flow 2 is
-the streaming read path, whose correctness rests on a byte-offset cursor that survives a
-reconnect through the endpoint proxy. Flow 3 is the file-transfer path, and it ends in the
-daemon's one confined write.
-
-Participants are the workspace crates named in `architecture/module-map.md` plus external
-actors. `microvm CLI` is `microvms-cli`; `agentd` is the in-VM daemon; `AWS MicroVMs` is the
-control plane together with its endpoint proxy.
-
-## Flow 1: microvm run — build, launch, bootstrap, exec, tear down
-
-1. `commands::lifecycle::run` resolves region, size class, and image name, then requires every
-   infra role before anything is created, so a missing role surfaces immediately rather than
-   after a build (`crates/microvms-cli/src/commands/lifecycle.rs:475`, guard at
-   `crates/microvms-cli/src/commands/lifecycle.rs:609-663`).
-2. It opens a `Sandbox` through the library seam and races `launch_and_exec` against ctrl-c in a
-   `tokio::select!`, with the sandbox owned outside the select so a cancelled launch still holds
-   the identifiers teardown needs (`crates/microvms-cli/src/commands/lifecycle.rs:670-716`,
-   recovery at `crates/microvms-cli/src/commands/lifecycle.rs:731-742`).
-3. `launch_and_exec` takes the image from `--image`, from `--artifact-uri`, or from a
-   content-addressed build. `--image` launches an existing image and builds nothing.
-   `--artifact-uri` builds from the caller's object with no upload: it preflights the build
-   request, then `Sandbox::build_image` issues `CreateMicrovmImage` and waits for the image to
-   become usable. Without either flag, `Sandbox::ensure_image` builds the image
-   `<name>-<hash12>`, reuses it when it is already ready, and uploads the artifact only when a
-   build is needed (`crates/microvms-cli/src/commands/lifecycle.rs:1064-1132`,
-   `crates/microvms-app/src/sandbox.rs:917`, `crates/microvms-app/src/sandbox.rs:941`).
-4. `Sandbox::run` refuses a second bootstrap on the same sandbox, mints the agent token, and
-   wraps it with the launch env in a typed `RunHookPayload` that checks its 4096-byte budget
-   before any call (`crates/microvms-app/src/sandbox.rs:1105`, refusal at
-   `crates/microvms-app/src/sandbox.rs:1110`, payload at `crates/microvms-app/src/sandbox.rs:1169`).
-5. `ControlPlane::run_microvm` validates the identifier, the duration range, and the role ARN,
-   splits ingress and egress connectors by intent, and puts the payload on the wire
-   (`crates/microvms-app/src/control/microvm.rs:433`, checks in `launch_connectors` at
-   `crates/microvms-app/src/control/microvm.rs:477`).
-6. The platform calls the daemon's run hook over loopback; `run_hook` unwraps the envelope,
-   parses the inner payload, and installs the token once — an identical replay is 200 and a
-   different token is 409 (`crates/agentd/src/routes.rs:180`, verdicts at
-   `crates/agentd/src/routes.rs:236-272`).
-7. `ControlPlane::wait_for_running` polls to RUNNING and fails fast on any terminal state; the
-   client then polls unauthenticated `/v1/health` until `bootstrapped`
-   (`crates/microvms-app/src/control/microvm.rs:609`, `crates/microvms-app/src/session/mod.rs:410`). The
-   sandbox marks the token installed only after RUNNING is observed
-   (`crates/microvms-app/src/sandbox.rs:1295-1297`).
-8. The optional workload runs through `Session::run_sync` — start, wait, ack — and `tear_down`
-   plus `attach_cost` then run however the select ended
-   (`crates/microvms-app/src/session/mod.rs:476`, `crates/microvms-cli/src/commands/lifecycle.rs:1337`,
-   `crates/microvms-cli/src/commands/lifecycle.rs:1391`).
+1. `lifecycle::run` opens a sandbox and races `launch_and_exec` against the interrupt future while retaining the sandbox for cleanup. `crates/microvms-cli/src/commands/lifecycle.rs:475`, `crates/microvms-cli/src/commands/lifecycle.rs:670-716`
+2. `launch_and_exec` selects an existing image, builds from the supplied artifact, or calls `ensure_image` to build or reuse a content-addressed image. `crates/microvms-cli/src/commands/lifecycle.rs:1048-1132`
+3. `Sandbox::run` constructs the launch payload, resolves the image identifier, calls the control plane, and records the accepted VM as pending. `crates/microvms-app/src/sandbox.rs:1105`, `crates/microvms-app/src/sandbox.rs:1169-1225`
+4. `ControlPlane::run_microvm` serializes `RunMicrovm`; the production `SignedTransport::send` signs the request and sends it to AWS. `crates/microvms-app/src/control/microvm.rs:433-469`, `crates/microvms-edges/src/control/transport.rs:153-203`
+5. The daemon's `run_hook` receives the platform envelope, installs the bootstrap state, and runs the configured run handler before returning success. `crates/agentd/src/routes.rs:180-272`
+6. Unless `--no-wait` is set, `Sandbox::wait_until_running` waits for the launch state and then calls `Session::wait_until_ready` to poll for bootstrap readiness. `crates/microvms-cli/src/commands/lifecycle.rs:1191-1205`, `crates/microvms-app/src/sandbox.rs:1277-1306`, `crates/microvms-app/src/control/microvm.rs:666-730`, `crates/microvms-app/src/session/mod.rs:410-438`
+7. When `--exec` is supplied, `launch_and_exec` calls `Session::run_sync` to start the workload, wait for its result, and acknowledge it. `crates/microvms-cli/src/commands/lifecycle.rs:1227-1247`, `crates/microvms-app/src/session/mod.rs:476-482`
+8. The CLI calls `tear_down` after the launch attempt; `--keep` retains resources, otherwise it requests termination and deletion of the image this run built. `crates/microvms-cli/src/commands/lifecycle.rs:777-784`, `crates/microvms-cli/src/commands/lifecycle.rs:1337-1384`
 
 ```mermaid
 sequenceDiagram
-    participant CLI as microvm CLI
-    participant Core as microvms-core
+    participant CLI as microvms-cli
+    participant App as microvms-app
+    participant Edges as microvms-edges
     participant AWS as AWS MicroVMs
     participant Daemon as agentd
-    CLI->>Core: open sandbox, build image
-    Core->>AWS: CreateMicrovmImage, wait usable
-    AWS-->>Core: image usable
-    CLI->>Core: sandbox run(RunRequest)
-    Core->>AWS: RunMicrovm with runHookPayload
-    AWS->>Daemon: POST runtime/v1/run
-    Daemon-->>AWS: 200, token installed once
-    AWS-->>Core: RUNNING plus endpoint
-    Core->>Daemon: GET /v1/health until bootstrapped
-    CLI->>Daemon: POST /v1/exec/start, wait, ack
-    Daemon-->>CLI: exit code and output
-    CLI->>AWS: TerminateMicrovm, DeleteMicrovmImage
+    CLI->>App: build or reuse image
+    App->>Edges: image operations
+    Edges->>AWS: image API requests
+    AWS-->>Edges: image ready
+    Edges-->>App: image ready
+    CLI->>App: Sandbox.run
+    App->>Edges: RunMicrovm
+    Edges->>AWS: signed launch request
+    AWS-->>Edges: accepted VM
+    Edges-->>App: pending VM
+    CLI->>App: wait_until_running
+    par platform lifecycle
+        AWS->>Daemon: run lifecycle hook
+        Daemon-->>AWS: bootstrap complete
+    and client state polling
+        App->>Edges: GetMicrovm
+        Edges->>AWS: state request
+        AWS-->>Edges: VM state
+        Edges-->>App: VM state
+    end
+    App->>Edges: health request
+    Edges->>Daemon: health through endpoint
+    Daemon-->>Edges: bootstrapped
+    Edges-->>App: bootstrapped
+    opt workload supplied
+        CLI->>App: run_sync
+        App->>Edges: start, wait, acknowledge
+        Edges->>Daemon: exec requests
+        Daemon-->>Edges: workload result
+        Edges-->>App: workload result
+    end
+    opt resources not kept
+        CLI->>App: terminate
+        App->>Edges: cleanup requests
+        Edges->>AWS: terminate VM, delete built image
+        AWS-->>Edges: cleanup responses
+        Edges-->>App: cleanup responses
+        App-->>CLI: cleanup report
+    end
 ```
 
-## Flow 2: microvm exec --stream — SSE output on a byte-offset cursor
+## Flow 2: Stream command output
 
-1. `commands::attached::exec` attaches a session from the identifier triple, builds the start
-   request under a caller-supplied or minted `exec_id`, starts the command, then branches to
-   `stream_exec` (`crates/microvms-cli/src/commands/attached.rs:243`, branch at
-   `crates/microvms-cli/src/commands/attached.rs:334-343`).
-2. `stream_exec` drives `ExecHandle::for_each_event` with a `FnMut(ExecEvent) -> ControlFlow<()>`
-   callback, writes one NDJSON line plus the raw bytes per event, and reports `nextOffset` from
-   core's cursor rather than its own tally (`crates/microvms-cli/src/commands/attached.rs:479`, cursor
-   read at `crates/microvms-cli/src/commands/attached.rs:534`).
-3. `for_each_event` delegates to `for_each_event_async`, whose loop steps the `advance` state
-   machine, reads the cursor off the machine, and reports `EndReason::Cut` when a body ends with
-   no `exit` event (`crates/microvms-app/src/session/exec.rs:483`, loop at
-   `crates/microvms-app/src/session/exec.rs:555-564`).
-4. `advance` re-attaches at the last good cursor with a fixed backoff on a retryable failure,
-   and errors out past `max_reconnects` instead of looping forever
-   (`crates/microvms-app/src/session/exec.rs:596`, backoff and re-attach at
-   `crates/microvms-app/src/session/exec.rs:623-627`).
-5. `ExecHandle::attach` issues `GET /v1/exec/{id}/stream?offset=N` with
-   `accept: text/event-stream`, building its headers inside the request path so a mid-stream
-   reconnect re-mints an expired token (`crates/microvms-app/src/session/exec.rs:727`, mint at
-   `crates/microvms-app/src/session/exec.rs:736`).
-6. `ProxyAuth::headers` serves the cached proxy token, or takes the mint lock and re-checks
-   freshness under it so two racing tasks do not burn two control-plane calls
-   (`crates/microvms-app/src/session/proxy.rs:412`, double check at
-   `crates/microvms-app/src/session/proxy.rs:501-510`).
-7. The daemon's `stream` handler snapshots the replay ring, reads the terminal marker after the
-   snapshot, and sends the SSE body with a keepalive plus `x-accel-buffering: no` so a buffering
-   proxy cannot batch a live stream into one delivery at exit (`crates/agentd/src/exec.rs:477`,
-   ordering at `crates/agentd/src/exec.rs:496-501`, header at `crates/agentd/src/exec.rs:511-513`).
-8. `build_stream` emits any `gap` first, drains the replayed backlog, then the live broadcast
-   channel, and closes the body one step after the terminal `exit` event
-   (`crates/agentd/src/exec.rs:584`, ending at `crates/agentd/src/exec.rs:628-639`).
+1. `attached::exec` attaches a session, starts the requested command, and selects `stream_exec` when `--stream` is set. `crates/microvms-cli/src/commands/attached.rs:243-342`
+2. `Session::run` sends `POST /v1/exec/start` and returns an `ExecHandle` using the daemon's confirmed exec identifier. `crates/microvms-app/src/session/mod.rs:448-467`
+3. `stream_exec` passes the requested offset to `ExecHandle::for_each_event` and renders each received output, gap, or exit event. `crates/microvms-cli/src/commands/attached.rs:479-534`
+4. `for_each_event` delegates to `for_each_event_async`, which drives `advance` and retains its cursor for the final stream result. `crates/microvms-app/src/session/exec.rs:483-590`
+5. `ExecHandle::attach` adds request headers and opens `GET /v1/exec/{id}/stream?offset=N` through the backend; `ReqwestBackend::open_stream` returns the response header and chunk source. `crates/microvms-app/src/session/exec.rs:727-751`, `crates/microvms-edges/src/session/http.rs:132-179`
+6. The daemon's `stream` handler looks up the exec, snapshots its replay buffer, and constructs an SSE response from `build_stream`. `crates/agentd/src/exec.rs:477-514`
+7. `build_stream` emits a gap when needed, drains replayed output, follows live output, and ends with the exec's terminal event. `crates/agentd/src/exec.rs:584-640`
+8. On a retryable interruption, `advance` can reconnect from the retained cursor within the configured retry limit; the callback driver returns the end reason and cursor to the CLI. `crates/microvms-app/src/session/exec.rs:539-590`, `crates/microvms-app/src/session/exec.rs:596-650`
 
 ```mermaid
 sequenceDiagram
-    participant CLI as microvm CLI
-    participant Handle as ExecHandle
-    participant Proxy as ProxyAuth
-    participant AWS as AWS MicroVMs
+    participant CLI as microvms-cli
+    participant App as microvms-app
+    participant Edges as microvms-edges
     participant Daemon as agentd
-    CLI->>Handle: for_each_event(offset)
-    Handle->>Proxy: headers()
-    Proxy->>AWS: CreateMicrovmAuthToken
-    AWS-->>Proxy: header map, cached
-    Handle->>Daemon: GET /v1/exec/id/stream?offset=N
-    Daemon-->>Handle: SSE gap event
-    Daemon-->>Handle: SSE output events
-    Daemon-->>Handle: SSE exit event, body closes
-    Handle-->>CLI: StreamEnd with cursor
+    CLI->>App: Session.run
+    App->>Edges: POST exec/start
+    Edges->>Daemon: start request through endpoint
+    Daemon-->>Edges: confirmed exec identifier
+    Edges-->>App: confirmed exec identifier
+    CLI->>App: for_each_event(offset)
+    App->>Edges: open_stream(offset)
+    Edges->>Daemon: GET exec stream through endpoint
+    Daemon-->>Edges: SSE output and optional gap
+    Edges-->>App: response chunks
+    App-->>CLI: decoded events
+    opt retryable interruption
+        App->>Edges: reconnect at retained cursor
+        Edges->>Daemon: GET exec stream with offset
+    end
+    Daemon-->>Edges: exit event
+    Edges-->>App: response chunk
+    App-->>CLI: end reason and cursor
 ```
 
-## Flow 3: microvm cp --tar — an archive into the one confined write path
+## Flow 3: Upload a file with microvm cp
 
-1. `commands::attached::cp` resolves the direction from the `vm:` prefix before opening
-   anything, so two local paths or two remote paths are refused by name rather than guessed at
-   (`crates/microvms-cli/src/commands/attached.rs:1473`, resolver at
-   `crates/microvms-cli/src/commands/attached.rs:1589`).
-2. It attaches through the helper every command in that file starts with, which resolves the
-   region first because the region is what the proxy-token mint's ARN is derived for
-   (`crates/microvms-cli/src/commands/attached.rs:95`).
-3. The upload arm reads the local archive whole and sends it without inspecting it: the daemon's
-   extractor is the only one in the system, and a client-side check would be a second set of
-   member rules that could disagree with it
-   (`crates/microvms-cli/src/commands/attached.rs:1494-1517`, stated at
-   `crates/microvms-cli/src/commands/attached.rs:1466-1472`).
-4. `Session::upload_tar` delegates to `files::upload_tar`, which builds
-   `PUT /v1/fs/tar?path=...` with `content-type: application/x-tar` and the archive bytes as the
-   body (`crates/microvms-app/src/session/mod.rs:538`, `crates/microvms-app/src/session/files.rs:133`).
-5. `Transport::request` sends through `request_inner`, which prepends the proxy headers and the
-   session's bearer token to the caller's own headers rather than replacing them, which is what
-   keeps the content type on the request (`crates/microvms-app/src/session/mod.rs:139`, header assembly at
-   `crates/microvms-app/src/session/mod.rs:111`).
-6. `auth::require_token` guards the control router before the body is polled, answering 503
-   when no token is installed and 401 on a mismatch, then draining a bounded prefix of the
-   rejected body so the client sees the status rather than a TCP reset
-   (`crates/agentd/src/auth.rs:62`, verdicts at `crates/agentd/src/auth.rs:69-83`, applied at
-   `crates/agentd/src/routes.rs:66-69`).
-7. `fs::write_tar` refuses a relative extraction root, preflights free disk against that root
-   before the body is spooled, then spools the body under the disk pacer
-   (`crates/agentd/src/fs.rs:1438`, preflight at `crates/agentd/src/fs.rs:1464-1466`, spool at
-   `crates/agentd/src/fs.rs:898`).
-8. `extract_into` runs under `spawn_blocking` and holds one confined directory handle for the
-   whole extraction: ownership and xattrs are dropped, device and fifo members are refused,
-   out-of-tree link targets are refused, and directory modes are replayed after all content
-   lands. Success is 204 (`crates/agentd/src/fs.rs:647`, refusals at `crates/agentd/src/fs.rs:728-733` and
-   `crates/agentd/src/fs.rs:768`, deferred modes at `crates/agentd/src/fs.rs:836`, dispatch and status at
-   `crates/agentd/src/fs.rs:1484-1492`).
+1. `attached::cp` resolves the `vm:` side, attaches a session, and reads the local file for an upload. `crates/microvms-cli/src/commands/attached.rs:1473-1507`
+2. For an upload without `--tar`, `cp` calls `Session::upload_file` with the remote path, bytes, and optional mode. `crates/microvms-cli/src/commands/attached.rs:1510-1515`
+3. `Session::upload_file` delegates to `files::upload_file`, which constructs a `PUT /v1/fs/file` request with an octet-stream body. `crates/microvms-app/src/session/mod.rs:505-512`, `crates/microvms-app/src/session/files.rs:65-77`
+4. `Transport::request_inner` combines session and caller headers before sending through the backend; `ReqwestBackend::send` collects the HTTP response. `crates/microvms-app/src/session/mod.rs:139-155`, `crates/microvms-edges/src/session/http.rs:110-129`
+5. The daemon router maps `PUT /v1/fs/file` to `fs::write_file`. `crates/agentd/src/routes.rs:110-136`
+6. `write_file` parses the request, checks available disk space, creates missing parents, and opens the destination for replacement. `crates/agentd/src/fs.rs:1187-1237`
+7. `write_file` streams the request body through `disk::copy_guarded`, applies a requested mode, and returns `204 No Content` on success. `crates/agentd/src/fs.rs:1245-1296`
+8. The application's `Transport::send` checks the response status before `upload_file` returns success to the CLI. `crates/microvms-app/src/session/mod.rs:159-164`, `crates/microvms-app/src/session/files.rs:65-77`
 
 ```mermaid
 sequenceDiagram
-    participant CLI as microvm CLI
-    participant Core as microvms-core
-    participant AWS as AWS MicroVMs
+    participant CLI as microvms-cli
+    participant App as microvms-app
+    participant Edges as microvms-edges
     participant Daemon as agentd
     participant Disk as guest filesystem
-    CLI->>Core: upload_tar(remote, archive)
-    Core->>AWS: PUT /v1/fs/tar with bearer
-    AWS->>Daemon: forwarded request
-    Daemon->>Daemon: require_token, then disk preflight
-    Daemon->>Disk: spool body, then extract_into
-    Disk-->>Daemon: members written, modes replayed
-    Daemon-->>Core: 204 No Content
-    Core-->>CLI: bytes and paths for the envelope
+    CLI->>App: upload_file(path, bytes, mode)
+    App->>Edges: PUT fs/file with headers and body
+    Edges->>Daemon: upload through endpoint
+    Daemon->>Disk: create parents, open destination
+    Daemon->>Disk: copy_guarded, apply mode
+    Disk-->>Daemon: write complete
+    Daemon-->>Edges: 204 No Content
+    Edges-->>App: HTTP response
+    App-->>CLI: upload succeeded
 ```
 
 ## See also
 
-- [processes](../behavior/processes.md)
-- [sequences](../diagrams/behavioral/sequences.md)
-- [debugging guide](../insights/debugging-guide.md)
-- [impact analysis](../insights/impact-analysis.md)
-- [business logic](../insights/business-logic.md)
+- [contract map](../insights/contract-map.md) — 11 shared source citations
+- [processes](../behavior/processes.md) — 10 shared source citations
+- [impact analysis](../insights/impact-analysis.md) — 10 shared source citations
+- [module map](module-map.md) — 9 shared source citations
+- [components](../diagrams/architecture/components.md) — 6 shared source citations

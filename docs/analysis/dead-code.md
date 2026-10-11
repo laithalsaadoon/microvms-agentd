@@ -1,148 +1,72 @@
 # microvms-agentd · Dead code
 
-Figures on this page were measured at `5e6f752` (2026-08-17).
+Reviewed at `9729b82` on 2026-10-11. These are source-level findings, not a
+whole-program reachability proof. An empty section means no candidate was confirmed
+in this review. Public library APIs may have downstream callers, and language
+bindings register exports that need no Rust caller: the Node binding describes its
+registration mechanism at `bindings/microvms-js/src/lib.rs:82-86`.
 
-The compiler already owns most of this question. `rustc`'s `unused_imports` and `dead_code`
-are warn-by-default, Rust 1.97 added `dead_code_pub_in_binary`, and
-`cargo clippy --all-targets --all-features` over all seven workspace members exits 0 with
-zero warnings — verified on a forced fresh re-check, not a warm cache, with every `.rs` file
-in `agentd`, `microvms-cli`, `microvms-core`, `microvms-js`, `microvms-py`, `model`, and
-`protocol` touched first. Nothing crate-private is dead, and no import is unused anywhere
-`rustc` can see. Restating that would add nothing.
-
-What the compiler cannot decide is what this file covers:
-
-- A `pub` item in `microvms-core` with zero in-repo callers may still be live API. The crate
-  has three consumers (`microvms-cli`, `microvms-py`, `microvms-js`), and `protocol` is
-  consumed by `agentd` and `microvms-core`.
-- Items reached only through `#[pyclass]` / `#[pymethods]` / `#[pyfunction]` / `#[pymodule]`
-  or `#[napi]` are dispatched by CPython and Node, never by a Rust caller. They read as
-  uncalled and are not dead. `#[derive(Serialize, Deserialize)]` impls, trait impls
-  satisfying a bound, and `#[test]` functions read the same way.
-- napi-rs renames snake_case Rust to camelCase JS, so a `#[napi]` export exercised only from
-  `bindings/microvms-js/__test__/*.mjs` is invisible to a snake_case search.
-
-Method: a symbol is a candidate when no edge of kind
-`calls | references | instantiates | imports | implements | extends` targets it in the
-CodeGraph index (`.codegraph/codegraph.db`, 4,430 nodes / 16,638 edges), and no textual
-reference to it — or to its camelCase / `#[napi(js_name)]` / `#[pyo3(name)]` alias — exists
-anywhere in the git-tracked tree. `contains` edges are excluded because every symbol is
-`contains`-reachable from its own file node. The funnel: 1,398 zero-inbound Rust symbols →
-551 after dropping test files and `#[cfg(test)]` modules → 465 after dropping two whole-file
-test-only modules → 112 after the alias-aware reference search → 2 after removing 110 trait
-and language-protocol members → **1** after hand-dropping a trait associated type
-(`bindings/microvms-js/src/exec.rs:273`, `type Return = ()` inside
-`impl AsyncGenerator for ExecStream`) that the automated filter missed because it matched
-trait methods but not associated types. No dead-code analyzer is integrated in this repo
-(no `cargo-udeps`, `cargo-machete`, `vulture`, or `knip` in `mise.toml`, `Cargo.toml`,
-`.cargo/deny.toml`, or `.github/workflows/`), so the index is the analyzer.
+The repository's lint task runs `cargo clippy --all-targets -- -D warnings` and
+`ruff check .`; its configured Rust invocation does not enable every feature.
+Python's selected rules include unused-import diagnostics through the `F` family.
+These checks complement source review but do not establish reachability across
+all features, platforms, or downstream applications.
+`.config/mise/tasks/lint.toml:48-53`
+`pyproject.toml:138-166`
 
 ## Unreferenced exports
 
-| Symbol | Path | Last modified |
-| --- | --- | --- |
-| `SessionBuilder::with_timeout` | `crates/microvms-app/src/session/mod.rs:450` | 2026-08-15 |
+_none_
 
-**Confidence: high.** `git grep -n "with_timeout\|withTimeout" -- .` over the whole
-git-tracked tree returns exactly one line — the declaration. Every sibling on the same
-builder has a caller: `with_minter` (`crates/microvms-app/src/session/mod.rs:421`) from
-`crates/microvms-cli/src/seam.rs`, `crates/microvms-app/src/sandbox.rs`, and
-`crates/microvms-core/tests/turmoil_client.rs`; `with_proxy_auth`
-(`crates/microvms-app/src/session/mod.rs:429`) from `crates/microvms-core/tests/turmoil_client.rs`;
-`with_backend` (`crates/microvms-app/src/session/mod.rs:436`) from `crates/microvms-cli/src/guards/`
-and `crates/microvms-core/tests/turmoil_client.rs`; `with_port`
-(`crates/microvms-app/src/session/mod.rs:443`) from `crates/microvms-cli/src/seam.rs` and
-`crates/microvms-app/src/sandbox.rs`.
+`SessionBuilder::with_timeout` is used by the production session constructor when
+an attachment requests a timeout. Its declaration and caller are
+`crates/microvms-app/src/session/mod.rs:609-614` and
+`crates/microvms-core/src/prelude.rs:350-368`.
 
-The field it writes is live — only the setter is unreached. `SessionBuilder::build` reads
-`self.timeout` at `crates/microvms-app/src/session/mod.rs:459` and `:471`, and `Session::run`
-back-fills a per-request `None` from it at `crates/microvms-app/src/session/mod.rs:110-111`.
-`Session::builder` is the sole constructor (`crates/microvms-app/src/session/mod.rs:224-225`) and
-seeds every path with `DEFAULT_REQUEST_TIMEOUT` (`crates/microvms-app/src/session/mod.rs:231`).
-
-**What would falsify this.** Three conditions hold; any one of them failing moves this row
-out of the table.
-
-1. No unseen downstream consumer. `microvms-core` is a library crate, so a `pub` method is
-   reachable by anything that depends on it. The package is published on crates.io and has language bindings. This analysis
-   cannot establish the absence of downstream callers, so removing public API
-   requires a compatibility decision; lack of local references is insufficient.
-2. No binding re-exports it. `bindings/microvms-py/microvms.pyi` contains no `with_timeout`, and no
-   `withTimeout` exists in `microvms-js`.
-3. No host runtime dispatches to it. Its only attribute is `#[must_use]` — no `#[napi]`,
-   no `#[pymethods]`.
-
-**Related defect in the same construct.** The builder's doc comment at
-`crates/microvms-app/src/session/mod.rs:223` reads "A builder, for the cases that need a port, a
-timeout, or a custom backend." The port case and the backend case each have callers; the
-timeout case has none. The comment asserts a motivating case that does not exist in the tree.
+Runtime-exported functions remain part of their binding's public surface even
+without direct Rust calls. Examples include the Node binding's error-code
+enumeration and base-image helpers, which carry export attributes at
+`bindings/microvms-js/src/errors.rs:147-165` and
+`bindings/microvms-js/src/sandbox.rs:256-274`.
 
 ## Unreferenced files
 
 _none_
 
-All 200 git-tracked files resolve to an inbound reference. Every non-root `.rs` file has a
-`mod` declaration or is cargo-auto-discovered by one of the patterns `*/src/lib.rs`,
-`*/src/main.rs`, `*/build.rs`, `*/src/bin/*.rs`, `*/tests/*.rs`, `*/examples/*.rs`. Four
-files that a basename search calls orphans, each cleared against its real invocation site:
-
-| File | Reached by |
-| --- | --- |
-| `bindings/microvms-py/tests/test_stubs.py` | `pytest bindings/microvms-py/tests -q` at `.github/workflows/ci.yml:308`; pytest auto-discovers `test_*.py`, so no file names it |
-| `bindings/microvms-js/__test__/support/decimal.mjs` | `bindings/microvms-js/__test__/cost.mjs:40` |
-| `bindings/microvms-js/__test__/support/sse.mjs` | `bindings/microvms-js/__test__/cost.mjs:41`, `bindings/microvms-js/__test__/errors.mjs:40`, `bindings/microvms-js/__test__/exec.mjs:44`, `bindings/microvms-js/__test__/process.mjs:31`, `bindings/microvms-js/__test__/session.mjs:33` |
-| `conformance/infra/main.tf` | `terraform -chdir=conformance/infra` at `.config/mise/tasks/lint.toml:13`, `.config/mise/tasks/lint.toml:54`, `.config/mise/tasks/live.toml:21`, `.config/mise/tasks/live.toml:263` |
-
-Two modules are compiled only under `cfg(test)` and are live test code, not dead source:
-`crates/microvms-cli/src/guards/` (inner `#![cfg(test)]` at `crates/microvms-cli/src/guards/mod.rs:25` and in
-each file under it, plus `#[cfg(test)] mod guards;` at `crates/microvms-cli/src/main.rs:36-37`) and
-`crates/microvms-app/src/control/fake.rs` (`#[cfg(test)] pub(crate) mod fake;` at
-`crates/microvms-app/src/control/mod.rs:900-901`).
+Cargo workspace roots and module declarations are entry points rather than
+ordinary imports. Test-only source also remains reachable through conditional
+module declarations: the app's control tests include `posture_fuzz` under
+`cfg(test)`. The ratchet's sentinel source is an intentional scanner input, not an
+application module awaiting a caller.
+`Cargo.toml:1-19`
+`crates/microvms-app/src/control/mod.rs:1090-1097`
+`tools/ratchet.py:265-270`
+`tools/ratchet.py:1454-1461`
 
 ## Dead imports
 
 | Path | Symbol | Imported from |
 | --- | --- | --- |
-| `crates/microvms-cli/src/commands/lifecycle.rs:2495` | `_DocsOnly` (alias of `ControlPlane`) | `microvms_core::control::ControlPlane`, re-bound from `crates/microvms-cli/src/commands/lifecycle.rs:69` |
-| `crates/microvms-cli/src/commands/attached.rs:948` | `_DocsOnly` (alias of `ErrorKind`) | `microvms_core::ErrorKind`, re-bound from `crates/microvms-cli/src/commands/attached.rs:40` |
+| `crates/microvms-cli/src/commands/lifecycle.rs:2566` | `ControlPlane as _DocsOnly` | `crates/microvms-cli/src/commands/lifecycle.rs:70` |
+| `crates/microvms-cli/src/commands/attached.rs:2883` | `ErrorKind as _DocsOnly` | `crates/microvms-cli/src/commands/attached.rs:41` |
 
-**Confidence: high that nothing names `_DocsOnly`; do not delete either line on its own.**
-Both carry `#[allow(unused_imports, reason = …)]`, so `rustc` never reports them, and both
-are the only `allow` attributes of this family in the workspace. Neither is independently
-removable. Measured by copying the git-tracked tree to a scratch directory, deleting each
-three-line construct (doc comment, attribute, `use`), and rebuilding:
+These aliases have no subsequent references. Both explicitly allow
+`unused_imports`, with a documentation-related reason, so they are intentional
+exceptions to the lint rather than evidence that the source types are unused.
+`crates/microvms-cli/src/commands/lifecycle.rs:2564-2566`
+`crates/microvms-cli/src/commands/attached.rs:2881-2883`
 
-- `cargo clippy -p microvms-cli --all-targets` emits two new warnings —
-  `unused import: ControlPlane` and `unused import: ErrorKind` — because the `_DocsOnly`
-  re-export is what consumes the code-level import at
-  `crates/microvms-cli/src/commands/lifecycle.rs:69` and
-  `crates/microvms-cli/src/commands/attached.rs:40`. Under `-D warnings` that is a build failure.
-- `cargo doc --no-deps -p microvms-cli` emits the same eight warnings with or without the
-  constructs, and neither `ControlPlane` nor `ErrorKind` appears among them. The stated
-  reason — "Re-exported so `[ControlPlane]` is nameable in this module's docs"
-  (`crates/microvms-cli/src/commands/lifecycle.rs:2493`) — is not the mechanism. The intra-doc link
-  at `crates/microvms-cli/src/commands/lifecycle.rs:10` resolves from the `:69` import directly.
-
-The two differ in whether the whole construct earns its place:
-
-- `ControlPlane` is a trait, so its name never appears in an expression; the `:69` import is
-  what makes `[ControlPlane]` at `crates/microvms-cli/src/commands/lifecycle.rs:10` resolve. Removing
-  the pair means removing that doc link. Load-bearing as a unit.
-- `ErrorKind` is named nowhere in `crates/microvms-cli/src/commands/attached.rs` except its import
-  at `:40` and the two `_DocsOnly` lines at `:2794-2796`. The only documentation that links
-  `[ErrorKind]` is the doc comment justifying the import that makes it resolvable. Removable
-  as a unit — `:40`'s `ErrorKind`, plus all three lines at `:2794-2796`.
-
-**Non-Rust surfaces, both clean.** `uvx ruff check --select F401,F811,F841` over all 17
-tracked `.py` files plus `bindings/microvms-py/microvms.pyi` reports no findings; F401 is in the
-repo's own selected set (`ruff.toml`) and `.config/mise/tasks/lint.toml:52` runs `ruff check .` across the whole
-repo. The eight `bindings/microvms-js/__test__/*.mjs` files have no linter, so their
-`import … from '…'` bindings were checked directly for non-comment uses: zero unused.
+The lifecycle module links `ControlPlane` in its documentation. The attached
+commands also use `ErrorKind` directly when handling a timeout. Removing either
+underlying import solely because its `_DocsOnly` alias is unused would ignore
+these uses.
+`crates/microvms-cli/src/commands/lifecycle.rs:10`
+`crates/microvms-cli/src/commands/attached.rs:391`
 
 ## See also
 
-- [impact analysis](../insights/impact-analysis.md)
-- [contract map](../insights/contract-map.md)
-- [processes](../behavior/processes.md)
-- [tech debt](../insights/tech-debt.md)
-- [risk hotspots](risk-hotspots.md)
+- [module map](../architecture/module-map.md) — 8 shared source citations
+- [contract map](../insights/contract-map.md) — 6 shared source citations
+- [impact analysis](../insights/impact-analysis.md) — 5 shared source citations
+- [risk hotspots](risk-hotspots.md) — 4 shared source citations
+- [system overview](../architecture/system-overview.md) — 4 shared source citations

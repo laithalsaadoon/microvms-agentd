@@ -39,9 +39,12 @@ For a running daemon's wire contract, use `/v1/schema`.
 
 ## Source analyses and history
 
-These pages were generated from a particular source revision. Confirm their
-citations against the current code; a line number alone does not establish
-freshness. Current source and generated executable contracts take precedence.
+These pages were checked against source revision `9729b82` on October 11, 2026.
+Confirm their citations when the code changes; a line number alone does not
+establish freshness. Current source and generated executable contracts take
+precedence.
+
+*Prose is generated; structure is mechanical. Cross-references are deterministic.*
 
 - Architecture: [overview](architecture/system-overview.md),
   [modules](architecture/module-map.md), [data flow](architecture/data-flow.md).
