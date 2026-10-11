@@ -86,17 +86,18 @@ fn args_of(command: &str) -> Vec<String> {
     words.map(str::to_string).collect()
 }
 
-/// `microvm` with `args`, a cleared environment, and a HOME no ledger write can reach.
-fn command(args: &[String]) -> Command {
+/// `microvm` with `args` and a cleared environment. The home must outlive the child.
+fn command(args: &[String]) -> (Command, support::TempDir) {
+    let home = support::TempDir::new("bdd-home");
     let mut command = Command::new(support::binary());
     command
         .args(args)
         .env_clear()
-        .env("HOME", "/nonexistent-microvm-test-home")
+        .env("HOME", &home.0)
         // No credential lookup on this machine may reach instance metadata.
         .env("AWS_EC2_METADATA_DISABLED", "true")
         .stdin(Stdio::null());
-    command
+    (command, home)
 }
 
 /// The write end of a pipe whose read end is already closed.
@@ -145,7 +146,7 @@ impl Cli {
 
 #[when(expr = "I run {string} with stdout closed after {int} bytes")]
 fn stdout_closed_after(world: &mut Cli, text: String, bytes: usize) {
-    let mut command = command(&args_of(&text));
+    let (mut command, _home) = command(&args_of(&text));
     command.stderr(Stdio::piped());
     if bytes == 0 {
         command.stdout(closed_pipe());
@@ -167,7 +168,7 @@ fn stdout_closed_after(world: &mut Cli, text: String, bytes: usize) {
 
 #[when(expr = "I run {string} with stderr closed")]
 fn stderr_closed(world: &mut Cli, text: String) {
-    let mut command = command(&args_of(&text));
+    let (mut command, _home) = command(&args_of(&text));
     command.stdout(Stdio::piped()).stderr(closed_pipe());
     let mut child = command.spawn().expect("the microvm binary spawns");
     drop(command);
@@ -179,7 +180,7 @@ fn stderr_closed(world: &mut Cli, text: String) {
 
 #[when(expr = "I run {string} with stdout and stderr closed")]
 fn both_closed(world: &mut Cli, text: String) {
-    let mut command = command(&args_of(&text));
+    let (mut command, _home) = command(&args_of(&text));
     command.stdout(closed_pipe()).stderr(closed_pipe());
     let mut child = command.spawn().expect("the microvm binary spawns");
     drop(command);
