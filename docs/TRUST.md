@@ -216,9 +216,10 @@ the managed internet connector. An empty child environment does not hide
 metadata credentials.
 
 Grant the execution role only permissions every workload may use. The
-conformance role grants CloudWatch logging; its policy is checked during live
-verification. Deliver additional workload credentials with their own scope
-and lifetime instead of broadening the shared VM role.
+conformance role grants CloudWatch logging within `/aws/lambda-microvms/` in
+its region and account; live verification checks both actions and resource
+scope. Deliver additional workload credentials with their own scope and lifetime
+instead of broadening the shared VM role.
 
 Tested in-guest metadata blocks failed: the capability set lacked
 `CAP_NET_ADMIN`, and route/rule/link changes returned `EPERM`. Relevant sysctl

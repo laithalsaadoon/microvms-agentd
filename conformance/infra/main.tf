@@ -221,15 +221,23 @@ resource "aws_iam_role" "execution" {
 
 data "aws_iam_policy_document" "execution" {
   statement {
+    sid     = "CreateRuntimeLogGroups"
+    effect  = "Allow"
+    actions = ["logs:CreateLogGroup"]
+    resources = [
+      "arn:aws:logs:${var.region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda-microvms/*",
+    ]
+  }
+
+  statement {
     sid    = "WriteRuntimeLogs"
     effect = "Allow"
     actions = [
-      "logs:CreateLogGroup",
       "logs:CreateLogStream",
       "logs:PutLogEvents",
     ]
     resources = [
-      "arn:aws:logs:${var.region}:${data.aws_caller_identity.current.account_id}:log-group:*",
+      "arn:aws:logs:${var.region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda-microvms/*:log-stream:*",
     ]
   }
 }
