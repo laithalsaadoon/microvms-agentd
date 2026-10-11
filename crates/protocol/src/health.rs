@@ -86,20 +86,16 @@ pub struct Health {
     /// does not report a count.
     #[serde(default)]
     pub execs: usize,
-    /// Every lifecycle-hook invocation the daemon observed, oldest first.
+    /// Hook requests kept in the daemon's capped log, oldest first.
     ///
-    /// The platform writes no CloudWatch logs for the validate hook, so "did my
-    /// validate hook even run?" has no answer anywhere else. Each entry is the
-    /// daemon's own observation — the hook path that was posted and the daemon's
-    /// clock when it arrived — never anything the guest printed.
+    /// Each entry records the requested hook path and the daemon's clock when
+    /// it recorded the request. The platform writes no CloudWatch logs for the
+    /// validate hook, so a kept entry provides a record of its receipt.
     ///
-    /// One trust caveat travels with this field and is stated rather than implied:
-    /// the hook routes are unauthenticated and reachable over loopback from inside
-    /// the guest, so a hostile workload can *forge additional* entries by posting
-    /// the hook paths itself. It cannot remove or alter real ones — the daemon
-    /// records before it responds and the log is append-capped, keeping the
-    /// earliest entries — so the platform's real firings are the front of the list
-    /// and later spam is what the cap drops.
+    /// Hook routes are unauthenticated and reachable over loopback from inside
+    /// the guest. An entry shows receipt, not the request's source identity.
+    /// The log keeps its earliest entries and counts later requests in
+    /// `hooks_dropped` without storing them, including later platform requests.
     ///
     /// Defaulted for `busy`'s reason: an older daemon omits the field, and an empty
     /// list is the honest reading of a daemon that reports no observations.
@@ -107,9 +103,9 @@ pub struct Health {
     pub hooks: Vec<HookObservation>,
     /// How many hook invocations were dropped once the log reached its cap.
     ///
-    /// Non-zero means the list above is the *earliest* invocations only — the cap
-    /// keeps first-N so a guest spamming the unauthenticated hook routes cannot
-    /// grow daemon memory or push the platform's real firings out of the record.
+    /// The log preserves its earliest entries. Later requests are counted here
+    /// without being stored or running a workload handler. Their routes still
+    /// perform other work and return their normal status.
     ///
     /// Defaulted like `hooks`: an older daemon omits it, and zero is the honest
     /// reading of a daemon that dropped nothing it could tell us about.

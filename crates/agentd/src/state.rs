@@ -93,12 +93,10 @@ fn recover<'a, T>(lock: &'a Mutex<T>, name: &str) -> MutexGuard<'a, T> {
 
 /// How many hook invocations are kept before the log stops growing.
 ///
-/// Six is what the platform ever sends a well-behaved VM (ready, validate, run,
-/// then suspend/resume cycles and a terminate), so 64 is room for many cycles
-/// while bounding what a guest spamming the unauthenticated hook routes can make
-/// this daemon hold. First-N-wins on purpose: the earliest invocations are the
-/// platform's real lifecycle firings, and spam arrives later by construction —
-/// nothing runs in the guest before the run hook.
+/// The cap bounds log memory and the number of workload handlers that can run.
+/// Keeping the earliest entries preserves the start of the observed sequence.
+/// Later invocations are counted rather than stored, regardless of their source;
+/// unauthenticated hook requests do not establish who sent them.
 const HOOK_LOG_CAP: usize = 64;
 
 /// The hook-invocation log: what was kept, and how much was not.
@@ -184,19 +182,17 @@ struct Inner {
     /// not win the identity.
     tunnel_identity: Mutex<crate::tunnel_identity::Shared>,
     execs: Mutex<HashMap<String, ExecEntry>>,
-    /// Every lifecycle-hook invocation this daemon observed, oldest first, capped.
+    /// The earliest lifecycle-hook requests this daemon kept, oldest first.
     ///
     /// Plain process memory on purpose, and the placement carries a property worth
     /// wanting: build-time hooks (validate, ready) fire in the snapshot VM before
-    /// the snapshot is taken, so their records ride the memory image into every VM
+    /// the snapshot is taken, so their stored records ride the memory image into every VM
     /// launched from it and are visible on the first health poll.
     ///
-    /// The trust shape mirrors the routes that feed it. The hook paths are
-    /// unauthenticated and loopback-reachable from inside the guest, so a hostile
-    /// workload can *add* entries; it cannot remove or edit real ones, because the
-    /// daemon records before responding and the cap keeps the earliest entries —
-    /// the platform's real lifecycle firings — while later spam is what gets
-    /// dropped and counted. Recovery from poisoning follows `launch_env`'s
+    /// The hook paths are unauthenticated and reachable over loopback from inside
+    /// the guest. Entries show receipt, not source identity. The cap preserves
+    /// stored entries and counts later requests, including platform requests,
+    /// without storing them. Recovery from poisoning follows `launch_env`'s
     /// argument: every write is a bounded push or a counter bump, nothing here
     /// authorizes anything, and a stale log is a far better outcome than a VM
     /// nothing can reach.
@@ -410,13 +406,13 @@ impl AppState {
     /// Called by every hook handler *before* it does any work or chooses a status:
     /// a run hook that arrives malformed, or answers 409, was still invoked, and
     /// the record is of the invocation rather than the verdict. Beyond the cap the
-    /// invocation is counted rather than kept — first-N-wins, because the earliest
-    /// entries are the platform's real firings and later spam is what an in-guest
-    /// caller posting these unauthenticated routes can produce.
+    /// invocation is counted rather than kept. Keeping the earliest entries
+    /// preserves the start of the observed sequence without assigning a source
+    /// identity to any request.
     ///
     /// Returns the entry's slot, or `None` when the cap dropped it. A dropped
-    /// invocation also runs no workload handler, so the cap bounds how many times an
-    /// in-guest caller can make the daemon run one.
+    /// invocation also runs no workload handler. Its route still performs other
+    /// work and returns its normal status; the cap only limits the log and handler.
     pub fn record_hook(&self, hook: &str) -> Option<usize> {
         let mut log = recover(&self.inner.hooks, "hooks");
         if log.observed.len() >= HOOK_LOG_CAP {
