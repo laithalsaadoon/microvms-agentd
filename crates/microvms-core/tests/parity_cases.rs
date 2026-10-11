@@ -223,7 +223,7 @@ async fn daemon_status(case: &Case) -> Value {
     if case.input.get("response").is_some() {
         use futures_util::StreamExt as _;
         let upstream = parity_corpus::ForwardUpstream::for_case(case).await;
-        let session = Session::direct(&format!("http://{}", upstream.address), "agent-token")
+        let session = Session::direct(format!("http://{}", upstream.address), "agent-token")
             .expect("session");
         let result = if case.capability == "stream" {
             let handle = session.exec("x-1");
