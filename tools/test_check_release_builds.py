@@ -274,9 +274,9 @@ class ReleaseBuildTests(unittest.TestCase):
     def test_empty_workflow_and_missing_artifact_job_fail(self):
         for jobs in (None, {}, [], "jobs"):
             self.workflow = {"jobs": jobs}
-            self.assert_refused("no jobs")
+            self.assertEqual(self.problems(), ["release workflow has no jobs"])
         self.workflow = {}
-        self.assert_refused("no jobs")
+        self.assertEqual(self.problems(), ["release workflow has no jobs"])
         self.setUp()
         del self.workflow["jobs"]["wheels"]
         self.assert_refused("missing artifact job wheels")
