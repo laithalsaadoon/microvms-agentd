@@ -42,9 +42,8 @@ CONNECTORLESS_POSTURE = "unsealed"
 #: (`crates/microvms-app/src/sandbox.rs`, `DENY_EGRESS_PROXY_URL`). Loopback port 1, privileged,
 #: nothing serving it.
 DENY_EGRESS_PROXY_URL = "http://127.0.0.1:1"
-#: The one API family the conformance execution role may grant (`conformance/infra/main.tf`,
-#: `WriteRuntimeLogs`). The guest holds this role through MMDS, so this prefix is the whole
-#: blast radius of anything the suite runs in a VM.
+#: The API family the conformance execution role may grant. Resources are checked
+#: separately against the service log namespace in the same region and account.
 EXECUTION_ROLE_ACTION_PREFIX = "logs:"
 
 
@@ -76,45 +75,79 @@ MMDS_HANDSHAKE = (
 )
 
 
-def execution_role_actions(iam: Any, role_arn: str) -> tuple[list[str], list[str]]:
-    """Every grant the role's inline policies allow, plus any attached managed policy ARNs.
+def execution_role_actions(
+    iam: Any, role_arn: str, region: str
+) -> tuple[list[str], list[str], list[str]]:
+    """Read every inline grant, attached policy, and resource outside the log namespace.
 
-    Both lists, because a managed policy attached beside the inline one is exactly how a
-    role's grant widens without its inline document changing. `Action` is normalised to a
-    list: IAM accepts a bare string and boto3 hands it back unchanged. An `Allow` statement
-    carrying `NotAction` grants everything *except* what it names, so each of those is
-    returned as `NotAction:<name>` — never under the `logs:` prefix, so the caller's
-    off-prefix test goes red on it. A reader that collected `Action` alone reported such a
-    role as its `logs:` actions and stayed green.
+    IAM returns either strings or lists for Action and Resource. NotAction is kept
+    distinct from logs actions, and NotResource never establishes the required scope.
+    Read all pages so the verdict covers the whole role, not just the first page.
     """
     role_name = role_arn.rsplit("/", 1)[-1]
+    arn = role_arn.split(":", 5)
+    log_prefix = f"arn:{arn[1]}:logs:{region}:{arn[4]}:log-group:/aws/lambda-microvms/"
     actions: list[str] = []
-    for policy_name in iam.list_role_policies(RoleName=role_name)["PolicyNames"]:
-        document = iam.get_role_policy(RoleName=role_name, PolicyName=policy_name)[
-            "PolicyDocument"
-        ]
-        statements = document.get("Statement", [])
-        if isinstance(statements, dict):
-            statements = [statements]
-        for statement in statements:
-            if statement.get("Effect") != "Allow":
-                continue
-            action = statement.get("Action", [])
-            actions.extend([action] if isinstance(action, str) else list(action))
-            not_action = statement.get("NotAction", [])
-            actions.extend(
-                f"NotAction:{name}"
-                for name in (
-                    [not_action] if isinstance(not_action, str) else not_action
+    outside_namespace: list[str] = []
+    for page in iam.get_paginator("list_role_policies").paginate(RoleName=role_name):
+        for policy_name in page["PolicyNames"]:
+            document = iam.get_role_policy(RoleName=role_name, PolicyName=policy_name)[
+                "PolicyDocument"
+            ]
+            statements = document.get("Statement", [])
+            if isinstance(statements, dict):
+                statements = [statements]
+            for statement in statements:
+                if statement.get("Effect") != "Allow":
+                    continue
+                action = statement.get("Action", [])
+                actions.extend([action] if isinstance(action, str) else list(action))
+                not_action = statement.get("NotAction", [])
+                actions.extend(
+                    f"NotAction:{name}"
+                    for name in (
+                        [not_action] if isinstance(not_action, str) else not_action
+                    )
                 )
-            )
+                resources = statement.get("Resource", [])
+                resources = [resources] if isinstance(resources, str) else resources
+                if not resources or "NotResource" in statement:
+                    outside_namespace.append(
+                        f"{policy_name}: requires explicit Resource"
+                    )
+                for resource in resources:
+                    if not isinstance(resource, str) or not resource.startswith(
+                        log_prefix
+                    ):
+                        outside_namespace.append(f"{policy_name}: {resource!r}")
     attached = [
         policy["PolicyArn"]
-        for policy in iam.list_attached_role_policies(RoleName=role_name)[
-            "AttachedPolicies"
-        ]
+        for page in iam.get_paginator("list_attached_role_policies").paginate(
+            RoleName=role_name
+        )
+        for policy in page["AttachedPolicies"]
     ]
-    return actions, attached
+    return actions, attached, outside_namespace
+
+
+def check_execution_role(
+    iam: Any, role_arn: str, region: str, results: Results
+) -> None:
+    """Require inline logs grants scoped to this run's service log namespace."""
+    actions, attached, outside_namespace = execution_role_actions(iam, role_arn, region)
+    off_prefix = [a for a in actions if not a.startswith(EXECUTION_ROLE_ACTION_PREFIX)]
+    results.check(
+        "the conformance execution role grants only logs actions",
+        bool(actions) and not off_prefix and not attached,
+        f"{role_arn.rsplit('/', 1)[-1]}: {len(actions)} allowed actions, "
+        f"off-prefix {off_prefix!r}, attached managed policies {attached!r}",
+    )
+    results.check(
+        "the conformance execution role scopes logs to the service namespace",
+        bool(actions) and not outside_namespace and not attached,
+        f"resources outside /aws/lambda-microvms/: {outside_namespace!r}, "
+        f"attached managed policies {attached!r}",
+    )
 
 
 def drive_platform_posture(
@@ -268,14 +301,7 @@ def drive_platform_posture(
     # Asserted against IAM rather than against `main.tf`'s text: the text is what someone
     # intended, the role is what the guest gets.
     role_arn = os.environ["MICROVM_EXECUTION_ROLE_ARN"]
-    actions, attached = execution_role_actions(aws.client("iam"), role_arn)
-    off_prefix = [a for a in actions if not a.startswith(EXECUTION_ROLE_ACTION_PREFIX)]
-    results.check(
-        "the conformance execution role grants only logs actions",
-        bool(actions) and not off_prefix and not attached,
-        f"{role_arn.rsplit('/', 1)[-1]}: {len(actions)} allowed actions, "
-        f"off-prefix {off_prefix!r}, attached managed policies {attached!r}",
-    )
+    check_execution_role(aws.client("iam"), role_arn, cli.region, results)
 
 
 def drive_posture_parity(cli: Cli, launched: Envelope, results: Results) -> None:

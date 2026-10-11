@@ -25,3 +25,29 @@ transform = { file = "conformance/harness/results.py", replace = "return self.ch
 id = "conformance-bind19-record"
 message = "FAIL  the digest record check refuses a proof absent from both sides"
 transform = { file = "conformance/lanes/quickstart.py", replace = "        and record.get(\"verification\") is not None\n", with = "" }
+
+
+[[family.fault]]
+id = "conformance-log-resource-scope"
+message = "FAIL  execution role rejects regional groups"
+transform = { file = "conformance/lanes/posture.py", replace = "bool(actions) and not outside_namespace and not attached,", with = "bool(actions) and not attached," }
+
+[[family.fault]]
+id = "conformance-log-explicit-resources"
+message = "FAIL  execution role rejects NotResource"
+transform = { file = "conformance/lanes/posture.py", replace = 'if not resources or "NotResource" in statement:', with = "if not resources:" }
+
+[[family.fault]]
+id = "conformance-log-inline-pages"
+message = "FAIL  execution role checks every inline-policy page"
+transform = { file = "conformance/lanes/posture.py", replace = 'for page in iam.get_paginator("list_role_policies").paginate(RoleName=role_name):', with = 'for page in list(iam.get_paginator("list_role_policies").paginate(RoleName=role_name))[:1]:' }
+
+[[family.fault]]
+id = "conformance-log-attached-pages"
+message = "FAIL  execution role checks every attached-policy page"
+transform = { file = "conformance/lanes/posture.py", replace = "for page in iam.get_paginator(\"list_attached_role_policies\").paginate(\n            RoleName=role_name\n        )", with = "for page in list(iam.get_paginator(\"list_attached_role_policies\").paginate(\n            RoleName=role_name\n        ))[:1]" }
+
+[[family.fault]]
+id = "conformance-log-empty-policy"
+message = "FAIL  execution role requires grants"
+transform = { file = "conformance/lanes/posture.py", replace = "bool(actions) and not outside_namespace and not attached,", with = "not outside_namespace and not attached," }

@@ -7,14 +7,12 @@ import hashlib
 import stat
 import tempfile
 from pathlib import Path
-from typing import Any
 
 from harness.archives import build_hostile_archives
 from harness.cli import Cli
 from harness.envelope import EnvelopeError, KindError
 from harness.results import Results
 from lanes.agents import daemon_deadline_ok, prompt_metadata_ok
-from lanes.posture import EXECUTION_ROLE_ACTION_PREFIX, execution_role_actions
 from lanes.quickstart import digest_record_agrees
 
 from selftest.bindings import check_binding_handles
@@ -30,7 +28,7 @@ from selftest.harness import check_run_section
 from selftest.image_versions import check_image_versions_section
 from selftest.local import check_doctor_region_lines, check_preflight_lines
 from selftest.names import check_terminate_fallback
-from selftest.posture import check_posture_lines
+from selftest.posture import check_execution_role_policy, check_posture_lines
 from selftest.privacy import check_log_privacy
 from selftest.quickstart import check_gh_logged_out
 from selftest.skew import check_version_skew_helpers
@@ -60,6 +58,7 @@ def self_test() -> int:
         check_terminate_fallback(results)
         check_bdd_outcome(results)
         check_posture_lines(results)
+        check_execution_role_policy(results)
         check_preflight_lines(results)
         check_doctor_region_lines(results)
         check_ensure_image_section(results)
@@ -509,55 +508,6 @@ def self_test() -> int:
             "the skip primitive records rather than passing", len(skip_probe.skipped), 1
         )
         results.eq("and does not count as a pass", len(skip_probe.passed), 0)
-
-        # -- the IAM guard reads NotAction as a grant, offline -------------------
-        #
-        # `execution_role_actions` feeds "the conformance execution role grants only logs
-        # actions", and an `Allow` statement carrying `NotAction` grants everything
-        # *except* what it names. A reader that collected `Action` alone reported such a
-        # role as its `logs:` actions and stayed green (review of #163). Pinned here with a
-        # fake IAM client so the shape is asserted without a role to create.
-        class _FakeIam:
-            def __init__(self, statements: list[dict[str, Any]]) -> None:
-                self.statements = statements
-
-            def list_role_policies(self, **_: Any) -> dict[str, Any]:
-                return {"PolicyNames": ["inline"]}
-
-            def get_role_policy(self, **_: Any) -> dict[str, Any]:
-                return {"PolicyDocument": {"Statement": self.statements}}
-
-            def list_attached_role_policies(self, **_: Any) -> dict[str, Any]:
-                return {"AttachedPolicies": []}
-
-        logs_only = {
-            "Effect": "Allow",
-            "Action": ["logs:PutLogEvents"],
-            "Resource": "*",
-        }
-        fake_role = "arn:aws:iam::000000000000:role/self-test"
-        widened, _ = execution_role_actions(
-            _FakeIam(
-                [logs_only, {"Effect": "Allow", "NotAction": "iam:*", "Resource": "*"}]
-            ),
-            fake_role,
-        )
-        results.check(
-            "an Allow statement with NotAction counts as a grant outside logs:",
-            any(not a.startswith(EXECUTION_ROLE_ACTION_PREFIX) for a in widened),
-            repr(widened),
-        )
-        denied, _ = execution_role_actions(
-            _FakeIam(
-                [logs_only, {"Effect": "Deny", "NotAction": "logs:*", "Resource": "*"}]
-            ),
-            fake_role,
-        )
-        results.check(
-            "a Deny statement with NotAction grants nothing",
-            all(a.startswith(EXECUTION_ROLE_ACTION_PREFIX) for a in denied),
-            repr(denied),
-        )
 
         print("\n== self-test summary ==")
         print(f"  passed: {len(results.passed)}")
