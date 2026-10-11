@@ -239,8 +239,8 @@ and [recovery](https://laithalsaadoon.github.io/microvms-agentd/learn/operations
 
 ## Stability
 
-From 1.0.0, the CLI, packages, published crates, and daemon wire protocol follow
-the [stability and deprecation policy](docs/STABILITY.md).
+From 1.0.0, the command-line tool, packages, published crates, and daemon wire
+protocol follow the [stability and deprecation policy](docs/STABILITY.md).
 
 ## Next steps
 
