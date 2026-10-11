@@ -70,7 +70,7 @@ guard = "session::forward::tests::host_authorities_match_the_bound_address_and_p
 run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::forward::tests::host_authorities_match_the_bound_address_and_port"]
 expect = "test-failed"
 suite = "rust"
-transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "    if authority.port_u16().unwrap_or(80) != bind.port() {", with = "    if false && authority.port_u16().unwrap_or(80) != bind.port() {" }
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "    if port != bind.port() {", with = "    if false && authority.port_u16().unwrap_or(80) != bind.port() {" }
 
 [[fault]]
 id = "forward-host-the-caller-cannot-smuggle-its-own-proxy-headers-upstream"

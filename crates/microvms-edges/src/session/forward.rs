@@ -238,10 +238,15 @@ fn local_host_matches(headers: &[(String, String)], bind: SocketAddr) -> bool {
     let Ok(authority) = value.parse::<http::uri::Authority>() else {
         return false;
     };
-    if value.contains('@') || (authority.port().is_some() && authority.port_u16().is_none()) {
+    if value.contains('@') {
         return false;
     }
-    if authority.port_u16().unwrap_or(80) != bind.port() {
+    let port = match authority.port_u16() {
+        Some(port) => port,
+        None if authority.as_str() == authority.host() => 80,
+        None => return false,
+    };
+    if port != bind.port() {
         return false;
     }
     let host = authority.host();
