@@ -4842,9 +4842,14 @@ class TraceReading(unittest.TestCase):
                 (["uv", "run", "--script", "gate.py"], ["boto3>=1.40"]),
                 (["uvx", "maturin@1.14.1", "develop"], []),
                 (["uvx", "ruff", "check"], ["ruff"]),
+                # Classified without executing: keep both a range and an exact pin.
+                (
+                    ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build"],
+                    ["@napi-rs/cli@3"],
+                ),
                 (
                     ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build"],
-                    ["@napi-rs/cli@3.8.2"],
+                    [],
                 ),
                 (["npx", "--package", "typedoc@0.28.14", "--", "typedoc"], []),
                 (["uv", "run", "-p", "3.12", "python"], []),
