@@ -49,8 +49,11 @@ class ReleaseBuildTests(unittest.TestCase):
         for root, expected in ((ROOT, 0), (ROOT / "absent-release-inputs", 1)):
             with (
                 self.subTest(root=root),
-                patch.dict(policy.main.__globals__, ROOT=root),
-                patch("sys.argv", ["check-release-builds.py"]),
+                patch(
+                    "sys.argv",
+                    ["check-release-builds.py"]
+                    + (["--root", str(root)] if expected else []),
+                ),
             ):
                 with contextlib.redirect_stdout(io.StringIO()) as output:
                     self.assertEqual(policy.main(), expected)
@@ -214,18 +217,20 @@ class ReleaseBuildTests(unittest.TestCase):
         self.assertIn("--root ROOT", output.getvalue())
 
     def test_command_reports_policy_violations(self):
-        with (
-            patch("sys.argv", ["check-release-builds.py"]),
-            patch.dict(
-                policy.main.__globals__,
-                check=lambda *_: ["first violation", "second violation"],
-            ),
-            contextlib.redirect_stdout(io.StringIO()) as output,
-        ):
-            self.assertEqual(policy.main(), 1)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for path in (policy.WORKFLOW, policy.PACKAGE, policy.LOCK):
+                (root / path).parent.mkdir(parents=True, exist_ok=True)
+                (root / path).write_text((ROOT / path).read_text())
+            (root / policy.WORKFLOW).write_text("jobs: {}\n")
+            with (
+                patch("sys.argv", ["check-release-builds.py", "--root", directory]),
+                contextlib.redirect_stdout(io.StringIO()) as output,
+            ):
+                self.assertEqual(policy.main(), 1)
         self.assertEqual(
             output.getvalue(),
-            "release builds: FAILED\n  first violation\n  second violation\n",
+            "release builds: FAILED\n  release workflow has no jobs\n",
         )
 
     def test_release_tags_are_validated_before_work_starts(self):
