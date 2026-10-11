@@ -31,7 +31,7 @@ description = "The publish set is the intended one and every manifest can upload
 run = "./tools/check-publishable.py"
 
 ["release:check"]
-description = "Every job in release.yml that publishes waits on the live gate and the release environment. Offline"
+description = "Release builds use pinned inputs, and publishers wait on the live gate and release environment. Offline"
 # A release is gated on a live run of its tag's draft (`tools/release-gate.py`'s docstring has
 # the flow and the rules), and the gate holds only while every publishing job needs it. A job
 # that drops it publishes on the tag push again, which nothing else here would notice before a
@@ -39,8 +39,9 @@ description = "Every job in release.yml that publishes waits on the live gate an
 # lint, and CI's `security` job runs it. release.yml's `guard` job runs the same graph check
 # against the tagged commit. The unit tests run first, for `trace:check`'s reason.
 run = [
-  "uv run --locked pytest -n auto -q -p no:cacheprovider tools/test_release_gate.py",
+  "uv run --locked pytest -n auto -q -p no:cacheprovider tools/test_release_gate.py tools/test_check_release_builds.py",
   "./tools/release-gate.py graph",
+  "./tools/check-release-builds.py",
 ]
 
 ["release:tag"]

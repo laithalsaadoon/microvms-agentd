@@ -7,7 +7,7 @@
 id = "dts-consumer-exec-stream-attribute"
 guard = "tools/check-dts-consumer.py"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["./tools/check-dts-consumer.py"],
 ]
 expect = "exit-nonzero"
@@ -135,7 +135,7 @@ transform = { file = "bindings/microvms-js/index.d.ts", replace = "  get amount(
 id = "dts-consumer-hook-timeout-attribute"
 guard = "tools/check-dts-consumer.py"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["./tools/check-dts-consumer.py"],
 ]
 expect = "exit-nonzero"

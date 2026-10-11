@@ -28,7 +28,7 @@ nothing. What counts as a reference, all inside backticks:
   directory first and then the root. A `:line` or `:line:col` suffix is dropped first. A glob
   (`docs/*.md`) must match some file. A path .gitignore names (the live tier's Terraform
   state) is a local file on purpose and passes. Absolute paths, URLs, flags and package specs
-  (`@napi-rs/cli@3`) aren't paths.
+  (`@napi-rs/cli@3.8.2`) aren't paths.
 - A bare file name (`microvms.pyi`, `Cargo.toml`), against the names of the files in the tree:
   some file anywhere has it. That's all a bare name can promise, since `Cargo.toml` names one
   in every crate.

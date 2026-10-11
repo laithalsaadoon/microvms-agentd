@@ -19,7 +19,7 @@ converts types and maps errors; behavior belongs in the Rust layers below.
   `python and node bindings` job does:
 
   ```bash
-  npx -y -p @napi-rs/cli@3 napi build --manifest-path Cargo.toml --package microvms-js \
+  npx -y -p @napi-rs/cli@3.8.2 napi build --manifest-path Cargo.toml --package microvms-js \
     --platform --output-dir . --cwd bindings/microvms-js
   node --test "bindings/microvms-js/__test__/*.mjs"
   ```

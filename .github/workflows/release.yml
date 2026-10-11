@@ -59,10 +59,20 @@ jobs:
     name: the tag and the manifests agree
     runs-on: ubuntu-latest
     steps:
+      - name: validate the release tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::release tags must use vX.Y.Z with an optional prerelease suffix"
+            exit 1
+          fi
       # Whole history, because the ancestry check below needs it and a shallow clone has none.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          persist-credentials: false
       # Catches a tag created on a branch that was never merged, which is what tagging from a
       # working branch produces.
       #
@@ -90,16 +100,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: 1.99.0
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: false
       - name: publish set, manifest metadata, and tag agreement
-        run: ./tools/check-publishable.py --tag=${{ github.ref_name }}
+        env:
+          TAG: ${{ github.ref_name }}
+        run: ./tools/check-publishable.py --tag="$TAG"
       # The same check `mise run check` runs, against the file this run is: a publishing job
       # that stopped waiting on `live-gate` fails here, before anything is built.
       - name: every publishing job waits on the live gate
-        run: ./tools/release-gate.py graph
+        run: |
+          ./tools/release-gate.py graph
+          ./tools/check-release-builds.py
       # The same dry run `ci.yml` performs on every pull request, repeated here against the
       # exact commit being released. Cheap next to a partial publish, and it is the only
       # place the edges between the published crates resolve the way a consumer will resolve
@@ -108,7 +121,9 @@ jobs:
       # trusted publishing can't create a crate, so a new one needs its first publish by hand
       # (CONTRIBUTING.md, "Releases and reviews").
       - name: every crate still packages and verifies
-        run: ./tools/check-publishable.py --dry-run --tag=${{ github.ref_name }}
+        env:
+          TAG: ${{ github.ref_name }}
+        run: ./tools/check-publishable.py --dry-run --tag="$TAG"
 
   crates-io:
     name: publish to crates.io
@@ -119,7 +134,7 @@ jobs:
     #
     # Nothing here makes a release atomic — crates.io, PyPI and npm are three separate
     # irreversible acts. What this does is move every *buildable* failure ahead of the first
-    # one, so a broken artifact costs a re-tag rather than a burnt version number. `live-gate`
+    # one. A failed attempt keeps its tag and uses a new patch version for changed sources. `live-gate`
     # moves the live run's failures ahead of it too.
     needs: [guard, wheels, sdist, addons, cli, live-gate]
     runs-on: ubuntu-latest
@@ -129,10 +144,11 @@ jobs:
       id-token: write # exchanged for a 30-minute crates.io token
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: 1.99.0
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
         id: auth
       # `--workspace` publishes in dependency order, which Cargo has done natively since
@@ -161,37 +177,25 @@ jobs:
     needs: guard
     strategy:
       fail-fast: false
-      # `zig` is set only on the aarch64 linux leg, and it is what makes that wheel exist at
-      # all. `manylinux: auto` for aarch64 selects a manylinux2014 cross container whose GCC is
-      # glibc-2.17 era, and `aws-lc-sys` does not compile with it — no `stdatomic.h`, no
-      # `AT_HWCAP2`, `-march=armv8.4-a+sha3` unknown. That is what failed the v0.1.0 release.
-      #
-      # `maturin --zig` compiles through zig instead and produces a wheel tagged
-      # `manylinux_2_17_aarch64`, whose extension module was verified to reference nothing above
-      # GLIBC_2.17 — the tag checked against the shipped `.so`'s symbols rather than trusted,
-      # because an overstated manylinux tag is an install that succeeds and an import that
-      # fails.
-      #
-      # `container: off` runs maturin on the runner rather than in that container, which is the
-      # arrangement the verification used: maturin finds zig on PATH.
+      # Linux wheels use the same checked Zig toolchain for their glibc 2.17 floor.
+      # Host builds avoid implicit build-tool installation in container actions.
       matrix:
         include:
-          - { runner: ubuntu-latest, target: x86_64, manylinux: auto, container: '', zig: '' }
-          - { runner: ubuntu-latest, target: aarch64, manylinux: '2_17', container: 'off', zig: '--zig' }
-          - { runner: macos-latest, target: aarch64, manylinux: '', container: '', zig: '' }
-          # Cross-compiled from the arm64 macOS runner rather than built natively: Rust
-          # demoted `x86_64-apple-darwin` to Tier 2 in 1.90 and GitHub is discontinuing free
-          # macOS x86_64 runners for public repositories.
-          - { runner: macos-latest, target: x86_64, manylinux: '', container: '', zig: '' }
-          - { runner: windows-latest, target: x64, manylinux: '', container: '', zig: '' }
+          - { runner: ubuntu-latest, target: x86_64-unknown-linux-gnu, zig: '--zig --compatibility manylinux_2_17' }
+          - { runner: ubuntu-latest, target: aarch64-unknown-linux-gnu, zig: '--zig --compatibility manylinux_2_17' }
+          - { runner: macos-latest, target: aarch64-apple-darwin, zig: '' }
+          # Cross-compile on arm64 macOS for the Intel target.
+          - { runner: macos-latest, target: x86_64-apple-darwin, zig: '' }
+          - { runner: windows-latest, target: x86_64-pc-windows-msvc, zig: '' }
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
-        if: matrix.zig != ''
         with:
           toolchain: 1.99.0
-          targets: aarch64-unknown-linux-gnu
+          targets: ${{ matrix.target }}
       # The same pinned tarball the addons job uses, for the same reason: one zig acquisition
       # mechanism, and the one the verification ran against.
       - name: install zig (pinned, checksummed)
@@ -202,14 +206,14 @@ jobs:
           echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  zig.tar.xz" | sha256sum -c -
           tar -xJf zig.tar.xz
           echo "$PWD/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
-      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          command: build
-          args: --release -m bindings/microvms-py/Cargo.toml --out dist ${{ matrix.zig }}
-          target: ${{ matrix.target }}
-          manylinux: ${{ matrix.manylinux }}
-          container: ${{ matrix.container }}
-          sccache: 'true'
+          enable-cache: false
+      - name: build the wheel
+        run: >
+          uvx maturin@1.14.1 build --release --locked
+          -m bindings/microvms-py/Cargo.toml --out dist
+          --target ${{ matrix.target }} ${{ matrix.zig }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: dist-wheel-${{ matrix.runner }}-${{ matrix.target }}
@@ -222,16 +226,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       # Verified buildable rather than assumed: maturin vendors the workspace path
       # dependencies into the archive, so `pip install` from this sdist compiles
       # `microvms-protocol`, `microvms-domain`, `microvms-app`, `microvms-edges` and
       # `microvms-core` from source and the module imports. An sdist that cannot build is
       # worse than none, because pip prefers it over failing outright on a platform with no
       # wheel.
-      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          command: sdist
-          args: -m bindings/microvms-py/Cargo.toml --out dist
+          enable-cache: false
+      - name: build the source distribution
+        run: uvx maturin@1.14.1 sdist -m bindings/microvms-py/Cargo.toml --out dist
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: dist-sdist
@@ -247,6 +254,8 @@ jobs:
       id-token: write # exchanged for a short-lived PyPI token, and signs the attestations
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: dist-*
@@ -296,16 +305,17 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: 1.99.0
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: '24'
-      # zig backs `--cross-compile`; napi installs `cargo-zigbuild` but not zig. Pinned and
-      # checksummed, as `addons.yml` records at length.
+          node-version: '24.21.0'
+          package-manager-cache: false
+      # The pinned zig and cargo-zigbuild provide the cross compiler before napi runs.
       - name: install zig (pinned, checksummed)
         if: matrix.cross != ''
         run: |
@@ -314,10 +324,16 @@ jobs:
           echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  zig.tar.xz" | sha256sum -c -
           tar -xJf zig.tar.xz
           echo "$PWD/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+      - name: install the locked Node build tools
+        working-directory: bindings/microvms-js
+        run: npm ci --ignore-scripts
+      - name: install cargo-zigbuild
+        if: matrix.cross != ''
+        run: cargo install cargo-zigbuild --version 0.23.4 --locked
       - name: napi build
         working-directory: bindings/microvms-js
         run: >
-          npx -y -p @napi-rs/cli@3 napi build
+          npm exec --offline -- napi build
           --manifest-path ../../Cargo.toml --package microvms-js
           --platform --release --target ${{ matrix.target }} ${{ matrix.cross }} --output-dir .
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -356,6 +372,8 @@ jobs:
       id-token: write # the npm CLI exchanges this for a short-lived publish token
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       # For the PEP 723 loader gate below. No cache: see `ci.yml`'s `security` job — there is
       # no lockfile here to key one on, and that script's dependency set is empty.
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -367,7 +385,8 @@ jobs:
       # path and fall back to looking for a token that does not exist.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: '24'
+          node-version: '24.21.0'
+          package-manager-cache: false
           registry-url: 'https://registry.npmjs.org'
       # Asserted rather than trusted, because the failure mode is `ENEEDAUTH` — an error
       # about credentials, from a cause that is a version.
@@ -386,8 +405,15 @@ jobs:
               process.exit(1)
             }
           '
-          npx --yes semver@7 -r ">=11.5.1" "$(npm --version)" > /dev/null \
-            || { echo "npm $(npm --version) predates trusted publishing (needs >= 11.5.1)"; exit 1; }
+          NPM_VERSION=$(npm --version) node -e '
+            const version = process.env.NPM_VERSION
+            if (!/^\d+\.\d+\.\d+$/.test(version)) process.exit(1)
+            const [major, minor, patch] = version.split(".").map(Number)
+            if (major < 11 || (major === 11 && (minor < 5 || (minor === 5 && patch < 1)))) {
+              console.error("npm " + version + " predates trusted publishing (needs >= 11.5.1)")
+              process.exit(1)
+            }
+          '
       # Every platform's addon lands beside the loader in ONE package, so they download
       # straight into the package directory rather than into a staging area. `napi
       # create-npm-dirs`, `napi artifacts` and `napi pre-publish` are all absent: those exist
@@ -459,11 +485,12 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: 1.99.0
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: install zig (pinned, checksummed)
         if: matrix.zigbuild
         run: |
@@ -474,7 +501,7 @@ jobs:
           echo "$PWD/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
       - name: install cargo-zigbuild
         if: matrix.zigbuild
-        run: cargo install cargo-zigbuild --locked
+        run: cargo install cargo-zigbuild --version 0.23.4 --locked
       # `.2.17` pins the glibc floor the wheels verified: the tag was checked against the
       # shipped artifact's symbols there, and this reuses the same toolchain arrangement.
       - name: build (zigbuild, glibc 2.17 floor)
@@ -521,7 +548,7 @@ jobs:
   # SLSA provenance, both automatically, and crates.io supports neither.
   #
   # This job drafts the release; `github-release` publishes it once `live-gate` passes. A draft
-  # can be deleted and made again, so nothing here needs the gate.
+  # stays attached to this attempt's tag; changed sources use a new patch version.
   draft:
     name: attest the release assets and draft the release
     needs: [guard, cli]
@@ -532,11 +559,12 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: 1.99.0
           targets: aarch64-unknown-linux-musl
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: install cross linker
         run: |
           sudo apt-get update
@@ -579,7 +607,7 @@ jobs:
       # because that CLI fetches exactly this release's daemon and nothing
       # refreshes its root. A refusal here (a Rekor shard or key the pinned
       # `sigstore-trust-root` predates) means bumping that pin and tagging
-      # again, never skipping this step. Every publishing job waits on
+      # a new patch version, never skipping this step. Every publishing job waits on
       # `live-gate`, which waits on this job, so a refusal here publishes
       # nothing. Absolute paths, because cargo runs the test from the crate's
       # directory.
@@ -609,9 +637,8 @@ jobs:
           cp cli-dist/microvm-*.tar.gz cli-dist/microvm-*.zip staging/
           (cd staging && sha256sum ./* | sed 's|\./||') > SHA256SUMS
           cat SHA256SUMS
-      # A second draft of the same tag would leave the live run, the gate and the publish each
-      # to pick one. A re-run of this job finds its earlier draft here: delete that draft (it
-      # was never public, and `gh release delete` keeps the tag) and run it again.
+      # A tag identifies one set of attested assets. Keep its draft and tag after a failure;
+      # changed sources require a new patch version.
       - name: no release exists for the tag yet
         env:
           GH_TOKEN: ${{ github.token }}
@@ -622,16 +649,17 @@ jobs:
           existing=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName,isDraft \
             --jq '.[] | select(.tagName == env.TAG) | "draft: \(.isDraft)"')
           if [ -n "$existing" ]; then
-            echo "::error::a release for $TAG already exists ($existing). A published version is final; a stale draft can go with 'gh release delete $TAG', which keeps the tag."
+            echo "::error::a release for $TAG already exists ($existing). Keep this tag and draft; changed sources require a new patch version."
             exit 1
           fi
       - name: draft the release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
         run: >
-          gh release create ${{ github.ref_name }}
+          gh release create "$TAG"
           --draft
-          --title ${{ github.ref_name }}
+          --title "$TAG"
           --generate-notes
           --verify-tag
           target/aarch64-unknown-linux-musl/release/agentd#agentd-aarch64-unknown-linux-musl
@@ -663,6 +691,8 @@ jobs:
       actions: read # lists live-conformance.yml's runs and downloads their marker
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: false

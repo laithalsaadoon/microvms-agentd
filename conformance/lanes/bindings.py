@@ -41,7 +41,7 @@ from harness.results import Results
 #: The maturin CI's `bindings:py` task builds with, and the napi CLI the `dts` task builds with.
 #: The self-test holds both to those tasks, so this build is the one CI tests offline.
 MATURIN = "maturin@1.14.1"
-NAPI_CLI = "@napi-rs/cli@3"
+NAPI_CLI = "@napi-rs/cli@3.8.2"
 
 DRIVERS = REPO / "conformance" / "drivers"
 

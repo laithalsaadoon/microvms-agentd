@@ -28,7 +28,7 @@ transform = { file = "bindings/microvms-py/src/keepalive.rs", replace = "    if 
 id = "js-keepalive-drops-tolerated-errors"
 guard = "one tolerated error is one retry before the keepalive rejects"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/keepalive.mjs"],
 ]
 expect = "test-failed"
