@@ -12,7 +12,7 @@ mod parity_corpus;
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
-use microvms_app::testing::FakeControlPlane;
+use microvms_app::testing::{CountingMinter, FakeControlPlane};
 use microvms_core::agents::{Agent, AgentSpec, AgentVm};
 use microvms_core::control::artifact::{
     BaseImage, WrapOptions, default_dockerfile, wrap_dockerfile,
@@ -32,7 +32,8 @@ use microvms_core::{Error, Region, SizeClass};
 use parity_corpus::{Case, Run};
 use serde_json::{Value, json};
 
-const AREAS: [&str; 7] = [
+const AREAS: [&str; 8] = [
+    "forward",
     "image-name",
     "cost",
     "error",
@@ -50,6 +51,7 @@ async fn core_answers_the_shared_case_corpus() {
     let mut run = Run::plan("core", &AREAS, &[]);
     for case in run.cases() {
         let answer = match case.area.as_str() {
+            "forward" => forward(&case).await,
             "image-name" => image_name(&case),
             "cost" => cost(&case),
             "error" => daemon_status(&case).await,
@@ -330,4 +332,52 @@ fn wrap(case: &Case) -> Value {
         Ok(text) => json!({"dockerfile": text}),
         Err(error) => refusal(&error),
     }
+}
+
+async fn forward(case: &Case) -> Value {
+    use microvms_core::session::proxy::ProxyAuth;
+    use microvms_core::session::serve::{ServeLimits, start_forward};
+    let upstream = parity_corpus::ForwardUpstream::start().await;
+    let auth = Arc::new(ProxyAuth::with_clock(
+        Arc::new(CountingMinter::default()),
+        DEFAULT_AGENT_PORT,
+        Arc::new(SystemClock::new()),
+    ));
+    let forward = start_forward(
+        format!(
+            "{}:0",
+            case.input
+                .get("bind_ip")
+                .and_then(Value::as_str)
+                .unwrap_or("127.0.0.1")
+        )
+        .parse()
+        .expect("local bind"),
+        &format!("http://{}", upstream.address),
+        upstream.address.port(),
+        Some(Arc::clone(&auth)),
+        ServeLimits {
+            max_connections: Some(1),
+        },
+    )
+    .await
+    .expect("starts the forward");
+    let address = forward.local_address();
+    let request = parity_corpus::forward_request(case, address.port());
+    let status =
+        parity_corpus::forward_exchange(([127, 0, 0, 1], address.port()).into(), &request).await;
+    let summary = forward
+        .stop(Some(std::time::Duration::from_secs(10)))
+        .await
+        .expect("stops");
+    // A refused request must stop before the proxy credential is requested. Accepted cases
+    // prove this is a live minter and the actual forwarding path reaches the upstream.
+    assert_eq!(
+        auth.mint_count(),
+        case.expect["upstream_requests"].as_u64().unwrap(),
+        "{}: mints",
+        case.id
+    );
+    json!({"status": status, "served": summary.report.served,
+        "refused": summary.report.refused, "upstream_requests": upstream.request_count()})
 }

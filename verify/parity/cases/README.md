@@ -72,6 +72,13 @@ refusal regresses the case fails on a connection error rather than a signed requ
 
 ## The areas
 
+- `forward`: raw HTTP Host fields sent through each surface's running local port-forward to a
+  loopback upstream. `{port}` is the assigned listener port and `{wrong_port}` is a different
+  valid port; optional `bind_ip` selects an explicit local bind address. Every case compares the response status, served and refused connections, and
+  upstream request count. Core also uses a counting proxy minter to require a refusal before
+  any credential is requested. The binding runners use their default ephemeral bind; the CLI
+  reserves an ephemeral port before asking the command to bind it.
+
 - `image-name`: the name `ensure_image` gives an image and the CLI's `build --reuse` gives the
   same inputs (`ensure-image`), and the name `AgentVm.image_name` gives an agent image
   (`agent-image-name`). The binary is `binary_hex`, built from the default Dockerfile on AL2023

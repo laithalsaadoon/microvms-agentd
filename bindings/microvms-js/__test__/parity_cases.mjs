@@ -26,6 +26,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { connect } from 'node:net';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -408,7 +409,41 @@ async function wrap(testCase) {
   return answered(() => ({ dockerfile: wrapDockerfile(testCase.input.task) }));
 }
 
+async function forward(testCase) {
+  const server = await startSseServer([['parity']]);
+  const session = Session.direct(server.endpoint, 'parity-agent-token');
+  const handle = await session.portForward(Number(new URL(server.endpoint).port), {
+    bind: testCase.input.bind_ip ? `${testCase.input.bind_ip}:0` : undefined,
+    maxConnections: 1,
+  });
+  try {
+    const port = Number(handle.localAddress.split(':').at(-1));
+    const wrongPort = port === 65535 ? port - 1 : port + 1;
+    const hosts = testCase.input.hosts.map((host) =>
+      host.replaceAll('{port}', String(port)).replaceAll('{wrong_port}', String(wrongPort)),
+    );
+    const request = 'GET /parity HTTP/1.1\r\n' +
+      hosts.map((host) => `Host: ${host}\r\n`).join('') + 'Connection: close\r\n\r\n';
+    const status = await new Promise((resolve, reject) => {
+      const socket = connect({ host: '127.0.0.1', port });
+      const chunks = [];
+      socket.setTimeout(10_000, () => socket.destroy(new Error('forward response timed out')));
+      socket.on('connect', () => socket.write(request));
+      socket.on('data', (chunk) => chunks.push(chunk));
+      socket.on('end', () => resolve(Number(Buffer.concat(chunks).toString().split(/\s+/)[1])));
+      socket.on('error', reject);
+    });
+    const report = await handle.stop(10);
+    return { status, served: report.served, refused: report.refused,
+      upstream_requests: server.requestedPaths.length };
+  } finally {
+    await handle.stop(10);
+    await server.close();
+  }
+}
+
 const HANDLERS = new Map([
+  ['forward', forward],
   ['image-name', imageName],
   ['cost', cost],
   ['error', daemonStatus],

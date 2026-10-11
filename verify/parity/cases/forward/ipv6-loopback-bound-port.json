@@ -1,0 +1,14 @@
+{
+  "capability": "port-forward",
+  "input": {
+    "hosts": [
+      "[::1]:{port}"
+    ]
+  },
+  "expect": {
+    "status": 200,
+    "served": 1,
+    "refused": 0,
+    "upstream_requests": 1
+  }
+}

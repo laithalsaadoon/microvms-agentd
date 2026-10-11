@@ -1,0 +1,15 @@
+{
+  "capability": "port-forward",
+  "input": {
+    "hosts": [
+      "127.0.0.1:{port}"
+    ],
+    "bind_ip": "0.0.0.0"
+  },
+  "expect": {
+    "status": 200,
+    "served": 1,
+    "refused": 0,
+    "upstream_requests": 1
+  }
+}

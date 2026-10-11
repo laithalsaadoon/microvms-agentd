@@ -32,7 +32,7 @@ pub const SENTINEL: &str = "wrap-dockerfile/sentinel";
 /// alone. The split is stated once, here, so a tier can't hand an area to the other without the
 /// other one planning it and failing on a case it has no handler for.
 pub const CLI_PROCESS_AREAS: [&str; 4] = ["cost", "egress", "size-class", "wrap-dockerfile"];
-pub const CLI_FAKE_AREAS: [&str; 3] = ["image-name", "error", "names"];
+pub const CLI_FAKE_AREAS: [&str; 4] = ["image-name", "error", "names", "forward"];
 
 const CASE_KEYS: [&str; 5] = ["capability", "input", "expect", "ignore", "skip"];
 
@@ -585,4 +585,108 @@ fn same_objects(left: &Map<String, Value>, right: &Map<String, Value>) -> bool {
         && left
             .iter()
             .all(|(key, value)| right.get(key).is_some_and(|other| same(value, other)))
+}
+
+/// The case's raw Host fields, with the listener's assigned port substituted. The runner sends
+/// these bytes unchanged so HTTP client normalization cannot decide the answer for the forward.
+pub fn forward_request(case: &Case, port: u16) -> String {
+    let wrong_port = if port == u16::MAX { port - 1 } else { port + 1 };
+    let mut request = String::from("GET /parity HTTP/1.1\r\n");
+    for host in case.input_strings("hosts") {
+        let host = host
+            .replace("{port}", &port.to_string())
+            .replace("{wrong_port}", &wrong_port.to_string());
+        request.push_str(&format!("Host: {host}\r\n"));
+    }
+    request.push_str("Connection: close\r\n\r\n");
+    request
+}
+
+/// A bounded raw request to a running forward, returning its HTTP status.
+pub async fn forward_exchange(address: std::net::SocketAddr, request: &str) -> u16 {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        let mut socket = loop {
+            match tokio::net::TcpStream::connect(address).await {
+                Ok(socket) => break socket,
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused => {
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+                Err(error) => panic!("connects to the forward: {error}"),
+            }
+        };
+        socket
+            .write_all(request.as_bytes())
+            .await
+            .expect("sends the request");
+        let mut response = Vec::new();
+        socket
+            .read_to_end(&mut response)
+            .await
+            .expect("reads the response");
+        std::str::from_utf8(&response)
+            .expect("an HTTP response")
+            .split_whitespace()
+            .nth(1)
+            .expect("a status")
+            .parse()
+            .expect("a numeric status")
+    })
+    .await
+    .expect("the forward answers before the deadline")
+}
+
+/// A loopback upstream which records every request and returns an ordinary successful response.
+/// Dropping it aborts its accept loop, including when a case fails before reaching upstream.
+pub struct ForwardUpstream {
+    pub address: std::net::SocketAddr,
+    pub requests: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl ForwardUpstream {
+    pub async fn start() -> Self {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("binds upstream");
+        let address = listener.local_addr().expect("upstream address");
+        let requests = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = std::sync::Arc::clone(&requests);
+        let task = tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.expect("accepts upstream");
+                let mut request = Vec::new();
+                let mut byte = [0];
+                while !request.ends_with(b"\r\n\r\n") {
+                    if socket.read(&mut byte).await.expect("reads upstream") == 0 {
+                        break;
+                    }
+                    request.push(byte[0]);
+                }
+                seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                socket
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\nparity",
+                    )
+                    .await
+                    .expect("answers upstream");
+            }
+        });
+        Self {
+            address,
+            requests,
+            task,
+        }
+    }
+
+    pub fn request_count(&self) -> usize {
+        self.requests.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl Drop for ForwardUpstream {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
 }

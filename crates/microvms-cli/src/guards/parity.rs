@@ -33,6 +33,7 @@ async fn the_cli_answers_the_shared_case_corpus_against_its_fakes() {
     );
     for case in run.cases() {
         let answer = match case.area.as_str() {
+            "forward" => parity_forward(&case).await,
             "image-name" => parity_image_name(&case).await,
             "error" => parity_daemon_status(&case).await,
             "names" => parity_names(&case).await,
@@ -234,4 +235,38 @@ async fn parity_names(case: &parity_corpus::Case) -> serde_json::Value {
             answer
         }
     }
+}
+
+async fn parity_forward(case: &parity_corpus::Case) -> serde_json::Value {
+    use super::support::ScriptedSessionSeam;
+    let upstream = parity_corpus::ForwardUpstream::start().await;
+    let reserved = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("reserves local port");
+    let address = reserved.local_addr().expect("local address");
+    let command = Command::PortForward(crate::cli::PortForwardArgs {
+        ports: format!("{}:{}", address.port(), upstream.address.port()),
+        bind: case
+            .input
+            .get("bind_ip")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("127.0.0.1")
+            .to_string(),
+        max_connections: Some(1),
+        attach: attach_flags(),
+        region: region_flags(),
+    });
+    let seam = ScriptedSessionSeam {
+        script: DaemonScript::at_endpoint(format!("http://{}", upstream.address)),
+    };
+    let request = parity_corpus::forward_request(case, address.port());
+    // The CLI binds its own socket; release the reservation immediately before dispatch.
+    drop(reserved);
+    let (dispatched, status) = tokio::join!(
+        dispatch_with(&seam, &command, full_infra()),
+        parity_corpus::forward_exchange(address, &request),
+    );
+    let data = dispatched.0.expect("port-forward completes").data;
+    serde_json::json!({"status": status, "served": data["connectionsServed"],
+        "refused": data["connectionsRefused"], "upstream_requests": upstream.request_count()})
 }
