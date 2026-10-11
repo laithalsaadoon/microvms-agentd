@@ -29,8 +29,35 @@ jqr() { python3 -c "import json,sys; print(json.load(sys.stdin)['data']$1)"; }
 if microvm health --name "$VM_NAME" --region "$REGION" >/dev/null 2>&1; then
   # The name answers: either the VM is running, or it was suspended and the
   # health request itself resumed it (auto-resume = true in microvm.toml).
+  # Only reattach to a VM initialized with this authenticated configuration.
+  microvm exec "test -f /run/code-server-authenticated" \
+    --name "$VM_NAME" --region "$REGION" --json >/dev/null || {
+    echo "Recreate $VM_NAME with this script to initialize password authentication." >&2
+    exit 1
+  }
   echo "reusing $VM_NAME" >&2
 else
+  # Read the password from a protected local file, before creating resources.
+  : "${CODE_SERVER_PASSWORD_FILE:?Set CODE_SERVER_PASSWORD_FILE to a protected password file}"
+  CONFIG_DIR=$(mktemp -d)
+  trap 'rm -rf "$CONFIG_DIR"' EXIT
+  python3 - "$CODE_SERVER_PASSWORD_FILE" "$CONFIG_DIR/config.yaml" <<'PYCONFIG'
+import json
+import os
+import pathlib
+import sys
+
+source = pathlib.Path(sys.argv[1])
+if source.stat().st_mode & 0o077:
+    raise SystemExit("The password file must have mode 0600 or stricter.")
+password = source.read_text().rstrip("\r\n")
+if not password or any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in password):
+    raise SystemExit("The password must be nonempty and contain no control characters.")
+fd = os.open(sys.argv[2], os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+with os.fdopen(fd, "w") as config:
+    config.write("bind-addr: 127.0.0.1:8080\nauth: password\npassword: " + json.dumps(password) + "\n")
+PYCONFIG
+
   # ── 1. the image: build once per content hash, reuse otherwise ──────────
   echo "resolving image (builds server-side on first run, several minutes)..." >&2
   BUILT=$(microvm build "$AGENTD" --json --reuse \
@@ -49,17 +76,21 @@ else
     --config "$HERE/microvm.toml" --region "$REGION" >/dev/null
 
   # ── 3. code-server, detached, demoted ────────────────────────────────────
-  # --auth none is deliberate: the local port binds 127.0.0.1, and the hop in
-  # between is the endpoint proxy, which requires a port-scoped auth token on
-  # every request (docs/PLATFORM.md, "Endpoint authentication"). A password
-  # prompt on top of that authenticates nothing extra. --user 1000 because an
-  # IDE that spawns terminals should not hand every terminal root.
-  microvm exec "code-server --bind-addr 127.0.0.1:8080 --auth none /workspace" \
+  # The IDE verifies its own password; the forward authenticates only the upstream hop.
+  microvm cp "$CONFIG_DIR/config.yaml" vm:/run/code-server.yaml --mode 0600 \
+    --name "$VM_NAME" --region "$REGION" --json >/dev/null
+  microvm exec "chown 1000:1000 /run/code-server.yaml" \
+    --name "$VM_NAME" --region "$REGION" --json >/dev/null
+  rm -rf "$CONFIG_DIR"
+  trap - EXIT
+  microvm exec "code-server --config /run/code-server.yaml /workspace" \
     --detach --user 1000 --group 1000 --name "$VM_NAME" --region "$REGION" \
     --json >/dev/null
 
   # Wait for the listener with bash's /dev/tcp — nothing to install.
   microvm exec "timeout 60 bash -c 'until echo > /dev/tcp/127.0.0.1/8080; do sleep 1; done' 2>/dev/null" \
+    --name "$VM_NAME" --region "$REGION" --json >/dev/null
+  microvm exec "touch /run/code-server-authenticated" \
     --name "$VM_NAME" --region "$REGION" --json >/dev/null
 fi
 

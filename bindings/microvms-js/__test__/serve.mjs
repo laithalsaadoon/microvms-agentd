@@ -138,7 +138,7 @@ test('stop(timeout) cuts a connection left open', async () => {
     // open until it's cut.
     const kept = connect(hostAndPort(forward.localAddress));
     kept.on('error', () => {});
-    kept.write('GET /slow HTTP/1.1\r\nHost: localhost\r\n\r\n');
+    kept.write(`GET /slow HTTP/1.1\r\nHost: ${forward.localAddress}\r\n\r\n`);
     await guest.arrived;
     const report = await forward.stop(0.2);
     kept.destroy();

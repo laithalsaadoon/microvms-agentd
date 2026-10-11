@@ -103,16 +103,29 @@ cd examples/background-coding-agent
 uv sync --frozen
 export TF_VAR_image_arn='arn:aws:lambda:us-east-1:ACCOUNT:microvm-image:NAME'
 export TF_VAR_image_version='1.0'
+export TF_VAR_github_forks='{"you/app":"your-publisher/app"}'
 ./deploy.sh
 ```
 
-Deployment writes `.agent/config.json` and prints the command that stores your
-GitHub token in Secrets Manager. Use a
-[fine-grained token](https://github.com/settings/personal-access-tokens) limited
-to the repositories you want the agent on, with **Contents** and **Pull
-requests** read/write and **Issues** read. `gh auth token` works too, but it
-grants everything your account can do. Changes under `.github/workflows/` also
-need **Workflows** write access; without it, publishing those changes fails.
+Before deploying, create each configured direct fork under an account you
+control and disable GitHub Actions in that fork's Settings → Actions → General.
+Use a dedicated publishing account with no repository secrets or cloud identity
+permissions. The workflow checks that the destination is a direct fork of the
+source and that Actions is disabled before writing any blobs or branches.
+Leave fork-PR workflow approval enabled on the source repository, and require
+review before running contributed code with privileged credentials.
+
+Deployment writes `.agent/config.json` with separate `github_secret` and
+`github_publish_secret` destinations. Store separate
+[fine-grained tokens](https://github.com/settings/personal-access-tokens) from
+protected local files using the printed `aws secretsmanager put-secret-value`
+command. The source token needs **Contents** read, **Issues** read, and **Pull
+requests** read/write on the source repositories. The publishing token needs
+**Contents** read/write and **Administration** read only on the configured
+forks (the latter reads the Actions enablement setting).
+Neither token needs **Workflows** write. Changes requiring that permission
+remain unpublished. Do not give the publishing token access to the source
+repositories. Terraform stores the secret containers, never their values.
 
 Set `TF_VAR_task_seconds` (600 to 3600, default 1800) to change the agent's time
 budget. The VM's maximum lifetime is 15 minutes longer.
@@ -134,7 +147,8 @@ downloads `REPORT.md`, the agent's stdout and stderr, and for issues
 `patch.diff`. Failed jobs usually still have output to fetch.
 
 For an issue, the agent works on the default branch's current commit. Its
-changes become one commit on `agent/issue-<n>-<id>` and a draft PR whose body
+changes become one commit on `agent/issue-<n>-<id>` in the configured fork and a
+cross-repository draft PR whose body
 is the agent's report plus `Closes #<n>`. Caches and dependencies a test run
 leaves behind (`__pycache__/`, `*.pyc`, `.pytest_cache/`, `.mypy_cache/`,
 `.ruff_cache/`, `node_modules/`, `.venv/`) stay out of the commit, unless the
@@ -151,8 +165,10 @@ comments are folded into the review body instead.
 
 - Issue and PR text is untrusted. The prompt labels it as untrusted, but prompt
   injection is not solved; review every PR the agent opens before merging.
-- The GitHub token is read only by Lambda. The guest gets a source tarball and
-  the task text, and publishing happens after the VM is terminated.
+- The GitHub tokens are read only by Lambda. The guest gets a source tarball
+  and the task text, and publishing happens after the VM is terminated. Branch
+  writes use only the fork credential; PR and review writes use the source
+  credential. Fork Actions must stay disabled.
 - The guest has a short-lived Bedrock bearer token. Published text is scanned
   for Bedrock bearer tokens and redacted, and publishing refuses a change that
   contains one. The token is signed with the Lambda role's credentials, so it

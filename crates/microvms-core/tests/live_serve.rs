@@ -45,7 +45,10 @@ async fn attached() -> Session {
 async fn schema_through(local: std::net::SocketAddr) -> String {
     let mut client = TcpStream::connect(local).await.expect("the loop accepts");
     client
-        .write_all(b"GET /v1/schema HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .write_all(
+            format!("GET /v1/schema HTTP/1.1\r\nHost: {local}\r\nConnection: close\r\n\r\n")
+                .as_bytes(),
+        )
         .await
         .expect("written");
     let mut response = Vec::new();

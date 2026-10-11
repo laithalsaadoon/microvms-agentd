@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
+import io
 import json
+from types import SimpleNamespace as NS
 
 import cli
 import pytest
+from rich.console import Console
 
 
 @pytest.mark.parametrize(
@@ -61,3 +64,57 @@ def test_submit_records_the_job_and_show_reconciles_a_stopped_run(
     cli.show(job.id[:8])
     job.refresh()
     assert (job.status, job.error) == ("FAILED", "execution STOPPED")
+
+
+def test_job_list_renders_stored_text_literally(monkeypatch):
+    monkeypatch.setenv("COLUMNS", "240")
+    output = io.StringIO()
+    console = Console(
+        file=output, force_terminal=True, color_system="truecolor", width=240, height=25
+    )
+    message = (
+        "file\x1b[2J\x1b]52;c;value\x07[link=https://example.invalid]text[/link]\x85"
+    )
+    job = NS(
+        created_at=0,
+        id="0123456789ab",
+        repo="octo/app",
+        number=7,
+        kind="implement",
+        status="FAILED",
+        phase="publish",
+        url=None,
+        error=message,
+    )
+    monkeypatch.setattr(cli, "config", lambda: None)
+    monkeypatch.setattr(cli, "Job", NS(scan=lambda: [job]))
+    monkeypatch.setattr(cli, "console", console)
+    cli.list_jobs()
+    rendered = output.getvalue()
+    assert "\x1b]52;" not in rendered and "\x1b[2J" not in rendered
+    assert "\x1b]8;" not in rendered and "\x85" not in rendered
+    assert r"\x1b[2J" in rendered and r"\x07" in rendered and r"\x85" in rendered
+    assert "[link=https://example.invalid]text[/link]" in rendered
+
+
+def test_every_job_cell_uses_literal_text(monkeypatch):
+    monkeypatch.setenv("COLUMNS", "240")
+    output = io.StringIO()
+    job = NS(
+        created_at=0,
+        id="[bold]id[/]",
+        repo="[bold]repo[/]",
+        number=7,
+        kind="[bold]kind[/]",
+        status="[bold]status[/]",
+        phase="[bold]phase[/]",
+        url="[bold]url[/]",
+        error=None,
+    )
+    monkeypatch.setattr(cli, "config", lambda: None)
+    monkeypatch.setattr(cli, "Job", NS(scan=lambda: [job]))
+    monkeypatch.setattr(cli, "console", Console(file=output, width=240, height=25))
+    cli.list_jobs()
+    rendered = output.getvalue()
+    for field in ["id", "repo", "kind", "status", "phase", "url"]:
+        assert f"[bold]{field}[/]" in rendered

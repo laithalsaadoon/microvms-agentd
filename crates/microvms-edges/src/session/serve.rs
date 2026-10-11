@@ -293,6 +293,8 @@ where
     // One client for the whole forward: connection reuse to the endpoint is what keeps a
     // page-load of thirty assets from paying thirty TLS handshakes.
     let client = Arc::new(ForwardClient::new()?);
+    let mut spec = spec;
+    spec.bind = local_address(&listener)?;
     let spec = Arc::new(spec);
     let mut report = ForwardReport {
         served: 0,

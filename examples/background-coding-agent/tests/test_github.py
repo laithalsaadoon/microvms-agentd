@@ -26,9 +26,18 @@ META = {
 
 
 class Repo:
-    owner = NS(login="octo")
+    def __init__(self, drafts=True, name="octo/app", parent=None, actions=False):
+        self.full_name = name
+        self.owner = NS(login=name.split("/")[0])
+        self.url = f"https://api.github.com/repos/{name}"
+        self.fork = parent is not None
+        self.parent = parent
 
-    def __init__(self, drafts=True):
+        def action_permissions(method, url):
+            assert method == "GET" and url == self.url + "/actions/permissions"
+            return {}, {"enabled": actions}
+
+        self.requester = NS(requestJsonAndCheck=action_permissions)
         self.drafts, self.blobs, self.trees, self.refs, self.pulls = (
             drafts,
             [],
@@ -70,13 +79,32 @@ class Repo:
                 422, {"message": "Draft pull requests are not supported"}
             )
         pull = NS(
-            head=f"octo:{head}",
+            head=head,
             body=body,
             draft=draft,
             html_url=f"pr-{len(self.pulls)}",
         )
         self.pulls.append(pull)
         return pull
+
+
+def repositories(monkeypatch, drafts=True):
+    source = Repo(drafts=drafts)
+    fork = Repo(name="publisher/app", parent=source)
+
+    def source_repo(name):
+        assert name == source.full_name
+        return source
+
+    monkeypatch.setattr(github_ops, "client", lambda: NS(get_repo=source_repo))
+
+    def fork_repo(name):
+        assert name == fork.full_name
+        return fork
+
+    monkeypatch.setattr(github_ops, "publish_client", lambda: NS(get_repo=fork_repo))
+    monkeypatch.setenv("GITHUB_FORKS", json.dumps({source.full_name: fork.full_name}))
+    return source, fork
 
 
 # A git hook exports GIT_DIR and GIT_INDEX_FILE, which would point these fixture commands
@@ -117,8 +145,7 @@ def edit(project: Path):
 
 
 def test_changes_become_one_commit_and_a_retry_safe_draft(tmp_path, monkeypatch):
-    repo = Repo()
-    monkeypatch.setattr(github_ops, "client", lambda: NS(get_repo=lambda _: repo))
+    source, repo = repositories(monkeypatch)
     bundle = export(tmp_path, edit)
     url = github_ops.open_pull_request(JOB, META, bundle)
     tree = repo.trees[0]
@@ -131,12 +158,14 @@ def test_changes_become_one_commit_and_a_retry_safe_draft(tmp_path, monkeypatch)
     assert tree["tool.sh"]["mode"] == "100755"
     assert tree["link"]["mode"] == "120000"
     assert sorted(repo.blobs) == [b"#!/bin/sh\n", b"keep.py", b"new\n"]
-    [pull] = repo.pulls
+    [pull] = source.pulls
     assert url == pull.html_url and pull.draft
     assert "Closes #7" in pull.body and github_ops.marker(JOB.id) in pull.body
     # A retried step force-updates the branch and reuses the PR.
     assert github_ops.open_pull_request(JOB, META, bundle) == url
-    assert len(repo.pulls) == 1
+    assert len(source.pulls) == 1
+    assert pull.head == "publisher:agent/issue-7-01234567"
+    assert source.refs == {} and source.blobs == [] and source.trees == []
     assert repo.refs == {"refs/heads/agent/issue-7-01234567": "commit-2"}
 
 
@@ -165,15 +194,13 @@ def test_caches_and_dependencies_a_test_run_leaves_are_not_published(tmp_path):
 
 
 def test_private_plans_without_drafts_get_a_ready_pr(tmp_path, monkeypatch):
-    repo = Repo(drafts=False)
-    monkeypatch.setattr(github_ops, "client", lambda: NS(get_repo=lambda _: repo))
+    repo, _ = repositories(monkeypatch, drafts=False)
     github_ops.open_pull_request(JOB, META, export(tmp_path, edit))
     assert [pull.draft for pull in repo.pulls] == [False]
 
 
 def test_no_changes_publish_nothing_and_leaks_are_refused(tmp_path, monkeypatch):
-    repo = Repo()
-    monkeypatch.setattr(github_ops, "client", lambda: NS(get_repo=lambda _: repo))
+    repo, _ = repositories(monkeypatch)
     assert (
         github_ops.open_pull_request(JOB, META, export(tmp_path / "a", lambda _: None))
         is None
@@ -280,3 +307,52 @@ def test_an_issue_stages_with_any_number_of_comments(monkeypatch, count):
     with tarfile.open(fileobj=io.BytesIO(task)) as archive:
         request = archive.extractfile("request.md").read().decode()
     assert request.count("### Comment by") == min(count, 30)
+
+
+@pytest.mark.parametrize(
+    "configuration", ["missing", "same", "not-fork", "parent", "actions", "unknown"]
+)
+def test_publishing_requires_an_isolated_configured_fork(
+    tmp_path, monkeypatch, configuration
+):
+    source, fork = repositories(monkeypatch)
+    if configuration == "missing":
+        monkeypatch.delenv("GITHUB_FORKS")
+    elif configuration == "same":
+        monkeypatch.setenv(
+            "GITHUB_FORKS", json.dumps({source.full_name: source.full_name})
+        )
+    elif configuration == "not-fork":
+        fork.fork = False
+    elif configuration == "parent":
+        fork.parent = NS(full_name="someone/else")
+    else:
+        permissions = {"enabled": True} if configuration == "actions" else {}
+        fork.requester = NS(requestJsonAndCheck=lambda method, url: ({}, permissions))
+    with pytest.raises(ValueError):
+        github_ops.open_pull_request(JOB, META, export(tmp_path, edit))
+    assert source.refs == {} and source.blobs == [] and source.pulls == []
+    assert fork.refs == {} and fork.blobs == []
+
+
+def test_publishing_uses_its_separate_secret(monkeypatch):
+    requests = []
+    monkeypatch.setenv("GITHUB_SECRET", "source-secret-id")
+    monkeypatch.setenv("GITHUB_PUBLISH_SECRET", "publishing-secret-id")
+    monkeypatch.setattr(
+        github_ops.boto3,
+        "client",
+        lambda service: NS(
+            get_secret_value=lambda **kwargs: (
+                requests.append(kwargs) or {"SecretString": "fixture-token"}
+            )
+        ),
+    )
+    monkeypatch.setattr(github_ops, "Github", lambda **kwargs: kwargs)
+    github_ops.publish_client.cache_clear()
+    try:
+        result = github_ops.publish_client()
+        assert requests == [{"SecretId": "publishing-secret-id"}]
+        assert result["auth"].token == "fixture-token"
+    finally:
+        github_ops.publish_client.cache_clear()

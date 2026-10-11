@@ -15,6 +15,7 @@ from cyclopts import App, Parameter
 from jobs import Job
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 
 REF = re.compile(
     r"^(?:https://github\.com/)?(?P<repo>[\w.-]+/[\w.-]+)"
@@ -80,6 +81,16 @@ def submit(
     )
 
 
+def display_text(value: str) -> Text:
+    """Render stored job text literally, with control bytes shown as escapes."""
+    return Text(
+        "".join(
+            f"\\x{ord(char):02x}" if ord(char) < 32 or 127 <= ord(char) <= 159 else char
+            for char in value
+        )
+    )
+
+
 @app.command(name="list")
 def list_jobs(*, limit: int = 20):
     """Show recent jobs."""
@@ -87,12 +98,17 @@ def list_jobs(*, limit: int = 20):
     table = Table("id", "target", "kind", "status", "phase", "result")
     for job in sorted(Job.scan(), key=lambda j: j.created_at, reverse=True)[:limit]:
         table.add_row(
-            job.id[:12],
-            f"{job.repo}#{job.number}",
-            job.kind or "",
-            job.status,
-            job.phase,
-            job.url or job.error or "",
+            *map(
+                display_text,
+                (
+                    job.id[:12],
+                    f"{job.repo}#{job.number}",
+                    job.kind or "",
+                    job.status,
+                    job.phase,
+                    job.url or job.error or "",
+                ),
+            )
         )
     console.print(table)
 

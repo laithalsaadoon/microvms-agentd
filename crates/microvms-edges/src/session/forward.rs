@@ -223,6 +223,44 @@ pub fn direct_url(endpoint: &str, guest_port: u16, target: &str) -> Result<Strin
     Ok(url.to_string())
 }
 
+// A Host names this listener, including its port, before any proxy credential is minted.
+// Authority parsing rejects URL components; duplicate Host fields are never combined.
+fn local_host_matches(headers: &[(String, String)], bind: SocketAddr) -> bool {
+    let mut hosts = headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("host"));
+    let Some((_, value)) = hosts.next() else {
+        return false;
+    };
+    if hosts.next().is_some() {
+        return false;
+    }
+    let Ok(authority) = value.parse::<http::uri::Authority>() else {
+        return false;
+    };
+    if value.contains('@') || (authority.port().is_some() && authority.port_u16().is_none()) {
+        return false;
+    }
+    if authority.port_u16().unwrap_or(80) != bind.port() {
+        return false;
+    }
+    let host = authority.host();
+    if host.eq_ignore_ascii_case("localhost") {
+        return bind.ip().is_loopback();
+    }
+    let host = host
+        .strip_prefix('[')
+        .and_then(|host| host.strip_suffix(']'))
+        .unwrap_or(host);
+    host.parse::<std::net::IpAddr>().is_ok_and(|ip| {
+        if bind.ip().is_loopback() {
+            ip.is_loopback()
+        } else {
+            ip == bind.ip()
+        }
+    })
+}
+
 /// Header names this forwarder must never copy from the caller's request.
 ///
 /// The two proxy headers are minted per hop, so a client that sent its own would either be
@@ -383,6 +421,16 @@ where
         // speculative connections constantly, so this is normal traffic and not an error.
         None => return Ok(()),
     };
+
+    if !local_host_matches(&head.headers, spec.bind) {
+        let explanation = "the request Host must name the local forward and its port".to_string();
+        write_local_error(&mut local, 403, &explanation).await?;
+        on_event(ForwardEvent::Refused {
+            status: 403,
+            explanation,
+        });
+        return Ok(());
+    }
 
     // Minted per exchange rather than once at bind time. This call is the token refresh —
     // see the module docs.
@@ -811,7 +859,7 @@ mod tests {
     ) -> (String, Vec<ForwardEvent>) {
         let (mut client, server) = tokio::io::duplex(64 * 1024);
         let spec = ForwardSpec::new(
-            "127.0.0.1:0".parse().expect("an addr"),
+            "127.0.0.1:8080".parse().expect("an addr"),
             guest_port,
             endpoint,
         );
@@ -839,6 +887,78 @@ mod tests {
             .await
             .expect("the client reads the response");
         (String::from_utf8_lossy(&seen).to_string(), events)
+    }
+
+    #[tokio::test]
+    async fn requests_name_the_local_listener_before_minting() {
+        for host in [
+            "",
+            "example.com:8080",
+            "localhost:8081",
+            "127.0.0.1",
+            "localhost:8080@elsewhere.example",
+            "user@localhost:8080",
+            "localhost:8080/path",
+            "localhost:8080\r\nHost: localhost:8080",
+        ] {
+            let (auth, _) = auth_pair();
+            let request = if host.is_empty() {
+                "GET / HTTP/1.1\r\n\r\n".to_string()
+            } else {
+                format!("GET / HTTP/1.1\r\nHost: {host}\r\n\r\n")
+            };
+            let (response, events) =
+                exchange(&request, "http://127.0.0.1:1".to_string(), 8080, &auth).await;
+            assert!(
+                response.starts_with("HTTP/1.1 403 Forbidden"),
+                "{host}: {response}"
+            );
+            assert_eq!(auth.mint_count(), 0, "{host}");
+            assert!(matches!(
+                events.as_slice(),
+                [ForwardEvent::Refused { status: 403, .. }]
+            ));
+        }
+    }
+
+    #[test]
+    fn host_authorities_match_the_bound_address_and_port() {
+        let bind = "127.0.0.1:8080".parse().expect("an address");
+        for host in [
+            "localhost:8080",
+            "LOCALHOST:8080",
+            "127.0.0.1:8080",
+            "[::1]:8080",
+        ] {
+            assert!(
+                local_host_matches(&[("Host".into(), host.into())], bind),
+                "{host}"
+            );
+        }
+        assert!(local_host_matches(
+            &[("Host".into(), "localhost".into())],
+            "127.0.0.1:80".parse().unwrap()
+        ));
+        assert!(!local_host_matches(
+            &[("Host".into(), "localhost:invalid".into())],
+            bind
+        ));
+        assert!(!local_host_matches(
+            &[("Host".into(), "localhost:65536".into())],
+            bind
+        ));
+        assert!(!local_host_matches(
+            &[("Host".into(), "localhost:65536".into())],
+            "127.0.0.1:80".parse().unwrap()
+        ));
+        assert!(!local_host_matches(
+            &[("Host".into(), "localhost:8080".into())],
+            "192.0.2.1:8080".parse().unwrap()
+        ));
+        assert!(local_host_matches(
+            &[("Host".into(), "192.0.2.1:8080".into())],
+            "192.0.2.1:8080".parse().unwrap()
+        ));
     }
 
     #[tokio::test]
@@ -904,7 +1024,7 @@ mod tests {
         let (auth, _minter) = auth_pair();
 
         let request = format!(
-            "GET / HTTP/1.1\r\nhost: local\r\n{PROXY_AUTH_HEADER}: forged-jwe\r\n\
+            "GET / HTTP/1.1\r\nhost: localhost:8080\r\n{PROXY_AUTH_HEADER}: forged-jwe\r\n\
              {PROXY_PORT_HEADER}: 1\r\n\r\n"
         );
         let (_seen, _events) = exchange(&request, endpoint, 8080, &auth).await;
@@ -919,7 +1039,7 @@ mod tests {
             "the minted port header should be the only one: {saw}"
         );
         assert!(
-            !saw.contains("host: local"),
+            !saw.contains("host: localhost:8080"),
             "the local host header must not override the endpoint's: {saw}"
         );
     }
@@ -933,7 +1053,7 @@ mod tests {
         let (auth, _minter) = auth_pair();
 
         let (seen, events) = exchange(
-            "GET / HTTP/1.1\r\nhost: local\r\n\r\n",
+            "GET / HTTP/1.1\r\nhost: localhost:8080\r\n\r\n",
             endpoint,
             8080,
             &auth,
@@ -963,7 +1083,7 @@ mod tests {
         let (auth, _minter) = auth_pair();
 
         let (seen, events) = exchange(
-            "GET / HTTP/1.1\r\nhost: local\r\n\r\n",
+            "GET / HTTP/1.1\r\nhost: localhost:8080\r\n\r\n",
             endpoint,
             5432,
             &auth,
@@ -990,7 +1110,7 @@ mod tests {
         let (auth, _minter) = auth_pair();
 
         let (seen, events) = exchange(
-            "GET /nope HTTP/1.1\r\nhost: local\r\n\r\n",
+            "GET /nope HTTP/1.1\r\nhost: localhost:8080\r\n\r\n",
             endpoint,
             8080,
             &auth,
@@ -1020,7 +1140,7 @@ mod tests {
         let (auth, _minter) = auth_pair();
 
         let (seen, _events) = exchange(
-            "POST /submit HTTP/1.1\r\nhost: local\r\ncontent-length: 7\r\n\r\npayload",
+            "POST /submit HTTP/1.1\r\nhost: localhost:8080\r\ncontent-length: 7\r\n\r\npayload",
             endpoint,
             8080,
             &auth,
@@ -1080,7 +1200,7 @@ mod tests {
         let (auth, _minter) = auth_pair();
         let (mut client, server) = tokio::io::duplex(64 * 1024);
         let spec = ForwardSpec::new(
-            "127.0.0.1:0".parse().expect("an addr"),
+            "127.0.0.1:8080".parse().expect("an addr"),
             8080,
             format!("http://{addr}"),
         );
@@ -1094,7 +1214,7 @@ mod tests {
 
         client
             .write_all(
-                b"GET /socket HTTP/1.1\r\nhost: local\r\nupgrade: websocket\r\n\
+                b"GET /socket HTTP/1.1\r\nhost: localhost:8080\r\nupgrade: websocket\r\n\
                   connection: upgrade\r\nsec-websocket-protocol: my-app-protocol\r\n\r\n",
             )
             .await
@@ -1165,7 +1285,7 @@ mod tests {
             let (endpoint, upstream_saw) =
                 upstream("HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok").await;
             let (_seen, _events) = exchange(
-                "GET / HTTP/1.1\r\nhost: local\r\n\r\n",
+                "GET / HTTP/1.1\r\nhost: localhost:8080\r\n\r\n",
                 endpoint,
                 8080,
                 &auth,
