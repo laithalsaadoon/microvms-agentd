@@ -26,6 +26,11 @@ message = "Node needs an exact version"
 transform = { file = ".github/workflows/release.yml", replace = "          node-version: '24.21.0'\n          package-manager-cache: false\n          registry-url:", with = "          node-version: '24'\n          package-manager-cache: false\n          registry-url:" }
 
 [[family.fault]]
+id = "release-builds-floating-uv"
+message = "uv needs an exact version"
+transform = { file = ".github/workflows/release.yml", replace = "          version: \"0.12.13\"\n          enable-cache: false\n      - name: build the wheel", with = "          version: latest\n          enable-cache: false\n      - name: build the wheel" }
+
+[[family.fault]]
 id = "release-builds-floating-maturin"
 message = "maturin needs an exact version"
 transform = { file = ".github/workflows/release.yml", replace = "uvx maturin@1.14.1 sdist", with = "uvx maturin sdist" }
@@ -72,6 +77,16 @@ transform = { file = ".github/workflows/addons.yml", replace = "npx -y -p @napi-
 id = "release-builds-python-pin-agreement"
 message = "FAIL: test_python_build_commands_use_the_stub_generator_pin"
 transform = { file = ".config/mise/tasks/test.toml", replace = "uvx maturin@1.14.1 develop", with = "uvx maturin@1.14.0 develop" }
+
+[[family.fault]]
+id = "release-builds-draft-retry"
+message = "FAIL: test_draft_retry_reuses_the_first_complete_assets"
+transform = { file = ".github/workflows/release.yml", replace = "            cp retained/SHA256SUMS SHA256SUMS", with = "            : retained/SHA256SUMS SHA256SUMS" }
+
+[[family.fault]]
+id = "release-builds-uv-pin-agreement"
+message = "FAIL: test_uv_uses_the_repository_pin"
+transform = { file = ".github/workflows/release.yml", replace = "          version: \"0.12.13\"\n          enable-cache: false\n      - name: build the wheel", with = "          version: \"0.12.12\"\n          enable-cache: false\n      - name: build the wheel" }
 
 [[scanner]]
 id = "release-builds"

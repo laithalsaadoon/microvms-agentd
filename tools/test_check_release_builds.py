@@ -3,25 +3,29 @@
 
 import contextlib
 import copy
-import importlib.util
+import hashlib
 import io
 import json
 import os
 import re
+import runpy
 import subprocess
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
-SPEC = importlib.util.spec_from_file_location(
-    "tools.check-release-builds", ROOT / "tools/check-release-builds.py"
+policy = SimpleNamespace(
+    **runpy.run_path(
+        str(ROOT / "tools/check-release-builds.py"),
+        run_name="tools.check-release-builds",
+    )
 )
-policy = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(policy)
 
 
 class ReleaseBuildTests(unittest.TestCase):
@@ -45,7 +49,7 @@ class ReleaseBuildTests(unittest.TestCase):
         for root, expected in ((ROOT, 0), (ROOT / "absent-release-inputs", 1)):
             with (
                 self.subTest(root=root),
-                patch.object(policy, "ROOT", root),
+                patch.dict(policy.main.__globals__, ROOT=root),
                 patch("sys.argv", ["check-release-builds.py"]),
             ):
                 with contextlib.redirect_stdout(io.StringIO()) as output:
@@ -92,6 +96,64 @@ class ReleaseBuildTests(unittest.TestCase):
                     set(versions), {expected}, f"{path} uses another Python build tool"
                 )
 
+    def test_uv_uses_the_repository_pin(self):
+        expected = tomllib.loads((ROOT / "mise.toml").read_text())["tools"]["uv"]
+        for job in self.workflow["jobs"].values():
+            for step in job["steps"]:
+                if str(step.get("uses", "")).startswith("astral-sh/setup-uv@"):
+                    self.assertEqual(step["with"]["version"], expected)
+                    step["with"]["version"] = "latest"
+                    self.assert_refused("uv needs an exact version")
+                    step["with"]["version"] = expected
+
+    def test_draft_retry_reuses_the_first_complete_assets(self):
+        script = self.step("draft", "draft the release")["run"]
+        for state in ("", "true", "false", "incomplete", "changed", "list-error"):
+            with self.subTest(state=state), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                remote = root / "remote"
+                remote.mkdir()
+                (remote / "agentd").write_bytes(b"original binary")
+                for name in ("agentd.sigstore.json", "agentd.intoto.jsonl"):
+                    (remote / name).write_text("bundle")
+                digest = hashlib.sha256(b"original binary").hexdigest()
+                original = f"{digest}  agentd\n"
+                (remote / "SHA256SUMS").write_text(original)
+                if state == "incomplete":
+                    (remote / "agentd.sigstore.json").unlink()
+                if state == "changed":
+                    (remote / "agentd").write_bytes(b"changed binary")
+                (root / "SHA256SUMS").write_text("0" * 64 + "  agentd\n")
+                executable = root / "gh"
+                executable.write_text(
+                    "#!/bin/sh\nset -eu\n"
+                    'case "$2" in\n'
+                    'list) [ "$STATE" != list-error ] || exit 1; '
+                    '[ -z "$STATE" ] || [ "$STATE" = false ] && echo "$STATE" || echo true ;;\n'
+                    "download) cp -r remote retained ;;\n"
+                    "create) touch created ;;\n"
+                    "*) exit 2 ;;\nesac\n"
+                )
+                executable.chmod(0o755)
+                result = subprocess.run(
+                    ["bash", "-c", script],
+                    cwd=root,
+                    env={
+                        **os.environ,
+                        "PATH": directory + os.pathsep + os.environ["PATH"],
+                        "STATE": state,
+                        "TAG": "v1.2.3",
+                        "GITHUB_REPOSITORY": "owner/repo",
+                    },
+                    capture_output=True,
+                )
+                self.assertEqual(
+                    result.returncode == 0, state in ("", "true"), result.stderr
+                )
+                self.assertEqual((root / "created").exists(), state == "")
+                if state == "true":
+                    self.assertEqual((root / "SHA256SUMS").read_text(), original)
+
     def test_repository_release_builds_pass(self):
         self.assertEqual(self.problems(), [])
 
@@ -132,6 +194,21 @@ class ReleaseBuildTests(unittest.TestCase):
         self.assertIn(policy.__doc__.splitlines()[0], output.getvalue())
         self.assertIn("--root ROOT", output.getvalue())
 
+    def test_command_reports_policy_violations(self):
+        with (
+            patch("sys.argv", ["check-release-builds.py"]),
+            patch.dict(
+                policy.main.__globals__,
+                check=lambda *_: ["first violation", "second violation"],
+            ),
+            contextlib.redirect_stdout(io.StringIO()) as output,
+        ):
+            self.assertEqual(policy.main(), 1)
+        self.assertEqual(
+            output.getvalue(),
+            "release builds: FAILED\n  first violation\n  second violation\n",
+        )
+
     def test_release_tags_are_validated_before_work_starts(self):
         step = self.workflow["jobs"]["guard"]["steps"][0]
         for tag, expected in (
@@ -151,11 +228,17 @@ class ReleaseBuildTests(unittest.TestCase):
                 self.assertEqual(result.returncode, expected, result.stdout)
 
     def test_empty_workflow_and_missing_artifact_job_fail(self):
+        for jobs in (None, {}, [], "jobs"):
+            self.workflow = {"jobs": jobs}
+            self.assert_refused("no jobs")
         self.workflow = {}
         self.assert_refused("no jobs")
         self.setUp()
         del self.workflow["jobs"]["wheels"]
         self.assert_refused("missing artifact job wheels")
+        self.setUp()
+        self.workflow["jobs"]["wheels"] = {}
+        self.assertEqual(self.problems(), [])
 
     def test_cache_restore_and_checkout_credentials_fail(self):
         self.workflow["jobs"]["draft"]["steps"].append(
@@ -184,8 +267,106 @@ class ReleaseBuildTests(unittest.TestCase):
             )
             step["with"][option] = True
             with self.subTest(action=action):
-                self.assertTrue(self.problems())
+                self.assert_refused("caches must be disabled")
             self.workflow = workflow
+
+    def test_independent_release_policy_violations(self):
+        steps = self.workflow["jobs"]["draft"]["steps"]
+        for step, reason in (
+            ({"uses": "owner/CACHE@pin"}, "release jobs cannot restore caches"),
+            (
+                {"uses": "actions/checkout@pin"},
+                "checkout must disable credential persistence",
+            ),
+            (
+                {"uses": "actions/setup-node@pin"},
+                "Node dependency caches must be disabled",
+            ),
+            ({"uses": "astral-sh/setup-uv@pin"}, "uv caches must be disabled"),
+            (
+                {"uses": "actions/checkout@pin", "with": {"persist-credentials": True}},
+                "checkout must disable credential persistence",
+            ),
+            (
+                {
+                    "uses": "actions/setup-node@pin",
+                    "with": {
+                        "node-version": "24.21.0",
+                        "package-manager-cache": False,
+                        "cache": "npm",
+                    },
+                },
+                "Node dependency caches must be disabled",
+            ),
+            (
+                {"uses": "PyO3/maturin-action@pin"},
+                "install only the pinned release tools explicitly",
+            ),
+            ({"run": "uvx maturin@1.14 build"}, "maturin needs an exact version"),
+            (
+                {"run": "cargo install tool --version 1.2.3"},
+                "cargo install needs an exact version and --locked",
+            ),
+            (
+                {"run": "cargo install tool --version 1 --locked"},
+                "cargo install needs an exact version and --locked",
+            ),
+        ):
+            with self.subTest(step=step):
+                steps.append(step)
+                self.assertTrue(self.problems())
+                self.assert_refused(reason)
+                steps.pop()
+
+    def test_required_tools_tag_guard_and_lock_fields(self):
+        for tool, text in (
+            ("maturin", "uvx maturin"),
+            ("cargo install", "cargo install"),
+            ("napi", "npm exec --offline -- napi build"),
+        ):
+            original = copy.deepcopy(self.workflow)
+            for job in self.workflow["jobs"].values():
+                job["steps"] = [
+                    s for s in job["steps"] if text not in str(s.get("run"))
+                ]
+            self.assert_refused(f"no {tool} tool step")
+            self.workflow = original
+        original = copy.deepcopy(self.workflow["jobs"]["guard"])
+        for steps in (
+            [],
+            [{"run": "echo ready"}],
+            [{"run": policy.TAG_PATTERN, "env": {"TAG": "another tag"}}],
+        ):
+            self.workflow["jobs"]["guard"]["steps"] = steps
+            self.assert_refused("guard must validate")
+        self.workflow["jobs"]["guard"] = original
+        original_lock = copy.deepcopy(self.lock)
+        for field, value in (("lockfileVersion", 2), ("packages", {})):
+            self.lock[field] = value
+            self.assert_refused("lock must")
+            self.lock = copy.deepcopy(original_lock)
+        for resolved in (
+            None,
+            "http://registry.npmjs.org/cli.tgz",
+            "https://example.com/cli.tgz",
+        ):
+            entry = self.lock["packages"]["node_modules/@napi-rs/cli"]
+            if resolved is None:
+                del entry["resolved"]
+            else:
+                entry["resolved"] = resolved
+            self.assert_refused("registry integrity")
+            self.lock = copy.deepcopy(original_lock)
+
+    def test_node_tool_install_must_precede_build_in_its_directory(self):
+        install = self.step("addons", "install the locked Node build tools")
+        install["working-directory"] = "another-directory"
+        self.assert_refused("install the locked Node tools before building")
+        install["working-directory"] = "bindings/microvms-js"
+        steps = self.workflow["jobs"]["addons"]["steps"]
+        steps.remove(install)
+        steps.append(install)
+        self.assert_refused("install the locked Node tools before building")
 
     def test_floating_tools_and_incomplete_lock_fail(self):
         self.step("cli", "install cargo-zigbuild")["run"] = (

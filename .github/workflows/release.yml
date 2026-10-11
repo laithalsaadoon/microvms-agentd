@@ -102,6 +102,7 @@ jobs:
           toolchain: 1.99.0
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          version: "0.12.13"
           enable-cache: false
       - name: publish set, manifest metadata, and tag agreement
         env:
@@ -208,6 +209,7 @@ jobs:
           echo "$PWD/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          version: "0.12.13"
           enable-cache: false
       - name: build the wheel
         run: >
@@ -236,6 +238,7 @@ jobs:
       # wheel.
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          version: "0.12.13"
           enable-cache: false
       - name: build the source distribution
         run: uvx maturin@1.14.1 sdist -m bindings/microvms-py/Cargo.toml --out dist
@@ -263,6 +266,7 @@ jobs:
           path: dist
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          version: "0.12.13"
           enable-cache: false
       # Every wheel against its own manylinux tag, before anything immutable is uploaded. pip
       # selects by that tag and trusts it, so an overstated one installs and then fails to
@@ -339,6 +343,7 @@ jobs:
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         if: matrix.cross != ''
         with:
+          version: "0.12.13"
           enable-cache: false
       - name: the addon does not demand a newer glibc than its oldest supported host
         if: matrix.cross != ''
@@ -378,6 +383,7 @@ jobs:
       # no lockfile here to key one on, and that script's dependency set is empty.
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          version: "0.12.13"
           enable-cache: false
       # Node 24, for npm 11.x. Trusted publishing requires npm >= 11.5.1 and Node >=
       # 22.14.0, and every Node 22 release ships npm 10.9 — so pinning the version this
@@ -637,36 +643,40 @@ jobs:
           cp cli-dist/microvm-*.tar.gz cli-dist/microvm-*.zip staging/
           (cd staging && sha256sum ./* | sed 's|\./||') > SHA256SUMS
           cat SHA256SUMS
-      # A tag identifies one set of attested assets. Keep its draft and tag after a failure;
-      # changed sources require a new patch version.
-      - name: no release exists for the tag yet
+      # Retain the first complete draft across retries, including its original checksums.
+      # A completed API call can lose its response, so creation itself must be recoverable.
+      - name: draft the release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          # `gh release list` includes drafts for an account that can push.
           existing=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName,isDraft \
-            --jq '.[] | select(.tagName == env.TAG) | "draft: \(.isDraft)"')
-          if [ -n "$existing" ]; then
-            echo "::error::a release for $TAG already exists ($existing). Keep this tag and draft; changed sources require a new patch version."
+            --jq '.[] | select(.tagName == env.TAG) | .isDraft')
+          if [ "$existing" = true ]; then
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir retained
+            test -s retained/agentd.sigstore.json
+            test -s retained/agentd.intoto.jsonl
+            cut -c 67- SHA256SUMS > expected-assets
+            cut -c 67- retained/SHA256SUMS > retained-assets
+            cmp expected-assets retained-assets
+            (cd retained && sha256sum -c SHA256SUMS)
+            cp retained/SHA256SUMS SHA256SUMS
+          elif [ -n "$existing" ]; then
+            echo "::error::a published release for $TAG already exists. Keep this tag; changed sources require a new patch version."
             exit 1
+          else
+            gh release create "$TAG" \
+              --draft \
+              --title "$TAG" \
+              --generate-notes \
+              --verify-tag \
+              target/aarch64-unknown-linux-musl/release/agentd#agentd-aarch64-unknown-linux-musl \
+              agentd.sigstore.json \
+              agentd.intoto.jsonl \
+              SHA256SUMS \
+              cli-dist/*
           fi
-      - name: draft the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        run: >
-          gh release create "$TAG"
-          --draft
-          --title "$TAG"
-          --generate-notes
-          --verify-tag
-          target/aarch64-unknown-linux-musl/release/agentd#agentd-aarch64-unknown-linux-musl
-          agentd.sigstore.json
-          agentd.intoto.jsonl
-          SHA256SUMS
-          cli-dist/*
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-sums
@@ -695,6 +705,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          version: "0.12.13"
           enable-cache: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
