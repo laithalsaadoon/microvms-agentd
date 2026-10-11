@@ -448,7 +448,7 @@ the existing guards miss.
 
 The release workflow publishes `microvms-protocol`, `microvms-domain`,
 `microvms-app`, `microvms-edges`, `microvms-core`, and `microvms-cli` to crates.io, `microvms` to PyPI, and
-`@theagenticguy/microvms` to npm. `agentd` ships as a GitHub release binary.
+`microvms` to npm. `agentd` ships as a GitHub release binary.
 
 crates.io trusted publishing can't create a crate, so a crate that's new to the
 publish set needs one manual publish before the first release tag that includes

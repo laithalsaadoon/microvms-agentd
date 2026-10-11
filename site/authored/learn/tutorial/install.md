@@ -43,7 +43,7 @@ Choose your language:
 | Language | Install | Runtime |
 | --- | --- | --- |
 | Python | `pip install microvms` | Python 3.9+ |
-| Node.js / TypeScript | `npm install @theagenticguy/microvms` | Node.js 22.13+ |
+| Node.js / TypeScript | `npm install microvms` | Node.js 22.13+ |
 | Rust | `cargo add microvms-core` | Rust toolchain |
 
 [Run sandboxed tools from your application](/learn/tutorial/from-code/)

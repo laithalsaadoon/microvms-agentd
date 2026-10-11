@@ -10,7 +10,7 @@ converts types and maps errors; behavior belongs in the Rust layers below.
 - `__test__/types/*.ts` are type probes: `tools/check-dts-consumer.py` (in `dts:check`)
   compiles them with `tsc --strict` against `index.d.ts`, because the diff against the generator
   can't see a declaration the generator leaves out (#262). A surface change a caller types
-  against gets a probe there. Each probe imports `@theagenticguy/microvms`, never a relative
+  against gets a probe there. Each probe imports `microvms`, never a relative
   path, since the script maps that name to the file under test, and each carries a
   `@ts-expect-error` directive as its control, so a declaration that types a value as `any`
   fails. The script refuses a probe that mentions `@ts-nocheck` and any other file in the

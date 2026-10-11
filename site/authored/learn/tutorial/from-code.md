@@ -90,13 +90,13 @@ exceptions with `code`, `kind`, `wire_kind`, and `retryable` attributes.
 Requires Node.js 22.13.0+. The package includes TypeScript declarations.
 
 ```sh
-npm install @theagenticguy/microvms
+npm install microvms
 ```
 
 Save this as `hello.mjs`:
 
 ```js
-import { Region, Sandbox } from '@theagenticguy/microvms';
+import { Region, Sandbox } from 'microvms';
 
 const imageIdentifier = process.env.MICROVM_IMAGE;
 const executionRoleArn = process.env.MICROVM_EXECUTION_ROLE_ARN;
@@ -200,7 +200,7 @@ Save as `agent.mjs`:
 
 ```js
 import { writeFile } from 'node:fs/promises';
-import { AgentVm, Region } from '@theagenticguy/microvms';
+import { AgentVm, Region } from 'microvms';
 
 const imageIdentifier = process.env.MICROVM_AGENT_IMAGE;
 const executionRoleArn = process.env.MICROVM_EXECUTION_ROLE_ARN;

@@ -12,7 +12,7 @@ declared `ExecStream` as an empty class, byte-identical to the generator's outpu
 rejected the `for await (const event of handle.stream())` loop that `stream()`'s own doc
 recommends (TS2504). The runtime tests are `.mjs`, so nothing type-checked them.
 
-Each `*.ts` file under `--probes` imports `@theagenticguy/microvms` by its package name, the
+Each `*.ts` file under `--probes` imports `microvms` by its package name, the
 way a caller does. A generated tsconfig maps that name to `--dts` through `compilerOptions.paths`
 and lists only the probes in `files`, so the declarations enter the program only through that
 import, and the file `--dts` names is the one checked. `skipLibCheck` is off, unlike the

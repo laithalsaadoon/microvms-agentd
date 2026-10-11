@@ -24,7 +24,6 @@
 # The `microvm` binary's subcommands and flags that are words cspell does not know.
 # The `openat2` resolve flag `RESOLVE_NO_MAGICLINKS`, quoted in the glossary's tar-confinement entry.
 # The build page names a snapshot pass per chipset generation.
-# The npm scope, which the account rename did not touch: `@theagenticguy/microvms`.
 # The stateright model-checking crate, which `crates/model/` is built on.
 # The vocabulary the authored pages write in, and nothing else. A word belongs here when it is a
 # `ENVFILE` is the placeholder variable the Bedrock operation page has the reader export.
@@ -99,7 +98,6 @@ stateright
 subshells
 suspendable
 tfstate
-theagenticguy
 unjudged
 unparseable
 venv

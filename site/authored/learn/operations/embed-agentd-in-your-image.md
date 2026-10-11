@@ -61,7 +61,7 @@ agentd = microvms.provision_agentd()
 ```
 
 ```js
-import { provisionAgentd } from '@theagenticguy/microvms';
+import { provisionAgentd } from 'microvms';
 
 const agentd = await provisionAgentd();
 ```

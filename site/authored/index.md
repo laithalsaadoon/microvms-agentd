@@ -43,7 +43,7 @@ VMs, builds, and stored images create AWS charges.
 |---|---|---|
 | Terminal | `cargo binstall microvms-cli --no-confirm` | [CLI and AWS setup](/learn/tutorial/first-run/) |
 | Python 3.9+ | `pip install microvms` | [Python SDK](/learn/tutorial/from-code/#python) |
-| Node 22.13+ | `npm install @theagenticguy/microvms` | [JavaScript / TypeScript SDK](/learn/tutorial/from-code/#javascript--typescript) |
+| Node 22.13+ | `npm install microvms` | [JavaScript / TypeScript SDK](/learn/tutorial/from-code/#javascript--typescript) |
 | Rust | `cargo add microvms-core` | [Rust SDK](/learn/tutorial/from-code/#rust) |
 
 The CLI install command needs `cargo-binstall`. [Installation](/learn/tutorial/install/)
