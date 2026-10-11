@@ -440,13 +440,10 @@ async fn health(State(state): State<AppState>) -> Json<Health> {
         image_env_keys: state.image_env().map(|image_env| image_env.len()),
         busy,
         execs,
-        // The daemon's own observations of the platform's lifecycle hooks —
-        // validate in particular has no CloudWatch trace, so this is the only
-        // place "did my validate hook even run?" is answerable. The hook routes
-        // are unauthenticated and loopback-reachable from inside the guest, so a
-        // hostile workload can forge ADDITIONAL entries; it cannot remove or
-        // alter real ones, and the cap keeps the earliest (the platform's) while
-        // `hooks_dropped` says how much later traffic was discarded.
+        // The earliest hook requests kept by the daemon, plus the count of later
+        // requests. The routes are unauthenticated and reachable over loopback
+        // from inside the guest, so an entry shows receipt rather than source
+        // identity. Later platform requests are subject to the same cap.
         hooks,
         hooks_dropped,
     })
@@ -769,13 +766,15 @@ pub fn surface_docs() -> Vec<schema::Endpoint> {
                  measures idleness by inbound traffic through the endpoint proxy, \
                  which terminates outside the guest, so a request from inside the \
                  guest cannot reset the idle timer. Polling this from outside is \
-                 both the traffic and the decision. `hooks` lists every lifecycle \
-                 hook the daemon observed, oldest first, with `fired_at` epoch \
-                 seconds on the daemon's clock, and `hooks_dropped` counts \
-                 invocations past the cap. Hook routes are unauthenticated and \
-                 loopback-reachable from inside the guest, so a hostile workload \
-                 can forge ADDITIONAL entries — never remove or alter real ones; \
-                 the cap keeps the earliest, which are the platform's.",
+                 both the traffic and the decision. `hooks` lists the earliest \
+                 hook requests kept in the daemon's capped log, oldest first, \
+                 with `fired_at` epoch seconds on the daemon's clock. Later \
+                 requests increment `hooks_dropped` without being stored or \
+                 running a workload handler. Their routes still perform other \
+                 work and return their normal status. Hook routes are \
+                 unauthenticated and reachable over loopback from inside the \
+                 guest, so entries show receipt rather than source identity. \
+                 Later platform requests are subject to the same cap.",
                 schema::HEALTH,
             )
         },

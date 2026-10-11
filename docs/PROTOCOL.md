@@ -33,29 +33,28 @@ never gets bootstrapped.
 | `GET /v1/health` | none | liveness, version, bootstrap state, exec-activity, hook observations, image-environment key count |
 | `GET /v1/schema` | none | this contract as a JSON Schema document: every route, shape, status, and limit |
 
-**Every hook invocation is recorded and reported on `/v1/health`.** The daemon
-records the hook's name and timestamp in memory, in arrival order, before the
-handler does any work or chooses a status, and
-`GET /v1/health` reports the log as `hooks` (`[{hook, fired_at}]`, oldest first)
-beside `hooks_dropped`, a count of invocations past the log's cap. A run hook
-that arrives malformed or answers 409 still leaves a `run` observation: the
-record is of the invocation, not the verdict. The platform writes no CloudWatch
-logs for the validate hook, so this record is the only trace that hook leaves
-anywhere. Build-time hooks (`ready`, `validate`) fire in the snapshot VM before
-the snapshot is taken, so their in-memory records ride the memory image into
-every VM launched from it and are visible on the first health poll.
+**`/v1/health` reports hook requests kept in a capped log.** The daemon records
+the hook's name and timestamp in memory before running its workload handler or
+choosing a status. `GET /v1/health` reports kept entries as `hooks`
+(`[{hook, fired_at}]`, oldest first), beside `hooks_dropped`. The earliest entries
+stay. Once the log is full, the daemon counts later requests in `hooks_dropped`
+instead of storing them. This applies regardless of the hook or request source.
+A later request does not run a workload handler. The route still performs its
+other work and returns its normal status. A run
+hook that arrives malformed or answers 409 can leave a `run` entry if space
+remains: the entry records receipt of the request, not its success.
 
-One caveat is part of this contract rather than a footnote. The hook routes are
-unauthenticated and arrive over loopback indistinguishably from an in-VM
-process (see "Trust boundary" below), so a hostile workload can forge
-ADDITIONAL observations by posting the hook paths itself. It cannot remove or
-alter real ones: the daemon records before it responds, and the capped log
-keeps the *earliest* entries, the platform's real lifecycle firings, which
-arrive before anything runs in the guest, while later spam is dropped and
-counted in `hooks_dropped`. Read an observation as "the daemon saw this hook
-fire", never as "only the platform could have fired it". Both fields are
-`#[serde(default)]` like `busy` and `execs`, and for the same reason: an older
-daemon omits them, and empty/zero is the honest reading.
+The platform writes no CloudWatch logs for the validate hook. Build-time hooks
+(`ready`, `validate`) fire in the snapshot VM before the snapshot is taken, so
+their stored in-memory records ride the memory image into every VM launched
+from it and are visible on the first health poll.
+
+The hook routes are unauthenticated and can be called over loopback from inside
+the guest (see "Trust boundary" below). An entry shows that the daemon received
+a request on that hook route. It does not prove that the platform sent it.
+Later platform requests are subject to the same cap as any other request.
+Both fields are `#[serde(default)]` like `busy` and `execs`, and for the same
+reason: an older daemon omits them, and empty/zero is the honest reading.
 
 ## Compatibility between releases
 
