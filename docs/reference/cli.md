@@ -9,9 +9,9 @@ machine, pipe it into `microvm attach --from -`, then use its registered name.
 Attached commands also accept `--agent-token-file <FILE|->`. The `attach` and
 `tunnel` commands accept `--identity-host-seed-file <FILE|->` for the host seed.
 
-The credential file flags read a regular file or stdin with `-`, remove trailing line endings,
-and refuse an empty value. On Unix, files must grant no permissions to group or
-other users. Only one input may read stdin, including `exec --stdin` and
+The credential file flags read a regular file or stdin with `-`, remove trailing
+line endings, and refuse an empty value. The group and other permission bits
+must be clear on Unix. Only one input may read stdin, including `exec --stdin` and
 `stdin --data -`. Literal secret flags remain supported and print a warning
 recommending these input paths.
 
@@ -207,7 +207,7 @@ Flags:
 - `--detach`: Start the agent and return immediately, without waiting and without acking. `crates/microvms-cli/src/cli.rs:2583`.
 - `--exec-id`: Use this exec id instead of a fresh one, making a retry idempotent. `crates/microvms-cli/src/cli.rs:2587`.
 - `--endpoint`: The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
-- `--agent-token-file`: Read the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
+- `--agent-token-file` reads the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
 - `--agent-token`: The agent token delivered to the VM at launch. Prefer `--name` or `--agent-token-file`. `crates/microvms-cli/src/cli.rs:629`.
 - `--microvm-id`: The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:638`.
 - `--name`: The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:649`.
@@ -252,7 +252,7 @@ Flags:
 - `--reap`: Signal the command's whole process group once its own child exits. `crates/microvms-cli/src/cli.rs:1478`.
 - `--kill-on-timeout`: On `ERR_TIMEOUT`, stop the exec rather than leaving it running. `crates/microvms-cli/src/cli.rs:1489`.
 - `--endpoint`: The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
-- `--agent-token-file`: Read the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
+- `--agent-token-file` reads the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
 - `--agent-token`: The agent token delivered to the VM at launch. Prefer `--name` or `--agent-token-file`. `crates/microvms-cli/src/cli.rs:629`.
 - `--microvm-id`: The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:638`.
 - `--name`: The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:649`.
@@ -280,7 +280,7 @@ Flags:
 
 - `--timeout`: How long to wait for RUNNING, in seconds. The daemon wait after it is core's own bootstrap bound. `crates/microvms-cli/src/cli.rs:1572`.
 - `--endpoint`: The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
-- `--agent-token-file`: Read the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
+- `--agent-token-file` reads the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
 - `--agent-token`: The agent token delivered to the VM at launch. Prefer `--name` or `--agent-token-file`. `crates/microvms-cli/src/cli.rs:629`.
 - `--microvm-id`: The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:638`.
 - `--name`: The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:649`.
@@ -307,7 +307,7 @@ Ask a running MicroVM's daemon whether it is up, and what its identity repair di
 Flags:
 
 - `--endpoint`: The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
-- `--agent-token-file`: Read the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
+- `--agent-token-file` reads the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
 - `--agent-token`: The agent token delivered to the VM at launch. Prefer `--name` or `--agent-token-file`. `crates/microvms-cli/src/cli.rs:629`.
 - `--microvm-id`: The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:638`.
 - `--name`: The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:649`.
@@ -339,7 +339,7 @@ Flags:
 - `--idle-window`: The VM's `maxIdleDurationSeconds`. Read from the control plane when omitted. `crates/microvms-cli/src/cli.rs:1514`.
 - `--tolerated-errors`: Retryable poll failures in a row to retry, a second apart, before giving up. `crates/microvms-cli/src/cli.rs:1518`.
 - `--endpoint`: The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
-- `--agent-token-file`: Read the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
+- `--agent-token-file` reads the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
 - `--agent-token`: The agent token delivered to the VM at launch. Prefer `--name` or `--agent-token-file`. `crates/microvms-cli/src/cli.rs:629`.
 - `--microvm-id`: The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:638`.
 - `--name`: The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:649`.
@@ -366,7 +366,7 @@ Release a finished exec's buffered output, which starts its collection clock.
 Flags:
 
 - `--endpoint`: The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
-- `--agent-token-file`: Read the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
+- `--agent-token-file` reads the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
 - `--agent-token`: The agent token delivered to the VM at launch. Prefer `--name` or `--agent-token-file`. `crates/microvms-cli/src/cli.rs:629`.
 - `--microvm-id`: The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:638`.
 - `--name`: The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:649`.
@@ -393,7 +393,7 @@ Stop a running exec: SIGTERM its whole process group, SIGKILL after the daemon's
 Flags:
 
 - `--endpoint`: The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
-- `--agent-token-file`: Read the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
+- `--agent-token-file` reads the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
 - `--agent-token`: The agent token delivered to the VM at launch. Prefer `--name` or `--agent-token-file`. `crates/microvms-cli/src/cli.rs:629`.
 - `--microvm-id`: The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:638`.
 - `--name`: The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:649`.
@@ -420,7 +420,7 @@ List what is running in a MicroVM: every exec's process group and its live pids.
 Flags:
 
 - `--endpoint`: The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
-- `--agent-token-file`: Read the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
+- `--agent-token-file` reads the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
 - `--agent-token`: The agent token delivered to the VM at launch. Prefer `--name` or `--agent-token-file`. `crates/microvms-cli/src/cli.rs:629`.
 - `--microvm-id`: The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:638`.
 - `--name`: The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:649`.
@@ -449,7 +449,7 @@ Flags:
 - `--data`: What to write. `-` reads this process's stdin; omitted writes nothing. `crates/microvms-cli/src/cli.rs:1822`.
 - `--eof`: Close stdin after any --data is written. `crates/microvms-cli/src/cli.rs:1830`.
 - `--endpoint`: The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
-- `--agent-token-file`: Read the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
+- `--agent-token-file` reads the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
 - `--agent-token`: The agent token delivered to the VM at launch. Prefer `--name` or `--agent-token-file`. `crates/microvms-cli/src/cli.rs:629`.
 - `--microvm-id`: The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:638`.
 - `--name`: The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:649`.
@@ -479,7 +479,7 @@ Flags:
 - `--mode`: Permissions for an uploaded file, octal as a string (`644`, `0755`). `crates/microvms-cli/src/cli.rs:1878`.
 - `--lines`: Read only lines START through END of a file in the VM, 1-based and inclusive. `crates/microvms-cli/src/cli.rs:1888`.
 - `--endpoint`: The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
-- `--agent-token-file`: Read the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
+- `--agent-token-file` reads the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
 - `--agent-token`: The agent token delivered to the VM at launch. Prefer `--name` or `--agent-token-file`. `crates/microvms-cli/src/cli.rs:629`.
 - `--microvm-id`: The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:638`.
 - `--name`: The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:649`.
@@ -506,7 +506,7 @@ Say whether a path exists in a running MicroVM.
 Flags:
 
 - `--endpoint`: The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
-- `--agent-token-file`: Read the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
+- `--agent-token-file` reads the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
 - `--agent-token`: The agent token delivered to the VM at launch. Prefer `--name` or `--agent-token-file`. `crates/microvms-cli/src/cli.rs:629`.
 - `--microvm-id`: The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:638`.
 - `--name`: The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:649`.
@@ -536,7 +536,7 @@ Flags:
 - `--full`: Upload the whole tree even when the guest manifest claims members are unchanged. `crates/microvms-cli/src/cli.rs:1920`.
 - `--timeout`: How long the in-guest deletion of locally-removed paths may take, in seconds. `crates/microvms-cli/src/cli.rs:1924`.
 - `--endpoint`: The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
-- `--agent-token-file`: Read the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
+- `--agent-token-file` reads the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
 - `--agent-token`: The agent token delivered to the VM at launch. Prefer `--name` or `--agent-token-file`. `crates/microvms-cli/src/cli.rs:629`.
 - `--microvm-id`: The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:638`.
 - `--name`: The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:649`.
@@ -566,10 +566,10 @@ Flags:
 - `--from`: A name record as the registry writes it (`<state-dir>/names/<name>.json`), or `-` for stdin. `crates/microvms-cli/src/cli.rs:1951`.
 - `--name`: The name to register. Required with the explicit triple; renames a `--from` record. `crates/microvms-cli/src/cli.rs:1964`.
 - `--endpoint`: The VM's endpoint, as reported by `run` on the machine that launched it. `crates/microvms-cli/src/cli.rs:1968`.
-- `--agent-token-file`: Read the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:1978`.
+- `--agent-token-file` reads the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:1978`.
 - `--agent-token`: The agent token delivered to the VM at launch. Prefer `--from` or `--agent-token-file`. Never echoed in the envelope. `crates/microvms-cli/src/cli.rs:1972`.
 - `--microvm-id`: The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:1981`.
-- `--identity-host-seed-file`: Read the host identity secret from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:2006`.
+- `--identity-host-seed-file` reads the host identity secret from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:2006`.
 - `--identity-host-seed`: Prefer `--identity-host-seed-file`. The launching host's identity secret, base64, from `run --identity`'s envelope. `crates/microvms-cli/src/cli.rs:1988`.
 - `--identity-vm-public-key`: The VM's public key, base64, from `run --identity`'s envelope. The pin. `crates/microvms-cli/src/cli.rs:2009`.
 - `--verify-identity`: Prove the far end is the VM the record was created for, before writing anything. `crates/microvms-cli/src/cli.rs:2021`.
@@ -596,7 +596,7 @@ Adopt a MicroVM this invocation didn't launch, through core's lifecycle guards, 
 Flags:
 
 - `--endpoint`: The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
-- `--agent-token-file`: Read the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
+- `--agent-token-file` reads the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
 - `--agent-token`: The agent token delivered to the VM at launch. Prefer `--name` or `--agent-token-file`. `crates/microvms-cli/src/cli.rs:629`.
 - `--microvm-id`: The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:638`.
 - `--name`: The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:649`.
@@ -625,11 +625,11 @@ Flags:
 - `--bind`: The local address to bind. Loopback by default, deliberately. `crates/microvms-cli/src/cli.rs:1620`.
 - `--max-connections`: Stop after this many connections; without this limit, runs until Ctrl-C. `crates/microvms-cli/src/cli.rs:1627`.
 - `--verify-identity`: Prove the far end is the VM this record was created for, before relaying a byte. `crates/microvms-cli/src/cli.rs:1653`.
-- `--identity-host-seed-file`: Read the host identity secret from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:1670`.
+- `--identity-host-seed-file` reads the host identity secret from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:1670`.
 - `--identity-host-seed`: Prefer `--identity-host-seed-file`. The launching host's identity secret, base64, from `run --identity`'s envelope. `crates/microvms-cli/src/cli.rs:1660`.
 - `--identity-vm-public-key`: The VM's public key, base64, from `run --identity`'s envelope. The pin. `crates/microvms-cli/src/cli.rs:1673`.
 - `--endpoint`: The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
-- `--agent-token-file`: Read the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
+- `--agent-token-file` reads the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
 - `--agent-token`: The agent token delivered to the VM at launch. Prefer `--name` or `--agent-token-file`. `crates/microvms-cli/src/cli.rs:629`.
 - `--microvm-id`: The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:638`.
 - `--name`: The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:649`.
@@ -658,7 +658,7 @@ Flags:
 - `--bind`: The local address to bind. Loopback by default, deliberately. `crates/microvms-cli/src/cli.rs:1733`.
 - `--max-connections`: Stop after serving this many connections; without this limit, runs until Ctrl-C. `crates/microvms-cli/src/cli.rs:1740`.
 - `--endpoint`: The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:625`.
-- `--agent-token-file`: Read the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
+- `--agent-token-file` reads the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:635`.
 - `--agent-token`: The agent token delivered to the VM at launch. Prefer `--name` or `--agent-token-file`. `crates/microvms-cli/src/cli.rs:629`.
 - `--microvm-id`: The MicroVM id, needed to mint the endpoint proxy token. `crates/microvms-cli/src/cli.rs:638`.
 - `--name`: The name `run --keep --vm-name` registered, standing in for the whole triple. `crates/microvms-cli/src/cli.rs:649`.

@@ -214,9 +214,9 @@ impersonate it. Protect local records accordingly.
 Use `tunnel --name <NAME> --verify-identity` with the local record. To transfer
 a record, pipe it into `microvm attach --from -`, then use its registered name.
 For explicit connection details, `--agent-token-file` and
-`--identity-host-seed-file` read a protected file or stdin with `-`. On Unix,
-these files must grant no permissions to group or other users. Only one input
-can read stdin per invocation. The literal secret flags remain supported and
+`--identity-host-seed-file` read a protected file or stdin with `-`.
+The group and other permission bits must be clear on Unix. Only one input can read stdin
+per invocation. The literal secret flags remain supported and
 print a warning recommending these input paths.
 
 This proves key possession by the endpoint, not that the guest remains
