@@ -531,6 +531,25 @@ async fn initiate_with(
     guest_port: u16,
     payload: &[u8],
 ) -> Result<(snow::TransportState, Vec<u8>), Option<(u16, String)>> {
+    initiate_with_control_frames(
+        socket,
+        host_seed,
+        pinned_vm_public,
+        guest_port,
+        payload,
+        &[],
+    )
+    .await
+}
+
+async fn initiate_with_control_frames(
+    socket: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>,
+    host_seed: [u8; 32],
+    pinned_vm_public: [u8; 32],
+    guest_port: u16,
+    payload: &[u8],
+    control_frames: &[Message],
+) -> Result<(snow::TransportState, Vec<u8>), Option<(u16, String)>> {
     let mut initiator =
         snow::Builder::new(protocol::identity::NOISE_PATTERN.parse().expect("parses"))
             .prologue(&protocol::identity::tunnel_prologue(guest_port))
@@ -563,6 +582,12 @@ async fn initiate_with(
                     .expect("the daemon's reply authenticates");
                 let offer = scratch[..read].to_vec();
                 let mut transport = initiator.into_transport_mode().expect("transport");
+                for frame in control_frames {
+                    socket
+                        .send(frame.clone())
+                        .await
+                        .expect("control frame sends");
+                }
                 socket
                     .send(sealed(
                         &mut transport,
@@ -579,6 +604,52 @@ async fn initiate_with(
             Some(Ok(_)) => continue,
             Some(Err(_)) | None => return Err(None),
         }
+    }
+}
+
+/// AGENTD-18: WebSocket keepalive frames do not replace or invalidate the session confirmation.
+#[tokio::test]
+async fn control_frames_before_confirmation_preserve_the_verified_tunnel() {
+    let vm_seed = [7_u8; 32];
+    let host_seed = [9_u8; 32];
+    let vm_public =
+        *x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from(vm_seed)).as_bytes();
+    let guest = upper_server().await;
+    let daemon = identity_daemon(vm_seed, host_seed).await;
+
+    for frame in [Message::Ping(vec![1].into()), Message::Pong(vec![2].into())] {
+        let mut socket = open_identity_tunnel(daemon, guest.port()).await;
+        let (mut noise, _) = initiate_with_control_frames(
+            &mut socket,
+            host_seed,
+            vm_public,
+            guest.port(),
+            &protocol::identity::HANDSHAKE_PAYLOAD,
+            &[frame],
+        )
+        .await
+        .expect("the handshake and confirmation complete");
+        socket
+            .send(sealed(&mut noise, b"control frame roundtrip"))
+            .await
+            .expect("user data sends");
+
+        let reply = loop {
+            let response = tokio::time::timeout(std::time::Duration::from_secs(5), socket.next())
+                .await
+                .expect("the guest replies");
+            match response {
+                Some(Ok(Message::Binary(reply))) => break reply,
+                Some(Ok(Message::Pong(_))) => continue,
+                other => panic!("expected the guest's encrypted reply, got {other:?}"),
+            }
+        };
+        let mut scratch = vec![0_u8; 65535];
+        let count = noise
+            .read_message(&reply, &mut scratch)
+            .expect("the guest's reply authenticates");
+        assert_eq!(&scratch[..count], b"CONTROL FRAME ROUNDTRIP");
+        socket.close(None).await.expect("the caller closes");
     }
 }
 

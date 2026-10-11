@@ -1,6 +1,14 @@
 # The tunnel session context and confirmation contract.
 
 [[fault]]
+id = "tunnel-confirmation-control-frames"
+guard = "control_frames_before_confirmation_preserve_the_verified_tunnel"
+run = ["cargo", "test", "-p", "agentd", "--test", "tunnel_relay", "--", "--exact", "control_frames_before_confirmation_preserve_the_verified_tunnel"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/tunnel.rs", replace = "                    Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,\n", with = "" }
+
+[[fault]]
 id = "tunnel-confirmation-before-dial"
 guard = "a_handshake_without_confirmation_leaves_the_guest_listener_idle"
 run = ["cargo", "test", "-p", "model-conformance", "--test", "tunnel_confirmation", "--", "--exact", "a_handshake_without_confirmation_leaves_the_guest_listener_idle"]
