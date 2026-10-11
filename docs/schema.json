@@ -879,7 +879,7 @@
           "meaning": "acknowledged. The platform terminates the VM on any other status, so there is no failure a hook can usefully report."
         }
       ],
-      "summary": "acknowledged; begins graceful shutdown with in-flight requests draining"
+      "summary": "acknowledged after the terminate handler; process signals initiate shutdown"
     },
     {
       "auth": "bearer",

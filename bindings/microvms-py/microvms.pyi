@@ -2667,8 +2667,8 @@ class Sandbox:
         """
     def run(self, /, *, image_identifier: str |None = None, image_version: str |None = None, execution_role_arn: str |None = None, agent_token: str |None = None, client_token: str |None = None, launch_env: dict[str, str] |None = None, identity: bool = False, egress: bool = False, egress_network_connectors: Sequence[str] |None = None, deny_egress: bool = False, shell: bool = False, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None, ready_timeout: float |None = None, token_scope: str |None = None, wait: bool = True, log_group: str |None = None, log_stream: str |None = None, disable_logging: bool = False) -> Session:
         """
-        Launches a MicroVM, waits for RUNNING and for its daemon to answer, and returns its
-        session.
+        Launches a MicroVM and returns its session. By default it waits for RUNNING
+        and for the daemon to answer; `wait=False` skips those readiness waits.
         
         `ready_timeout` bounds the wait for RUNNING (default
         `session_constants()["defaultRunningTimeoutSeconds"]`); the wait for the daemon after it

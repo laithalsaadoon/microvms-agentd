@@ -26,12 +26,11 @@ where
         .await
 }
 
-/// Resolves when the platform asks the VM to stop.
+/// Resolves when the process receives a shutdown signal.
 ///
-/// The MicroVM lifecycle sends `/terminate` through the hook route, but the
-/// process can also be signalled directly, so both paths are handled. In-flight
-/// requests drain rather than being cut, which matters because a harness waiting
-/// on `/exec/{id}` should get its status rather than a transport error.
+/// `/terminate` acknowledges its lifecycle handler; it does not resolve this
+/// future. A process signal starts graceful shutdown so in-flight requests can
+/// drain.
 async fn shutdown_signal() {
     #[cfg(unix)]
     {
