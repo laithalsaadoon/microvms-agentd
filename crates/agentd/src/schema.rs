@@ -291,6 +291,16 @@ pub fn document(config: &Config, endpoints: &[Endpoint]) -> Value {
         "daemon_version": crate::routes::VERSION,
         "protocol_version": PROTOCOL_VERSION,
         "version_header": crate::routes::VERSION_HEADER,
+        "verified_tunnel": {
+            "route": protocol::identity::TUNNEL_ROUTE,
+            "pattern": protocol::identity::NOISE_PATTERN,
+            "prologue": "NUL-separated microvms-tunnel, pattern, protocol_version, route; then big-endian u16 guest port",
+            "confirmation": {
+                "plaintext": std::str::from_utf8(protocol::identity::TUNNEL_CONFIRMATION)
+                    .expect("the confirmation is an ASCII protocol constant"),
+                "when": "the first caller transport message, consumed before the guest dial",
+            },
+        },
         "hook_prefix": crate::routes::HOOK_PREFIX,
         "generated_from": "the daemon's own serde types, via schemars",
         "auth": {

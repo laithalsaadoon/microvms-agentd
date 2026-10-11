@@ -80,14 +80,23 @@ struct Seen {
 ///
 /// A `Callback` impl rather than a closure, since a closure returning tungstenite's whole
 /// `ErrorResponse` trips `clippy::result_large_err`.
-struct Marker;
+struct Marker(Arc<Mutex<u16>>);
 
 impl Callback for Marker {
     fn on_request(
         self,
-        _request: &Request,
+        request: &Request,
         mut response: Response,
     ) -> Result<Response, ErrorResponse> {
+        *self.0.lock().expect("not poisoned") = request
+            .uri()
+            .query()
+            .expect("query")
+            .split('&')
+            .find_map(|pair| pair.strip_prefix("port="))
+            .expect("port")
+            .parse()
+            .expect("port number");
         response.headers_mut().insert(
             "sec-websocket-protocol",
             protocol::tunnel::WS_MARKER_SUBPROTOCOL
@@ -125,7 +134,8 @@ async fn stand_in(plays: Plays) -> (std::net::SocketAddr, Arc<Mutex<Seen>>) {
     let record = seen.clone();
     tokio::spawn(async move {
         let (stream, _) = listener.accept().await.expect("one connection");
-        let mut socket = tokio_tungstenite::accept_hdr_async(stream, Marker)
+        let port = Arc::new(Mutex::new(0));
+        let mut socket = tokio_tungstenite::accept_hdr_async(stream, Marker(port.clone()))
             .await
             .expect("the client's upgrade");
         if matches!(plays, Plays::Plain) {
@@ -135,7 +145,8 @@ async fn stand_in(plays: Plays) -> (std::net::SocketAddr, Arc<Mutex<Seen>>) {
             let _ = socket.send(Message::Close(None)).await;
             return;
         }
-        let mut noise = respond(&mut socket, plays, &record).await;
+        let guest_port = *port.lock().expect("not poisoned");
+        let mut noise = respond(&mut socket, plays, &record, guest_port).await;
         match plays {
             Plays::Listens => listen(&mut socket, &mut noise, &record).await,
             Plays::Replays | Plays::Forges => {
@@ -193,9 +204,12 @@ async fn respond(
     socket: &mut WebSocketStream<tokio::net::TcpStream>,
     plays: Plays,
     record: &Mutex<Seen>,
+    guest_port: u16,
 ) -> snow::TransportState {
     let mut responder =
         snow::Builder::new(protocol::identity::NOISE_PATTERN.parse().expect("parses"))
+            .prologue(&protocol::identity::tunnel_prologue(guest_port))
+            .expect("valid prologue")
             .local_private_key(&VM_SEED)
             .expect("a 32-byte secret")
             .remote_public_key(&host_public())
@@ -225,7 +239,15 @@ async fn respond(
         .send(Message::Binary(scratch[..written].to_vec().into()))
         .await
         .expect("the reply is sent");
-    responder.into_transport_mode().expect("transport")
+    let mut transport = responder.into_transport_mode().expect("transport");
+    let Some(Ok(Message::Binary(frame))) = socket.next().await else {
+        panic!("confirmation arrives");
+    };
+    let count = transport
+        .read_message(&frame, &mut scratch)
+        .expect("confirmation authenticates");
+    assert_eq!(&scratch[..count], protocol::identity::TUNNEL_CONFIRMATION);
+    transport
 }
 
 /// Reads the client's frames until its close, recording what arrived.

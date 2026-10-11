@@ -2,7 +2,12 @@
 
 [test]
 description = "All six Rust tiers: unit, model, proptest, turmoil, panic, schema"
+depends = ["parity:fixtures"]
 run = "cargo test --all"
+
+["parity:fixtures"]
+description = "Build the portable peer used by every surface's verified tunnel cases"
+run = "cargo build -p microvms-core --example parity-tunnel-peer"
 
 # `test:python` was here: 83 client-library tests against a fake daemon over a real
 # loopback socket. The Python tier moved to git history after the Rust port went
@@ -74,6 +79,7 @@ run = "./tools/check-mutants.py"
 
 ["bindings:py"]
 description = "Build the Python binding into .venv-bindings and run its tests"
+depends = ["parity:fixtures"]
 # `maturin develop` installs into the active environment, so the tests get one of their own,
 # made fresh each run.
 shell = "bash -e -c"
@@ -103,6 +109,7 @@ uvx ty@0.0.72 check --python .venv-typed bindings/microvms-py/examples/typed_usa
 
 ["bindings:js"]
 description = "Build the Node addon in place and run its tests"
+depends = ["parity:fixtures"]
 # `dts` is the build: it also rewrites `index.d.ts`, so run `dts:check` before this, not after.
 run = [
   { task = "dts" },

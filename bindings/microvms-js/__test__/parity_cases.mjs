@@ -14,7 +14,7 @@
 // connection error instead of sending a signed request to AWS.
 
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -27,7 +27,8 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { connect } from 'node:net';
-import { dirname, join } from 'node:path';
+import { createInterface } from 'node:readline';
+import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
@@ -40,6 +41,7 @@ import {
   Sandbox,
   Session,
   SizeClass,
+  TunnelIdentity,
   compareResidency,
   defaultBaseImage,
   egressPostureFor,
@@ -470,8 +472,69 @@ async function forward(testCase) {
   }
 }
 
+function bounded(promise) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('the tunnel case timed out')), 15_000);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+async function tunnel(testCase) {
+  const target = resolve(ROOT, process.env.CARGO_TARGET_DIR ?? 'target');
+  const suffix = process.platform === 'win32' ? '.exe' : '';
+  const binary = join(target, 'debug', 'examples', `parity-tunnel-peer${suffix}`);
+  assert.ok(existsSync(binary), `build ${binary} with mise run parity:fixtures`);
+  const peer = spawn(binary, [], { cwd: ROOT, stdio: ['pipe', 'pipe', 'inherit'] });
+  let spawnError;
+  peer.on('error', (error) => { spawnError = error; });
+  peer.stdin.on('error', (error) => { spawnError ??= error; });
+  const exited = new Promise((resolve) => peer.once('close', (code) => resolve(code)));
+  const lines = createInterface({ input: peer.stdout })[Symbol.asyncIterator]();
+  const nextJson = async () => {
+    const line = await bounded(lines.next());
+    assert.equal(line.done, false, spawnError?.message ?? 'the tunnel peer ended early');
+    return JSON.parse(line.value);
+  };
+  let handle;
+  try {
+    peer.stdin.end(`${JSON.stringify(testCase.input)}\n`);
+    const ready = await nextJson();
+    const session = Session.direct(ready.endpoint, 'parity-tunnel-token');
+    handle = await session.tunnel(
+      ready.guest_port,
+      { maxConnections: 1 },
+      new TunnelIdentity(ready.host_seed, ready.vm_public_key),
+    );
+    const port = Number(handle.localAddress.split(':').at(-1));
+    const { received, reset } = await bounded(new Promise((resolve, reject) => {
+      const socket = connect({ host: '127.0.0.1', port });
+      const chunks = [];
+      socket.setTimeout(15_000, () => socket.destroy(new Error('the tunnel did not close')));
+      socket.on('data', (chunk) => chunks.push(chunk));
+      socket.on('end', () => resolve({ received: Buffer.concat(chunks).toString(), reset: false }));
+      // Refused verified tunnels reset; other socket errors still fail the case.
+      socket.on('error', (error) => error.code === 'ECONNRESET'
+        ? resolve({ received: Buffer.concat(chunks).toString(), reset: true })
+        : reject(error));
+    }));
+    const report = await handle.stop(15);
+    const final = await nextJson();
+    assert.equal(await bounded(exited), 0, 'the tunnel peer failed');
+    return { received, refused: report.refused, confirmed: final.confirmed, reset };
+  } finally {
+    if (peer.exitCode === null) peer.kill('SIGKILL');
+    await bounded(exited);
+    if (handle) await handle.stop(1);
+    await lines.return?.();
+  }
+}
+
 const HANDLERS = new Map([
   ['forward', forward],
+  ['tunnel', tunnel],
   ['image-name', imageName],
   ['cost', cost],
   ['error', daemonStatus],

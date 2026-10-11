@@ -690,7 +690,7 @@ pub fn surface_docs() -> Vec<schema::Endpoint> {
                  port-scoped token byte-exact (docs/PLATFORM.md, 2026-08-29). With \
                  `identity=1` the relay first completes a Noise KK handshake against the \
                  per-VM key delivered in the launch payload, which proves the far end is \
-                 this VM without trusting the endpoint proxy and makes every later frame \
+                 the launch pin under the bootstrap trust assumptions and makes every later frame \
                  ciphertext; 4401 means this VM was launched without a seed and 4403 means \
                  the handshake was refused. The handshake runs before the dial, so a refused \
                  caller never reaches a guest service.",

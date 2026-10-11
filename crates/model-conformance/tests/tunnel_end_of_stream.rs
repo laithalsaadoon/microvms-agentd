@@ -121,6 +121,8 @@ fn ramp(total: usize) -> Vec<u8> {
 enum OnPath {
     /// Carries every frame both ways.
     Faithful,
+    /// Uses another destination while carrying the same handshake frames.
+    OtherPort(u16),
     /// Carries this many of the daemon's binary frames, then sends the client a close frame of
     /// its own with code 1000 and drops both connections.
     CloseAfter(usize),
@@ -179,11 +181,14 @@ async fn on_path(daemon: SocketAddr, behavior: OnPath) -> SocketAddr {
         let mut client = tokio_tungstenite::accept_hdr_async(stream, Upgrade(asked.clone()))
             .await
             .expect("the client's upgrade");
-        let (target, bearer) = asked
+        let (mut target, bearer) = asked
             .lock()
             .expect("not poisoned")
             .take()
             .expect("the upgrade was recorded");
+        if let OnPath::OtherPort(port) = behavior {
+            target = format!("/v1/tcp?port={port}&identity=true");
+        }
         let mut request = format!("ws://{daemon}{target}")
             .into_client_request()
             .expect("a well-formed request");
@@ -250,7 +255,7 @@ where
             message = client.next() => {
                 let Some(Ok(message)) = message else { return };
                 let binary = matches!(message, Message::Binary(_));
-                if matches!(behavior, OnPath::WithholdClientEnd) && binary && from_client > 0 {
+                if matches!(behavior, OnPath::WithholdClientEnd) && binary && from_client > 1 {
                     from_client += 1;
                     if let Some(previous) = held.replace(message)
                         && upstream.send(previous).await.is_err()
@@ -466,4 +471,43 @@ async fn agentd_20_the_clients_end_of_stream_withheld_resets_the_guest() {
         Err(std::io::ErrorKind::ConnectionReset),
         "an upload whose end of stream never arrived must reach the guest as a reset"
     );
+}
+
+/// AGENTD-18: both ends agree on the destination before any guest connection opens.
+#[tokio::test]
+async fn a_verified_tunnel_requires_the_requested_guest_port() {
+    let daemon = daemon().await;
+    let requested = TcpListener::bind("127.0.0.1:0").await.expect("listener");
+    let different = TcpListener::bind("127.0.0.1:0").await.expect("listener");
+    let path = on_path(
+        daemon,
+        OnPath::OtherPort(different.local_addr().unwrap().port()),
+    )
+    .await;
+    let (bytes, ended) = download(path, requested.local_addr().unwrap()).await;
+    assert!(bytes.is_empty());
+    assert!(matches!(
+        ended,
+        TunnelEnd::Refused {
+            code: protocol::tunnel::close::IDENTITY_REFUSED,
+            ..
+        }
+    ));
+    for listener in [&requested, &different] {
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), listener.accept())
+                .await
+                .is_err()
+        );
+    }
+}
+
+/// The separate confirmation lets a guest send its greeting before the caller sends data.
+#[tokio::test]
+async fn the_confirmation_allows_a_server_first_guest() {
+    let daemon = daemon().await;
+    let guest = sending_guest().await;
+    let (bytes, ended) = download(daemon, guest).await;
+    assert_eq!(bytes, ramp(TOTAL));
+    assert_eq!(ended, TunnelEnd::Closed);
 }

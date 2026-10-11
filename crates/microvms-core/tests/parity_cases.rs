@@ -32,7 +32,7 @@ use microvms_core::{Error, Region, SizeClass};
 use parity_corpus::{Case, Run};
 use serde_json::{Value, json};
 
-const AREAS: [&str; 8] = [
+const AREAS: [&str; 9] = [
     "forward",
     "image-name",
     "cost",
@@ -41,6 +41,7 @@ const AREAS: [&str; 8] = [
     "names",
     "size-class",
     "wrap-dockerfile",
+    "tunnel",
 ];
 
 const BUCKET: &str = "parity-cases-bucket";
@@ -59,11 +60,68 @@ async fn core_answers_the_shared_case_corpus() {
             "names" => names(&case).await,
             "size-class" => size_class(&case),
             "wrap-dockerfile" => wrap(&case),
+            "tunnel" => tunnel(&case).await,
             other => unreachable!("planned only the owned areas, not {other}"),
         };
         run.judge(&case, answer);
     }
     run.finish();
+}
+
+async fn tunnel(case: &Case) -> Value {
+    use microvms_core::session::serve::{ServeLimits, TunnelTarget, start_tunnel};
+    use std::process::{Command, Stdio};
+    use tokio::io::AsyncReadExt as _;
+
+    let child = Command::new(parity_corpus::tunnel::fixture_path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .expect("build the fixture with mise run parity:fixtures");
+    let mut peer = parity_corpus::tunnel::Peer::started(child, &case.input);
+    let ready = &peer.ready;
+    let identity = microvms_core::identity::TunnelIdentity::from_encoded_parts(
+        ready["host_seed"].as_str().unwrap(),
+        ready["vm_public_key"].as_str().unwrap(),
+    )
+    .unwrap();
+    let session = Session::builder(ready["endpoint"].as_str().unwrap(), "parity-tunnel-token")
+        .build()
+        .unwrap();
+    let serving = start_tunnel(
+        "127.0.0.1:0".parse().unwrap(),
+        TunnelTarget::for_session(
+            &session,
+            case.input_u64("guest_port") as u16,
+            Some(identity),
+        ),
+        ServeLimits {
+            max_connections: Some(1),
+        },
+    )
+    .await
+    .unwrap();
+    let mut client = tokio::net::TcpStream::connect(serving.local_address())
+        .await
+        .unwrap();
+    let mut bytes = Vec::new();
+    // A refused verified tunnel resets the local socket; preserve that verdict in the case.
+    let reset = match tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        client.read_to_end(&mut bytes),
+    )
+    .await
+    .expect("tunnel completes")
+    {
+        Ok(_) => false,
+        Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => true,
+        Err(error) => panic!("the tunnel read failed: {error}"),
+    };
+    let report = serving.finished().await.unwrap();
+    let verdict = peer.finish();
+    json!({"received": String::from_utf8(bytes).unwrap(), "refused": report.report.refused,
+        "confirmed": verdict["confirmed"], "reset": reset})
 }
 
 /// The facets every runner reports for a failure.

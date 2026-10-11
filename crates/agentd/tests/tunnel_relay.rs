@@ -508,11 +508,13 @@ async fn initiate(
     socket: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>,
     host_seed: [u8; 32],
     pinned_vm_public: [u8; 32],
+    guest_port: u16,
 ) -> Result<snow::TransportState, Option<(u16, String)>> {
     initiate_with(
         socket,
         host_seed,
         pinned_vm_public,
+        guest_port,
         &protocol::identity::HANDSHAKE_PAYLOAD,
     )
     .await
@@ -526,10 +528,32 @@ async fn initiate_with(
     socket: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>,
     host_seed: [u8; 32],
     pinned_vm_public: [u8; 32],
+    guest_port: u16,
     payload: &[u8],
+) -> Result<(snow::TransportState, Vec<u8>), Option<(u16, String)>> {
+    initiate_with_control_frames(
+        socket,
+        host_seed,
+        pinned_vm_public,
+        guest_port,
+        payload,
+        &[],
+    )
+    .await
+}
+
+async fn initiate_with_control_frames(
+    socket: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>,
+    host_seed: [u8; 32],
+    pinned_vm_public: [u8; 32],
+    guest_port: u16,
+    payload: &[u8],
+    control_frames: &[Message],
 ) -> Result<(snow::TransportState, Vec<u8>), Option<(u16, String)>> {
     let mut initiator =
         snow::Builder::new(protocol::identity::NOISE_PATTERN.parse().expect("parses"))
+            .prologue(&protocol::identity::tunnel_prologue(guest_port))
+            .expect("valid prologue")
             .local_private_key(&host_seed)
             .expect("a 32-byte secret")
             .remote_public_key(&pinned_vm_public)
@@ -557,7 +581,21 @@ async fn initiate_with(
                     .read_message(&reply, &mut scratch)
                     .expect("the daemon's reply authenticates");
                 let offer = scratch[..read].to_vec();
-                return Ok((initiator.into_transport_mode().expect("transport"), offer));
+                let mut transport = initiator.into_transport_mode().expect("transport");
+                for frame in control_frames {
+                    socket
+                        .send(frame.clone())
+                        .await
+                        .expect("control frame sends");
+                }
+                socket
+                    .send(sealed(
+                        &mut transport,
+                        protocol::identity::TUNNEL_CONFIRMATION,
+                    ))
+                    .await
+                    .expect("the confirmation is sent");
+                return Ok((transport, offer));
             }
             Some(Ok(Message::Close(Some(CloseFrame { code, reason })))) => {
                 return Err(Some((code.into(), reason.to_string())));
@@ -566,6 +604,52 @@ async fn initiate_with(
             Some(Ok(_)) => continue,
             Some(Err(_)) | None => return Err(None),
         }
+    }
+}
+
+/// AGENTD-18: WebSocket keepalive frames do not replace or invalidate the session confirmation.
+#[tokio::test]
+async fn control_frames_before_confirmation_preserve_the_verified_tunnel() {
+    let vm_seed = [7_u8; 32];
+    let host_seed = [9_u8; 32];
+    let vm_public =
+        *x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from(vm_seed)).as_bytes();
+    let guest = upper_server().await;
+    let daemon = identity_daemon(vm_seed, host_seed).await;
+
+    for frame in [Message::Ping(vec![1].into()), Message::Pong(vec![2].into())] {
+        let mut socket = open_identity_tunnel(daemon, guest.port()).await;
+        let (mut noise, _) = initiate_with_control_frames(
+            &mut socket,
+            host_seed,
+            vm_public,
+            guest.port(),
+            &protocol::identity::HANDSHAKE_PAYLOAD,
+            &[frame],
+        )
+        .await
+        .expect("the handshake and confirmation complete");
+        socket
+            .send(sealed(&mut noise, b"control frame roundtrip"))
+            .await
+            .expect("user data sends");
+
+        let reply = loop {
+            let response = tokio::time::timeout(std::time::Duration::from_secs(5), socket.next())
+                .await
+                .expect("the guest replies");
+            match response {
+                Some(Ok(Message::Binary(reply))) => break reply,
+                Some(Ok(Message::Pong(_))) => continue,
+                other => panic!("expected the guest's encrypted reply, got {other:?}"),
+            }
+        };
+        let mut scratch = vec![0_u8; 65535];
+        let count = noise
+            .read_message(&reply, &mut scratch)
+            .expect("the guest's reply authenticates");
+        assert_eq!(&scratch[..count], b"CONTROL FRAME ROUNDTRIP");
+        socket.close(None).await.expect("the caller closes");
     }
 }
 
@@ -585,7 +669,7 @@ async fn a_verified_tunnel_proves_the_vm_and_carries_encrypted_bytes() {
     let daemon = identity_daemon(vm_seed, host_seed).await;
     let mut socket = open_identity_tunnel(daemon, server.port()).await;
 
-    let mut noise = initiate(&mut socket, host_seed, vm_public)
+    let mut noise = initiate(&mut socket, host_seed, vm_public, server.port())
         .await
         .expect("the launching host's handshake completes");
 
@@ -638,7 +722,7 @@ async fn a_valid_token_with_the_wrong_host_key_is_refused() {
     let daemon = identity_daemon(vm_seed, host_seed).await;
     let mut socket = open_identity_tunnel(daemon, server.port()).await;
 
-    let refusal = initiate(&mut socket, [1_u8; 32], vm_public)
+    let refusal = initiate(&mut socket, [1_u8; 32], vm_public, server.port())
         .await
         .expect_err("a wrong host key must not complete");
     let (code, reason) = refusal.expect("the daemon closes with a code, not a hangup");
@@ -662,7 +746,7 @@ async fn a_pin_from_a_different_vm_is_refused() {
     let daemon = identity_daemon(vm_seed, host_seed).await;
     let mut socket = open_identity_tunnel(daemon, server.port()).await;
 
-    let refusal = initiate(&mut socket, host_seed, other_vm_public)
+    let refusal = initiate(&mut socket, host_seed, other_vm_public, server.port())
         .await
         .expect_err("a wrong pin must not complete");
     let (code, _) = refusal.expect("the daemon closes with a code");
@@ -719,7 +803,7 @@ async fn a_refused_caller_never_causes_a_guest_connection() {
 
     let daemon = identity_daemon(vm_seed, host_seed).await;
     let mut socket = open_identity_tunnel(daemon, guest.port()).await;
-    let refusal = initiate(&mut socket, [1_u8; 32], vm_public).await;
+    let refusal = initiate(&mut socket, [1_u8; 32], vm_public, guest.port()).await;
     assert!(refusal.is_err(), "the wrong key must be refused");
 
     // The refusal already arrived, so any dial would have happened by now.
@@ -781,7 +865,7 @@ async fn verified_upload(
     let (guest, outcome) = reading_guest().await;
     let daemon = identity_daemon(vm_seed, host_seed).await;
     let mut socket = open_identity_tunnel(daemon, guest.port()).await;
-    let (mut noise, _) = initiate_with(&mut socket, host_seed, vm_public, offer)
+    let (mut noise, _) = initiate_with(&mut socket, host_seed, vm_public, guest.port(), offer)
         .await
         .expect("the launching host's handshake completes");
     socket
@@ -830,6 +914,7 @@ async fn agentd_19_a_guest_eof_reaches_the_caller_as_the_end_of_stream() {
         &mut socket,
         host_seed,
         vm_public,
+        guest.port(),
         &protocol::identity::HANDSHAKE_PAYLOAD,
     )
     .await
@@ -1039,7 +1124,7 @@ async fn one_chunk_relayed() -> (
     let (guest, recorded, outcome) = recording_guest().await;
     let daemon = identity_daemon(vm_seed, host_seed).await;
     let mut socket = open_identity_tunnel(daemon, guest.port()).await;
-    let mut noise = initiate(&mut socket, host_seed, vm_public)
+    let mut noise = initiate(&mut socket, host_seed, vm_public, guest.port())
         .await
         .expect("the launching host's handshake completes");
     let frame = sealed(&mut noise, b"once");

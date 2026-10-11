@@ -12,8 +12,8 @@
 //! its x25519 static from that seed and keeps it in memory. So:
 //!
 //! * A caller that completes a handshake against the pinned public key learns the far end
-//!   holds the seed, and only the launching host and this VM ever had it. That is the proof
-//!   the endpoint proxy cannot give, because the proxy terminates TLS itself.
+//!   holds the seed delivered at launch. The AWS control plane and run-hook delivery
+//!   are part of that trust root, and authorized guest-root access must remain trusted.
 //! * The daemon requires the *host's* static in return, so it learns the peer is the host
 //!   that launched it rather than anyone who came to hold the agent token. The token is a
 //!   bearer credential the proxy carries on every request; a private key is not.
@@ -22,7 +22,7 @@
 //! cross-compile constraint, not a preference) and the honest ptrace limit. Read it before
 //! changing anything here.
 //!
-//! # The key never leaves this process, and never reaches a child
+//! # The daemon keeps the key out of child environments
 //!
 //! Held in [`crate::state::AppState`] behind the same lock discipline as the agent token, and
 //! deliberately in a different slot from the launch environment: the environment reaches
@@ -144,13 +144,27 @@ impl Material {
     ///
     /// Built per connection, because a `HandshakeState` carries nonces and cannot be reused —
     /// sharing one across tunnels would reuse a nonce, which is the failure mode that turns
-    /// an AEAD into plaintext.
+    /// an AEAD into plaintext. This low-level handshake has no tunnel context;
+    /// `/v1/tcp` uses [`Self::tunnel_responder`].
     pub fn responder(&self) -> Result<snow::HandshakeState, snow::Error> {
+        self.responder_with_prologue(&[])
+    }
+
+    /// Builds the responder bound to this tunnel's route, version, and guest port.
+    pub fn tunnel_responder(&self, guest_port: u16) -> Result<snow::HandshakeState, snow::Error> {
+        self.responder_with_prologue(&protocol::identity::tunnel_prologue(guest_port))
+    }
+
+    fn responder_with_prologue(
+        &self,
+        prologue: &[u8],
+    ) -> Result<snow::HandshakeState, snow::Error> {
         snow::Builder::new(
             protocol::identity::NOISE_PATTERN
                 .parse()
                 .expect("the pattern is a compile-time constant this crate's tests parse"),
         )
+        .prologue(prologue)?
         .local_private_key(&self.seed)?
         .remote_public_key(&self.host_public_key)?
         .build_responder()

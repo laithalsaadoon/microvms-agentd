@@ -96,6 +96,7 @@ SELECTOR_FILES = (
     ".config/mise/tasks/contracts.toml",
     ".config/mise/tasks/live.toml",
     ".config/mise/tasks/release.toml",
+    ".config/mise/tasks/test.toml",
 )
 
 #: Where an executable cargo selector can live, for the listing check above: the workflows,

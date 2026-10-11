@@ -1,0 +1,59 @@
+# The tunnel session context and confirmation contract.
+
+[[fault]]
+id = "tunnel-confirmation-control-frames"
+guard = "control_frames_before_confirmation_preserve_the_verified_tunnel"
+run = ["cargo", "test", "-p", "agentd", "--test", "tunnel_relay", "--", "--exact", "control_frames_before_confirmation_preserve_the_verified_tunnel"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/tunnel.rs", replace = "                    Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,\n", with = "" }
+
+[[fault]]
+id = "tunnel-confirmation-before-dial"
+guard = "a_handshake_without_confirmation_leaves_the_guest_listener_idle"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tunnel_confirmation", "--", "--exact", "a_handshake_without_confirmation_leaves_the_guest_listener_idle"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/tunnel-confirmation-before-dial.patch"
+
+[[fault]]
+id = "tunnel-confirmation-payload"
+guard = "a_different_confirmation_payload_leaves_the_guest_listener_idle"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tunnel_confirmation", "--", "--exact", "a_different_confirmation_payload_leaves_the_guest_listener_idle"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/tunnel.rs", replace = "scratch[..count] == *protocol::identity::TUNNEL_CONFIRMATION", with = "count <= scratch.len()" }
+
+[[fault]]
+id = "tunnel-destination-context"
+guard = "a_verified_tunnel_requires_the_requested_guest_port"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tunnel_end_of_stream", "--", "--exact", "a_verified_tunnel_requires_the_requested_guest_port"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/protocol/src/identity.rs", replace = "context.extend_from_slice(&guest_port.to_be_bytes());", with = "let _ = guest_port;\n    context.extend_from_slice(&0_u16.to_be_bytes());" }
+
+[[fault]]
+id = "tunnel-server-first-confirmation"
+guard = "the_confirmation_allows_a_server_first_guest"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tunnel_end_of_stream", "--", "--exact", "the_confirmation_allows_a_server_first_guest"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/session/tunnel.rs", replace = "let mut verified = read_reply(initiator, &reply, &mut scratch, guest_port)?;", with = "let mut verified = read_reply(initiator, &reply, &mut scratch, guest_port)?;\n                if guest_port > 0 { return Ok(Initiated::Transport(verified)); }" }
+
+[[fault]]
+id = "parity-tunnel-refusal-reset"
+guard = "core_answers_the_shared_case_corpus"
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]]
+expect = "test-failed"
+suite = "rust"
+message = "tunnel/different-port: core answered"
+transform = { file = "crates/microvms-edges/src/session/serve.rs", replace = "stream.set_zero_linger().map_err(|error| {", with = "Ok::<(), std::io::Error>(()).map_err(|error| {" }
+
+[[fault]]
+id = "parity-tunnel-clean-end"
+guard = "core_answers_the_shared_case_corpus"
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]]
+expect = "test-failed"
+suite = "rust"
+message = "tunnel/server-first: core answered"
+transform = { file = "crates/microvms-edges/src/session/serve.rs", replace = "                if target.identity.is_some()\n                    && matches!(\n                        result,\n                        Err(_) | Ok(TunnelEnd::Truncated { .. } | TunnelEnd::Refused { .. })\n                    )\n", with = "                if target.identity.is_some()\n" }

@@ -35,7 +35,7 @@ pub mod tunnel;
 
 /// Protocol version, distinct from the daemon version.
 ///
-/// It tracks the `/v1/` path namespace rather than the crate version: a patch to
+/// It tracks the wire contract, including verified tunnel framing, rather than the crate version: a patch to
 /// the daemon does not change the wire format, and a client that pinned a daemon
 /// version would refuse an upgrade it is compatible with.
 ///
@@ -43,7 +43,7 @@ pub mod tunnel;
 /// version number exists to answer:
 ///
 /// * **Same `protocol_version`, different `daemon_version`** — proceed. The path
-///   namespace and every shape in `$defs` are unchanged; only the implementation
+///   namespace, framing, and shapes in `$defs` are compatible; only the implementation
 ///   moved. This is the normal case and must not be treated as an error.
 /// * **Different `protocol_version`** — do not proceed against `/v1/`. A new
 ///   protocol version means a shape or a status code changed meaning, and a client
@@ -57,7 +57,7 @@ pub mod tunnel;
 ///
 /// There is deliberately no negotiation *request*: the daemon serves exactly one
 /// protocol version, and a client that has read this document already knows which.
-pub const PROTOCOL_VERSION: &str = "1";
+pub const PROTOCOL_VERSION: &str = "2";
 
 /// The response header carrying the daemon version, on every response including
 /// errors.

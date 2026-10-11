@@ -86,10 +86,13 @@ break in `docs/schema-breaks.toml`, as the line the check prints and with the
 reason. While the version differs from the previous tag's, the check passes only
 when that list and the breaks it finds are the same, so a later change that
 breaks something else before the next release still fails. No client reads
-`protocol_version` yet, so the bump tells reviewers, not callers, and an older
-client that meets the break fails the way any undecodable answer does. Type
-changes (a field that accepts less than it did, an enum that loses a variant, a
-body's media type) and `limits` aren't checked; review holds those.
+`protocol_version` before every HTTP call yet, so an older client that meets a
+changed HTTP shape fails the way any undecodable answer does. Verified tunnels
+bind the version into the handshake and refuse a different version. Type changes
+(a field that accepts less than it did, an enum that loses a variant, a body's
+media type), `limits`, and encrypted tunnel framing aren't checked by
+`schema:compat`. Review holds those. Encrypted framing changes also appear beside
+the schema break declarations, with their protocol version.
 
 ## Workload hook handlers
 
@@ -313,7 +316,7 @@ Three fields of `POST /v1/exec/start` accept a second JSON type, and one flag is
 new. All four are backward compatible in both directions that matter: a request
 that sends integers and booleans is byte-identical to what it always was, and a
 daemon that predates them refuses a string it cannot read as `malformed_request`
-rather than misreading it. `PROTOCOL_VERSION` stays `1`.
+rather than misreading it. `PROTOCOL_VERSION` does not change for these fields.
 
 | Field | Accepts | Refused before spawn with |
 | --- | --- | --- |
@@ -537,9 +540,17 @@ request distinguishes 403 (wrong scope) from 502 (right scope, nothing listening
 
 ## The verified tunnel's end of stream
 
-A tunnel opened with `identity=true` runs a Noise KK handshake before it relays anything
-(`crates/protocol/src/identity.rs`), and each relayed chunk after it is one Noise transport
-message in one binary frame. The close frame that ends a tunnel is plaintext, because it has to
+A tunnel opened with `identity=true` runs a Noise KK handshake before it relays data
+(`crates/protocol/src/identity.rs`). Protocol 2 binds a shared prologue to this handshake.
+Its fields are `microvms-tunnel`, the Noise pattern, the protocol version, and `/v1/tcp`,
+each followed by a NUL byte. The guest port follows as a 16-bit unsigned value in big-endian
+order. Both sides must agree on these fields and the pinned keys. The client checks the
+reply and sends `microvms-tunnel-ready` as the plaintext in the first Noise transport
+message. The daemon reads this ready message before it dials the guest and never passes
+it on as user data. The client sends this message before any user data. A guest can send first
+as soon as the daemon dials it. The daemon refuses a missing or different ready message,
+with a ten-second deadline. Each chunk of user data then goes in one Noise transport
+message per binary frame. The close frame that ends a tunnel is plaintext, because it has to
 reach a caller whose handshake failed, so anything on the path can send one or drop the
 connection. Before #342 both ends read either as a finished stream, so a transfer cut short
 looked complete. The end of a verified stream is now a message inside the session:
@@ -567,14 +578,12 @@ What each side does when the tunnel ends without the end of stream of a peer tha
 | Client | a close frame with one of the daemon's failure codes | `TunnelEnd::Refused` with the code, as before |
 | Daemon | a close frame, a transport error, a hangup, or a frame that doesn't authenticate | the guest connection is reset rather than closed, so a guest reading to its EOF sees a broken stream |
 
-**Older peers.** A release from before the end of stream writes an empty handshake payload and
-never sends one, and it reads the other side's end of stream as a message with nothing in it. A
-current client ends a clean-looking tunnel into an older daemon as `TunnelEnd::ClosedUnproven`,
-which `microvm tunnel` warns about and counts as `connectionsUnproven`, rather than failing it; a
-current daemon takes an older client's close as its end, as it always did. The rule stays that
-way: daemons ship in images, so requiring the end of stream would fail every verified tunnel
-into an image built before it. `PROTOCOL_VERSION` stays `1`, and `docs/schema.json` doesn't
-change, because the route, its query and its close codes are what they were.
+**Version compatibility.** Protocol 2 peers must use the shared prologue and ready message.
+A peer refuses a protocol 1 handshake. Both peers stop if the handshake fails. They do not retry
+with an unbound handshake or switch to a plain tunnel. Rebuild older guest images and update their
+clients together before using verified tunnels. Plain tunnels and unchanged HTTP shapes keep their existing behavior.
+A protocol 2 peer may omit the end-of-stream offer and end with `ClosedUnproven`. That
+optional offer does not relax the rules for the prologue and ready message.
 
 A plain tunnel (no `identity`) has no end of stream. None of its frames are authenticated, so its
 close is its end.

@@ -4,7 +4,7 @@
 [[fault]]
 id = "f2p-relative-default-home-core"
 guard = "core_answers_the_shared_case_corpus"
-run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]]
 expect = "test-failed"
 suite = "rust"
 patch = "verify/guards/faults/f2p-relative-default-home-core.patch"
@@ -13,7 +13,7 @@ patch = "verify/guards/faults/f2p-relative-default-home-core.patch"
 [[fault]]
 id = "f2p-relative-default-home-cli"
 guard = "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"
-run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"]
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"]]
 expect = "test-failed"
 suite = "rust"
 patch = "verify/guards/faults/f2p-relative-default-home-cli.patch"
@@ -34,10 +34,7 @@ patch = "verify/guards/faults/f2p-relative-default-home-python.patch"
 [[fault]]
 id = "f2p-relative-default-home-node"
 guard = "names/relative-default-home"
-run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
-  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
-]
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"], ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"]]
 expect = "test-failed"
 suite = "bindings"
 patch = "verify/guards/faults/f2p-relative-default-home-node.patch"

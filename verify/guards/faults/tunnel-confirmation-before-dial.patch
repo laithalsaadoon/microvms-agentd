@@ -1,0 +1,31 @@
+--- a/crates/agentd/src/tunnel.rs
++++ b/crates/agentd/src/tunnel.rs
+@@ -568,28 +568,6 @@
+             Ok(transport) => transport,
+             Err(error) => return Err(Failed::new(socket, error.to_string())),
+         };
+-        // The caller confirms this session before any guest connection is opened. Consume
+-        // this control message here so a server-first guest never waits for application data.
+-        let confirmation = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+-            loop {
+-                match socket.recv().await {
+-                    Some(Ok(Message::Binary(frame))) => {
+-                        let count = transport.read_message(&frame, &mut scratch).ok()?;
+-                        return (scratch[..count] == *protocol::identity::TUNNEL_CONFIRMATION)
+-                            .then_some(());
+-                    }
+-                    Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
+-                    _ => return None,
+-                }
+-            }
+-        })
+-        .await;
+-        if !matches!(confirmation, Ok(Some(()))) {
+-            return Err(Failed::new(
+-                socket,
+-                "the caller did not confirm the tunnel session",
+-            ));
+-        }
+         Ok(Noise {
+             socket,
+             transport,

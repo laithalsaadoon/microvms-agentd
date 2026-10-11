@@ -551,11 +551,33 @@ async fn verified_relay_server(
             return;
         };
         let recorder = Arc::new(std::sync::Mutex::new(Observed::default()));
-        let socket = tokio_tungstenite::accept_hdr_async(stream, Recorder { recorder }).await;
+        let socket = tokio_tungstenite::accept_hdr_async(
+            stream,
+            Recorder {
+                recorder: Arc::clone(&recorder),
+            },
+        )
+        .await;
         let Ok(mut socket) = socket else { return };
+        // The fixture maps the requested guest port to a random local listener; the
+        // authenticated context still names the request's port, as the daemon does.
+        let query = recorder
+            .lock()
+            .expect("not poisoned")
+            .query
+            .clone()
+            .expect("a query");
+        let guest_port = query
+            .split('&')
+            .find_map(|field| field.strip_prefix("port="))
+            .expect("a guest port")
+            .parse::<u16>()
+            .expect("a numeric guest port");
 
         let mut responder =
             snow::Builder::new(protocol::identity::NOISE_PATTERN.parse().expect("parses"))
+                .prologue(&protocol::identity::tunnel_prologue(guest_port))
+                .expect("valid prologue")
                 .local_private_key(&vm_seed)
                 .expect("a 32-byte secret")
                 .remote_public_key(&host_public)
@@ -589,6 +611,15 @@ async fn verified_relay_server(
             return;
         }
         let mut noise = responder.into_transport_mode().expect("transport");
+        let Some(Ok(Message::Binary(frame))) = socket.next().await else {
+            return;
+        };
+        let Ok(count) = noise.read_message(&frame, &mut scratch) else {
+            return;
+        };
+        if &scratch[..count] != protocol::identity::TUNNEL_CONFIRMATION {
+            return;
+        }
 
         let Ok(guest) = tokio::net::TcpStream::connect(target).await else {
             return;

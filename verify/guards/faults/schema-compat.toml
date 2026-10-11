@@ -55,7 +55,7 @@ transform = { file = "docs/schema.json", replace = "\"timed_out\",\n        \"tr
 id = "schema-compat-undeclared-break"
 message = "not declared"
 transform = [
-  { file = "docs/schema.json", replace = "\"protocol_version\": \"1\"", with = "\"protocol_version\": \"2\"" },
+  { file = "docs/schema.json", replace = "\"protocol_version\": \"2\"", with = "\"protocol_version\": \"3\"" },
   { file = "docs/schema.json", replace = "\"path\": \"/v1/procs\",", with = "\"path\": \"/v1/processes\"," },
 ]
 

@@ -8,7 +8,7 @@
 [[fault]]
 id = "parity-core-empty-corpus"
 guard = "core_answers_the_shared_case_corpus"
-run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]]
 expect = "test-failed"
 suite = "rust"
 message = "no case ran in area \"image-name\" on core"
@@ -17,7 +17,7 @@ transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace 
 [[fault]]
 id = "parity-cli-fakes-empty-corpus"
 guard = "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"
-run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"]
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"]]
 expect = "test-failed"
 suite = "rust"
 message = "no case ran in area \"image-name\" on cli"
@@ -34,7 +34,7 @@ transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace 
 
 [[family]]
 guard = "core_answers_the_shared_case_corpus"
-run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]]
 expect = "test-failed"
 suite = "rust"
 
@@ -46,7 +46,7 @@ transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace 
 [[family.fault]]
 id = "parity-core-no-handler"
 message = "the core runner has no handler for area \"size-class\""
-transform = { file = "crates/microvms-core/tests/parity_cases.rs", replace = "const AREAS: [&str; 8] = [\n    \"forward\",\n    \"image-name\",\n    \"cost\",\n    \"error\",\n    \"egress\",\n    \"names\",\n    \"size-class\",\n    \"wrap-dockerfile\",\n];\n", with = "const AREAS: [&str; 7] = [\n    \"forward\",\n    \"image-name\",\n    \"cost\",\n    \"error\",\n    \"egress\",\n    \"names\",\n    \"wrap-dockerfile\",\n];\n" }
+transform = { file = "crates/microvms-core/tests/parity_cases.rs", replace = "const AREAS: [&str; 9] = [\n    \"forward\",\n    \"image-name\",\n    \"cost\",\n    \"error\",\n    \"egress\",\n    \"names\",\n    \"size-class\",\n    \"wrap-dockerfile\",\n    \"tunnel\",\n];\n", with = "const AREAS: [&str; 8] = [\n    \"forward\",\n    \"image-name\",\n    \"cost\",\n    \"error\",\n    \"egress\",\n    \"names\",\n    \"wrap-dockerfile\",\n    \"tunnel\",\n];\n" }
 
 # The issue's regression: `wrap_dockerfile` stops ending the task's last line before the stanza.
 # Core, Python and TypeScript each fail the case (the binding entries are in the bindings section).
@@ -62,11 +62,11 @@ transform = { file = "crates/microvms-app/src/control/artifact.rs", replace = " 
 [[fault]]
 id = "parity-cli-area-handed-over"
 guard = "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"
-run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"]
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"]]
 expect = "test-failed"
 suite = "rust"
 message = "gives the fakes tier area \"egress\", which it has no handler for"
-transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 4] = [\"cost\", \"egress\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 4] = [\"image-name\", \"error\", \"names\", \"forward\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 3] = [\"cost\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 5] = [\"image-name\", \"error\", \"names\", \"egress\", \"forward\"];\n" }
+transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 4] = [\"cost\", \"egress\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 5] = [\"image-name\", \"error\", \"names\", \"forward\", \"tunnel\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 3] = [\"cost\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 6] = [\"image-name\", \"error\", \"names\", \"forward\", \"tunnel\", \"egress\"];\n" }
 
 [[family]]
 guard = "the_cli_process_answers_the_shared_case_corpus"
@@ -77,18 +77,18 @@ suite = "rust"
 [[family.fault]]
 id = "parity-cli-area-dropped"
 message = "the cli runner has no handler for area \"egress\""
-transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 4] = [\"cost\", \"egress\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 4] = [\"image-name\", \"error\", \"names\", \"forward\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 3] = [\"cost\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 4] = [\"image-name\", \"error\", \"names\", \"forward\"];\n" }
+transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 4] = [\"cost\", \"egress\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 5] = [\"image-name\", \"error\", \"names\", \"forward\", \"tunnel\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 3] = [\"cost\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 5] = [\"image-name\", \"error\", \"names\", \"forward\", \"tunnel\"];\n" }
 
 [[family.fault]]
 id = "parity-cli-area-in-both-tiers"
 message = "area \"egress\" is both this cli runner's and another's"
-transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 4] = [\"cost\", \"egress\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 4] = [\"image-name\", \"error\", \"names\", \"forward\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 4] = [\"cost\", \"egress\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 5] = [\"image-name\", \"error\", \"names\", \"egress\", \"forward\"];\n" }
+transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 4] = [\"cost\", \"egress\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 5] = [\"image-name\", \"error\", \"names\", \"forward\", \"tunnel\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 4] = [\"cost\", \"egress\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 6] = [\"image-name\", \"error\", \"names\", \"forward\", \"tunnel\", \"egress\"];\n" }
 
 # A skip that doesn't name its issue or trace id fails the reader, in every runner.
 
 [[family]]
 guard = "core_answers_the_shared_case_corpus"
-run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]]
 expect = "test-failed"
 suite = "rust"
 
@@ -116,7 +116,7 @@ transform = { file = "crates/microvms-domain/src/names.rs", replace = "        &
 [[fault]]
 id = "parity-cli-names-region"
 guard = "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"
-run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"]
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"]]
 expect = "test-failed"
 suite = "rust"
 message = "names/region-mismatch: cli answered"
@@ -125,7 +125,7 @@ transform = { file = "crates/microvms-domain/src/names.rs", replace = "        &
 [[fault]]
 id = "parity-core-names-torn-reads-free"
 guard = "core_answers_the_shared_case_corpus"
-run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]]
 expect = "test-failed"
 suite = "rust"
 message = "names/torn-record: core answered"
@@ -135,7 +135,7 @@ transform = { file = "crates/microvms-edges/src/names.rs", replace = "        se
 [[fault]]
 id = "parity-core-forward-wildcard"
 guard = "core_answers_the_shared_case_corpus"
-run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]]
 expect = "test-failed"
 suite = "rust"
 message = "forward/wildcard-localhost: mints"

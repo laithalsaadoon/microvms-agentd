@@ -38,7 +38,8 @@
 //! of stream in its handshake payload is held to it: the client reads a close or a hangup
 //! without the daemon's end as [`End::Truncated`], and the daemon resets the guest connection
 //! when the caller's end is missing. [`Variant::OlderDaemon`] and [`Variant::OlderClient`] are
-//! the releases from before #342, which offer nothing and send no end of stream.
+//! peers that omit the optional end-of-stream offer within the current handshake
+//! version. A peer using an earlier handshake version is refused before this model's relay.
 
 use stateright::{Model, Property};
 
@@ -107,6 +108,8 @@ pub enum Session {
 /// A sealed frame's plaintext.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Body {
+    /// The session confirmation, consumed before opening the guest connection.
+    Confirm,
     /// One relayed byte, by its index in the sender's stream.
     Byte(u8),
     /// The end of stream: the message with nothing in it.
@@ -185,6 +188,10 @@ pub enum Variant {
     ClientPinOff,
     /// The daemon dials the guest when the handshake arrives, before deciding it.
     DialBeforeHandshake,
+    /// The daemon opens the guest after its reply, before session confirmation.
+    DialBeforeConfirmation,
+    /// The handshake omits the destination context.
+    NoDestinationContext,
     /// Receivers open a frame of their session at any position: no counter nonce.
     NoNonce,
     /// The daemon closes the guest's connection without its end of stream.
@@ -225,6 +232,8 @@ pub struct Config {
     pub far_end: FarEnd,
     /// How many times the attacker may act.
     pub budget: u8,
+    /// Both peers selected the same route and guest port.
+    pub destination_matches: bool,
 }
 
 impl Config {
@@ -235,6 +244,7 @@ impl Config {
             caller: Caller::Launcher,
             far_end: FarEnd::Daemon,
             budget: 2,
+            destination_matches: true,
         }
     }
 
@@ -289,6 +299,8 @@ pub struct Daemon {
     pub established: bool,
     /// The daemon connected to the guest port.
     pub dialed: bool,
+    /// The first authenticated transport message confirmed this session.
+    pub confirmed: bool,
     /// The daemon closed the tunnel with 4403.
     pub refused: bool,
     /// Whether the caller's handshake offered the end of stream.
@@ -436,6 +448,17 @@ impl TunnelModel {
                     client.phase = ClientPhase::Relaying;
                     client.session = Some(session);
                     client.far_offered = offer && variant.client_offers();
+                    let seq = client.next_out;
+                    client.next_out += 1;
+                    queue(
+                        next,
+                        Dir::ToFar,
+                        Frame::Sealed {
+                            session,
+                            seq,
+                            body: Body::Confirm,
+                        },
+                    );
                 } else {
                     client.phase = ClientPhase::Done(End::Failed);
                 }
@@ -456,6 +479,7 @@ impl TunnelModel {
                         client.phase = ClientPhase::Done(End::Closed);
                     }
                     Body::End => {}
+                    Body::Confirm => client.phase = ClientPhase::Done(End::Failed),
                 }
             }
             (ClientPhase::Hello | ClientPhase::Relaying, Some(Frame::Close(code))) => {
@@ -480,7 +504,9 @@ impl TunnelModel {
         let variant = self.cfg.variant;
         // AGENTD-20: a caller that offered the end of stream and ended without it may have been
         // cut short, so the guest gets a reset.
-        next.daemon.guest = if next.daemon.caller_offered
+        next.daemon.guest = if !next.daemon.dialed {
+            GuestRead::Open
+        } else if next.daemon.caller_offered
             && variant.daemon_offers()
             && variant != Variant::CloseEndsGuest
         {
@@ -526,11 +552,12 @@ impl TunnelModel {
                 if variant == Variant::DialBeforeHandshake {
                     next.daemon.dialed = true;
                 }
-                if Daemon::accepts(from, to, variant) {
+                if Daemon::accepts(from, to, variant)
+                    && (self.cfg.destination_matches || variant == Variant::NoDestinationContext)
+                {
                     next.daemon.established = true;
                     next.daemon.caller_offered = offer && variant.daemon_offers();
-                    // AGENTD-18: the dial comes after the handshake decided.
-                    next.daemon.dialed = true;
+                    next.daemon.dialed = variant == Variant::DialBeforeConfirmation;
                     queue(
                         next,
                         Dir::ToClient,
@@ -556,7 +583,17 @@ impl TunnelModel {
                     return;
                 }
                 next.daemon.next_in = seq + 1;
+                if !next.daemon.confirmed {
+                    if body != Body::Confirm {
+                        self.caller_vanished(next);
+                        return;
+                    }
+                    next.daemon.confirmed = true;
+                    next.daemon.dialed = true;
+                    return;
+                }
                 match body {
+                    Body::Confirm => self.caller_vanished(next),
                     Body::Byte(byte) => next.daemon.guest_received.push(byte),
                     Body::End => {
                         next.daemon.guest = GuestRead::Eof;
@@ -600,6 +637,7 @@ impl Model for TunnelModel {
             daemon: Daemon {
                 established: false,
                 dialed: false,
+                confirmed: false,
                 refused: false,
                 caller_offered: false,
                 done: false,
@@ -843,6 +881,14 @@ impl Model for TunnelModel {
 
     fn properties(&self) -> Vec<Property<Self>> {
         vec![
+            Property::<Self>::always(
+                "AGENTD-18 the guest opens only after session confirmation",
+                |_, s| !s.daemon.dialed || s.daemon.confirmed,
+            ),
+            Property::<Self>::always(
+                "AGENTD-18 the guest opens only for the agreed destination",
+                |m, s| !s.daemon.dialed || m.cfg.destination_matches,
+            ),
             // ── the handshake and its pins ──────────────────────────────────────
             Property::<Self>::always(
                 "AGENTD-17 the daemon completes a handshake only with the launching host's key",
@@ -1019,6 +1065,38 @@ mod tests {
         );
     }
 
+    /// AGENTD-18: the responder's reply alone leaves the guest unopened.
+    #[test]
+    fn the_guest_waits_for_the_sessions_authenticated_confirmation() {
+        let cfg = Config::path_attacker(Variant::Specified);
+        let replied = run(cfg, &HANDSHAKE);
+        assert!(replied.daemon.established);
+        assert!(!replied.daemon.dialed);
+        let mut steps = HANDSHAKE.to_vec();
+        steps.push(Action::Deliver(Dir::ToFar));
+        let confirmed = run(cfg, &steps);
+        assert!(confirmed.daemon.confirmed && confirmed.daemon.dialed);
+        attack(
+            Config::path_attacker(Variant::DialBeforeConfirmation),
+            "AGENTD-18 the guest opens only after session confirmation",
+        );
+    }
+
+    /// AGENTD-18: a different destination cannot complete the handshake.
+    #[test]
+    fn the_tunnel_requires_the_same_destination_on_both_sides() {
+        let mut cfg = Config::path_attacker(Variant::Specified);
+        cfg.destination_matches = false;
+        assert_safe(cfg);
+        let refused = run(cfg, &HANDSHAKE);
+        assert!(refused.daemon.refused && !refused.daemon.dialed);
+        cfg.variant = Variant::NoDestinationContext;
+        attack(
+            cfg,
+            "AGENTD-18 the guest opens only for the agreed destination",
+        );
+    }
+
     /// **A caller holding the agent token but not the host key never completes a handshake**
     /// (AGENTD-17, AGENTD-18): the daemon refuses it with 4403 and never dials the guest.
     #[test]
@@ -1170,6 +1248,7 @@ mod tests {
         let cfg = Config::path_attacker(Variant::OlderDaemon);
         assert_safe(cfg);
         let mut steps = HANDSHAKE.to_vec();
+        steps.push(Action::Deliver(Dir::ToFar));
         for _ in 0..GUEST_BYTES {
             steps.extend([Action::GuestSend, Action::Deliver(Dir::ToClient)]);
         }
@@ -1184,6 +1263,7 @@ mod tests {
     #[test]
     fn an_older_client_still_reads_a_cut_stream_as_finished() {
         let mut steps = HANDSHAKE.to_vec();
+        steps.push(Action::Deliver(Dir::ToFar));
         steps.extend([
             Action::GuestSend,
             Action::Deliver(Dir::ToClient),

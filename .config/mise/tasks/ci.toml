@@ -61,6 +61,7 @@ description = "CI's `rust` job on macOS and Windows: clippy and the tests of the
 # These legs install mise's Rust alone (`.github/actions/mise`'s `install_args`), since nothing
 # here runs another tool.
 run = [
+  { task = "parity:fixtures" },
   "cargo clippy -p microvms-protocol -p microvms-domain -p microvms-app -p microvms-edges -p microvms-core -p microvms-cli -p agentd-model --all-targets -- -D warnings",
   "cargo test -p microvms-protocol -p microvms-domain -p microvms-app -p microvms-edges -p microvms-core -p microvms-cli -p agentd-model",
 ]
