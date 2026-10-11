@@ -39,3 +39,21 @@ run = ["cargo", "test", "-p", "model-conformance", "--test", "tunnel_end_of_stre
 expect = "test-failed"
 suite = "rust"
 transform = { file = "crates/microvms-edges/src/session/tunnel.rs", replace = "let mut verified = read_reply(initiator, &reply, &mut scratch, guest_port)?;", with = "let mut verified = read_reply(initiator, &reply, &mut scratch, guest_port)?;\n                if guest_port > 0 { return Ok(Initiated::Transport(verified)); }" }
+
+[[fault]]
+id = "parity-tunnel-refusal-reset"
+guard = "core_answers_the_shared_case_corpus"
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]]
+expect = "test-failed"
+suite = "rust"
+message = "tunnel/different-port: core answered"
+transform = { file = "crates/microvms-edges/src/session/serve.rs", replace = "stream.set_zero_linger().map_err(|error| {", with = "Ok::<(), std::io::Error>(()).map_err(|error| {" }
+
+[[fault]]
+id = "parity-tunnel-clean-end"
+guard = "core_answers_the_shared_case_corpus"
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]]
+expect = "test-failed"
+suite = "rust"
+message = "tunnel/server-first: core answered"
+transform = { file = "crates/microvms-edges/src/session/serve.rs", replace = "                if target.identity.is_some()\n                    && matches!(\n                        result,\n                        Err(_) | Ok(TunnelEnd::Truncated { .. } | TunnelEnd::Refused { .. })\n                    )\n", with = "                if target.identity.is_some()\n" }

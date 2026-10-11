@@ -503,11 +503,16 @@ def tunnel(case: Case, _servers: Callable[..., SseServer]) -> dict[str, Any]:
                 )
                 _, port = handle.local_address.rsplit(":", 1)
                 received = bytearray()
+                reset = False
                 with socket.create_connection(
                     ("127.0.0.1", int(port)), timeout=15
                 ) as client:
-                    while chunk := client.recv(4096):
-                        received.extend(chunk)
+                    # A refusal resets the local socket; the shared case judges that verdict.
+                    try:
+                        while chunk := client.recv(4096):
+                            received.extend(chunk)
+                    except ConnectionResetError:
+                        reset = True
                 report = handle.stop(timeout=15)
                 final = json.loads(
                     reader.submit(peer.stdout.readline).result(timeout=15)
@@ -517,6 +522,7 @@ def tunnel(case: Case, _servers: Callable[..., SseServer]) -> dict[str, Any]:
                     "received": received.decode(),
                     "refused": report.refused,
                     "confirmed": final["confirmed"],
+                    "reset": reset,
                 }
             finally:
                 if peer.poll() is None:

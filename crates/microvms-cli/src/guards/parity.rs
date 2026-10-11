@@ -103,18 +103,25 @@ async fn parity_tunnel(case: &parity_corpus::Case) -> serde_json::Value {
             }
         };
         let mut bytes = Vec::new();
-        client.read_to_end(&mut bytes).await.unwrap();
-        bytes
+        // Report the TCP verdict alongside the bytes, including a refused verified tunnel.
+        let reset = match client.read_to_end(&mut bytes).await {
+            Ok(_) => false,
+            Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => true,
+            Err(error) => panic!("the tunnel read failed: {error}"),
+        };
+        (bytes, reset)
     };
-    let ((result, _), bytes) = tokio::time::timeout(std::time::Duration::from_secs(20), async {
-        tokio::join!(dispatch_with(&seam, &command, full_infra()), read)
-    })
-    .await
-    .expect("the CLI tunnel completes");
+    let ((result, _), (bytes, reset)) =
+        tokio::time::timeout(std::time::Duration::from_secs(20), async {
+            tokio::join!(dispatch_with(&seam, &command, full_infra()), read)
+        })
+        .await
+        .expect("the CLI tunnel completes");
     let rendered = result.expect("the CLI reports the completed connection");
     let verdict = peer.finish();
     serde_json::json!({"received": String::from_utf8(bytes).unwrap(),
-        "refused": rendered.data["connectionsRefused"], "confirmed": verdict["confirmed"]})
+        "refused": rendered.data["connectionsRefused"], "confirmed": verdict["confirmed"],
+        "reset": reset})
 }
 
 /// A failure's facets, the way the envelope and the exit code state them.

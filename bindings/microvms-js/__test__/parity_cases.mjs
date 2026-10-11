@@ -509,18 +509,21 @@ async function tunnel(testCase) {
       new TunnelIdentity(ready.host_seed, ready.vm_public_key),
     );
     const port = Number(handle.localAddress.split(':').at(-1));
-    const received = await bounded(new Promise((resolve, reject) => {
+    const { received, reset } = await bounded(new Promise((resolve, reject) => {
       const socket = connect({ host: '127.0.0.1', port });
       const chunks = [];
       socket.setTimeout(15_000, () => socket.destroy(new Error('the tunnel did not close')));
       socket.on('data', (chunk) => chunks.push(chunk));
-      socket.on('end', () => resolve(Buffer.concat(chunks).toString()));
-      socket.on('error', reject);
+      socket.on('end', () => resolve({ received: Buffer.concat(chunks).toString(), reset: false }));
+      // Refused verified tunnels reset; other socket errors still fail the case.
+      socket.on('error', (error) => error.code === 'ECONNRESET'
+        ? resolve({ received: Buffer.concat(chunks).toString(), reset: true })
+        : reject(error));
     }));
     const report = await handle.stop(15);
     const final = await nextJson();
     assert.equal(await bounded(exited), 0, 'the tunnel peer failed');
-    return { received, refused: report.refused, confirmed: final.confirmed };
+    return { received, refused: report.refused, confirmed: final.confirmed, reset };
   } finally {
     if (peer.exitCode === null) peer.kill('SIGKILL');
     await bounded(exited);

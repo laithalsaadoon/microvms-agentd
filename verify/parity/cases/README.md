@@ -75,7 +75,9 @@ Test and binding tasks build it. Run that task first to test one case directly.
 The peer takes its version, port, and ready message from the case file.
 It fixes its route at `/v1/tcp` and uses the Noise KK pattern.
 Each runner opens its own verified tunnel and reads the peer's data. It checks
-the tunnel report and the peer's verdict against the same `expect`.
+the tunnel report, the peer's verdict, and the local TCP reset against the same
+`expect`. Refused verified connections must reset; a complete stream must end
+without a reset.
 
 ## The areas
 

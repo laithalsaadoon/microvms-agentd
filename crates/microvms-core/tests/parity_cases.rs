@@ -106,17 +106,22 @@ async fn tunnel(case: &Case) -> Value {
         .await
         .unwrap();
     let mut bytes = Vec::new();
-    tokio::time::timeout(
+    // A refused verified tunnel resets the local socket; preserve that verdict in the case.
+    let reset = match tokio::time::timeout(
         std::time::Duration::from_secs(20),
         client.read_to_end(&mut bytes),
     )
     .await
     .expect("tunnel completes")
-    .unwrap();
+    {
+        Ok(_) => false,
+        Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => true,
+        Err(error) => panic!("the tunnel read failed: {error}"),
+    };
     let report = serving.finished().await.unwrap();
     let verdict = peer.finish();
     json!({"received": String::from_utf8(bytes).unwrap(), "refused": report.report.refused,
-        "confirmed": verdict["confirmed"]})
+        "confirmed": verdict["confirmed"], "reset": reset})
 }
 
 /// The facets every runner reports for a failure.

@@ -7,5 +7,5 @@
     "confirmation": "microvms-tunnel-ready",
     "greeting": "guest-ready"
   },
-  "expect": { "received": "guest-ready", "refused": 0, "confirmed": true }
+  "expect": { "received": "guest-ready", "refused": 0, "confirmed": true, "reset": false }
 }
