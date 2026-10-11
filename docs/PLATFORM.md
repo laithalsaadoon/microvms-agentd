@@ -3,6 +3,8 @@
 A compact record of runtime observations. Unless stated otherwise, measurements
 used us-east-1, MicroVM API `2025-09-09`, and an ARM64 `al2023-minimal` guest.
 Dates apply to observations, not guarantees about current service behavior.
+Use [Protocol](PROTOCOL.md) for the current daemon contract and the installed
+`microvm manifest` for the CLI surface.
 Original experiments and full narratives remain in git history.
 
 For current operation shapes, see the [AWS MicroVM documentation](https://docs.aws.amazon.com/lambda/latest/microvm-api/Welcome.html).

@@ -63,6 +63,9 @@ client token when retrying the same creation request. After updates, inspect
 configuration update. Delete an unused connector explicitly with
 `delete_network_connector(Identifier=arn)` and confirm completion.
 
+The client accepts an existing connector; creating it does not attach it to
+a VM or transfer ownership of its cleanup.
+
 ## Attach it at launch
 
 ```bash

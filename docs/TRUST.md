@@ -4,6 +4,8 @@
 workloads. It does not isolate itself from a root workload. This document
 states the guarantees, deployment assumptions, and limits. [Protocol](PROTOCOL.md)
 defines the wire behavior; [Platform](PLATFORM.md) records dated AWS evidence.
+For deployment choices and task execution, use [Embedding](EMBEDDING.md) and
+[Networking](NETWORKING.md) alongside this contract.
 
 ## The threat model
 

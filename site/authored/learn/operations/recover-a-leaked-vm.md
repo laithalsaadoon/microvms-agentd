@@ -9,11 +9,13 @@ sidebar:
 ```bash
 microvm ls                                  # what this CLI created and could not confirm it deleted
 microvm history <microvm-id-or-name>        # what was asked of one VM and what the platform reported
-microvm terminate <microvm-id> --wait       # stop paying
+microvm terminate <microvm-id> --wait       # wait for VM termination
 mise run live:verify-clean                  # ask the account, independently of the code that cleaned up
 ```
 
-Teardown reporting success and the account being clean are different questions. At the end of this page you will know what the ledger says you left behind, how to release it, and how to confirm the account is clean without trusting any message that says so.
+After an interrupted run, inspect the local ledger, compare it with AWS, and
+use `terminate` for resources that should no longer exist. Keep cleanup reports until
+you have confirmed the intended resources are gone.
 
 ## 1. Ask the ledger
 
@@ -55,9 +57,12 @@ mise run live:verify-clean
 ./tools/verify-clean.py --delete
 ```
 
-`live:verify-clean` queries the account directly and is independent of the code that did the cleanup: `terraform destroy` once reported nine resources destroyed while six service-created log groups survived, because Terraform never owned them. It classifies the remaining resources. A **leak** is something still costing money that nothing intends to keep: a live MicroVM, an image, a log group. **Standing** is the Terraform stack, which you may keep applied on purpose. **Pending** is a deletion still in flight, where the right response is to re-run in a minute. Exit 0 when nothing leaked, 1 otherwise. `--delete` removes the leaks and leaves the stack to `terraform destroy`, and expect to run it more than once, because an image refuses deletion while its VM is still terminating.
+`live:verify-clean` queries the account directly and is independent of the
+code that did the cleanup. Service-created log groups can remain after
+Terraform destroys the resources it owns. It classifies the remaining resources. A **leak** is something still costing money that nothing intends to keep: a live MicroVM, an image, a log group. **Standing** is the Terraform stack, which you may keep applied on purpose. **Pending** is a deletion still in flight, where the right response is to re-run in a minute. Exit 0 when nothing leaked, 1 otherwise. `--delete` removes the leaks and leaves the stack to `terraform destroy`, and expect to run it more than once, because an image refuses deletion while its VM is still terminating.
 
-It only recognizes resources under this project's own name prefixes, so anything else in the account is untouched. It needs the repository (`tools/verify-clean.py` runs under `uv`) and credentials for the account. [Run the live suite](/learn/operations/run-the-live-suite/) puts it at the end of every billable run.
+Its scope is the resource prefixes selected by the script; inspect that scope
+before using `--delete`. It is not an inventory of every resource in the account. It needs the repository (`tools/verify-clean.py` runs under `uv`) and credentials for the account. [Run the live suite](/learn/operations/run-the-live-suite/) puts it at the end of every billable run.
 
 ## 5. Trace an incomplete cleanup
 

@@ -12,7 +12,9 @@ microvm --json run --exec "make test"     # one envelope on stdout, progress on 
 microvm --dense ls                        # tab-separated, token-lean
 ```
 
-Every command is built to be driven by something that is not a person at a terminal. At the end of this page you will parse every command the same way, branch on stable codes, discover the surface without parsing help text, and know the one place stdout carries more than one object.
+Use `--json` to read results in a script and `microvm manifest` to learn what
+the installed `microvm` can do. Check the error code and cleanup report before
+starting more work. For a stream, read each event and then the final result.
 
 ## 1. One envelope on stdout
 
@@ -48,7 +50,24 @@ Branch on `code`, never on `error`. `data` carries partial results on the failur
 
 ## 2. The exit codes
 
-`exitCode` in the envelope matches `$?`, and the table is append-only because consumers branch on it. Rows are split by what the caller should do next. `ERR_RETRYABLE` (3) means run the identical command again; `ERR_CREDENTIALS` (4) means fix an identity, and waiting will not help. `ERR_TIMEOUT` (10) means a client-side deadline elapsed and the VM and the exec are untouched, so a poll is safe. `ERR_EXEC_FAILED` (13) means the sandbox worked and your command exited non-zero, which is the one non-zero exit that says nothing is wrong with the platform, the credentials, or the CLI; a CI caller needs to tell "your tests failed" from "we never got a VM". `ERR_PRECONDITION` (12) means run `microvm doctor`. `ERR_NAME_TAKEN` (14), `ERR_CONFIG` (15), and `ERR_SYNC` (16) are refused locally with no AWS call made. `ERR_UNEXPECTED` (1) is a bug in this CLI and never the platform. clap's own usage errors exit 2, which is `ERR_INVALID_ARG`, so a caller reading `$?` sees the same number either way. [Exit codes](/reference/exit-codes/) has every row with its `finding`.
+`exitCode` in the envelope matches the process exit status. Branch on the
+stable code and use its details to decide what to do next.
+[Exit codes](/reference/exit-codes/) lists the full table.
+
+| Code | Next step |
+|---|---|
+| `ERR_RETRYABLE` (3) | Reconcile any accepted launch or execution, then retry the same operation when safe. |
+| `ERR_CREDENTIALS` (4) | Check the identity and credentials named in the error. Waiting does not fix them. |
+| `ERR_TIMEOUT` (10) | Inspect the operation and its cleanup report. A caller deadline alone does not cancel guest work; a surrounding workflow may still request teardown. |
+| `ERR_PRECONDITION` (12) | Read the missing prerequisite and run `microvm doctor` when relevant. |
+| `ERR_EXEC_FAILED` (13) | Inspect the guest command's outcome and output. |
+| `ERR_NAME_TAKEN` (14) | Choose another local name or resolve the VM already using it. |
+| `ERR_CONFIG` (15) | Correct the project file or select another config. |
+| `ERR_SYNC` (16) | Check local input or output files. This can occur after a VM ran, when collecting artifacts. |
+| `ERR_UNEXPECTED` (1) | Preserve the error details for a bug report. |
+
+Argument-parse failures exit with `ERR_INVALID_ARG` (2). A failure's code
+classifies the error; it does not prove that no remote action took place.
 
 A reader that closes early never changes the exit code. `microvm manifest | head -c 100` exits 0, and a `run` whose output nobody reads still tears its VM down and exits with its own outcome, so a closed pipe can never look like a failure that invites a second launch. The CLI never panics or dies by `SIGPIPE` on a closed stdout or stderr. The one exception is `exec --stream`: when its stdout reader leaves, streaming stops at the next event, the exec keeps running in the VM, stderr names the exec id and the `--exec-id … --from-offset` command that reattaches, and the exit is `ERR_INTERRUPTED` (11).
 
@@ -70,7 +89,10 @@ The agent layer's commands follow the same rules: `agent-up --json` is one `micr
 {"status":"ok","apiVersion":"1","type":"microvm.exec.stream","data":{"execId":"x-1","events":2,"bytes":12,"nextOffset":12,"gaps":0,"exitCode":0,"truncated":false}}
 ```
 
-Each of the following keeps the two contracts distinguishable. The discriminant differs: a streamed exec's final envelope has `type` `microvm.exec.stream`, so a consumer learns which parse applies from the field it already reads first. The manifest publishes it, as `exec`'s `alternateResponse` with `when: "--stream"`. And the envelope is written compact once a stream has started, because "the last line is the envelope" is only true if the envelope is one line.
+A stream's final result has `type: "microvm.exec.stream"`. The manifest lists
+this as `exec`'s `alternateResponse` with `when: "--stream"`. Read each event
+as one line of JSON, then read the final envelope as the last line. The stream
+keeps that envelope on one line too.
 
 Event kinds are `output` (with `stream`, `offset`, `bytes`, `text`, `lossy`), `gap` (with `from` and `to`, the only report of lost bytes), and `exit`. The envelope's keys summarize the stream rather than repeating it: `events` and `bytes` let a caller assert it read everything, and `nextOffset` is where `--from-offset` would resume. A stream cut before its exit event reports `exitCode: null` rather than `0`, because zero would turn a truncated stream into a passing build, and the command exits `ERR_EXEC_FAILED`. A stream that fails part-way through gets the failure envelope as its compact last line. The stream chunks are the command's output, so they cannot go to stderr; `microvm exec --stream build.sh > log` has to write the log.
 
@@ -80,7 +102,9 @@ Event kinds are `output` (with `stream`, `offset`, `bytes`, `text`, `lossy`), `g
 
 ## 6. Retries and idempotency
 
-Pass your own `--exec-id` on an `exec` you may have to retry: a start carrying a known id returns the original exec without spawning a second child, so a caller whose process died between sending the start and reading the answer sends the identical start again. `ERR_RETRYABLE` means exactly that, run the identical command again. `build --reuse` makes a repeated build idempotent through a content-hash image name, and `run` defaults to a per-invocation image name because reusing one is how a `clientToken` replay wedges an image. A `--vm-name` is local state, refused with `ERR_NAME_TAKEN` before any call if a live VM holds it.
+Pass your own `--exec-id` on an `exec` you may have to retry: a start carrying a known id returns the original exec without spawning a second child, so a caller whose process died between sending the start and reading the answer sends the identical start again. A retryable error does not make a whole CLI invocation idempotent: a new
+`run` can request a new VM. Preserve resource identifiers and reconcile the
+original operation before deciding to start again. `build --reuse` makes a repeated build idempotent through a content-hash image name, and `run` defaults to a per-invocation image name because reusing one is how a `clientToken` replay wedges an image. A `--vm-name` is local state, refused with `ERR_NAME_TAKEN` before any call if a live VM holds it.
 
 ## 7. Extracting a field without jq
 

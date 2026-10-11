@@ -13,7 +13,9 @@ docker buildx build --platform linux/arm64 -t guest-check -f guest.Dockerfile .
 microvm build --reuse --name my-task-image --dockerfile guest.Dockerfile
 ```
 
-A server-side build cycle is roughly three minutes plus, on some failures, an image name you cannot reuse. Each item below cost a real cycle to find. At the end of this page you will have a Dockerfile that builds locally under arm64 and passes every check the client runs before it makes a billable call.
+Prepare and check the image locally before starting a billable AWS build.
+These steps catch common Dockerfile and architecture mistakes. A successful
+local build still needs verification against the service.
 
 ## 1. Start from the generated stanza
 
@@ -79,7 +81,8 @@ The artifact `microvm build` uploads carries exactly the Dockerfile and the `age
 
 ## 7. The daemon's knobs
 
-Every `AGENTD_*` variable is read at startup, and an unset or unparseable value keeps the default rather than refusing to boot, because a daemon that will not start strands the VM with no way in. Set them as `ENV` lines. The stanza already sets `AGENTD_PORT` and `AGENTD_LOG`; the others bound request bodies, captured output, stream replay, stdin writes, the disk reserve, and the identity repair that gives each VM restored from one snapshot its own machine-id, hostname, and boot_id. The table with defaults is in [Embedding](/internals/embedding/).
+Every `AGENTD_*` variable is read at startup, and an unset or unparseable value keeps the default rather than refusing to boot, because a daemon that will not start strands the VM with no way in. Set them as `ENV` lines. The stanza already sets `AGENTD_PORT` and `AGENTD_LOG`; the others bound request bodies, captured output, stream replay, stdin writes, the disk reserve, and the identity repair that gives each VM restored from one snapshot its own machine-id, hostname, and boot_id. The daemon configuration is defined in `crates/agentd/src/config.rs`;
+[Protocol](/internals/protocol/) documents the request limits and hook behavior.
 
 ## 8. Run code on suspend and resume
 

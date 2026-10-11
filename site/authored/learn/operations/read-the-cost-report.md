@@ -12,7 +12,9 @@ microvm cost --estimate --compare --memory 2048 --hold-sec 28800 --cycles 4
 microvm cost --estimate --memory 2048 --running-sec 3600 --max-cost 1.50 --on-breach abort
 ```
 
-Every `run` reports a cost estimate, and `microvm cost` produces the same report over durations you supply. At the end of this page you will know what each figure is built from, what it means when a total says "at least", and how to put a budget on a run before it launches.
+Use `microvm cost` to estimate a workload before launching it. Read the price
+sources and unpriced items before using the total as a budget. A partial
+total is a lower bound on the cost.
 
 ## 1. Check the rate sources
 
@@ -22,15 +24,26 @@ Anything the engine cannot price is reported as unpriced with a reason, and an u
 
 ## 2. What bills
 
-Compute bills per second while the VM is `RUNNING`, as separate vCPU and memory line items. The baseline you request with `--memory` is the floor you pay for every running second, the VM is provisioned at four times it from the start, and usage above the baseline bills by what is consumed. Idle time while `RUNNING` bills at baseline, so suspension is the only way to stop paying.
+A VM in `RUNNING` bills for vCPU and memory each second. The baseline set by
+`--memory` is the floor you pay for, even when the VM is idle. The guest has
+four times that capacity from launch. Usage above the baseline adds a charge
+for what it consumes. Suspend the VM or call `terminate` when it can stop.
 
-Snapshots bill three ways. Image storage bills per GB-hour with a one-week minimum retention, so a 2 GB image deleted sixty seconds after creation still bills about a week of storage. A suspended VM pays snapshot storage only, about $0.16 a month for a 2 GB VM against roughly $100 a month left running at baseline. Each suspend/resume cycle pays a snapshot write plus a read, about $0.011 for a 2 GB VM, so the thing to avoid is cycling constantly; a long suspension is cheap.
+Snapshots bill three ways. Image storage bills per GB-hour with a one-week minimum retention, so a 2 GB image deleted sixty seconds after creation still bills about a week of storage. A suspended VM incurs snapshot storage charges. Each suspend/resume cycle
+adds a snapshot write and read; use the calculator with the intended region,
+size, duration, and cycle count to compare alternatives.
 
 Rates vary by region. `us-east-2` and `us-west-2` match `us-east-1` on every line; `eu-west-1` and `ap-northeast-1` are higher, most of all on the snapshot dimensions, so a design that leans on a suspended pool should price in its own region. Data transfer bills at standard AWS rates and is not on the report. The measurements are in [Platform](/internals/platform/), under "What actually costs money".
 
 ## 3. A total may be a lower bound
 
-A total over any unpriced line is a different kind of total. It renders as `at least $X`, and under `--json` the budget verdict carries `basis: "lower-bound"` where a fully priced report carries `basis: "exact"`. A verdict from a lower bound says so in both directions: a breach detected from a floor has already been exceeded by an unknown margin, and an under-budget floor proves nothing, so the text says which lines are unpriced beside the figure.
+When any line lacks a price, the total reads `at least $X`. In `--json`, the
+budget result has `basis: "lower-bound"`. A report with all prices has
+`basis: "exact"`.
+
+If the floor exceeds your budget, the full cost does too. If the floor is
+within budget, the full cost may still exceed it. Read the unpriced lines
+beside the total before deciding to proceed.
 
 ## 4. Plan before you spend
 
