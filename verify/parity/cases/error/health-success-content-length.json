@@ -1,0 +1,19 @@
+{
+  "capability": "health",
+  "input": {
+    "response": {
+      "status": 200,
+      "headers": {
+        "Content-Length": "536870913"
+      }
+    }
+  },
+  "expect": {
+    "error": {
+      "code": "ERR_PROTOCOL",
+      "wire_kind": "TooLarge",
+      "retryable": false
+    },
+    "upstream_requests": 1
+  }
+}

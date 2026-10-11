@@ -268,7 +268,11 @@ pub fn resolve_record(
     Ok(record)
 }
 
-/// The state directory the CLI uses: `$MICROVM_STATE_DIR`, else `~/.microvm/runs`.
+/// The legacy pure state-directory calculation retained for source compatibility.
+///
+/// This helper does not resolve the operating system's home directory and can return a
+/// relative path. Production storage uses the fallible `microvms_edges::names::state_root`
+/// resolver, re-exported by `microvms_core::names`, instead.
 pub fn default_state_root(env: &dyn Fn(&str) -> Option<String>) -> PathBuf {
     if let Some(dir) = env("MICROVM_STATE_DIR") {
         return PathBuf::from(dir);

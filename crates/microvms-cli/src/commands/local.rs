@@ -18,7 +18,7 @@ use serde_json::{Map, Value, json};
 use crate::cli::{DockerfileArgs, EgressPostureArgs, HistoryArgs, LogsArgs, LsArgs, NamesArgs};
 use crate::commands::{Ctx, Rendered, response_type};
 use crate::exit::CliError;
-use crate::seam::state_dir;
+use crate::seam::try_state_dir;
 use crate::{history, ledger};
 
 /// What every `microvm.runs` envelope's `source` says, and the first line of its text.
@@ -53,7 +53,7 @@ pub async fn ls<O: std::io::Write, E: std::io::Write>(
     ctx: &mut Ctx<'_, O, E>,
     args: &LsArgs,
 ) -> Result<Rendered, CliError> {
-    let root = state_dir(args.state_dir.clone(), ctx.env);
+    let root = try_state_dir(args.state_dir.clone(), ctx.env)?;
     let mut runs = ledger::read_all(&root);
     let mut text = vec![ledger_header(&root)];
     let mut dense = Vec::new();
@@ -467,7 +467,7 @@ pub async fn watch<O: std::io::Write, E: std::io::Write>(
         .suggest("--max-refreshes takes 1 or more; omit it to watch until Ctrl-C"));
     }
 
-    let root = state_dir(args.state_dir.clone(), ctx.env);
+    let root = try_state_dir(args.state_dir.clone(), ctx.env)?;
     ctx.out.progress(WATCH_LEDGER_ONLY);
 
     let mut interrupt = interrupt;
@@ -562,7 +562,7 @@ pub fn history<O: std::io::Write, E: std::io::Write>(
     )
     .map(|(id, _)| id)
     .unwrap_or_else(|_| args.microvm_id.clone());
-    let root = state_dir(args.state_dir.clone(), ctx.env);
+    let root = try_state_dir(args.state_dir.clone(), ctx.env)?;
     let events = history::read_events(&root, &microvm_id);
 
     let mut data = Map::new();
@@ -634,7 +634,7 @@ pub fn names<O: std::io::Write, E: std::io::Write>(
     ctx: &mut Ctx<'_, O, E>,
     args: &NamesArgs,
 ) -> Result<Rendered, CliError> {
-    let registry = ledger::Names::new(&state_dir(args.state_dir.clone(), ctx.env));
+    let registry = ledger::Names::new(&try_state_dir(args.state_dir.clone(), ctx.env)?);
     for name in &args.delete {
         ledger::validate_name(name).map_err(microvms_core::Error::invalid_arg)?;
         if registry.lookup(name).is_none() {

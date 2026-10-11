@@ -40,7 +40,7 @@ use crate::commands::{Ctx, Rendered, response_type};
 use crate::exit::{CliError, Exit};
 use crate::history::{Event, History};
 use crate::ledger::{Ledger, NameRecord, Names};
-use crate::seam::{Attach, state_dir};
+use crate::seam::{Attach, try_state_dir};
 
 /// The specs the flags describe, in the order given, one row per agent.
 fn specs_from(args: &AgentUpArgs) -> Vec<AgentSpec> {
@@ -259,7 +259,7 @@ pub async fn up<O: std::io::Write, E: std::io::Write>(
         None => None,
     };
 
-    let root = state_dir(args.state_dir.clone(), ctx.env);
+    let root = try_state_dir(args.state_dir.clone(), ctx.env)?;
     let names = Names::new(&root);
     match names.lookup(&args.vm_name) {
         Some(record) => refresh(ctx, args, record, ttl, packed).await,
@@ -286,7 +286,7 @@ async fn refresh<O: std::io::Write, E: std::io::Write>(
         )
         .suggest(format!(
             "the record is {}",
-            Names::new(&state_dir(args.state_dir.clone(), ctx.env))
+            Names::new(&try_state_dir(args.state_dir.clone(), ctx.env)?)
                 .path_of(&args.vm_name)
                 .display()
         )));
@@ -300,7 +300,7 @@ async fn refresh<O: std::io::Write, E: std::io::Write>(
     // Core's name rule, as every `--name` command reads a record: the region is the record's,
     // and it picks the Bedrock mint below too, so the token and the VM agree. A disagreeing
     // flag is refused before the attach.
-    let names_dir = state_dir(args.state_dir.clone(), ctx.env).join("names");
+    let names_dir = try_state_dir(args.state_dir.clone(), ctx.env)?.join("names");
     let record = microvms_core::names::resolve_record(
         &args.vm_name,
         Some(record),
@@ -776,6 +776,7 @@ pub async fn prompt<O: std::io::Write, E: std::io::Write>(
     }
     let timeout = args.timeout;
     let options = prompt_options(args)?;
+    let root = try_state_dir(args.attach.state_dir.clone(), ctx.env)?;
     let (session, microvm_id) = super::attached::attach(ctx, &args.region, &args.attach).await?;
     let spec = choose_spec(&session, args.agent).await?;
     let actual_version = agents::installed_version(&session, spec.agent).await?;
@@ -790,10 +791,7 @@ pub async fn prompt<O: std::io::Write, E: std::io::Write>(
     ));
     let handle = agents::prompt(&session, &spec, &args.task, &options).await?;
     let exec_id = handle.exec_id().to_string();
-    let history = History::for_vm(
-        &state_dir(args.attach.state_dir.clone(), ctx.env),
-        &microvm_id,
-    );
+    let history = History::for_vm(&root, &microvm_id);
 
     let result = if args.detach {
         history.append(Event::Exec {

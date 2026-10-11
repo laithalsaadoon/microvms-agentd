@@ -185,18 +185,35 @@ where
         limits,
         stop,
         cut,
-        |stream, _| {
+        |mut stream, _| {
             let target = Arc::clone(&target);
             async move {
-                relay_connection_inner(
-                    stream,
+                let result = relay_connection_inner(
+                    &mut stream,
                     &target.endpoint,
                     target.guest_port,
                     &target.agent_token,
                     target.auth.as_ref(),
                     target.identity.as_ref(),
                 )
-                .await
+                .await;
+                // A verified stream only ends cleanly when its authenticated end arrives.
+                // Keep the socket until the verdict so a short stream reaches the local
+                // application as a reset, after any bytes already delivered.
+                if target.identity.is_some()
+                    && matches!(
+                        result,
+                        Err(_) | Ok(TunnelEnd::Truncated { .. } | TunnelEnd::Refused { .. })
+                    )
+                {
+                    stream.set_zero_linger().map_err(|error| {
+                        Error::new(
+                            ErrorKind::Unexpected,
+                            format!("could not reset the local tunnel connection: {error}"),
+                        )
+                    })?;
+                }
+                result
             }
         },
         |peer, end| {

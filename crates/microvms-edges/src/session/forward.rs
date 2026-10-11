@@ -298,6 +298,8 @@ impl ForwardClient {
     /// A pooled client for one tunnel.
     pub fn new() -> Result<Self, Error> {
         reqwest::Client::builder()
+            // Relay redirects to the local client without requesting their destination.
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map(|inner| Self { inner })
             .map_err(|err| {

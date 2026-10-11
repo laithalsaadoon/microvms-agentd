@@ -16,7 +16,7 @@ use microvms_core::testing::YieldingClock;
 
 use super::support::{
     DaemonScript, RefusingSeam, ScriptedSeam, ScriptedTransport, TempDir, against_daemon,
-    attach_flags, dispatch_with, full_infra, region_flags, sync_command,
+    attach_flags, dispatch_with, dispatch_with_env, full_infra, region_flags, sync_command,
 };
 use crate::cli::{BuildArgs, Cli, Command, CpArgs, HealthArgs, InfraFlags};
 use crate::exit::{CliError, Exit};
@@ -152,6 +152,28 @@ async fn parity_image_name(case: &parity_corpus::Case) -> serde_json::Value {
 
 /// The case's status answered to one attached command.
 async fn parity_daemon_status(case: &parity_corpus::Case) -> serde_json::Value {
+    if case.input.get("response").is_some() {
+        let upstream = parity_corpus::ForwardUpstream::for_case(case).await;
+        let script = DaemonScript::over_http(format!("http://{}", upstream.address));
+        let command = if case.capability == "stream" {
+            super::support::exec_command(|args| {
+                args.stream = true;
+            })
+        } else {
+            Command::Health(HealthArgs {
+                attach: attach_flags(),
+                region: region_flags(),
+            })
+        };
+        let mut answer = match against_daemon(&script, &command).await.0 {
+            Ok(_) => serde_json::json!({"ok":true}),
+            Err(failure) => parity_refusal(&failure),
+        };
+        // Starting an exec is specific to the CLI's stream entry point.
+        answer["upstream_requests"] =
+            serde_json::json!(upstream.request_count() - usize::from(case.capability == "stream"));
+        return answer;
+    }
     let status = u16::try_from(case.input_u64("status")).expect("a status");
     let body = case.input_str("body");
     let dir = TempDir::new("parity-status");
@@ -204,30 +226,38 @@ async fn parity_names(case: &parity_corpus::Case) -> serde_json::Value {
     );
     let state = TempDir::new("parity-names");
     let name = case.input_str("name");
-    let names = state.0.join("names");
-    std::fs::create_dir_all(&names).expect("the names directory");
-    std::fs::write(
-        names.join(format!("{name}.json")),
-        case.input_str("record_text"),
-    )
-    .expect("writes the record");
+    let home = case.input.get("home").and_then(serde_json::Value::as_str);
+    if home.is_none() {
+        let names = state.0.join("names");
+        std::fs::create_dir_all(&names).expect("the names directory");
+        std::fs::write(
+            names.join(format!("{name}.json")),
+            case.input_str("record_text"),
+        )
+        .expect("writes the record");
+    }
     let state_dir = state.0.to_string_lossy().to_string();
-    let argv = [
+    let mut argv = vec![
         "microvm",
         "exec",
         "--name",
         name,
         "--region",
         case.input_str("region"),
-        "--state-dir",
-        &state_dir,
-        "true",
     ];
+    if home.is_none() {
+        argv.extend(["--state-dir", &state_dir]);
+    }
+    argv.push("true");
     let command = Cli::try_parse_from(argv)
         .unwrap_or_else(|error| panic!("{}: {}", case.id, error.render()))
         .command;
     let seam = RefusingSeam::new();
-    match dispatch_with(&seam, &command, full_infra()).await.0 {
+    let result = match home {
+        Some(home) => dispatch_with_env(&seam, &command, full_infra(), ("HOME", home)).await,
+        None => dispatch_with(&seam, &command, full_infra()).await,
+    };
+    match result.0 {
         Ok(rendered) => panic!("{}: exec answered {:?}", case.id, rendered.data),
         Err(failure) => {
             let mut answer = parity_refusal(&failure);
@@ -239,7 +269,7 @@ async fn parity_names(case: &parity_corpus::Case) -> serde_json::Value {
 
 async fn parity_forward(case: &parity_corpus::Case) -> serde_json::Value {
     use super::support::ScriptedSessionSeam;
-    let upstream = parity_corpus::ForwardUpstream::start().await;
+    let upstream = parity_corpus::ForwardUpstream::for_case(case).await;
     let reserved = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("reserves local port");
@@ -262,11 +292,14 @@ async fn parity_forward(case: &parity_corpus::Case) -> serde_json::Value {
     let request = parity_corpus::forward_request(case, address.port());
     // The CLI binds its own socket; release the reservation immediately before dispatch.
     drop(reserved);
-    let (dispatched, status) = tokio::join!(
+    let (dispatched, response) = tokio::join!(
         dispatch_with(&seam, &command, full_infra()),
         parity_corpus::forward_exchange(address, &request),
     );
     let data = dispatched.0.expect("port-forward completes").data;
-    serde_json::json!({"status": status, "served": data["connectionsServed"],
-        "refused": data["connectionsRefused"], "upstream_requests": upstream.request_count()})
+    let mut answer = parity_corpus::forward_answer(&response, case);
+    answer["served"] = data["connectionsServed"].clone();
+    answer["refused"] = data["connectionsRefused"].clone();
+    answer["upstream_requests"] = serde_json::json!(upstream.request_count());
+    answer
 }

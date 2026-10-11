@@ -1,0 +1,17 @@
+{
+  "capability": "health",
+  "input": {
+    "response": {
+      "status": 400,
+      "body_bytes": 65537
+    }
+  },
+  "expect": {
+    "error": {
+      "code": "ERR_PROTOCOL",
+      "wire_kind": "TooLarge",
+      "retryable": false
+    },
+    "upstream_requests": 1
+  }
+}

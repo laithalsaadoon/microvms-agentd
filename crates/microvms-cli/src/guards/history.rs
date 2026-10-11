@@ -746,3 +746,41 @@ async fn a_terminate_with_wait_sec_waits_for_terminated_up_to_that_deadline() {
     );
     assert!(stderr.contains("did not reach TERMINATED"), "{stderr}");
 }
+
+/// Resolve a required history location before any remote operation starts.
+#[tokio::test]
+async fn an_unavailable_state_root_refuses_before_any_remote_operation() {
+    use super::support::{RefusingSeam, dispatch_with_env};
+    use clap::Parser as _;
+    for name in ["exec", "agent-prompt", "health", "suspend", "resume"] {
+        let mut argv = vec!["microvm", name, "--region", "us-east-1"];
+        if matches!(name, "suspend" | "resume") {
+            argv.push("mvm-1");
+        } else {
+            argv.extend([
+                "--microvm-id",
+                "mvm-1",
+                "--endpoint",
+                "https://mvm.example",
+                "--agent-token",
+                "test-token",
+            ]);
+            if matches!(name, "exec" | "agent-prompt") {
+                argv.push("true");
+            }
+        }
+        let command = crate::cli::Cli::try_parse_from(argv)
+            .expect("valid command")
+            .command;
+        let seam = RefusingSeam::new();
+        let (result, _) =
+            dispatch_with_env(&seam, &command, full_infra(), ("HOME", "relative-home")).await;
+        let error = result.expect_err("unavailable state root");
+        assert_eq!(error.code(), "ERR_PRECONDITION", "{name}: {error:?}");
+        assert!(
+            error.message.contains("absolute user home"),
+            "{name}: {error:?}"
+        );
+        assert!(seam.doors().is_empty(), "{name}: {:?}", seam.doors());
+    }
+}

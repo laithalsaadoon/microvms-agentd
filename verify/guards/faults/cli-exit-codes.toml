@@ -14,7 +14,7 @@ note = "crates/microvms-cli/tests/exit_codes.rs::a_streamed_exec_that_fails_befo
 [[family.fault]]
 id = "cli-exit-stream-stray-print"
 message = "stdout was not exactly one JSON document"
-transform = { file = "crates/microvms-cli/src/commands/attached.rs", replace = "    args: &ExecArgs,\n) -> Result<Rendered, CliError> {\n    let (session, microvm_id) = attach(ctx, &args.region, &args.attach).await?;\n", with = "    args: &ExecArgs,\n) -> Result<Rendered, CliError> {\n    println!(\"attaching\");\n    let (session, microvm_id) = attach(ctx, &args.region, &args.attach).await?;\n" }
+transform = { file = "crates/microvms-cli/src/commands/attached.rs", replace = "    args: &ExecArgs,\n) -> Result<Rendered, CliError> {\n", with = "    args: &ExecArgs,\n) -> Result<Rendered, CliError> {\n    println!(\"attaching\");\n" }
 
 [[family.fault]]
 id = "cli-exit-stream-mints-offline"

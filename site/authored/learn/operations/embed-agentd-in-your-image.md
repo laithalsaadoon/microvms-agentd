@@ -72,6 +72,17 @@ ARM64 ELF. The release path verifies the asset in the client.
 `provision_agentd_report()` in Python and `provisionAgentdReport()` in Node
 also return its source, verification result, path, and SHA-256.
 
+To manage the binary yourself, download and verify it by hand:
+
+```bash
+# Set the tag to the version of the client you installed.
+tag=vX.Y.Z
+gh release download "$tag" --repo laithalsaadoon/microvms-agentd --pattern agentd
+gh attestation verify agentd --repo laithalsaadoon/microvms-agentd \
+  --cert-identity "https://github.com/laithalsaadoon/microvms-agentd/.github/workflows/release.yml@refs/tags/$tag"
+chmod +x agentd
+```
+
 Pass the file to `build` or `run`, or set `MICROVM_AGENTD`.
 `microvm doctor --binary ./agentd` checks its format before a build.
 [Harness capabilities](/internals/harness-capabilities/) maps the current APIs

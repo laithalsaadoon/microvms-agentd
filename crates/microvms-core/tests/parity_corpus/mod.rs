@@ -602,8 +602,8 @@ pub fn forward_request(case: &Case, port: u16) -> String {
     request
 }
 
-/// A bounded raw request to a running forward, returning its HTTP status.
-pub async fn forward_exchange(address: std::net::SocketAddr, request: &str) -> u16 {
+/// A bounded raw request to a running forward, returning its response bytes.
+pub async fn forward_exchange(address: std::net::SocketAddr, request: &str) -> Vec<u8> {
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
         let mut socket = loop {
@@ -624,19 +624,79 @@ pub async fn forward_exchange(address: std::net::SocketAddr, request: &str) -> u
             .read_to_end(&mut response)
             .await
             .expect("reads the response");
-        std::str::from_utf8(&response)
-            .expect("an HTTP response")
-            .split_whitespace()
-            .nth(1)
-            .expect("a status")
-            .parse()
-            .expect("a numeric status")
+        response
     })
     .await
     .expect("the forward answers before the deadline")
 }
 
-/// A loopback upstream which records every request and returns an ordinary successful response.
+/// The observable HTTP response, including fields a redirect must preserve.
+pub fn forward_answer(response: &[u8], case: &Case) -> Value {
+    let text = std::str::from_utf8(response).expect("an HTTP response");
+    let (head, body) = text.split_once("\r\n\r\n").expect("HTTP head and body");
+    let status: u16 = head
+        .split_whitespace()
+        .nth(1)
+        .expect("status")
+        .parse()
+        .expect("numeric status");
+    let mut answer = serde_json::json!({"status": status});
+    if case.expect.get("body").is_some() {
+        answer["body"] = Value::String(body.to_string());
+        answer["location"] = head
+            .lines()
+            .skip(1)
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("location")
+                    .then(|| Value::String(value.trim().to_string()))
+            })
+            .unwrap_or(Value::Null);
+    }
+    answer
+}
+
+/// The wire response a case supplies; no client policy is reproduced here.
+fn wire_response(spec: &Value) -> Vec<u8> {
+    let status = spec["status"].as_u64().expect("response status");
+    let body = spec
+        .get("body_bytes")
+        .and_then(Value::as_u64)
+        .map(|size| vec![b'x'; size as usize])
+        .unwrap_or_else(|| spec["body"].as_str().unwrap_or("").as_bytes().to_vec());
+    let mut head = format!("HTTP/1.1 {status} Fixture\r\nConnection: close\r\n");
+    let headers = spec.get("headers").and_then(Value::as_object);
+    if let Some(headers) = headers {
+        for (name, value) in headers {
+            head.push_str(&format!(
+                "{name}: {}\r\n",
+                value.as_str().expect("header string")
+            ));
+        }
+    }
+    let chunked = spec["chunked"].as_bool().unwrap_or(false);
+    if chunked {
+        head.push_str("Transfer-Encoding: chunked\r\n");
+    } else if !headers.is_some_and(|headers| {
+        headers
+            .keys()
+            .any(|name| name.eq_ignore_ascii_case("content-length"))
+    }) {
+        head.push_str(&format!("Content-Length: {}\r\n", body.len()));
+    }
+    head.push_str("\r\n");
+    let mut response = head.into_bytes();
+    if chunked {
+        response.extend_from_slice(format!("{:x}\r\n", body.len()).as_bytes());
+        response.extend_from_slice(&body);
+        response.extend_from_slice(b"\r\n0\r\n\r\n");
+    } else {
+        response.extend_from_slice(&body);
+    }
+    response
+}
+
+/// A loopback upstream which records every request and returns the case's wire response.
 /// Dropping it aborts its accept loop, including when a case fails before reaching upstream.
 pub struct ForwardUpstream {
     pub address: std::net::SocketAddr,
@@ -645,8 +705,15 @@ pub struct ForwardUpstream {
 }
 
 impl ForwardUpstream {
-    pub async fn start() -> Self {
+    pub async fn for_case(case: &Case) -> Self {
         use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        let spec = case
+            .input
+            .get("response")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({"status":200,"body":"parity"}));
+        let response = wire_response(&spec);
+        let streaming = case.capability == "stream";
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("binds upstream");
@@ -664,13 +731,32 @@ impl ForwardUpstream {
                     }
                     request.push(byte[0]);
                 }
-                seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let request = String::from_utf8_lossy(&request);
+                let length = request
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().expect("request length"))
+                    })
+                    .unwrap_or(0);
+                let mut body = vec![0; length];
                 socket
-                    .write_all(
-                        b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\nparity",
-                    )
+                    .read_exact(&mut body)
                     .await
-                    .expect("answers upstream");
+                    .expect("reads request body");
+                let index = seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let reply = if streaming && request.starts_with("POST ") {
+                    wire_response(
+                        &serde_json::json!({"status":200,"body": "{\"exec_id\":\"x-1\",\"phase\":\"running\"}"}),
+                    )
+                } else if index == 0 || (streaming && request.contains("/stream")) {
+                    response.clone()
+                } else {
+                    wire_response(&serde_json::json!({"status":400,"body":"follow-up response"}))
+                };
+                // A bounded client may close as soon as it sees the response headers.
+                let _ = socket.write_all(&reply).await;
             }
         });
         Self {

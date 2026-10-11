@@ -623,3 +623,15 @@ SIGTERM-ignoring survivors. Processes that change process group or session may
 escape this mechanism; external platform VM termination supplies the final cap.
 These changes have local Linux regression coverage; AWS evidence must be recorded
 separately for the image and deployment being used.
+
+## Client response handling
+
+The production client does not follow redirects from daemon requests. Local HTTP
+port forwarding returns the upstream redirect's status, headers, and body to its
+caller without requesting the redirect destination.
+
+Buffered responses are limited to 512 MiB for successful requests and 64 KiB for
+error responses. The limit applies to declared lengths and to bytes received
+without a length. Streaming successful responses keep their streaming behavior;
+error responses collected while opening a stream use the same 64 KiB limit and
+an idle timeout.

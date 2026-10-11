@@ -560,3 +560,54 @@ async fn bind_24_a_forged_frame_fails_the_tunnel_unwritten() {
     );
     assert!(error.contains("did not authenticate"), "{error}");
 }
+
+/// BIND-23: a current-protocol verified TCP consumer resets unless the daemon proves completion.
+#[tokio::test]
+async fn a_verified_tcp_consumer_observes_the_stream_verdict() {
+    use microvms_edges::session::serve::{ServeLimits, TunnelTarget, serve_tunnel};
+    for plays in [
+        Plays::Current,
+        Plays::HangUp,
+        Plays::CloseWithoutEnd(1000),
+        Plays::CloseWithoutEnd(4500),
+        Plays::Replays,
+        Plays::Forges,
+    ] {
+        let (daemon, _) = stand_in(plays).await;
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
+        let mut consumer = tokio::net::TcpStream::connect(listener.local_addr().expect("address"))
+            .await
+            .expect("connect");
+        let task = tokio::spawn(serve_tunnel(
+            listener,
+            TunnelTarget {
+                endpoint: format!("http://{daemon}"),
+                agent_token: TOKEN.into(),
+                auth: Some(auth()),
+                guest_port: 8080,
+                identity: Some(identity()),
+            },
+            ServeLimits {
+                max_connections: Some(1),
+            },
+            std::future::pending(),
+            |_| {},
+        ));
+        let mut bytes = Vec::new();
+        let read = tokio::time::timeout(BOUND, consumer.read_to_end(&mut bytes))
+            .await
+            .expect("bounded read");
+        let report = task.await.expect("serving task");
+        if matches!(plays, Plays::Current) {
+            assert!(read.is_ok(), "authenticated completion: {read:?}");
+            assert_eq!(bytes, ramp(TOTAL));
+            assert_eq!(report.served, 1);
+        } else {
+            assert_eq!(
+                read.expect_err("incomplete stream resets").kind(),
+                std::io::ErrorKind::ConnectionReset
+            );
+            assert!(report.truncated + report.refused > 0);
+        }
+    }
+}

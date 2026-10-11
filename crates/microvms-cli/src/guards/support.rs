@@ -174,10 +174,16 @@ pub(super) async fn dispatch_with_env(
     seam: &dyn CoreSeam,
     command: &Command,
     infra: Infra,
-    var: (&'static str, &'static str),
+    var: (&str, &str),
 ) -> (Result<Rendered, CliError>, String) {
     let mut out = Output::new(Format::Json, false, Vec::new(), Vec::new());
-    let env = move |name: &str| (name == var.0).then(|| var.1.to_string());
+    // The production resolver can consult the OS home; guard state stays in scratch.
+    let home = tempfile::tempdir().expect("guard home");
+    let env = |name: &str| match name {
+        name if name == var.0 => Some(var.1.to_string()),
+        "HOME" => Some(home.path().to_string_lossy().into_owned()),
+        _ => None,
+    };
     let result = {
         let mut ctx = Ctx {
             seam,
@@ -201,7 +207,8 @@ pub(super) async fn dispatch_with_fetch(
     fetch: &dyn crate::provision::Fetch,
 ) -> (Result<Rendered, CliError>, String) {
     let mut out = Output::new(Format::Json, false, Vec::new(), Vec::new());
-    let env = |_: &str| None;
+    let home = tempfile::tempdir().expect("guard home");
+    let env = |name: &str| (name == "HOME").then(|| home.path().to_string_lossy().into_owned());
     let result = {
         let mut ctx = Ctx {
             seam,
@@ -671,6 +678,7 @@ pub(super) fn script_prov_build(transport: &ScriptedTransport) {
 /// at the call site where a reader can see them, not inside the fake where they are invisible.
 pub(super) struct DaemonScript {
     endpoint: String,
+    use_http: bool,
     seen: Mutex<Vec<microvms_core::session::HttpRequest>>,
     pub(super) replies: Mutex<std::collections::VecDeque<(u16, Vec<u8>)>>,
     /// Chunk sequences for `open_stream`, front to back.
@@ -685,10 +693,17 @@ impl DaemonScript {
     pub(super) fn at_endpoint(endpoint: String) -> Arc<Self> {
         Arc::new(Self {
             endpoint,
+            use_http: false,
             seen: Mutex::new(Vec::new()),
             replies: Mutex::new(std::collections::VecDeque::new()),
             streams: Mutex::new(std::collections::VecDeque::new()),
         })
+    }
+
+    pub(super) fn over_http(endpoint: String) -> Arc<Self> {
+        let mut script = Self::at_endpoint(endpoint);
+        Arc::get_mut(&mut script).expect("unshared script").use_http = true;
+        script
     }
 
     /// Queues one non-streaming reply.
@@ -831,9 +846,13 @@ impl CoreSeam for ScriptedSessionSeam {
         // directly and is exactly right here: TRAP-9's mint is core's own tested property, and
         // adding a fake minter would put a second thing in the way of what this guard is asking.
         let backend = Arc::clone(&self.script) as Arc<dyn microvms_core::session::HttpBackend>;
-        let built = Session::builder(&self.script.endpoint, "agent-token")
-            .with_backend(backend)
-            .build();
+        let built = if self.script.use_http {
+            Session::direct(&self.script.endpoint, "agent-token")
+        } else {
+            Session::builder(&self.script.endpoint, "agent-token")
+                .with_backend(backend)
+                .build()
+        };
         Box::pin(async move { built })
     }
 }

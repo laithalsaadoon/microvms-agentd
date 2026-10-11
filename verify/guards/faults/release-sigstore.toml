@@ -16,4 +16,4 @@ guard = "provision::release::tests::a_body_over_its_limit_is_refused"
 run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "provision::release::tests::a_body_over_its_limit_is_refused"]
 expect = "test-failed"
 suite = "rust"
-transform = { file = "crates/microvms-edges/src/provision/release.rs", replace = "if self.bytes.len() + chunk.len() > self.limit {", with = "if self.bytes.len() > self.limit {" }
+transform = { file = "crates/microvms-edges/src/provision/release.rs", replace = "if chunk.len() > self.limit.saturating_sub(self.bytes.len()) {", with = "if self.bytes.len() > self.limit {" }

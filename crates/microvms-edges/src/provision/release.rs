@@ -20,15 +20,16 @@
 //!
 //! The policy refuses the bytes on [`Bundles::Absent`] and falls back to `SHA256SUMS` on
 //! [`Bundles::Unreachable`], so the line between them is where provenance can be stripped.
-//! Only a 404 is an answer; every other failure (a transport error, a 403 or 429 rate limit, a
-//! 5xx, a body that doesn't parse) is a failure to get one. The lookup is absent when the
+//! A 404 or a successful status is an answer, even if its body is incomplete, too large,
+//! or cannot be parsed. A transport failure before a status, a rate limit, or a server
+//! error is a failure to get an answer. The lookup is absent when the
 //! bundle asset is a 404 and the API has no bundle to give, or when the API itself says it
 //! has no attestation for the digest (a 404 or an empty list). It's unreachable only when
 //! neither answered.
 //!
-//! A bundle asset that downloads is the bundle, whatever it holds: one that doesn't parse is
-//! refused by the verifier rather than skipped for the API, because otherwise uploading junk
-//! in its place would do what deleting it no longer can. Measured 2026-09-26: v0.5.0 on,
+//! A bundle asset with a successful status is the answer. Collection and parsing failures
+//! are verification failures and do not select the checksum fallback. Measured 2026-09-26:
+//! v0.5.0 on,
 //! every release carries both the bundle asset and `SHA256SUMS`, and before that neither, so
 //! none of these refusals turns away a release the checksum would have passed.
 //!
@@ -114,12 +115,13 @@ impl GitHubRelease {
     fn lookup(&self, tag: &str, sha256: &str, get: &Get<'_>) -> Bundles {
         let asset_reason = match get(&asset_url(tag, BUNDLE_ASSET), None, SMALL_LIMIT) {
             Ok(body) => return Bundles::Published(vec![String::from_utf8_lossy(&body).into()]),
+            Err(failure) if failure.success() => return Bundles::Absent(failure.message),
             Err(failure) => failure,
         };
         let (api_absent, api_reason) = match self.api_bundles(sha256, get) {
             Ok(bundles) if !bundles.is_empty() => return Bundles::Published(bundles),
             Ok(_) => (true, "no attestation for the digest".to_string()),
-            Err(failure) => (failure.not_found(), failure.message),
+            Err(failure) => (failure.not_found() || failure.success(), failure.message),
         };
         let reason = format!(
             "the {BUNDLE_ASSET} asset: {}; the attestations API: {api_reason}",
@@ -133,8 +135,8 @@ impl GitHubRelease {
     }
 
     /// The bundles the attestations API lists inline for one digest. A list whose entries
-    /// carry no inline bundle is a failure rather than an empty answer: the attestations
-    /// exist, and this client can't read them.
+    /// carry no inline bundle is rejected: the attestations exist, and this client cannot
+    /// read them. The successful HTTP status still counts as an answer.
     fn api_bundles(&self, sha256: &str, get: &Get<'_>) -> Result<Vec<String>, HttpFailure> {
         let url = attestations_url(sha256);
         let body = get(&url, self.token.as_deref(), API_LIMIT).map_err(|failure| {
@@ -151,7 +153,7 @@ impl GitHubRelease {
             }
         })?;
         parse_attestations(&body).map_err(|message| HttpFailure {
-            status: None,
+            status: Some(200),
             message,
         })
     }
@@ -169,7 +171,12 @@ struct HttpFailure {
 }
 
 impl HttpFailure {
-    /// The server answered that the resource doesn't exist: the one failure that is an answer.
+    /// The server explicitly answered that the resource does not exist.
+    fn success(&self) -> bool {
+        self.status
+            .is_some_and(|status| (200..300).contains(&status))
+    }
+
     fn not_found(&self) -> bool {
         self.status == Some(404)
     }
@@ -346,12 +353,12 @@ async fn get(url: &str, token: Option<&str>, limit: usize) -> Result<Vec<u8>, Ht
         .send()
         .await
         .map_err(|error| failure(format!("GET {url}: {}", chain(&error))))?;
+    let status = response.status().as_u16();
     let mut body = Body::start(url, response.status(), response.content_length(), limit)?;
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|error| failure(format!("GET {url}: {}", chain(&error))))?
-    {
+    while let Some(chunk) = response.chunk().await.map_err(|error| HttpFailure {
+        status: Some(status),
+        message: format!("GET {url}: {}", chain(&error)),
+    })? {
         body.push(&chunk)?;
     }
     Ok(body.bytes)
@@ -362,6 +369,7 @@ async fn get(url: &str, token: Option<&str>, limit: usize) -> Result<Vec<u8>, Ht
 struct Body<'a> {
     url: &'a str,
     limit: usize,
+    status: u16,
     bytes: Vec<u8>,
 }
 
@@ -384,6 +392,7 @@ impl<'a> Body<'a> {
         let body = Self {
             url,
             limit,
+            status: status.as_u16(),
             bytes: Vec::new(),
         };
         if length.is_some_and(|length| length > limit as u64) {
@@ -395,7 +404,7 @@ impl<'a> Body<'a> {
     /// Appends `chunk`, refusing one that takes the body over the limit. A server can send
     /// more than it declared, or declare nothing.
     fn push(&mut self, chunk: &[u8]) -> Result<(), HttpFailure> {
-        if self.bytes.len() + chunk.len() > self.limit {
+        if chunk.len() > self.limit.saturating_sub(self.bytes.len()) {
             return Err(self.over_limit());
         }
         self.bytes.extend_from_slice(chunk);
@@ -404,7 +413,7 @@ impl<'a> Body<'a> {
 
     fn over_limit(&self) -> HttpFailure {
         HttpFailure {
-            status: None,
+            status: Some(self.status),
             message: format!("GET {}: the body is over {} bytes", self.url, self.limit),
         }
     }
@@ -912,7 +921,7 @@ mod tests {
             (Status(403), EmptyList, &absent),
             (Status(403), Status(429), &unreachable),
             (Transport, Status(502), &unreachable),
-            (Status(500), Junk, &unreachable),
+            (Status(500), Junk, &absent),
         ];
         for (asset, api, expected) in rows {
             let (found, _) = lookup(None, asset, api);
@@ -925,6 +934,74 @@ mod tests {
         verifier()
             .verify(&bundles[0], agentd(), &Signer::release(TAG))
             .expect("the API's bundle verifies like the asset's");
+    }
+
+    /// A successful response remains an answer when its body cannot be collected.
+    #[test]
+    fn successful_incomplete_bundle_responses_do_not_use_checksums() {
+        for status in [200, 206] {
+            for declared in [true, false] {
+                let get = |url: &str, _: Option<&str>, _: usize| {
+                    if url == asset_url(TAG, BUNDLE_ASSET) {
+                        let status = reqwest::StatusCode::from_u16(status).expect("status");
+                        if declared {
+                            Err(Body::start(url, status, Some(2), 1).err().expect("limit"))
+                        } else {
+                            let mut body = Body::start(url, status, None, 1).expect("start");
+                            Err(body.push(b"xx").expect_err("limit"))
+                        }
+                    } else {
+                        panic!("a successful bundle response must not try the API")
+                    }
+                };
+                assert!(matches!(
+                    GitHubRelease::new(None).lookup(TAG, "abc", &get),
+                    Bundles::Absent(_)
+                ));
+            }
+        }
+    }
+
+    /// A transfer that ends after a success status remains an answer.
+    #[test]
+    fn an_incomplete_successful_transfer_does_not_use_checksums() {
+        for asset in [true, false] {
+            let get = |url: &str, _: Option<&str>, _: usize| {
+                let is_asset = url == asset_url(TAG, BUNDLE_ASSET);
+                Err(HttpFailure {
+                    status: Some(if is_asset == asset { 200 } else { 503 }),
+                    message: "the response body ended early".into(),
+                })
+            };
+            assert!(matches!(
+                GitHubRelease::new(None).lookup(TAG, "abc", &get),
+                Bundles::Absent(_)
+            ));
+        }
+    }
+
+    /// A successful API response that cannot supply a bundle is an answer too.
+    #[test]
+    fn a_successful_api_answer_without_a_bundle_does_not_use_checksums() {
+        for body in [
+            b"<html>".as_slice(),
+            br#"{"attestations":[{"bundle_url":"https://example.invalid/bundle"}]}"#,
+        ] {
+            let get = |url: &str, _: Option<&str>, _: usize| {
+                if url == asset_url(TAG, BUNDLE_ASSET) {
+                    Err(HttpFailure {
+                        status: Some(503),
+                        message: "unavailable".into(),
+                    })
+                } else {
+                    Ok(body.to_vec())
+                }
+            };
+            assert!(matches!(
+                GitHubRelease::new(None).lookup(TAG, "abc", &get),
+                Bundles::Absent(_)
+            ));
+        }
     }
 
     /// The token goes to the API and nowhere else, and a rate limit without one says to set
@@ -1147,7 +1224,7 @@ mod tests {
     #[test]
     fn a_body_over_its_limit_is_refused() {
         let over = Err(HttpFailure {
-            status: None,
+            status: Some(200),
             message: "GET https://example.invalid/x: the body is over 4 bytes".to_string(),
         });
         let start = |length: Option<u64>| {

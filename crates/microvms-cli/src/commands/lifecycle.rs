@@ -40,7 +40,7 @@ use crate::exit::Exit;
 use crate::history::{Event, History};
 use crate::ledger::Ledger;
 use crate::render::RunOutcome;
-use crate::seam::state_dir;
+use crate::seam::try_state_dir;
 
 /// How long a best-effort health read may take on a path that doesn't need it: the hook log
 /// fetched before a teardown, and after a resume. A CLI choice rather than core's: it's short
@@ -521,7 +521,7 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
             return Err(crate::exit::CliError::new(Exit::InvalidArg, reason)
                 .suggest("names take ASCII letters, digits, `-` and `_`, up to 128 bytes"));
         }
-        let names = crate::ledger::Names::new(&state_dir(args.state_dir.clone(), ctx.env));
+        let names = crate::ledger::Names::new(&try_state_dir(args.state_dir.clone(), ctx.env)?);
         if let Some(holder) = names.lookup(vm_name) {
             return Err(crate::exit::CliError::new(
                 Exit::NameTaken,
@@ -601,7 +601,7 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
             // daemon as the image's (#249). `build_request_from` takes no binary here.
             None if args.artifact_uri.is_some() => None,
             None => {
-                let state = state_dir(args.state_dir.clone(), ctx.env);
+                let state = try_state_dir(args.state_dir.clone(), ctx.env)?;
                 let resolved = {
                     let out = &mut *ctx.out;
                     crate::provision::resolve(
@@ -622,7 +622,7 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
         None
     };
 
-    let ledger_root = state_dir(args.state_dir.clone(), ctx.env);
+    let ledger_root = try_state_dir(args.state_dir.clone(), ctx.env)?;
     let mut ledger = Ledger::new(region.as_str(), &ledger_root);
     // Kept as a string before the sandbox takes the `Region`: the history event below wants
     // the name, and the type is not `Copy`.
@@ -883,7 +883,7 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
     if let Some(vm_name) = &args.vm_name
         && let Some(record) = name_record_for_kept(vm_name, &outcome, &region_name)
     {
-        let names = crate::ledger::Names::new(&state_dir(args.state_dir.clone(), ctx.env));
+        let names = crate::ledger::Names::new(&ledger_root);
         names.register(&record).map_err(|error| {
             crate::exit::CliError::new(
                 Exit::Precondition,
@@ -1452,7 +1452,7 @@ pub async fn build<O: std::io::Write, E: std::io::Write>(
         // No fetch beside a caller's --artifact-uri, for the reason `run` gives (#249).
         None if args.artifact_uri.is_some() => None,
         None => {
-            let state = state_dir(args.state_dir.clone(), ctx.env);
+            let state = try_state_dir(args.state_dir.clone(), ctx.env)?;
             let resolved = {
                 let out = &mut *ctx.out;
                 crate::provision::resolve(
@@ -2013,6 +2013,7 @@ pub async fn suspend<O: std::io::Write, E: std::io::Write>(
     ctx: &mut Ctx<'_, O, E>,
     args: &SuspendArgs,
 ) -> Result<Rendered, crate::exit::CliError> {
+    let root = try_state_dir(args.state_dir.clone(), ctx.env)?;
     // A name's record says where the VM is, whatever the environment says; an id has no
     // record, so the flags and the environment pick the region as before.
     let (microvm_id, recorded) = crate::commands::resolve_vm_identifier(
@@ -2058,8 +2059,7 @@ pub async fn suspend<O: std::io::Write, E: std::io::Write>(
     // platform reported, and a freeze that settled TERMINATED is not a suspension however
     // the command exits.
     if settled.state == "SUSPENDED" {
-        History::for_vm(&state_dir(args.state_dir.clone(), ctx.env), &microvm_id)
-            .append(Event::Suspended);
+        History::for_vm(&root, &microvm_id).append(Event::Suspended);
     }
 
     let mut data = Map::new();
@@ -2092,6 +2092,7 @@ pub async fn resume<O: std::io::Write, E: std::io::Write>(
     ctx: &mut Ctx<'_, O, E>,
     args: &ResumeArgs,
 ) -> Result<Rendered, crate::exit::CliError> {
+    let root = try_state_dir(args.state_dir.clone(), ctx.env)?;
     let (microvm_id, recorded) = crate::commands::resolve_vm_identifier(
         ctx,
         &args.microvm_id,
@@ -2115,7 +2116,6 @@ pub async fn resume<O: std::io::Write, E: std::io::Write>(
         .await?;
 
     // The wait returned, so the service reported RUNNING — which is what `resumed` means.
-    let root = state_dir(args.state_dir.clone(), ctx.env);
     History::for_vm(&root, &microvm_id).append(Event::Resumed);
 
     // The daemon's hook log, best-effort, and this is the moment that makes suspend-hook
@@ -2223,7 +2223,7 @@ pub async fn terminate<O: std::io::Write, E: std::io::Write>(
         Some(region) => region,
         None => args.region.resolve(ctx.env)?,
     };
-    let ledger_root = state_dir(args.state_dir.clone(), ctx.env);
+    let ledger_root = try_state_dir(args.state_dir.clone(), ctx.env)?;
 
     // The kept run's own record, when this state directory launched the VM. It names the
     // image and the image's name, which is what lets `--delete-image` stand alone (issue
@@ -2409,12 +2409,10 @@ pub async fn terminate<O: std::io::Write, E: std::io::Write>(
     // the calls above went — a terminate that failed is exactly the run a caller will want
     // the record of — and the append swallows its own failures, because this is the
     // teardown path and a history error must not displace the real outcome.
-    History::for_vm(&state_dir(args.state_dir.clone(), ctx.env), &microvm_id).append(
-        Event::Terminated {
-            terminate_accepted: !leaked.contains(&microvm_id),
-            undeleted: leaked.clone(),
-        },
-    );
+    History::for_vm(&ledger_root, &microvm_id).append(Event::Terminated {
+        terminate_accepted: !leaked.contains(&microvm_id),
+        undeleted: leaked.clone(),
+    });
 
     // The name is released only when the terminate was accepted, and by the VM id rather
     // than by the spelling the caller used — `terminate mvm-…` on a VM that was named must
@@ -2422,7 +2420,7 @@ pub async fn terminate<O: std::io::Write, E: std::io::Write>(
     // terminate that failed keeps the registration, because the VM is still billing and the
     // name still addresses it.
     if !leaked.contains(&microvm_id) {
-        let names = crate::ledger::Names::new(&state_dir(args.state_dir.clone(), ctx.env));
+        let names = crate::ledger::Names::new(&ledger_root);
         for freed in names.release_by_vm(&microvm_id) {
             ctx.out
                 .progress(&format!("released name {freed} — it can be reused"));

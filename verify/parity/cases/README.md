@@ -78,6 +78,8 @@ refusal regresses the case fails on a connection error rather than a signed requ
   served and refused counts, and upstream call counts. Core checks that each
   refusal happens before a proxy token request. Python and Node use a port from the OS.
   The command runner reserves a port before it runs `microvm`.
+  Optional `response` supplies the upstream HTTP response. Redirect cases also
+  compare its body and Location header.
 
 - `image-name`: the name `ensure_image` gives an image and the CLI's `build --reuse` gives the
   same inputs (`ensure-image`), and the name `AgentVm.image_name` gives an agent image
@@ -95,7 +97,11 @@ refusal regresses the case fails on a connection error rather than a signed requ
   runner passes `DEFAULT_REPORT_CYCLES` or `DEFAULT_RESIDENCY_CYCLES`. A report then counts no
   cycle and a comparison prices one (#280).
 - `error`: a daemon status answered to one call, as the error's code, wire kind and
-  retryability.
+  retryability. Optional `response` sends the case through a real loopback HTTP backend and
+  compares upstream request count. It supplies `status`, `body` or `body_bytes`, optional
+  `headers`, and `chunked` framing. These cases cover the buffered response and stream-opening
+  paths. The CLI starts an exec before opening its stream; that setup request is excluded
+  from the shared response request count.
 - `egress`: a launch's egress options, refused or classified.
 - `names`: a VM adopted by name (`from-name`) from a registry holding `input.record_text` as
   `<name>.json`, in `input.region`. A record from another region and a torn one are refused
@@ -105,5 +111,8 @@ refusal regresses the case fails on a connection error rather than a signed requ
   against a seam that refuses every door, and core through `names::resolve` and
   `Sandbox::adopt_record` on an offline plane, which is `Sandbox::from_name` with its plane
   swapped, so a regression that lets a record through fails without reaching AWS.
+  A case with `input.home` selects the default registry under that home instead of
+  writing `record_text` to an explicit state directory, so each surface must resolve
+  or refuse the default before adopting a named VM.
 - `size-class`: the class a resource request selects, or the refusal.
 - `wrap-dockerfile`: a task Dockerfile with the agentd stanza appended.

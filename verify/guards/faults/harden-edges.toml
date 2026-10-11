@@ -1,0 +1,145 @@
+# ── harden-edges: FAIL_TO_PASS entries tools/fail-to-pass.py emitted ──
+
+# FAIL_TO_PASS: fails on 698fa78077ee with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-an-unavailable-state-root-refuses-before-any-remote"
+guard = "guards::history::an_unavailable_state_root_refuses_before_any_remote_operation"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::history::an_unavailable_state_root_refuses_before_any_remote_operation"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-an-unavailable-state-root-refuses-before-any-remote.patch"
+
+# FAIL_TO_PASS: fails on 698fa78077ee with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-control-redirects-are-returned-without-a-followup"
+guard = "control_redirects_are_returned_without_a_followup_request"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "http_responses", "--", "--exact", "control_redirects_are_returned_without_a_followup_request"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-control-redirects-are-returned-without-a-followup.patch"
+
+# FAIL_TO_PASS: fails on 698fa78077ee with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-collected-error-responses-obey-the-byte-ceiling"
+guard = "collected_error_responses_obey_the_byte_ceiling"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "http_responses", "--", "--exact", "collected_error_responses_obey_the_byte_ceiling"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-collected-error-responses-obey-the-byte-ceiling.patch"
+
+# FAIL_TO_PASS: fails on 698fa78077ee with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-forwarded-redirects-keep-the-status-location-and-body"
+guard = "forwarded_redirects_keep_the_status_location_and_body"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "http_responses", "--", "--exact", "forwarded_redirects_keep_the_status_location_and_body"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-forwarded-redirects-keep-the-status-location-and-body.patch"
+
+# FAIL_TO_PASS: fails on 698fa78077ee with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-an-oversize-success-length-is-refused-before-collection"
+guard = "an_oversize_success_length_is_refused_before_collection"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "http_responses", "--", "--exact", "an_oversize_success_length_is_refused_before_collection"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-an-oversize-success-length-is-refused-before-collection.patch"
+
+# FAIL_TO_PASS: fails on 698fa78077ee with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-a-stream-error-body-obeys-the-idle-timeout"
+guard = "a_stream_error_body_obeys_the_idle_timeout"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "http_responses", "--", "--exact", "a_stream_error_body_obeys_the_idle_timeout"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-a-stream-error-body-obeys-the-idle-timeout.patch"
+
+# FAIL_TO_PASS: fails on 698fa78077ee with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-a-verified-tcp-consumer-observes-the-stream-verdict"
+guard = "a_verified_tcp_consumer_observes_the_stream_verdict"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "tunnel_end_of_stream", "--", "--exact", "a_verified_tcp_consumer_observes_the_stream_verdict"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-a-verified-tcp-consumer-observes-the-stream-verdict.patch"
+
+# FAIL_TO_PASS: fails on 698fa78077ee with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-an-unset-home-uses-the-platform-default-for-the-registry"
+guard = "names::tests::an_unset_home_uses_the_platform_default_for_the_registry"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "names::tests::an_unset_home_uses_the_platform_default_for_the_registry"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-an-unset-home-uses-the-platform-default-for-the-registry.patch"
+
+# FAIL_TO_PASS: fails on 698fa78077ee with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-an-unavailable-default-registry-refuses-operations"
+guard = "names::tests::an_unavailable_default_registry_refuses_operations"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "names::tests::an_unavailable_default_registry_refuses_operations"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-an-unavailable-default-registry-refuses-operations.patch"
+
+# FAIL_TO_PASS: fails on 698fa78077ee with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-provisioning-requires-an-absolute-default-root"
+guard = "provision::tests::provisioning_requires_an_absolute_default_root"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "provision::tests::provisioning_requires_an_absolute_default_root"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-provisioning-requires-an-absolute-default-root.patch"
+
+# FAIL_TO_PASS: fails on 698fa78077ee with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-a-failed-fetch-names-the-tag-and-every-way-out"
+guard = "provision::tests::a_failed_fetch_names_the_tag_and_every_way_out"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "provision::tests::a_failed_fetch_names_the_tag_and_every_way_out"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-a-failed-fetch-names-the-tag-and-every-way-out.patch"
+
+# FAIL_TO_PASS: fails on 698fa78077ee with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-a-missing-bundle-is-absent-and-a-failed-request-is"
+guard = "provision::release::tests::a_missing_bundle_is_absent_and_a_failed_request_is_unreachable"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "provision::release::tests::a_missing_bundle_is_absent_and_a_failed_request_is_unreachable"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-a-missing-bundle-is-absent-and-a-failed-request-is.patch"
+
+# FAIL_TO_PASS: fails on 698fa78077ee with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-successful-incomplete-bundle-responses-do-not-use"
+guard = "provision::release::tests::successful_incomplete_bundle_responses_do_not_use_checksums"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "provision::release::tests::successful_incomplete_bundle_responses_do_not_use_checksums"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-successful-incomplete-bundle-responses-do-not-use.patch"
+
+# FAIL_TO_PASS: fails on 698fa78077ee with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-an-incomplete-successful-transfer-does-not-use-checksums"
+guard = "provision::release::tests::an_incomplete_successful_transfer_does_not_use_checksums"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "provision::release::tests::an_incomplete_successful_transfer_does_not_use_checksums"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-an-incomplete-successful-transfer-does-not-use-checksums.patch"
+
+# FAIL_TO_PASS: fails on 698fa78077ee with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-a-successful-api-answer-without-a-bundle-does-not-use"
+guard = "provision::release::tests::a_successful_api_answer_without_a_bundle_does_not_use_checksums"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "provision::release::tests::a_successful_api_answer_without_a_bundle_does_not_use_checksums"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-a-successful-api-answer-without-a-bundle-does-not-use.patch"
+
+# FAIL_TO_PASS: fails on 698fa78077ee with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-a-body-over-its-limit-is-refused"
+guard = "provision::release::tests::a_body_over_its_limit_is_refused"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "provision::release::tests::a_body_over_its_limit_is_refused"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-a-body-over-its-limit-is-refused.patch"
