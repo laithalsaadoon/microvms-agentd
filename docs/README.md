@@ -25,6 +25,7 @@ For a running daemon's wire contract, use `/v1/schema`.
 | Document | Purpose |
 |---|---|
 | [Networking](NETWORKING.md) | VPC connectors and internet isolation |
+| [Stability](STABILITY.md) | Versioning, compatibility, and deprecation policy |
 | [Protocol](PROTOCOL.md) | Daemon routes, authentication, execution, files, and streaming |
 | [Embedding](EMBEDDING.md) | Image requirements and integration with a custom harness |
 | [Trust](TRUST.md) | Bootstrap, credentials, workload boundaries, and networking |

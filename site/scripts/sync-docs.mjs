@@ -155,6 +155,7 @@ const AUTHORITATIVE = new Map([
   ["PLATFORM.md", { label: "Platform", order: 2 }],
   ["NETWORKING.md", { label: "Networking", order: 2 }],
   ["SUSPEND-RESUME.md", { label: "Suspend and resume", order: 2 }],
+  ["STABILITY.md", { label: "Stability", order: 3 }],
   ["PROTOCOL.md", { label: "Protocol", order: 3 }],
   ["TRUST.md", { label: "Trust", order: 4 }],
   ["EMBEDDING.md", { label: "Embedding", order: 5 }],
