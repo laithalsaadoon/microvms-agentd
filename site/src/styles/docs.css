@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /*
- * Styles for the page-action controls, the agent note, and the build-time diagrams.
+ * Styles for the page-action controls, the agent note, and the build-time diagrams, plus one rule
+ * that holds Starlight's table of contents in place while the page loads.
  *
  * The class prefix must match `PageActions.astro` and `agent-note.ts` — three files agree on the
  * string `docs-`, and the inline script in `PageActions.astro` cannot read frontmatter, so renaming
@@ -122,4 +123,27 @@
 .docs-mermaid svg {
   max-inline-size: 100%;
   block-size: auto;
+}
+
+/*
+ * The table of contents stays at the right edge from the first frame the browser paints.
+ *
+ * Starlight's `.right-sidebar` is `position: fixed` and sets no `left`, so the browser draws it
+ * wherever its container, `.right-sidebar-container`, sits in the flex row. The container comes
+ * before `.main-pane` in the HTML, and `order: 2` is what moves it to the right of the content. On a
+ * slow or busy machine the browser can paint a frame after it has parsed the container and before it
+ * has reached `.main-pane`. In that frame the container is the row's only item, so it sits at the
+ * row's left edge, and the fixed sidebar covers the content column from x=300. When `.main-pane` is
+ * parsed, the sidebar jumps to x=1050. `tests/layout-stability.test.ts` measures that jump at 0.4321
+ * CLS on a 1350x940 viewport, against a Core Web Vitals limit of 0.1.
+ *
+ * `margin-inline-start: auto` puts the container at the row's right end even while it's alone in the
+ * row. Once `.main-pane` is there, Starlight's two widths add up to the whole row, so there's no free
+ * space for the margin to take, it computes to 0, and the finished layout doesn't change. The
+ * breakpoint is Starlight's own: below 72rem the row isn't a flex row and the sidebar isn't fixed.
+ */
+@media (min-width: 72rem) {
+  .right-sidebar-container {
+    margin-inline-start: auto;
+  }
 }

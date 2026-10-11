@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { createReadStream, existsSync, statSync } from "node:fs"
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs"
 import { createServer, type Server } from "node:http"
 import { join, resolve, sep } from "node:path"
 
@@ -16,7 +16,8 @@ import { join, resolve, sep } from "node:path"
  *
  * Three consumers, all vitest browser suites: the accessibility audit, the layout probe and the
  * Lighthouse budget import `serveStatic`, so all three measure the same server, the same bytes and
- * the same content types.
+ * the same content types. The layout probe also uses `serveHeld`, which serves those same bytes in
+ * two parts.
  */
 
 /**
@@ -54,13 +55,39 @@ export type StaticSite = {
   readonly close: () => Promise<void>
 }
 
+/** A site that stops each HTML page in front of a marker until `release` is called. */
+export type HeldSite = StaticSite & {
+  /** Sends the rest of every page the server is holding. `close` calls it too. */
+  readonly release: () => void
+}
+
 /**
  * @param root absolute path to the built output
  * @param base the site's base: `/` at the origin root, or `/microvms-agentd/` under a path. A
  *   trailing slash is optional and a missing one is tolerated.
  * @param port `0` (the default) lets the kernel pick a free port.
  */
-export const serveStatic = async (root: string, base: string, port = 0): Promise<StaticSite> => {
+export const serveStatic = (root: string, base: string, port = 0): Promise<StaticSite> =>
+  listen(root, base, port, undefined)
+
+/**
+ * The built site, with each HTML page's bytes stopped in front of `marker` until `release` is called.
+ *
+ * The browser gets every byte before the marker, parses and paints them, and waits for the rest. That
+ * lets a test put the browser in a state a slow machine reaches by chance: part of the page parsed
+ * and painted, the rest not yet arrived. A page that doesn't contain the marker is sent whole.
+ *
+ * @param marker the bytes the hold stops in front of, such as `<div class="main-pane`.
+ */
+export const serveHeld = (root: string, base: string, marker: string): Promise<HeldSite> =>
+  listen(root, base, 0, marker)
+
+const listen = async (
+  root: string,
+  base: string,
+  port: number,
+  marker: string | undefined
+): Promise<HeldSite> => {
   const distRoot = resolve(root)
 
   /*
@@ -90,6 +117,12 @@ export const serveStatic = async (root: string, base: string, port = 0): Promise
     return undefined
   }
 
+  // The rest of each held page, waiting to be sent.
+  const held: Array<() => void> = []
+  const release = (): void => {
+    for (const send of held.splice(0)) send()
+  }
+
   const server: Server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://localhost")
     const file = locate(url.pathname)
@@ -100,6 +133,15 @@ export const serveStatic = async (root: string, base: string, port = 0): Promise
     }
     const extension = file.slice(file.lastIndexOf("."))
     response.writeHead(200, { "content-type": TYPES[extension] ?? "application/octet-stream" })
+    if (marker !== undefined && extension === ".html") {
+      const bytes = readFileSync(file)
+      const at = bytes.indexOf(marker)
+      if (at >= 0) {
+        response.write(bytes.subarray(0, at))
+        held.push(() => response.end(bytes.subarray(at)))
+        return
+      }
+    }
     createReadStream(file).pipe(response)
   })
 
@@ -109,7 +151,11 @@ export const serveStatic = async (root: string, base: string, port = 0): Promise
 
   return {
     origin: `http://127.0.0.1:${address.port}`,
-    close: () =>
-      new Promise<void>((done, fail) => server.close((err) => (err ? fail(err) : done())))
+    release,
+    // A held response is an open request, and the server doesn't finish closing while one is open.
+    close: () => {
+      release()
+      return new Promise<void>((done, fail) => server.close((err) => (err ? fail(err) : done())))
+    }
   }
 }
