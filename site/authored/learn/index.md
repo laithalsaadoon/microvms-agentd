@@ -21,8 +21,8 @@ order.
 | I already have a VM running | [Keep working by name](/learn/tutorial/long-lived-vm/) |
 | I want to upload code and collect outputs | [Run a project](/learn/tutorial/run-a-project/) |
 
-With the CLI installed and AWS configured, the quickstart takes less than
-90 seconds to read and start. The first image build takes several minutes.
+With the CLI installed and AWS configured, start with `microvm quickstart`
+or the coding-agent guide. The first image build takes several minutes.
 VMs and images create AWS charges. The first-run guide covers prerequisites,
 expected output, image reuse, and cleanup.
 
@@ -35,8 +35,8 @@ These guides assume the CLI is installed and AWS is configured.
 | [Write a guest Dockerfile](/learn/operations/write-a-guest-dockerfile/)                      | How to start from the generated stanza, and which traps cost a server-side build cycle          |
 | [Embed agentd in your own image](/learn/operations/embed-agentd-in-your-image/)              | How to append the daemon to a task image your own harness drives                                |
 | [Run coding agents on Bedrock](/learn/operations/run-coding-agents-on-bedrock/)              | How `agent-up` and `agent-prompt` run Claude Code and Codex CLI headless in a VM with no vendor API key |
-| [Remote dev with code-server](/learn/operations/remote-dev-with-code-server/)                | How to reach VS Code in a browser through `port-forward`, on a VM that suspends when you leave   |
-| [Prefetch S3 content at image build](/learn/operations/prefetch-s3-at-build/)                | How to bake an S3 prefix into the snapshot so a launched VM makes no S3 call                     |
+| [Remote dev with code-server](/learn/operations/remote-dev-with-code-server/)                | Open code-server through `port-forward` and manage its idle policy   |
+| [Prefetch S3 content at image build](/learn/operations/prefetch-s3-at-build/)                | Try snapshot-time S3 prefetch and verify its build environment                     |
 | [Configure networking](/learn/operations/configure-networking/) | Attach a VPC connector and restrict internet access |
 | [Read the cost report](/learn/operations/read-the-cost-report/)                              | What each line means, why a total may read "at least", and how to plan with `microvm cost`       |
 | [Debug a failed build](/learn/operations/debug-a-failed-build/)                              | Where the reason lives, how to read the build log, and what `ERR_BUILD_WEDGED` means             |

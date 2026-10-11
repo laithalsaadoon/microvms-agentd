@@ -11,9 +11,8 @@ run tools, read their output, download results, and terminate the VM.
 `Sandbox` runs your own commands; `AgentVm` adds Claude Code and Codex through
 Amazon Bedrock.
 
-With AWS configured and an existing image, pick a language below and run
-your first command in about 90 seconds. One-time AWS setup and image builds
-take longer.
+With AWS configured and an existing image, pick a language below to launch a
+VM, run a command, and clean up. Launches create billable AWS resources.
 
 ## Before you start
 
@@ -30,7 +29,7 @@ export MICROVM_IMAGE='paste data.imageIdentifier from the result'
 ```
 
 Use the image **ARN**, in the same account and region as your credentials.
-The CLI resolves image names; these SDK calls take the ARN directly.
+The SDKs and CLI accept an image ARN or resolve a name in the selected region.
 The CLI handles daemon provisioning and artifact upload. If your team has
 already built a compatible image, set `MICROVM_IMAGE` to its ARN and skip
 the build.
@@ -303,7 +302,9 @@ cover supported hosts.
 
 The SDKs expose `build_artifact` / `buildArtifact` and
 `build_image` / `buildImage` for custom images. Upload the artifact bytes
-to S3 before calling the build method; the SDK does not perform that upload.
+to S3 before calling those lower-level build methods. The SDKs also expose
+`ensure_image` / `ensureImage` for image reuse and upload through the shared
+build services.
 Build once and reuse the resulting image ARN across fresh sandboxes.
 
 - [Run coding agents on Bedrock](/learn/operations/run-coding-agents-on-bedrock/)

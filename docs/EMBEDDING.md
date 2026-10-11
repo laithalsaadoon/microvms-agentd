@@ -1,845 +1,179 @@
-# Embedding agentd in your own image and driving it from your own harness
+# Embed agentd in a sandbox workflow
 
-The platform has no exec API: a MicroVM exposes one HTTPS endpoint and forwards
-it to whatever the image's `CMD` is listening on. Every harness that wants to
-run commands inside a VM needs a daemon in its task image. agentd provides
-that daemon for evaluation harnesses, session servers, and other clients. This
-document is the recipe for appending it to an arbitrary task image, and the
-orientation a harness client needs to drive it over the published wire
-protocol. The protocol itself is in `docs/PROTOCOL.md` and, machine-readably,
-at `GET /v1/schema` on any running daemon; nothing here duplicates either.
+Use the Rust client, Python package, or Node package to build an image, launch a
+VM, execute work, and collect results. The shared implementation manages the
+AWS control plane and the daemon connection. A custom HTTP client also works,
+but must implement the [protocol](PROTOCOL.md), proxy authentication, and
+reconnection behavior described below.
 
-## The recipe
+Start with the [SDK tutorial](https://laithalsaadoon.github.io/microvms-agentd/learn/tutorial/from-code/)
+for a complete program. [Harness capabilities](HARNESS-CAPABILITIES.md) maps
+integration requirements to the current API.
 
-A task that brings its own Dockerfile becomes buildable through library calls, with
-no string literal of the harness's own:
+## Prepare an image
 
-```python
-import microvms
+The image must contain the ARM64 Linux daemon and start it before any task
+workload. Generate a Dockerfile with the same defaults as the client:
 
-task = open("environment/Dockerfile").read()
-# The task text, then the agentd stanza.
-dockerfile = microvms.wrap_dockerfile(task)
-# The managed base, paired with the Dockerfile's own FROM.
-base = microvms.BaseImage.from_dockerfile(dockerfile)
-# The daemon for this client's version: fetched, verified, and cached once.
-agentd_bytes = microvms.provision_agentd()
-
-image = sandbox.build_image(
-    name="my-task-image",
-    binary=agentd_bytes,
-    code_artifact_uri=uploaded_uri,
-    build_role_arn=build_role_arn,
-    base_image=base,
-    dockerfile=dockerfile,
-)
-```
-
-The Node binding is the same pair: `wrapDockerfile(task, { workdir })` and
-`baseImageFromDockerfile(dockerfile)`, passed as `buildImage({ dockerfile,
-baseImage, … })`. Both are pure functions in
-`crates/microvms-app/src/control/artifact.rs` and make no AWS call.
-
-`build_image` runs its local guards before the create call, which comes after your
-upload. `sandbox.preflight(...)` takes the same keywords and runs those guards
-alone, with no AWS call, so the upload is only paid for a request the build will
-accept: call it, then `build_artifact` and your upload, then `build_image`.
-
-`base_image_version=` pins the managed base to one version, a value
-`managed_base_versions` lists. `project_dir=` bakes a directory's one
-manifest+lockfile pair into an environment layer, by the rule `microvm build
---project` uses, and a directory without exactly one pair is refused before any
-call. `build_image`, `preflight` and `ensure_image` take both, where both join
-`ensure_image`'s name hash, and `build_artifact` takes `project_dir`, because the
-pair enters the artifact. Node spells them `baseImageVersion` and `projectDir`.
-
-`wrap_dockerfile` keeps the task text verbatim and appends the stanza the
-default `microvm build` bakes, rendered by the same function, so the two cannot
-drift: `wrap_dockerfile("FROM x\n")` is the default Dockerfile for a base
-whose ref is `x`. The stanza is `COPY agentd /agentd`, its chmod, `ENV
-AGENTD_PORT`, `EXPOSE`, `ENTRYPOINT []` and `CMD ["/agentd"]`, preceded by
-`USER root` when the task's last `USER` is anyone else (the daemon demotes each
-exec itself, which takes root). `port=` must match the sandbox's port, and
-`workdir=` creates and sets a working directory the way `microvm dockerfile
---workdir` does.
-
-It refuses, with `InvalidArgError` naming the cause, the task Dockerfiles the
-build would accept and the guest would then fail on:
-
-- no `FROM`;
-- a last instruction that is unfinished: a trailing line continuation (in the
-  escape character an `# escape=` directive selects) would join the stanza's
-  `COPY agentd /agentd` into it, and an unterminated heredoc would swallow the
-  whole stanza, so the image would build with no daemon in it;
-- an `AGENTD_SSE_KEEPALIVE_SECS` at or over the client's stream idle timeout;
-- a port of 0, or a `workdir` that is not one absolute path;
-- `inherit_workdir=True` when neither the task nor `workdir` declares a
-  `WORKDIR`. A task with no `WORKDIR` runs its commands in `/`, as it would
-  under Docker, so this guard is opt-in: set it when your harness relies on the
-  image `WORKDIR` being set to the project directory.
-
-`BaseImage.from_dockerfile` answers the pairing the other way round.
-`build_image` refuses a Dockerfile whose first `FROM` differs from the base's
-`docker_ref`, which is the right guard where the client derives the Dockerfile
-from the base (the build runs the Dockerfile on top of the base `baseImageArn`
-names). A task Dockerfile chooses its own `FROM`, so the derived base keeps the
-managed base's `name` and unchanged `baseImageArn`, and takes the first
-`FROM`'s ref whole, digest pin included; the guard then compares the ref with
-itself. It raises `InvalidArgError` for a Dockerfile with no `FROM`.
-
-From a shell, `microvm dockerfile` prints the same stanza for a base of your
-choice, and `microvm build --dockerfile` takes the result:
-
-```
+```bash
 microvm dockerfile --workdir /workspace > Dockerfile
-# edit: insert your RUN layers between the chmod line and the ENV lines
-microvm build --dockerfile Dockerfile --name my-task-image
+microvm build --dockerfile Dockerfile --name task-tools --json
 ```
 
-With no binary, `build` provisions the daemon itself: the release asset for
-the CLI's own version, verified and cached under the state directory. The
-`agentd_bytes` above come from the same chain through the bindings
-(`crates/microvms-edges/src/provision.rs`). `provision_agentd_report()` returns the
-bytes together with `.source`, `.verification`, `.path`, and `.sha256`, and
-Node has the same pair:
-
-```js
-import { provisionAgentd, provisionAgentdReport } from '@theagenticguy/microvms';
-
-const agentd = await provisionAgentd(); // Buffer, for this client's version
-const { source, verification } = await provisionAgentdReport();
-```
-
-The call answers from, in order, a `binary` you pass (or `$MICROVM_AGENTD`),
-the cache entry for the version, and a fetch of the GitHub release asset. The
-version defaults to `core_version()`, so the daemon you bake always speaks the
-protocol of the client that drives it. A fetch is verified in-process against
-the release workflow's Sigstore attestation or, only when GitHub can't be
-reached for one, the release's `SHA256SUMS`, so it needs neither `gh` nor `curl`; one
-that cannot be verified raises `PreconditionError` rather than warning. Every binary it
-returns, including one you supplied, is checked for an aarch64 ELF header
-first, because a wrong-architecture daemon fails 45 minutes later as a run-hook
-timeout. The build calls check the bytes they're handed the same way before any
-upload, so `build_artifact`, `build_image` and `ensure_image` raise
-`PreconditionError` for a daemon that didn't come from here and isn't aarch64. A
-cache entry is served only while it still matches the digest recorded when it
-was verified.
-
-On a machine that can't reach GitHub, download the release's assets once
-(`gh release download vX.Y.Z --dir <dir>/vX.Y.Z`) and set `$MICROVM_RELEASE_DIR`
-to `<dir>`. The fetch then reads the asset and its `agentd.sigstore.json` from
-there and verifies the attestation the same way, and a directory without that
-bundle is refused rather than checked against its `SHA256SUMS`. The release
-workflow's live gate reads a draft release's assets this way.
-
-The worked example is
-[`examples/coding-agents-on-bedrock/Dockerfile`](../examples/coding-agents-on-bedrock/Dockerfile):
-the stanza's lines, plus `dnf install` and `npm install -g` layers that put the Claude Code
-and Codex CLIs in the image, plus a `/workspace` WORKDIR.
-
-Two lines in the stanza are required and must survive any edit.
-`ENTRYPOINT []` plus `CMD ["/agentd"]` is the deployment invariant the trust
-boundary rests on: it guarantees no task workload runs before the platform's
-run hook lands, and it is what makes an omitted `cwd` inherit the image
-`WORKDIR` (`docs/PROTOCOL.md`, "Trust boundary"). `wrap_dockerfile` writes them
-last, so a task's own `ENTRYPOINT` or `CMD` cannot displace them. A base image
-that starts its own background process before bootstrap breaks the invariant,
-and the image author must enforce that invariant.
-
-One thing never goes in the image: a secret. The image becomes a shared
-snapshot, so every VM launched from it sees the same bytes; per-VM credentials
-travel through `runHookPayload` at launch instead (the module docs of
-`crates/microvms-app/src/control/artifact.rs`).
-
-### From build inputs to an image ARN: `ensure_image`
-
-A harness with many trials of one task needs one image for all of them. `ensure_image`
-is that one call: it names the image by its content, builds it only when nothing usable
-exists under the name, and joins a sibling trial's build instead of racing it.
-
-```python
-ensured = sandbox.ensure_image(
-    name_prefix=f"harbor-{task_name}",
-    binary=agentd_bytes,
-    dockerfile=microvms.wrap_dockerfile(task_dockerfile),
-    context_dir=environment_dir,  # what the Dockerfile's COPY lines read
-    s3_bucket=bucket,
-    s3_key_prefix="harbor/images",
-    build_role_arn=build_role_arn,
-    size=microvms.SizeClass.from_baseline_mib(4096),
-)
-session = sandbox.run(image_identifier=ensured.image.identifier)
-print("reused" if ensured.reused else "built", ensured.image.name, ensured.warnings)
-```
-
-Node: `sandbox.ensureImage({ namePrefix, binary, dockerfile, contextDir, s3Bucket,
-s3KeyPrefix, buildRoleArn }, size)`, answering `{ image, reused, artifactUri, uploaded,
-warnings }`.
-
-- **The name** is `<name_prefix>-<hash12>`. The hash covers the daemon bytes, the
-  Dockerfile, every build-context file's path, mode and bytes, the base image, the size
-  class, and the fields the service fixes at create (identity repair, `inherit_workdir`,
-  the hook timeouts, the log destination; #280), because an image is created on one base
-  at one size with those set. Equal inputs name one
-  image and any changed input names a fresh one, so a stale snapshot is never served
-  under a reused name. The prefix is reduced to the characters the service's image
-  names admit. The artifact hash without a context is unchanged, so `microvm build
-  --reuse` names do not move.
-- **The context** is read the way `docker build` reads one. `Dockerfile.dockerignore`
-  wins over `.dockerignore`, with Docker's glob rules (`**`, `!` exceptions, parent
-  directories). The root `Dockerfile` and ignore files are left out. A symlink is
-  skipped and named in `warnings`, and a root file named `agentd` is refused. Each file
-  carries mode `0755` if it has an execute bit and `0644` otherwise, so two hosts
-  produce one artifact.
-- **The ARN** is built from the caller's account, looked up once per sandbox with
-  `GetCallerIdentity`. Pass the image ARN to the service.
-- **The upload** goes to `s3://<s3_bucket>/<s3_key_prefix>/<name>/artifact.zip`, and only
-  when a build is needed. The zip carries fixed dates and modes, so equal inputs are
-  one object.
-- **The decision** after each describe:
-
-  | The image is | What happens | `reused` |
-  |---|---|---|
-  | Ready | Returned as is | true |
-  | Building | Waited out | true |
-  | Failed (or any state with `force=True`) | Deleted, the name awaited free, rebuilt | false |
-  | Absent | Uploaded, created, waited for | false |
-
-  A forced caller waits for a running build to settle first, because the service
-  refuses to delete an image that is `CREATING`.
-- **The race.** Two trials that both find the name free both create, and the service
-  accepts one. The loser describes again and waits for the winner's build. It returns
-  that image only once it is ready, with `reused=True`.
-
-Every local check runs before the first AWS call: the bucket name, the prefix, the
-Dockerfile guards of `build_image`, and the context. A request refused locally costs no
-lookup and no upload. The build wait is 45 minutes unless `wait_timeout` says otherwise.
-The build role must be able to read the bucket. The artifact bucket must be in the
-sandbox's region.
-
-## The wire contract a harness client implements
-
-The full route table, request shapes, and the defect-driven rules are in
-`docs/PROTOCOL.md`; the same contract is served as JSON Schema at
-`GET /v1/schema`, unauthenticated, so a client can fetch it before it holds a
-token. The following example shows the client; the protocol document defines the contract.
-
-**Bootstrap.** The platform delivers your `runHookPayload` string to the
-daemon's `/run` hook; agentd parses it as JSON and installs `agent_token`
-(`crates/agentd/src/routes.rs:166-216`). The install is one-shot: a replay of the
-identical token answers 200 (the platform may retry its own hook), a different
-token answers 409 and changes nothing. Until it lands, every control route
-answers 503, not 404, not a dropped connection, so a client can distinguish
-"not yet bootstrapped" from "broken" (`crates/agentd/src/auth.rs:62-80`). The payload
-is capped at 4096 bytes (`crates/microvms-domain/src/constants.rs:83`).
-
-**Auth.** Every `/v1/` route except `/v1/health` and `/v1/schema` takes
-`Authorization: Bearer <agent_token>`, the same token the payload delivered.
-Comparison is constant-time over bytes (`crates/agentd/src/auth.rs:28`).
-
-**Exec.** The client mints the `exec_id` and sends it in `POST /v1/exec/start`.
-That is what makes a retry safe: a start carrying a known id returns success
-without spawning a second child, decided under the registry lock
-(`crates/agentd/src/exec.rs:364-367`), so a harness whose process died between sending
-the start and reading the answer sends the identical start again and gets the
-original exec. `GET /v1/exec/{id}` polls, read-only, repeatable. `POST
-/v1/exec/{id}/ack` releases the buffered output and starts the collection
-clock; a second ack is 409, because the first released it and a 200 with an
-empty body would read as "the command produced no output". Output lives until
-the ack, so nothing a slow reader has not seen is destroyed. `POST
-/v1/exec/{id}/kill` signals the process group, SIGTERM then SIGKILL after a
-grace period (`crates/agentd/src/exec.rs:900-931`). `POST /v1/exec/{id}/stdin` writes
-to a child that was started with `stdin: true` and carries the explicit EOF
-signal; an exec that never asked for stdin answers 409.
-
-**Streaming.** `GET /v1/exec/{id}/stream?offset=N` follows output as SSE from
-a byte cursor. A reconnecting client passes the offset it read to and receives
-exactly what it has not seen; a reattach past the retained window gets an
-explicit `gap` event naming the missing byte range rather than silently
-skipping (`crates/agentd/src/exec.rs:436-524`). The stream ends with a typed `exit`
-event, which is what distinguishes a finished command from a cut connection, the reason this is SSE and not a chunked byte stream.
-
-**Files.** `PUT`/`GET /v1/fs/file` move one file, streamed, with a mode
-applied at open. `PUT`/`GET /v1/fs/tar` move directory trees; extraction is
-confined by lexical resolution with symlink and bomb defenses and member/size
-caps (`crates/agentd/src/fs.rs:4-41`), and a write that would push the filesystem
-under the disk reserve is refused with 507 naming the real free space
-(`crates/agentd/src/fs.rs:66-91`). Every client reads a 507 as the wire kind
-`InsufficientStorage`, `ERR_PLATFORM` and not retryable: a retry needs space
-freed first.
-
-**Health.** `GET /v1/health` is unauthenticated and reports version, bootstrap
-state, disk pressure, and the identity-repair flags, the conditions that are
-reasons to drain a VM rather than schedule more work onto it.
-
-## Running one command to one result
-
-Most harness `exec` methods are one composition over the exec routes: start
-with a caller-minted id, stream output to a callback, fall back to polling when
-the stream is cut, kill the process group when the harness's own deadline
-passes, and turn what came back into a shell exit code. The bindings provide
-it as one call, `Session.run_to_completion` in Python and
-`Session.runToCompletion` in Node, over `Session::run_to_completion` in
-`microvms-core` (`crates/microvms-app/src/session/complete.rs`). The behavior is
-specified as BIND-6 through BIND-10 in `verify/spec/core.symspec.json` and checked by
-the Stateright model in `crates/model/src/run.rs`.
-
-```python
-def exec(self, command: str, timeout_sec: int | None = None) -> tuple[str, str, int]:
-    result = session.run_to_completion(
-        ["bash", "-c", command],  # bash semantics; see below
-        on_output=lambda chunk: stream_to_log(chunk.stream, chunk.text()),
-        cwd=workdir,
-        env=env,
-        timeout_sec=float(timeout_sec) if timeout_sec is not None else None,
-        client_grace_sec=60.0,
-    )
-    stderr = "\n".join([result.stderr, *result.notes])
-    return result.stdout, stderr, result.posix_exit_code
-```
-
-The call follows these steps:
-
-1. **Start.** With `exec_id` omitted a fresh id is minted; pass your own to make
-   a retried call address the same exec.
-2. **Stream.** With `on_output`, each output chunk reaches the callback as it
-   arrives, reconnecting at the byte cursor through ordinary cuts. The
-   terminal `exit` event means the output is final, and one ack returns it.
-3. **Fall back to wait and ack.** Without a callback, or when the stream ends
-   without its `exit` event (the reconnect budget ran out, the stream failed,
-   or the callback raised), the call polls until the exec finishes and then
-   acks it. A callback that raises stops delivery; the exec is still collected,
-   and then the exception is raised.
-4. **Client deadline.** The client waits `timeout_sec + client_grace_sec`, or
-   the VM's maximum lifetime when there is no `timeout_sec`. If that passes
-   first, it kills the process group and then waits and acks for up to
-   `client_grace_sec` more. The daemon enforces `timeout_sec` itself, so this
-   path runs only when the daemon's escalation outlasts the grace: a command
-   that ignores SIGTERM for longer than the daemon's ten-second `kill_grace`,
-   a grandchild holding the pipes, or a stalled proxy. The daemon answers the
-   kill only once the group is gone, sending SIGKILL after `kill_grace` if it
-   has to (measured in us-east-1 on 2026-09-24), so the kill itself can take
-   up to ten seconds before the grace starts.
-5. **Synthesize.** If that wait and ack fails too, the result is synthesized:
-   `synthesized` is true, `posix_exit_code` is 124, `phase` is `running`, and
-   the output is unknown rather than empty. Because a killed group is gone by
-   the time the kill returns, this happens when something outside the group
-   holds the output pipes past the grace (the daemon waits a five-second
-   linger for them), when the kill could not be sent, or when the daemon is
-   unreachable.
-
-`posix_exit_code` is what `$?` would say. It is **124** when a deadline ended
-the command: the daemon's own (`timed_out`), the client's kill of a live
-process group, or a synthesized result. It is **128 plus the signal** for any
-other signal death, so an out-of-memory kill reads 137 rather than as a
-timeout, and otherwise it is the exit code. A child that traps SIGTERM and
-exits 0 after the daemon's deadline reports 124, not 0, which agrees with `ok`
-being false.
-
-`notes` has one human-readable line per condition that changes how the output
-reads: truncation at the daemon's output cap, an expired daemon deadline,
-writers left alive past the linger deadline, and the client deadline (a kill,
-or a synthesized result naming both failures). A clean result has none.
-Append them to stderr as they are.
-
-**The `["bash", "-c", command]` idiom.** The daemon's `shell=True` runs the
-string through `/bin/sh -c`, and on Debian-family images `/bin/sh` is dash,
-which rejects `set -o pipefail`, arrays, and `[[`. A harness whose contract is
-bash semantics passes the command as an argv with `shell=False` (the default),
-so bash parses it and no other shell is in between. The image must ship bash;
-the managed al2023 base does (`GNU bash, version 5.2.15` at `/usr/bin/bash`,
-measured in us-east-1 on 2026-09-24). The named shell replaces the idiom:
-`run_to_completion(command, shell="bash")` sends the script string with
-`shell: "bash"`, which the daemon resolves in the guest and refuses with
-`400 unknown_shell` when the image has no bash, instead of the exit 127 the
-argv form reports. It needs a daemon that knows named shells (`docs/PROTOCOL.md`,
-"shell"); the argv form works with every daemon.
-
-## Separate stdout and stderr
-
-`Session.spawn` returns an exec as a process: `stdout` and `stderr` as two byte
-streams, a `wait()` that reads the daemon's exec record, and a `kill()` that
-can run twice. Both bindings read core's split, `ExecHandle::split`
-(`crates/microvms-app/src/session/split.rs`): one stream drive with one byte
-cursor, so a cut reconnects without ending either side, and each output frame
-routed to its own side.
-
-```python
-from concurrent.futures import ThreadPoolExecutor
-
-proc = session.spawn(["bash", "-lc", "make test"], cwd="/work")
-with ThreadPoolExecutor(2) as pool:
-    out, err = pool.map(b"".join, [proc.stdout, proc.stderr])
-result = proc.wait()
-```
-
-```js
-const proc = await session.spawn(['bash', '-lc', 'make test'], { exec: { cwd: '/work' } });
-const [out, err] = await Promise.all([
-  new Response(proc.stdout).text(),
-  new Response(proc.stderr).text(),
-]);
-const { exitCode } = await proc.wait();
-```
-
-A gap, a byte range the daemon evicted before this client read it, raises from
-both sides by default (`ERR_PLATFORM`, wire kind `OutputGap`) and names the
-range, since the shared offset space can't say which side lost it.
-`gap_policy="event"` (`gapPolicy: 'event'`) records the range on `proc.gaps`,
-under the stream of the output that followed it, and keeps both sides open.
-Each side holds one unread chunk, like a pipe, so read both at once.
-
-## The proxy-token reality
-
-The daemon's endpoint sits behind the platform's proxy, and the proxy wants two
-headers on every request: `X-aws-proxy-auth` carrying a minted JWE, and
-`X-aws-proxy-port` naming which allowed port this request targets. Omitting
-the second is rejected in a way that reads like a bad token
-(`crates/microvms-app/src/session/proxy.rs:5-13`). The token comes from
-`CreateMicrovmAuthToken`, and the response's `authToken` is a **map of header
-name to value**, not a string; read it as a string and every request fails.
-
-The service caps a token at sixty minutes
-(`crates/microvms-app/src/session/proxy.rs:63`). That is not a choice, and it is
-shorter than a long agent run, so a client that mints once at construction
-expires mid-run with a rejection indistinguishable from a dead daemon. The
-pattern that works is minting inside the request path with a refresh interval
-well under the ceiling. These clients refresh at half of it, thirty
-minutes, so a request in flight across the rollover still holds a token with
-about thirty minutes of life (`crates/microvms-app/src/session/proxy.rs:29-37`). A
-mint failure is retryable; treat it that way, because a control-plane throttle
-at minute thirty must not kill a healthy run. A credential failure during a mint
-is the exception: it stays `ERR_CREDENTIALS`, because the identical request is
-refused again until the identity is fixed.
-
-Token rotation costs nothing on the daemon side. Execution records, buffered
-output, and stream cursors are stored in the daemon, keyed by
-`exec_id`, so a detached exec started under one proxy token is polled and acked
-under the next one. Start, rotate, poll, ack is a normal sequence, not a
-recovery path. The live suite's
-`reattach after token rotation` section starts a detached exec, drops every
-piece of client state except the endpoint, the agent token, and the MicroVM id,
-reattaches under freshly minted proxy tokens, and asserts that the output
-produced *before* reattachment remains available under the new token (`conformance/run_rs.py`, `drive_token_rotation`).
-
-## The idle keepalive is yours, and it must run outside the VM
-
-The platform measures idleness by inbound traffic through the endpoint proxy
-and suspends a VM whose window elapses without any. Your harness, the
-orchestrator outside the VM, owns the keepalive: poll `GET /v1/health` on an
-interval well under the launch's `maxIdleDurationSeconds`, and each poll is the
-inbound traffic that resets the timer. Measured, both halves: a polled VM
-outlives its idle window and the same VM suspends once the polling stops
-(`docs/PLATFORM.md`, "An outside poll of `/v1/health` does reset the idle
-timer"; asserted every live run by `conformance/run_rs.py`,
-`drive_idle_keepalive`).
-
-An in-guest keepalive **cannot** reset this timer: the endpoint proxy terminates *outside* the VM and forwards
-over loopback, so a request a guest process sends to the daemon's own port is
-generated on the far side of the meter and never crosses it. A guest-side
-keepalive route would answer 200 and change nothing, and the failure would
-surface as a suspend during exactly the long run it was added to protect
-([Harness capabilities](HARNESS-CAPABILITIES.md)). Neither does in-guest *work*: a VM
-running a multi-hour exec with no outside traffic is suspended mid-work at the
-idle window. Suspend freezes the process and preserves its state, but
-nothing external can reach it until someone resumes it. What survives the
-freeze, including clocks and outbound connections, is in
-[Suspend and resume](SUSPEND-RESUME.md).
-
-`/v1/health` is the right route for the poll: unauthenticated, one small
-request, and it carries `busy` and `execs` so the poll is informed rather than
-unconditional. An orchestrator can stop keeping a drained VM alive instead of
-billing it to the duration ceiling.
-
-### The supported keepalive
-
-The core ships that loop as `KeepAwake`, and every surface exposes it:
-
-| Surface | Call |
-| --- | --- |
-| Rust | `session.keep_awake(&KeepAwake::new(window).while_busy(true), stop).await` or `KeepAwake::spawn` for a background task |
-| Python | `with session.keep_awake(while_busy=True) as keepalive: ...` (also `wait()` and `stop()`) |
-| JavaScript | `const keepalive = await session.keepAwake({ whileBusy: true }); await keepalive.done();` |
-| CLI | `microvm keepalive --name NAME --while-busy` |
-
-It polls `/v1/health` at an interval of at most half the idle window, so one
-missed poll cannot let the VM suspend. The default interval is a third of the
-window, at most 20 seconds. When the caller does not know the window, the policy
-assumes the platform minimum of 60 seconds. A sandbox-held session knows its own
-window, and the CLI reads it from `GetMicrovm`. Retryable poll failures are
-retried after one second, up to three in a row. `while_busy` ends the loop once
-no exec is running.
-
-A keepalive on a sandbox-held session ends as soon as that sandbox suspends or
-terminates, because the next poll would otherwise auto-resume the VM the caller
-just suspended. It reads the sandbox's lifecycle, not its lock, so it keeps
-polling while a long `run_sync` holds the lock. Stop a keepalive yourself before
-suspending the VM any other way, for example from the CLI.
-
-Measured 2026-09-23 in us-east-1: with `maxIdleDurationSeconds=60`, a CPU-busy
-exec was suspended between 60 and 70 seconds after the last inbound request,
-and a held-open exec output stream with steady output kept the VM running for
-150 seconds with no other requests (`docs/PLATFORM.md`).
-
-### Choosing `maxIdleDurationSeconds`
-
-- **An orchestrator that stays connected** (a CLI session, a notebook, a
-  service): keep the short default and run the keepalive for the length of the
-  work. The VM suspends soon after the orchestrator goes away, which is the
-  cheap failure.
-- **An orchestrator that disconnects between polls** (a durable workflow that
-  suspends between steps): the orchestrator's own poll cadence is the
-  keepalive. Set the window comfortably above the longest gap between polls,
-  including retries, or accept that the VM suspends and auto-resumes on the next
-  poll.
-- **Streaming output**: a client holding an exec stream open receives traffic
-  continuously, which kept a VM awake in the measurement above. It is not a
-  substitute for a keepalive: the stream ends when the exec does, and a reconnect
-  gap longer than the window suspends the VM.
-
-## Lifecycle from a process that did not launch the VM
-
-A durable workflow step, a reaper, or another machine often holds only an identifier.
-`ControlPlane` is lifecycle by ID in both bindings, one core call per method, with no
-lifecycle state of its own and therefore none of a `Sandbox`'s STATE guards:
-
-```python
-plane = microvms.ControlPlane(microvms.Region.us_east_1())
-vm = plane.get(microvm_id)  # state, state_reason, endpoint, idle_policy, started_at
-plane.suspend(microvm_id)
-plane.wait_for_state(microvm_id, ["SUSPENDED"])
-for item in plane.list(image_identifier=vm.image_arn):
-    print(item.id, item.state)
-```
-
-Pair `vm.endpoint` with the agent token in `Session.attach` for exec and files.
-
-The same object administers images by identifier: `list_images`, `delete_image`,
-`list_image_versions`, `set_image_version_status`, `list_image_builds` and
-`get_image_build` (`listImages`, `deleteImage` and so on in TypeScript). A version's status
-is the canary and rollback lever: `INACTIVE` makes `RunMicrovm` refuse the version while
-running VMs keep running and its readback stays, and the call raises when the readback
-doesn't carry the status asked for:
-
-```python
-plane.set_image_version_status(image_arn, "2.0", "INACTIVE")  # retire the new build
-for version in plane.list_image_versions(image_arn):
-    print(version.image_version, version.state, version.status)
-```
-
-`delete_image` doesn't raise: it answers `False` when every attempt failed, with the same
-retries a teardown's delete makes.
-
-The process that launches a VM for later steps hands it off with `detach()` rather than
-dropping the sandbox, which would warn that a live VM was abandoned:
-
-```python
-sandbox = microvms.Sandbox(region)
-sandbox.run(image_identifier=image, wait=False)
-record = sandbox.detach().to_dict()  # microvm_id, endpoint, region, port, agent_token
-save_privately(record)  # encrypted: agent_token is a credential
-```
-
-`detach()` (JS `sandbox.detach()`, `AgentVm.detach()` in both) makes no AWS call and leaves
-the VM running. It returns a `Detached` record whose token is absent from repr and
-`toString()`, and it leaves the sandbox inert: its session is gone, and `run`,
-`wait_until_running`, `suspend`, `resume`, and `terminate` are refused (`terminate` reports
-the refusal in its report rather than raising). It is refused without a live VM.
-
-To drive the VM with a `Sandbox`'s guards instead, adopt it from its private record:
-
-```python
-sandbox = microvms.Sandbox.adopt(region, microvm_id, endpoint, agent_token)
-if sandbox.lifecycle == "SUSPENDED":
-    sandbox.resume()
-sandbox.terminate(wait_for_terminated=True)
-```
-
-`Sandbox.adopt` (JS `Sandbox.adopt`, and `AgentVm.adopt` with the agent specs) reads the
-lifecycle from `GetMicrovm`, so suspend, resume, and terminate keep STATE-5, STATE-7,
-STATE-11, and STATE-12, with the suspended window from the reported `idlePolicy`. The VM
-was bootstrapped by the launch that made it, so an adopted sandbox refuses `run` and never
-re-sends a run-hook payload (STATE-3), and dropping it prints no leak warning: the
-launching record owns the teardown. A VM adopted while already SUSPENDED has no suspend
-time this client saw, so the service answers a late resume. The `endpoint` must match the
-one `GetMicrovm` reports. From a shell, `microvm adopt` (the triple or `--name`) runs the
-same adopt and reports the state it read, writing nothing.
-
-These launch options make a launch step safe to retry. `Sandbox.run(wait=False)` returns
-once `RunMicrovm` is accepted and `wait_until_running()` finishes the wait later. The CLI's
-spelling is `run --keep --no-wait`, and `microvm wait` finishes it from another process,
-from PENDING or RUNNING, through core's `Sandbox::wait_until_ready`. A
-persisted `client_token` with an explicit `agent_token` makes a retried launch adopt the
-VM the first attempt made; if that VM idle-suspended in between, the launch resumes it
-rather than reporting a startup death (`docs/PLATFORM.md`, "A client-token retry after a
-suspend returns the same VM"). The CLI's `run --client-token` reads the agent token from
-`$MICROVM_AGENT_TOKEN`.
-
-To find a VM by name instead of carrying the triple, register it and adopt it by name
-later, from any process:
-
-```python
-registry = microvms.NameRegistry()  # the CLI's registry: $MICROVM_STATE_DIR/names
-registry.register("ci-runner", sandbox)
-# ...in another process, or `microvm exec --name ci-runner` from a shell
-vm = microvms.Sandbox.from_name(region, "ci-runner", registry)
-vm.terminate(wait_for_terminated=True)
-registry.release_by_vm(vm.microvm_id)
-```
-
-`NameRegistry(state_dir)` is the CLI's file registry, so names cross freely between the
-CLI and both bindings. A record holds the agent token, a bearer credential: files are
-owner-only, and `NameRecord` keeps the token out of `repr` (JS: out of `toString` and
-`JSON.stringify`). To keep names in your own database, store `record.to_dict()` (JS
-`toObject()`) privately and rebuild it with `NameRecord.from_dict`, then call
-`Sandbox.adopt` with its fields. `from_name` refuses a missing name, and a record from
-another region, before any AWS call. The platform itself offers no lookup: `RunMicrovm`
-takes no tags and tagging a MicroVM fails (`docs/PLATFORM.md`).
-
-`log_group` (with an optional exact `log_stream`) sends a VM's own logs to a group you
-choose, and `disable_logging` turns them off; the execution role must be allowed to write
-there. The CLI spells these `--vm-log-group`, `--vm-log-stream`, and `--no-vm-logs`, since
-`--log-group` already names the image build's logs.
-
-## Advertising network isolation
-
-A harness that offers a no-network task mode must enforce it or reject the task before it
-starts. Omitting `egress` does not enforce it: a VM launched without the managed egress
-connector still reaches the internet (`docs/PLATFORM.md`, measured 2026-09-11 and
-2026-09-12), and `deny_egress` only sets proxy variables a workload can ignore. Internet
-isolation needs a VPC egress connector attached to a VPC with no internet gateway or NAT
-gateway, with its routes audited separately (`docs/NETWORKING.md`).
-
-Every launch reports what its outbound network is, as one of `open`, `unsealed`,
-`best-effort`, or `sealed`. `egress_posture_for` answers it for a set of launch options
-before anything is built, with no AWS call, and raises the launch's own `InvalidArgError`
-for options the launch would refuse. The launched session carries the same value, and so
-does the CLI envelope's `egressPosture` for the same options:
-
-```python
-posture = microvms.egress_posture_for(False, connectors, False, region=region)
-if task_needs_no_network and posture != "sealed":
-    raise RuntimeError(f"no-network needs a sealed launch; this one is {posture}")
-session = sandbox.run(image_identifier=image, egress_network_connectors=connectors)
-assert session.egress_posture == posture
-```
-
-Node spells these `egressPostureFor(egress, connectors, denyEgress, region)` and
-`await session.egressPosture()`. From a shell, `microvm egress-posture` takes `run`'s egress
-flags, microvm.toml and region, and answers the same function in `data.posture`. Advertise network isolation, such as Harbor's
-`disable_internet` capability, only when the launch would be `sealed`, and reject a
-no-network task otherwise. No launch option answers `sealed` today: the client cannot
-see a VPC's routes, so a VPC connector alone reports `unsealed`. A session that did not
-launch its VM (`Session.direct`, `Session.attach`, an adopted sandbox) holds no launch
-options and reports `unsealed`.
-
-## Before queueing work: size class and preflight
-
-A harness that takes CPU and memory requests picks a class with
-`SizeClass.from_request(cpus, memory_mib)` (JS `SizeClass.fromRequest(cpus, memoryMib)`).
-It returns the smallest class whose **baseline** covers both values. The baseline is what is
-billed and always present, and the fixed ceiling above it is four times larger. `None` or
-zero on an axis means no requirement on that axis. With neither set, the result is
-`default_class()`. A request that no class covers raises `InvalidArgError` naming the largest
-class, so the harness can reject the task.
-
-`microvms.preflight(region=None)` (JS `await preflight(region)`) says whether a launch could
-proceed, before any build. It runs these checks in order, and each check is in
-`report.checks` with `ok`, `fatal`, `ran`, `detail`, and `remedy`:
-
-1. **region**: the region resolves, from the argument or `$AWS_REGION` / `$AWS_DEFAULT_REGION`.
-   The check fails when the environment names a region the client refuses. An explicit
-   `Region.unlisted` region is only advisory, and the service check decides.
-2. **credentials**: the default credential chain resolves credentials. This makes no AWS API
-   call.
-3. **service**: the service answers one `ListManagedMicrovmImages` page in that region. This
-   is the only AWS operation, and it is free and read-only. A region without MicroVMs answers
-   `AccessDeniedException`.
-
-`report.ok` is true only when every fatal check passed. A check after a failure has
-`ran=False` and makes no call. `preflight` never raises, and nothing it does bills or changes
-the account. It does not check the execution or build role, the artifact bucket, quotas, or
-VPC connectors; `microvm doctor` reports what it can see of those. The check does not inspect boto3
-service-model availability, because the bindings are Rust and speak the API version they were
-built against. The listing is the evidence that the endpoint accepts that version. A harness
-that also calls the service through boto3 must check its own boto3. `doctor` shares the
-region and credentials checks.
-
-## The provider shape
-
-A harness environment provider, such as a Harbor `BaseEnvironment` subclass, is
-the harness's own contract over the calls above: its type and capabilities, its
-task-definition validation, its start and stop ordering, and its file transfers.
-Everything else is one binding call per step. The class imports the harness's
-packages, so it lives with the harness, not in this repo
-(`docs/HARNESS-CAPABILITIES.md`, non-goals). A sketch, with the harness's own
-method signatures abbreviated:
+Add runtime packages and other image layers before the generated environment
+and startup lines. Preserve the managed base image, the daemon's port, an
+explicit working directory, `ENTRYPOINT []`, and `CMD ["/agentd"]`. Run task
+commands through the session after readiness. An image's startup program can
+otherwise begin work before per-VM initialization has finished.
+
+The client validates the Dockerfile and daemon architecture before building.
+It cannot prove what arbitrary startup scripts or base-image programs do.
+See [Write a guest Dockerfile](https://laithalsaadoon.github.io/microvms-agentd/learn/operations/write-a-guest-dockerfile/)
+for supported customization and build diagnostics.
+
+Keep shared tools and data in the image. Upload each task's source after launch,
+and install its credentials after bootstrap. Every VM restored from an image
+receives that image's files and captured memory.
+
+## Obtain the daemon without the CLI
+
+The bindings expose the same release verification used by the CLI:
 
 ```python
 import microvms
 
-
-class LambdaMicrovmEnvironment:  # the harness's environment base class
-    def __init__(self, task, region, bucket, build_role_arn, connectors=()):
-        # Constructor: reject what the platform cannot satisfy, before any build.
-        self.size = microvms.SizeClass.from_request(task.cpus, task.memory_mib)
-        posture = microvms.egress_posture_for(
-            False, list(connectors), False, region=region
-        )
-        if task.no_network and posture != "sealed":
-            raise ValueError(f"no-network needs a sealed launch; this one is {posture}")
-        self.task, self.region, self.connectors = task, region, list(connectors)
-        self.bucket, self.build_role_arn = bucket, build_role_arn
-
-    def start(self, force_build=False):
-        report = microvms.preflight(self.region)
-        if not report.ok:
-            raise RuntimeError([c.detail for c in report.checks if not c.ok])
-        self.sandbox = microvms.Sandbox(self.region)
-        ensured = self.sandbox.ensure_image(
-            name_prefix=f"harbor-{self.task.name}",
-            binary=microvms.provision_agentd(),
-            dockerfile=microvms.wrap_dockerfile(self.task.dockerfile),
-            context_dir=self.task.environment_dir,
-            s3_bucket=self.bucket,
-            build_role_arn=self.build_role_arn,
-            size=self.size,
-            force=force_build,
-        )
-        self.session = self.sandbox.run(
-            image_identifier=ensured.image.identifier,
-            egress_network_connectors=self.connectors or None,
-        )
-
-    def exec(self, command, cwd=None, env=None, timeout_sec=None, user=None):
-        result = self.session.run_to_completion(
-            command,
-            shell="bash",
-            user=user,
-            inherit_image_env=True,
-            cwd=cwd,
-            env=env,
-            timeout_sec=timeout_sec,
-        )
-        stderr = "\n".join([result.stderr, *result.notes])
-        return result.stdout, stderr, result.posix_exit_code
-
-    def upload_file(self, source, target):
-        self.session.upload_file(target, open(source, "rb").read())
-
-    def download_file(self, source, target):
-        open(target, "wb").write(self.session.download_file(source))
-
-    def upload_dir(self, source):
-        # Into /workspace, and only what changed since the last pass travels.
-        self.session.sync_dir(source)
-
-    def download_dir(self, source, target, globs=("**",)):
-        # Regular files only, never under .git, never outside target: the archive is the VM's.
-        return self.session.download_dir(source, target, list(globs))
-
-    def stop(self):
-        # The image stays: the next trial of this task reuses it (see below).
-        self.sandbox.terminate(wait_for_terminated=True)
+agentd = microvms.provision_agentd()
 ```
 
-Client calls and their behavior references:
+```js
+import { provisionAgentd } from '@theagenticguy/microvms';
 
-| Provider step | Call | Section above | Requirements |
-| --- | --- | --- | --- |
-| Pick a size from a resource request | `SizeClass.from_request` | Before queueing work | BIND-13, BIND-14 |
-| Refuse a no-network task the launch cannot seal | `egress_posture_for`, `Session.egress_posture` | Advertising network isolation | BIND-11, BIND-12 |
-| Check the account before paying for a build | `preflight` | Before queueing work | BIND-15, BIND-16 |
-| Obtain the daemon for this client's version | `provision_agentd` | The recipe | BIND-17 to BIND-20 |
-| Turn the task Dockerfile into a buildable one | `wrap_dockerfile`, `BaseImage.from_dockerfile` | The recipe | IMAGE-1 to IMAGE-5 |
-| Build once per content, reuse across trials | `Sandbox.ensure_image` | From build inputs to an image ARN | IMAGE-6 to IMAGE-12 |
-| Bash semantics, a user by name, the image `ENV` | `shell="bash"`, `user=`, `inherit_image_env=` | A harness exec in one call | AGENTD-7 to AGENTD-16 |
-| One command to one exit code | `Session.run_to_completion`, `posix_exit_code`, `notes` | Running one command to one result | BIND-6 to BIND-10 |
+const agentd = await provisionAgentd();
+```
 
-The image is kept at `stop` on purpose: `ensure_image` names it by content, so the next
-trial of the task reuses it, and deleting it is a separate cleanup the harness schedules
-once the task set is finished. Some sketch choices depend on the daemon the image carries:
-`shell="bash"`, `user` by name, and `inherit_image_env` need a daemon built with those
-fields, which `provision_agentd()` guarantees because it fetches the daemon for the
-client's own version. With an older daemon, fall back to `["bash", "-c", command]` and a
-numeric `user`.
+The result is the daemon's bytes. The client considers a supplied binary,
+`MICROVM_AGENTD`, and the versioned local cache before downloading its matching
+release. Release verification is performed in the client. The report variants,
+`provision_agentd_report` and `provisionAgentdReport`, include the selected
+source, verification result, path, and SHA-256. Use the report when diagnosing
+installation failures.
 
-## Match client requirements to daemon capabilities
+A supplied binary still needs to be an ARM64 ELF. To check a file before an
+image build, run `microvm doctor --binary ./agentd`.
 
-The two daemon shapes this supersedes are described in
-`docs/HARNESS-CAPABILITIES.md`; neither project is a dependency of this repo,
-so the rows are the generic needs.
+## Launch, execute, and clean up
 
-| Need | Who had it | agentd |
-| --- | --- | --- |
-| Start/poll/ack exec that outlives an auth-token ceiling | evaluation harnesses | caller-minted `exec_id`, idempotent start, read-only poll, explicit ack, TTL only after ack (`crates/agentd/src/exec.rs`) |
-| Idempotent start under retry | evaluation harnesses | a known id returns success without spawning a second child (`crates/agentd/src/exec.rs:364-367`) |
-| Per-exec env, cwd, user/group, timeout | evaluation harnesses | in the wire protocol and applied by the daemon; the child's environment starts empty, so the token never leaks into it |
-| A user by name, with its `HOME` | evaluation harnesses | `user`/`group` take a name the daemon resolves against the guest's `/etc/passwd` and `/etc/group`, and a user with a row gets `HOME`, `USER`, `LOGNAME` beneath the caller's env; an unknown name is `400 unknown_user` before anything spawns (`crates/agentd/src/exec_start.rs`) |
-| The image's `ENV` (a venv `PATH`, a `JAVA_HOME`) in the child | evaluation harnesses | opt-in `inherit_image_env`: the daemon's startup snapshot of its own environment, minus `AGENTD_*`, as the lowest layer; `Health.image_env_keys` says whether the daemon honours it |
-| Bash semantics without guessing the image | evaluation harnesses | `shell: "bash"`, resolved in the guest; a missing shell is `400 unknown_shell` rather than exit 127 |
-| File and directory-tree transfer with tar fidelity | evaluation harnesses | streamed file routes plus confined tar extraction (`crates/agentd/src/fs.rs`) |
-| Per-instance credential bootstrap, no secret in the shared image | both | one-shot `runHookPayload` bootstrap with replay semantics (`crates/agentd/src/routes.rs:166-216`) |
-| Lifecycle hooks answered so the platform can manage the VM | session servers | ready/validate/run/suspend/resume/terminate all served (`crates/agentd/src/routes.rs:112-118`) |
-| A liveness probe cheaper than an exec | session servers | unauthenticated `GET /v1/health` |
-| Live output streaming with resume | neither had it | SSE with byte-cursor resume and explicit gap events (`crates/agentd/src/exec.rs:436-524`) |
-
-### A harness exec in one call
-
-A harness whose contract is bash semantics, a task user by name, and the image's own
-`ENV` sends all three on the start request and resolves nothing itself:
+A `Sandbox` tracks a VM's lifecycle and any image it built. `run` accepts an
+image ARN or resolves an image name in the sandbox's region. It waits for the
+running state and daemon readiness by default, then returns a `Session`.
+An execution role grants permissions to guest workloads; choose it for the
+workload rather than reusing an operator's permissions.
 
 ```python
-result = session.run_sync(
-    command,
-    shell="bash",  # resolved in the guest; unknown_shell if absent
-    user=task.agent_user,  # int or str; unknown_user if the guest has no such row
-    inherit_image_env=True,  # the image's ENV beneath the launch env and `env`
-    env=task.env,
-    timeout=timeout,
-)
+import os
+from microvms import Region, Sandbox
+
+vm = Sandbox(Region.parse(os.environ.get("AWS_REGION", "us-east-1")))
+try:
+    session = vm.run(
+        image_identifier=os.environ["MICROVM_IMAGE"],
+        execution_role_arn=os.environ["MICROVM_EXECUTION_ROLE_ARN"],
+    )
+    result = session.run_sync(["echo", "hello"])
+    print(result.stdout, end="")
+    if not result.ok:
+        raise RuntimeError(f"Command failed: {result.exit_code}")
+finally:
+    cleanup = vm.terminate(wait_for_terminated=True)
+    if cleanup.failures or cleanup.undeleted:
+        print("Cleanup needs attention:", cleanup.to_dict())
 ```
 
-The Node binding takes the same fields in `ExecOptions` (`shell: "bash"`, `user: "agent"`,
-`inheritImageEnv: true`), and the CLI as `exec --shell bash --user agent
---inherit-image-env`. Precedence, lowest first, is image env, the passwd row's `HOME`,
-`USER` and `LOGNAME`, the launch env, the request's `env`. A daemon built before these
-fields refuses a string `user` or `shell` as `malformed_request` and ignores
-`inherit_image_env`; check `Health.image_env_keys` (not `None`) before relying on the
-last one.
+This creates billable AWS resources. `terminate` returns a report even when
+cleanup is incomplete. Inspect it on success and failure. Dropping an object
+or ending a process does not guarantee termination. Images remain available
+for reuse unless cleanup explicitly deletes an eligible image.
 
-## Coding agents over the daemon
+For workspace transfer, use the session's file or tar methods, or the CLI's
+`run <DIR>` and `sync` workflows. The CLI packs project files with exclusions
+and can collect configured artifacts after the command finishes. A raw tar
+download is an archive; it does not choose which files an application should
+restore locally.
 
-The one opinionated layer this repo ships over the recipe above is `docs/AGENT-VMS.md`:
-`microvm agent-up` derives a Dockerfile from your agentd stanza plus the profile layers
-(Node 22 with `nodejs22-npm`, `npm install -g` of Claude Code and/or Codex, a uid
-1000), launches with egress, mints a Bedrock bearer token from the caller's own
-credentials, and installs it as `/workspace/.agent-env` for the agent to source;
-`microvm agent-prompt` runs the agent headless as that user. A harness that already
-embeds agentd gets the same steps from the bindings' `AgentVm`, or piecewise from
-`install_agent_access` and `prompt_agent` over any `Session`, so the credential file,
-the demotion, the `PATH` line, and the read-back-the-effect discipline are the
-library's rather than each harness's to rediscover.
+## Choose execution semantics
 
-## Configuration knobs
+| Need | API behavior |
+|---|---|
+| Wait for a command's complete result | `Session.run_sync` waits and acknowledges the execution. Check its outcome and exit code. |
+| Stream or detach | `Session.run` returns an execution handle; retain its ID to poll, stream, signal, and acknowledge later. |
+| Retry an uncertain start | Reuse the original execution ID and request. A duplicate ID refers to the existing execution. |
+| Bound guest execution | Set the request's execution timeout. A client wait deadline alone does not stop the guest process. |
+| End residual child processes | Request process-group cleanup when the workload requires it. |
+| Resume output after a broken connection | Reconnect at the last consumed byte offset and handle an explicit gap. |
 
-Every `AGENTD_*` variable is read at startup by `Config::from_env`
-(`crates/agentd/src/config.rs:116-152`); an unset or unparseable value keeps the
-default rather than refusing to boot, because a daemon that will not start
-strands the VM with no way in. Set them as `ENV` lines in your Dockerfile. The stanza already sets `AGENTD_PORT` and `AGENTD_LOG`.
+Execution output has separate stdout and stderr channels. Polling reports
+terminal output; streaming exposes progress. Acknowledge only after consuming
+the result: acknowledgment releases buffered output and permits collection.
+The daemon applies retention and admission limits rather than offering an
+unbounded output store. [Protocol](PROTOCOL.md) defines the exact fields and
+limits.
 
-| Variable | Default | What it bounds |
-| --- | --- | --- |
-| `AGENTD_PORT` | `9000` | the port the control API and hooks listen on (`crates/agentd/src/config.rs:15`) |
-| `AGENTD_LOG` | `info` | the tracing filter, standard `EnvFilter` syntax (`crates/agentd/src/main.rs:91`) |
-| `AGENTD_MAX_BODY_BYTES` | 512 MiB | largest request body accepted on the wire (`crates/agentd/src/config.rs:17-19`) |
-| `AGENTD_MAX_OUTPUT_BYTES` | 8 MiB | per-stream cap on captured exec output; exceeding it truncates and marks the result (`crates/agentd/src/config.rs:25-27`) |
-| `AGENTD_OUTPUT_LINGER_SECS` | `5` | how long to keep reading pipes after the child exits, for grandchildren holding them (`crates/agentd/src/config.rs:28-31`) |
-| `AGENTD_EXEC_TTL_SECS` | `900` | how long an acked exec entry is retained before collection (`crates/agentd/src/config.rs:32-33`) |
-| `AGENTD_STREAM_BUFFER_BYTES` | 1 MiB | bytes of recent output kept for stream replay; a reattach past it gets a gap event (`crates/agentd/src/config.rs:41-45`) |
-| `AGENTD_STREAM_CHANNEL_CAPACITY` | `256` | slots in an exec's live fan-out channel; a lagging subscriber re-reads the ring instead of losing output (`crates/agentd/src/config.rs:46-49`) |
-| `AGENTD_SSE_KEEPALIVE_SECS` | `15` | interval between SSE keep-alive comments, so a silent exec does not look like a dead connection (`crates/agentd/src/config.rs:50-53`) |
-| `AGENTD_MAX_STDIN_WRITE_BYTES` | 1 MiB | largest single decoded stdin write (`crates/agentd/src/config.rs:54-57`) |
-| `AGENTD_DISK_RESERVE_BYTES` | 256 MiB | free bytes a write target must keep; a write that would cross it is refused with 507. Zero disables the guard (`crates/agentd/src/config.rs:63-69`) |
-| `AGENTD_REPAIR_IDENTITY` | `true` | whether to replace image-derived identity at the first successful run hook, because N VMs restored from one snapshot share machine-id, hostname, and boot_id. `0`/`false`/`no`/`off` opt out (`crates/agentd/src/config.rs:70-78`) |
-| `AGENTD_HOOK_HANDLER_TIMEOUT_SECS` | `20` | how long one handler may run before its process group is killed; clamped to 1 to 55 so it stays under the image's hook timeout (`crates/agentd/src/config.rs:84-88`) |
+A launch idempotency key and an execution ID solve different problems. A
+persisted `client_token` reconciles the same AWS launch, using the same launch
+parameters. It is not a reusable name for future VMs. The sandbox requires an
+explicit agent token and disabled generated tunnel identity for that replay
+path. A new task that needs a new VM needs a new launch key.
+
+## Reconnect from another process
+
+Persist the endpoint, MicroVM ID, region, and agent token only in a store
+appropriate for credentials. A session can connect to an existing daemon;
+connecting is distinct from launching or bootstrapping it again. The CLI's
+`--vm-name`, `attach`, and `history` commands manage local records for this
+workflow.
+
+The daemon's agent token and the platform's proxy token serve different
+purposes. A daemon request needs its bearer token and the proxy headers minted
+by `CreateMicrovmAuthToken`, scoped to the daemon port. The shared client
+refreshes proxy authorization while retaining the daemon execution IDs and
+stream cursors. A custom client must do the same; a proxy token's expiration
+does not mean an execution disappeared.
+
+## Keep a VM available between tasks
+
+The idle policy is fixed at launch. Inbound endpoint traffic resets the idle
+timer; guest work and requests to the daemon from inside the guest do not.
+Choose the idle window for the workload. If the VM must stay available, send
+health requests from outside it at an interval below that window and monitor
+failures. Stop polling when you intend it to suspend.
+
+Suspend preserves the guest's state, but connections and time-sensitive
+credentials may need renewal after resume. Use workload hook scripts when
+necessary and treat reconnect failures explicitly. The configured suspended
+window and maximum lifetime still bound availability. Consult
+[Suspend and resume](SUSPEND-RESUME.md) for the distinction between documented
+behavior, measurements, and unknowns.
+
+## Integrate coding agents
+
+`AgentVm` composes image preparation, launch, credential installation, and
+prompt execution for the supported agent profiles. It does not schedule work
+across VMs. Use [Agent VMs](AGENT-VMS.md) for that workflow, or build your own
+recipe on `Sandbox` and `Session` for another tool.
+
+Internet access and guest credentials remain properties of the VM. A custom
+VPC connector must have suitable routing to enforce isolation; omitting the
+managed connector or setting proxy-deny variables does not do that. Read
+[Networking](NETWORKING.md) and [Trust](TRUST.md) before choosing a deployment
+policy.
+
+## Verify an integration
+
+Test command failure, interrupted connections, repeated starts, missing output,
+and incomplete cleanup as well as the successful path. Compare the installed
+CLI's `microvm manifest` and the daemon's `/v1/schema` with the versions your
+application uses. Do not infer an AWS guarantee from a serializer or mock.
+
+The repository's local checks exercise client policies and daemon behavior.
+AWS behavior requires a separate live conformance run. This documentation
+refresh was verified offline only; it introduces no new AWS measurement.

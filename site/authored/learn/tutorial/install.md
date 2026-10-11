@@ -73,7 +73,7 @@ binary's architecture.
 From a clone with Rust installed:
 
 ```bash
-cargo install --path microvms-cli --locked
+cargo install --path crates/microvms-cli --locked
 ```
 
 This builds the host CLI. It can still download the guest daemon

@@ -48,8 +48,9 @@ with `--image` to avoid unnecessary builds and retention charges.
 
 ## 3. Repository work
 
-Read `CONTRIBUTING.md`. Run `mise run check` for local verification and
-`mise run docs:check` for documentation. Live AWS behavior needs a separate
+Read `CONTRIBUTING.md`. Run `mise run check` for local code verification and
+`mise run docs:check` for the documentation build. `mise run docs:gate` adds
+accessibility and Lighthouse checks. The prose gate runs in `check`. Live AWS behavior needs a separate
 exercise of the changed path; `mise run live` is billable. Report when it has
 not been run, and verify cleanup independently afterward.
 

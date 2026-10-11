@@ -5,7 +5,8 @@ The MicroVMs client's use cases: the control-plane client, `Sandbox`, `Session`,
 
 Each use case reaches the outside only through a port this crate declares: the control
 plane's `Transport`, the session's `HttpBackend`, `TokenMinter`, `NameStore`, `BuildServices`,
-`Clock`, `Entropy`, and `Adapters` for the pieces a use case builds partway through. The crate
+`Clock`, `Entropy`, `LocalTree`, `ReleaseSource`, `AttestationVerifier`, and
+`Adapters` for the pieces a use case builds partway through. The crate
 itself doesn't touch the network, AWS, the filesystem, a subprocess, the wall clock, or the OS
 random pool, so a use case can be tested with fakes and a simulated clock instead of the real
 thing. The shared fakes are in `microvms_app::testing`, behind the `test-support` feature.

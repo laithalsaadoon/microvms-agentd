@@ -20,12 +20,12 @@ Or compile from crates.io with `cargo install microvms-cli --locked`.
 The CLI downloads and verifies the matching `agentd` binary automatically
 when it builds an image, checking its Sigstore attestation in-process.
 
-## Start an agent in 90 seconds
+## Start an agent
 
 With the CLI installed and [AWS configured](https://laithalsaadoon.github.io/microvms-agentd/learn/tutorial/first-run/),
 these are the commands to start using it. Your first image build takes several
-minutes; subsequent agent launches reuse that image. The 90 seconds is setup
-time, not a guarantee about AWS builds or the agent's task.
+minutes; subsequent agent launches can reuse that image. These commands
+create billable AWS resources.
 
 Prerequisites: AWS CLI v2, AWS credentials with MicroVMs and Bedrock model
 access, and `MICROVM_BUCKET`, `MICROVM_BUILD_ROLE_ARN`, and
@@ -64,8 +64,8 @@ microvm run --image agent-tools --exec "uname -m"
 
 This prints `aarch64` from the guest. `run` tears down its VM by default;
 `--keep --vm-name dev` keeps it for later `exec`, file transfer, or SDK calls.
-The CLI accepts image names; SDKs need the full image ARN returned by the
-build as `imageIdentifier`. [Python, Node.js/TypeScript, and Rust examples](https://laithalsaadoon.github.io/microvms-agentd/learn/tutorial/from-code/)
+The CLI and SDKs accept image names or ARNs. Use the build result's
+`imageIdentifier` when the exact image ARN is needed. [Python, Node.js/TypeScript, and Rust examples](https://laithalsaadoon.github.io/microvms-agentd/learn/tutorial/from-code/)
 show how to run an agent's tools in a fresh sandbox from your application.
 
 ## Networking and automation

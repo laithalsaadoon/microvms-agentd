@@ -17,8 +17,8 @@ First [install the CLI](/learn/tutorial/install/) and
 [configure AWS](/learn/tutorial/first-run/#configure-aws). You need AWS CLI
 v2, MicroVMs permissions, the artifact bucket and build/execution roles,
 and Bedrock invocation permissions with access to your chosen model.
-With those prerequisites ready, you can start this workflow in 90 seconds.
-The first image build takes several minutes; later launches reuse it
+These commands create billable AWS resources. The first image build takes
+several minutes; later launches reuse it
 when its inputs are unchanged.
 
 From your project directory:
@@ -191,7 +191,7 @@ For programmatic use, start with the complete
 [Python, Node.js/TypeScript, and Rust examples](/learn/tutorial/from-code/).
 The Python and Node packages also expose `AgentVm` for building agent
 images, launching, installing credentials, and prompting. The
-[Agent VMs specification](/internals/agent-vms/) documents those methods,
+[Agent VMs guide](/internals/agent-vms/) documents those methods,
 profiles, and provisioning details. The
 [shell example](https://github.com/laithalsaadoon/microvms-agentd/tree/main/examples/coding-agents-on-bedrock)
 shows the individual build, launch, file-transfer, and exec steps.

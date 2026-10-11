@@ -11,7 +11,7 @@ It can inspect files, edit code, and run commands in `/workspace`; you
 choose which results to bring back to your machine.
 
 With the [CLI installed](/learn/tutorial/install/) and AWS configured,
-you can start the workflow below in 90 seconds. A first image build takes
+start the workflow below from your project directory. A first image build takes
 several minutes, and the agent's task takes additional time. These commands
 create billable AWS resources.
 
@@ -117,8 +117,7 @@ microvm run --image agent-tools --exec "uname -m"
 ```
 
 The guest prints `aarch64`. Each `run` tears down its VM by default, while
-the existing image stays available. The CLI accepts an image name;
-SDKs need its ARN. Copy `data.imageIdentifier` from the build's JSON into
+the existing image stays available. The CLI and SDKs accept an image name or ARN. Copy `data.imageIdentifier` from the build's JSON into
 `MICROVM_IMAGE` for the SDK examples:
 
 ```bash

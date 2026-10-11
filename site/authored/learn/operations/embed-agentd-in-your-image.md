@@ -6,59 +6,73 @@ sidebar:
   order: 2
 ---
 
+Use agentd to run commands and move files through a VM's HTTPS endpoint.
+Build the image first. Launch it, wait for readiness, then start work through
+a session. Use the shared SDKs when possible; [Embedding](/internals/embedding/)
+covers their lifecycle and cleanup rules.
+
+## Build the image
+
 ```bash
 microvm dockerfile --workdir /workspace > Dockerfile
-# edit: insert your RUN layers between the chmod line and the ENV lines
+# Add your package-install steps before the generated ENV and CMD lines.
 microvm build --dockerfile Dockerfile --name my-task-image
 ```
 
-The platform has no exec API: a MicroVM exposes one HTTPS endpoint and forwards it to whatever the image's `CMD` is listening on. Every harness that runs commands inside a VM therefore ships a daemon in its task image, and before agentd each one wrote its own. At the end of this page you will have an image with agentd as its `CMD` and know which surfaces your client reads. The reasoning behind each rule is in [Embedding](/internals/embedding/).
+The generated file is the same one the default build uses. Add the tools your
+work needs and keep its daemon lines. Use the managed base image, an explicit
+`WORKDIR`, `ENTRYPOINT []`, and `CMD ["/agentd"]`. The client checks the base
+and working directory before it calls AWS. Keep task commands out of image
+startup: they must wait for per-VM setup.
 
-## 1. The recipe
+Do not put secrets in the image. A shared image supplies the same files and
+saved memory to each VM. Send per-VM credentials after launch.
+[Write a guest Dockerfile](/learn/operations/write-a-guest-dockerfile/) explains
+the build checks and how to diagnose failures.
 
-`microvm dockerfile` prints the stanza that wraps a base image with agentd, emitted by the same generator the default `microvm build` uses, so appending your layers to it is the default build plus your layers. Any task image is the same shape: take the stanza, add the layers your workload needs, keep the daemon lines intact. [Write a guest Dockerfile](/learn/operations/write-a-guest-dockerfile/) walks the stanza line by line.
+## Connect a client
 
-## 2. The lines that must survive your edits
+The SDKs handle launch, bootstrap, proxy tokens, and the daemon connection.
+For a custom client, read [Protocol](/internals/protocol/) and the
+[wire schema](/reference/wire-schema/). `GET /v1/schema` serves the schema
+without a daemon token. Access through the endpoint still needs proxy auth.
 
-`ENTRYPOINT []` plus `CMD ["/agentd"]` is the deployment invariant the trust boundary rests on: no task workload runs before the platform's run hook lands, and an omitted `cwd` inherits the image `WORKDIR`. The `FROM` must match the managed base's registry ref, and a `WORKDIR` is required because the managed base declares none. Both are enforced by the client before any AWS call. No secret goes in the image; per-VM credentials travel through `runHookPayload` at launch.
+The platform sends `runHookPayload` to `/run` at launch. It sets the daemon's
+agent token. Protected calls then need both that bearer token and the proxy
+headers. Refresh proxy tokens before they expire.
 
-## 3. Implement the client calls
+Keep the ID of each command you start. Reuse it to reconcile an uncertain
+start, and use a byte cursor to resume a stream. Check for output gaps and
+terminal outcomes. Ack the result after reading it. The daemon limits how
+much output it retains and how long it retains it.
 
-The full route table and request shapes are in [Protocol](/internals/protocol/), and the same contract is served as JSON Schema at `GET /v1/schema` on any running daemon, unauthenticated, so a client can fetch it before it holds a token. The committed copy is the [wire schema](/reference/wire-schema/). The shape of a client, in one line each:
+If the VM must remain ready between tasks, poll its health endpoint from
+outside the guest. Inbound traffic resets the idle timer. A guest-side poll
+does not. The launch policy still sets the VM's maximum lifetime.
 
-- **Bootstrap.** The platform delivers your `runHookPayload` to the daemon's `/run` hook, and agentd installs `agent_token` from it once. Until then every control route answers 503, so a client can tell "not yet bootstrapped" from "broken".
-- **Auth.** Every `/v1/` route except `/v1/health` and `/v1/schema` takes `Authorization: Bearer <agent_token>`.
-- **Exec.** The client mints the `exec_id`, which is what makes a retry safe: a start carrying a known id returns the original exec without spawning a second child. Poll is read-only; ack releases the buffered output; output lives until the ack.
-- **Streaming.** Server-sent events from a byte cursor, with an explicit `gap` event when a reattach falls past the retained window and a typed `exit` event that distinguishes a finished command from a cut connection.
-- **Files.** One file per request, streamed, or a directory tree as tar with confined extraction.
-- **Health.** `GET /v1/health` is unauthenticated and reports version, bootstrap state, disk pressure, and identity repair.
-- **The proxy.** Every request crosses the platform's endpoint proxy, which wants two headers, and the token it wants is capped at sixty minutes, so mint inside the request path and refresh well under the ceiling. A detached exec is polled and acked under the next token without loss.
-- **The keepalive is yours.** Idleness is measured by inbound traffic through the proxy, which terminates outside the VM, so an outside poll of `/v1/health` resets the timer and a guest-side request cannot.
+## Obtain the daemon from a library
 
-## 4. Get the daemon binary from the bindings
-
-The CLI provisions its own version's release asset. A harness that assembles its own build context gets the same bytes with one call:
+A client that builds its own archive can obtain the daemon bytes:
 
 ```python
 import microvms
 
-agentd = microvms.provision_agentd()  # bytes, for this client's version
+agentd = microvms.provision_agentd()
 ```
 
 ```js
 import { provisionAgentd } from '@theagenticguy/microvms';
 
-const agentd = await provisionAgentd(); // Buffer, for this client's version
+const agentd = await provisionAgentd();
 ```
 
-The call uses a `binary` you pass or `$MICROVM_AGENTD` first, then the cached asset for the version, then a fetch of the GitHub release. The client checks the release workflow's Sigstore attestation in-process, or the release's `SHA256SUMS` only when GitHub can't be reached for one, so it needs neither `gh` nor `curl`. A fetch that cannot be verified raises `PreconditionError`. Any binary that is not an ARM64 ELF is refused, including one you supply. `provision_agentd_report()` (`provisionAgentdReport()` in Node) also returns the source, verification, path, and SHA-256.
+The call checks a supplied `binary`, then `MICROVM_AGENTD`, then the local
+cache, before fetching the matching release. It checks that the binary is
+ARM64 ELF. The release path verifies the asset in the client.
+`provision_agentd_report()` in Python and `provisionAgentdReport()` in Node
+also return its source, verification result, path, and SHA-256.
 
-To manage the binary yourself, download and verify it by hand:
-
-```bash
-gh release download --repo laithalsaadoon/microvms-agentd --pattern agentd
-gh attestation verify agentd --repo laithalsaadoon/microvms-agentd
-chmod +x agentd
-```
-
-Pass it as the positional argument to `build` or `run`, or as `$MICROVM_AGENTD`. `microvm doctor --binary ./agentd` checks that it is the ARM64 build before a host-architecture mistake costs a build cycle. [Harness capabilities](/internals/harness-capabilities/) maps what the hand-rolled daemons needed onto what agentd covers.
+Pass the file to `build` or `run`, or set `MICROVM_AGENTD`.
+`microvm doctor --binary ./agentd` checks its format before a build.
+[Harness capabilities](/internals/harness-capabilities/) maps the current APIs
+to integration needs.

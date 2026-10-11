@@ -24,7 +24,7 @@ cd sandbox-demo
 ```
 
 The image and this example use `us-east-1`. Set `MICROVM_IMAGE` to the actual ARN;
-the SDK does not perform the CLI's image-name lookup. Set
+the SDK can also resolve an image name in that region. Set
 `MICROVM_EXECUTION_ROLE_ARN` to the actual execution role ARN from setup.
 AWS credentials come from
 the standard credential chain, including `AWS_PROFILE` and environment variables.
@@ -33,7 +33,7 @@ Replace the empty `[dependencies]` section in `Cargo.toml` with:
 
 ```toml
 [dependencies]
-microvms-core = "0.11"
+microvms-core = "0.12"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
