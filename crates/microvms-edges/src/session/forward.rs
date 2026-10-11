@@ -162,7 +162,9 @@ where
 #[derive(Clone, Debug)]
 pub struct ForwardSpec {
     /// The local address to bind. Port 0 asks the OS for a free one, which the
-    /// [`ForwardEvent::Listening`] event then reports.
+    /// [`ForwardEvent::Listening`] event then reports. When calling
+    /// [`serve_connection`] directly, use the accepted socket's local address here
+    /// so the request Host can be checked against its concrete address and port.
     pub bind: SocketAddr,
     /// The port inside the guest to forward to.
     pub guest_port: u16,

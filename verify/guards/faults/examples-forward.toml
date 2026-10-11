@@ -158,4 +158,4 @@ guard = "a_forward_handle_serves_until_stopped_and_reports"
 run = ["cargo", "test", "-p", "microvms-edges", "--test", "serve", "--", "--exact", "a_forward_handle_serves_until_stopped_and_reports"]
 expect = "test-failed"
 suite = "rust"
-transform = { file = "crates/microvms-edges/src/session/serve.rs", replace = "    spec.bind = local_address(&listener)?;", with = "    let _ = local_address(&listener)?;" }
+transform = { file = "crates/microvms-edges/src/session/serve.rs", replace = "                spec.bind = stream.local_addr().map_err(|error| {", with = "                let _ = stream.local_addr().map_err(|error| {" }
