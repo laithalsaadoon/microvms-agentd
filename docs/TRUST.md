@@ -211,6 +211,14 @@ retain the VM secret. A stolen record can authorize the same tunnels its
 agent token already permits, but does not provide the VM key needed to
 impersonate it. Protect local records accordingly.
 
+Use `tunnel --name <NAME> --verify-identity` with the local record. To transfer
+a record, pipe it into `microvm attach --from -`, then use its registered name.
+For explicit connection details, `--agent-token-file` and
+`--identity-host-seed-file` read a protected file or stdin with `-`.
+The group and other permission bits must be clear on Unix. Only one input can read stdin
+per invocation. The literal secret flags remain supported and
+print a warning recommending these input paths.
+
 This proves key possession by the endpoint, not that the guest remains
 uncompromised. A root workload may read daemon keys from memory. It also does
 not authenticate arbitrary plain HTTP or unverified tunnel traffic.

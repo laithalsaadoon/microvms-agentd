@@ -130,6 +130,10 @@ snow = { version = "0.10", default-features = false, features = [
 globset = "0.4"
 tar = "0.4.46"
 
+[target.'cfg(unix)'.dependencies]
+# Nonblocking opens let the credential reader reject special files before reading them.
+libc = "0.2"
+
 [dev-dependencies]
 # The app's shared test doubles, for the forwarder's and tunnel's tests.
 microvms-app = { version = "0.12.0", path = "../microvms-app", features = ["test-support"] }

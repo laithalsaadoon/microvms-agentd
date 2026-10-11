@@ -2899,6 +2899,7 @@ dependencies = [
  "getrandom 0.4.3",
  "globset",
  "http",
+ "libc",
  "microvms-app",
  "microvms-domain",
  "microvms-protocol",

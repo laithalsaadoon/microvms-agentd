@@ -56,6 +56,7 @@ mod manifest;
 mod provision;
 mod render;
 mod seam;
+mod secret_input;
 mod tui;
 
 use std::process::ExitCode;
@@ -183,8 +184,15 @@ fn main() -> ExitCode {
 /// handler can write a second one because no handler writes the first.
 async fn run<O: std::io::Write, E: std::io::Write>(
     out: &mut Output<O, E>,
-    parsed: Cli,
+    mut parsed: Cli,
 ) -> ExitCode {
+    if let Err(error) =
+        secret_input::prepare(&mut parsed.command, &mut std::io::stdin(), |warning| {
+            out.warn(warning);
+        })
+    {
+        return report(out, &error);
+    }
     let seam = AwsSeam;
     // The one place this crate holds the process environment. Every handler and resolver gets
     // it from here, through `ctx.env`, so a test can hand them another.

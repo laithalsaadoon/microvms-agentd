@@ -1,0 +1,442 @@
+diff --git a/crates/microvms-cli/src/cli.rs b/crates/microvms-cli/src/cli.rs
+index ee6a0b6..56a295e 100644
+--- a/crates/microvms-cli/src/cli.rs
++++ b/crates/microvms-cli/src/cli.rs
+@@ -625,15 +625,10 @@ pub struct AttachFlags {
+     #[arg(long, required_unless_present = "name")]
+     pub endpoint: Option<String>,
+ 
+-    /// The agent token delivered to the VM at launch. Prefer --name or --agent-token-file.
+-    #[arg(long, required_unless_present_any = ["name", "agent_token_file"], conflicts_with = "agent_token_file")]
++    /// The agent token delivered to the VM at launch.
++    #[arg(long, required_unless_present = "name")]
+     pub agent_token: Option<String>,
+ 
+-    /// Read the agent token from a protected file, or from stdin with `-`.
+-    /// On Unix, the file must grant no permissions to group or other users.
+-    #[arg(long, value_name = "FILE")]
+-    pub agent_token_file: Option<PathBuf>,
+-
+     /// The MicroVM id, needed to mint the endpoint proxy token.
+     #[arg(long, required_unless_present = "name")]
+     pub microvm_id: Option<String>,
+@@ -646,7 +641,7 @@ pub struct AttachFlags {
+     /// without the pasting. A name this directory never registered is ERR_PRECONDITION,
+     /// and a --region that disagrees with the record is ERR_INVALID_ARG. Conflicts with
+     /// the explicit triple: a name *is* the triple, and both are two answers to "which VM".
+-    #[arg(long, value_name = "NAME", conflicts_with_all = ["endpoint", "agent_token", "agent_token_file", "microvm_id"])]
++    #[arg(long, value_name = "NAME", conflicts_with_all = ["endpoint", "agent_token", "microvm_id"])]
+     pub name: Option<String>,
+ 
+     /// The daemon's port inside the guest.
+@@ -1644,7 +1639,7 @@ pub struct TunnelArgs {
+     /// `connectionsUnproven`.
+     ///
+     /// Needs the identity material, so it works with `--name <NAME>` (the registry record
+-    /// carries it) or with --identity-host-seed-file and --identity-vm-public-key.
++    /// carries it) or with the two `--identity-*` flags pasted from `run`'s envelope.
+     ///
+     /// What it proves, honestly: that the far end is agentd in the VM you launched. The
+     /// workload in that VM runs as root and could in principle read the daemon's memory, so
+@@ -1655,20 +1650,11 @@ pub struct TunnelArgs {
+ 
+     /// The launching host's identity secret, base64, from `run --identity`'s envelope.
+     ///
+-    /// Prefer --name or --identity-host-seed-file. Only read with --verify-identity.
+-    #[arg(
+-        long,
+-        value_name = "BASE64",
+-        requires = "verify_identity",
+-        conflicts_with = "identity_host_seed_file"
+-    )]
++    /// For the attach-by-triple path; `--name` reads it from the registry instead. Implies
++    /// nothing alone — only read when --verify-identity is set.
++    #[arg(long, value_name = "BASE64", requires = "verify_identity")]
+     pub identity_host_seed: Option<String>,
+ 
+-    /// Read the host identity secret from a protected file, or stdin with `-`.
+-    /// On Unix, the file must grant no permissions to group or other users.
+-    #[arg(long, value_name = "FILE", requires = "verify_identity")]
+-    pub identity_host_seed_file: Option<PathBuf>,
+-
+     /// The VM's public key, base64, from `run --identity`'s envelope. The pin.
+     #[arg(long, value_name = "BASE64", requires = "verify_identity")]
+     pub identity_vm_public_key: Option<String>,
+@@ -1951,7 +1937,7 @@ pub struct AttachArgs {
+     #[arg(
+         long,
+         value_name = "FILE",
+-        conflicts_with_all = ["endpoint", "agent_token", "agent_token_file", "microvm_id", "identity_host_seed", "identity_host_seed_file", "identity_vm_public_key"]
++        conflicts_with_all = ["endpoint", "agent_token", "microvm_id", "identity_host_seed", "identity_vm_public_key"]
+     )]
+     pub from: Option<PathBuf>,
+ 
+@@ -1968,15 +1954,10 @@ pub struct AttachArgs {
+     #[arg(long, required_unless_present = "from")]
+     pub endpoint: Option<String>,
+ 
+-    /// The agent token delivered at launch. Prefer --from or --agent-token-file.
+-    #[arg(long, required_unless_present_any = ["from", "agent_token_file"], conflicts_with = "agent_token_file")]
++    /// The agent token delivered to the VM at launch. Never echoed in the envelope.
++    #[arg(long, required_unless_present = "from")]
+     pub agent_token: Option<String>,
+ 
+-    /// Read the agent token from a protected file, or stdin with `-`.
+-    /// On Unix, the file must grant no permissions to group or other users.
+-    #[arg(long, value_name = "FILE")]
+-    pub agent_token_file: Option<PathBuf>,
+-
+     /// The MicroVM id, needed to mint the endpoint proxy token.
+     #[arg(long, required_unless_present = "from")]
+     pub microvm_id: Option<String>,
+@@ -1985,28 +1966,11 @@ pub struct AttachArgs {
+     ///
+     /// Stored on the record so a later `tunnel --name --verify-identity` can run the
+     /// handshake; the Noise KK pattern proves this side too, so the pin alone is not enough.
+-    /// Prefer --from or --identity-host-seed-file.
+-    #[arg(
+-        long,
+-        value_name = "BASE64",
+-        requires = "identity_vm_public_key",
+-        group = "identity_host_secret",
+-        conflicts_with = "identity_host_seed_file"
+-    )]
++    #[arg(long, value_name = "BASE64", requires = "identity_vm_public_key")]
+     pub identity_host_seed: Option<String>,
+ 
+-    /// Read the host identity secret from a protected file, or stdin with `-`.
+-    /// On Unix, the file must grant no permissions to group or other users.
+-    #[arg(
+-        long,
+-        value_name = "FILE",
+-        requires = "identity_vm_public_key",
+-        group = "identity_host_secret"
+-    )]
+-    pub identity_host_seed_file: Option<PathBuf>,
+-
+     /// The VM's public key, base64, from `run --identity`'s envelope. The pin.
+-    #[arg(long, value_name = "BASE64", requires = "identity_host_secret")]
++    #[arg(long, value_name = "BASE64", requires = "identity_host_seed")]
+     pub identity_vm_public_key: Option<String>,
+ 
+     /// Prove the far end is the VM the record was created for, before writing anything.
+diff --git a/crates/microvms-cli/src/main.rs b/crates/microvms-cli/src/main.rs
+index 4117daa..af740e0 100644
+--- a/crates/microvms-cli/src/main.rs
++++ b/crates/microvms-cli/src/main.rs
+@@ -56,7 +56,6 @@ mod manifest;
+ mod provision;
+ mod render;
+ mod seam;
+-mod secret_input;
+ mod tui;
+ 
+ use std::process::ExitCode;
+@@ -184,15 +183,8 @@ fn main() -> ExitCode {
+ /// handler can write a second one because no handler writes the first.
+ async fn run<O: std::io::Write, E: std::io::Write>(
+     out: &mut Output<O, E>,
+-    mut parsed: Cli,
++    parsed: Cli,
+ ) -> ExitCode {
+-    if let Err(error) =
+-        secret_input::prepare(&mut parsed.command, &mut std::io::stdin(), |warning| {
+-            out.warn(warning);
+-        })
+-    {
+-        return report(out, &error);
+-    }
+     let seam = AwsSeam;
+     // The one place this crate holds the process environment. Every handler and resolver gets
+     // it from here, through `ctx.env`, so a test can hand them another.
+diff --git a/crates/microvms-cli/src/secret_input.rs b/crates/microvms-cli/src/secret_input.rs
+deleted file mode 100644
+index b763534..0000000
+--- a/crates/microvms-cli/src/secret_input.rs
++++ /dev/null
+@@ -1,200 +0,0 @@
+-// SPDX-License-Identifier: Apache-2.0
+-//! Resolve CLI credential inputs before any command starts work or consumes stdin.
+-
+-use std::io::Read;
+-use std::path::Path;
+-
+-use crate::cli::{AttachFlags, Command};
+-use crate::exit::{CliError, Exit};
+-
+-type Input<'a> = (&'a mut Option<String>, Option<&'a Path>, &'static str);
+-
+-fn token_input(flags: &mut AttachFlags) -> Input<'_> {
+-    (
+-        &mut flags.agent_token,
+-        flags.agent_token_file.as_deref(),
+-        "agent-token",
+-    )
+-}
+-
+-pub(crate) fn prepare(
+-    command: &mut Command,
+-    stdin: &mut impl Read,
+-    mut warn: impl FnMut(&str),
+-) -> Result<(), CliError> {
+-    // A credential consumes stdin through EOF. Refuse a second reader before either
+-    // reader runs, so command input is never silently consumed as a credential.
+-    let command_reads_stdin = matches!(command, Command::Exec(args) if args.stdin)
+-        || matches!(command, Command::Stdin(args) if args.data.as_deref() == Some("-"));
+-    let inputs = match command {
+-        Command::Exec(args) => vec![token_input(&mut args.attach)],
+-        Command::Wait(args) => vec![token_input(&mut args.attach)],
+-        Command::Health(args) => vec![token_input(&mut args.attach)],
+-        Command::Keepalive(args) => vec![token_input(&mut args.attach)],
+-        Command::Ack(args) => vec![token_input(&mut args.attach)],
+-        Command::Kill(args) => vec![token_input(&mut args.attach)],
+-        Command::Ps(args) => vec![token_input(&mut args.attach)],
+-        Command::Stdin(args) => vec![token_input(&mut args.attach)],
+-        Command::Cp(args) => vec![token_input(&mut args.attach)],
+-        Command::Exists(args) => vec![token_input(&mut args.attach)],
+-        Command::Sync(args) => vec![token_input(&mut args.attach)],
+-        Command::Adopt(args) => vec![token_input(&mut args.attach)],
+-        Command::PortForward(args) => vec![token_input(&mut args.attach)],
+-        Command::AgentPrompt(args) => vec![token_input(&mut args.attach)],
+-        Command::Tunnel(args) => vec![
+-            token_input(&mut args.attach),
+-            (
+-                &mut args.identity_host_seed,
+-                args.identity_host_seed_file.as_deref(),
+-                "identity-host-seed",
+-            ),
+-        ],
+-        Command::Attach(args) => vec![
+-            (
+-                &mut args.agent_token,
+-                args.agent_token_file.as_deref(),
+-                "agent-token",
+-            ),
+-            (
+-                &mut args.identity_host_seed,
+-                args.identity_host_seed_file.as_deref(),
+-                "identity-host-seed",
+-            ),
+-        ],
+-        _ => Vec::new(),
+-    };
+-    let stdin_readers = inputs
+-        .iter()
+-        .filter(|(_, path, _)| *path == Some(Path::new("-")))
+-        .count()
+-        + usize::from(command_reads_stdin);
+-    if stdin_readers > 1 {
+-        return Err(CliError::new(
+-            Exit::InvalidArg,
+-            "stdin can supply only one input; use a protected file for the other input",
+-        ));
+-    }
+-    for (value, path, flag) in inputs {
+-        if let Some(path) = path {
+-            *value = Some(read_secret(path, stdin, flag)?);
+-        } else if value.is_some() {
+-            warn(&format!(
+-                "--{flag} supplies a secret on the command line; prefer --name, \
+-                 attach --from, or --{flag}-file"
+-            ));
+-        }
+-    }
+-    Ok(())
+-}
+-
+-fn read_secret(path: &Path, stdin: &mut impl Read, flag: &str) -> Result<String, CliError> {
+-    let result = if path == Path::new("-") {
+-        microvms_core::secret_input::read_secret(stdin)
+-    } else {
+-        microvms_core::secret_input::read_secret_file(path)
+-    };
+-    result.map_err(|error| {
+-        CliError::new(
+-            Exit::InvalidArg,
+-            format!("could not read --{flag}-file input: {error}"),
+-        )
+-    })
+-}
+-
+-#[cfg(test)]
+-mod tests {
+-    use super::*;
+-    use crate::cli::Cli;
+-    use clap::Parser;
+-    use std::io::Write;
+-
+-    #[test]
+-    fn every_attached_command_refuses_an_unreadable_token_file() {
+-        let directory = tempfile::tempdir().unwrap();
+-        let missing = directory.path().join("missing-token");
+-        for arguments in [
+-            vec!["exec", "true"],
+-            vec!["wait"],
+-            vec!["health"],
+-            vec!["keepalive"],
+-            vec!["ack", "exec-example"],
+-            vec!["kill", "exec-example"],
+-            vec!["ps"],
+-            vec!["stdin", "exec-example"],
+-            vec!["cp", "local", "vm:/remote"],
+-            vec!["exists", "/remote"],
+-            vec!["sync", "."],
+-            vec!["adopt"],
+-            vec!["port-forward", "8080"],
+-            vec!["agent-prompt", "task"],
+-            vec!["tunnel", "5432"],
+-            vec!["attach", "--name", "example"],
+-        ] {
+-            let name = arguments[0];
+-            let mut argv = vec!["microvm"];
+-            argv.extend(arguments);
+-            argv.extend([
+-                "--endpoint",
+-                "https://example.invalid",
+-                "--microvm-id",
+-                "mvm-example",
+-                "--agent-token-file",
+-                missing.to_str().unwrap(),
+-            ]);
+-            let mut command = Cli::try_parse_from(argv).unwrap().command;
+-            let mut stdin = &b"untouched"[..];
+-            let mut warnings = Vec::new();
+-            let error = prepare(&mut command, &mut stdin, |warning| {
+-                warnings.push(warning.to_owned())
+-            })
+-            .expect_err(name);
+-            assert_eq!(error.exit, Exit::InvalidArg, "{name}");
+-            assert!(
+-                error
+-                    .message
+-                    .contains("could not read --agent-token-file input"),
+-                "{name}: {}",
+-                error.message
+-            );
+-            assert_eq!(stdin, b"untouched", "{name}");
+-            assert!(warnings.is_empty(), "{name}: {warnings:?}");
+-        }
+-    }
+-
+-    #[test]
+-    fn file_inputs_preserve_credential_values() {
+-        let mut token = tempfile::NamedTempFile::new().unwrap();
+-        token.write_all(b"example-token\r\n").unwrap();
+-        let mut seed = tempfile::NamedTempFile::new().unwrap();
+-        seed.write_all(b"example-seed\n").unwrap();
+-        let mut command = Cli::try_parse_from([
+-            "microvm",
+-            "tunnel",
+-            "5432",
+-            "--endpoint",
+-            "https://example.invalid",
+-            "--microvm-id",
+-            "mvm-example",
+-            "--verify-identity",
+-            "--agent-token-file",
+-            token.path().to_str().unwrap(),
+-            "--identity-host-seed-file",
+-            seed.path().to_str().unwrap(),
+-            "--identity-vm-public-key",
+-            "example-pin",
+-        ])
+-        .unwrap()
+-        .command;
+-        let mut warnings = Vec::new();
+-        prepare(&mut command, &mut &b""[..], |warning| {
+-            warnings.push(warning.to_owned())
+-        })
+-        .unwrap();
+-        let Command::Tunnel(args) = command else {
+-            panic!("expected tunnel");
+-        };
+-        assert_eq!(args.attach.agent_token.as_deref(), Some("example-token"));
+-        assert_eq!(args.identity_host_seed.as_deref(), Some("example-seed"));
+-        assert!(warnings.is_empty());
+-    }
+-}
+diff --git a/crates/microvms-core/src/lib.rs b/crates/microvms-core/src/lib.rs
+index c67a0b0..39e8b13 100644
+--- a/crates/microvms-core/src/lib.rs
++++ b/crates/microvms-core/src/lib.rs
+@@ -94,7 +94,7 @@ pub use microvms_domain::{constants, cost, duration, error, hooks, region, sizin
+ 
+ // Whole modules that live in one crate below.
+ pub use microvms_app::{defaults, sandbox};
+-pub use microvms_edges::{env, provision, secret_input};
++pub use microvms_edges::{env, provision};
+ 
+ // Re-exported so consumers name wire types through this crate rather than
+ // depending on `protocol` directly — the CLI's thinness guard counts on that.
+diff --git a/crates/microvms-edges/src/lib.rs b/crates/microvms-edges/src/lib.rs
+index 43c5bcc..fa8df93 100644
+--- a/crates/microvms-edges/src/lib.rs
++++ b/crates/microvms-edges/src/lib.rs
+@@ -35,7 +35,6 @@ pub mod names;
+ pub mod provision;
+ #[cfg(test)]
+ mod provision_fuzz;
+-pub mod secret_input;
+ pub mod session;
+ pub mod workspace;
+ 
+diff --git a/crates/microvms-edges/src/secret_input.rs b/crates/microvms-edges/src/secret_input.rs
+deleted file mode 100644
+index 9a7ee16..0000000
+--- a/crates/microvms-edges/src/secret_input.rs
++++ /dev/null
+@@ -1,54 +0,0 @@
+-// SPDX-License-Identifier: Apache-2.0
+-//! Host credential input from private files or caller-owned byte streams.
+-
+-use std::io::Read;
+-use std::path::Path;
+-
+-use microvms_app::error::Error;
+-
+-/// Read a credential from a regular file. On Unix, require no group or other permissions.
+-///
+-/// Validation uses the opened handle so the permission check and the read refer to the
+-/// same file even when the directory entry changes. Trailing CR and LF are removed.
+-pub fn read_secret_file(path: &Path) -> Result<String, Error> {
+-    let mut options = std::fs::OpenOptions::new();
+-    options.read(true);
+-    #[cfg(unix)]
+-    {
+-        use std::os::unix::fs::OpenOptionsExt;
+-        // A special file must not block open before its type can be checked. Regular
+-        // files ignore this flag, and metadata below validates the same opened handle.
+-        options.custom_flags(libc::O_NONBLOCK);
+-    }
+-    let mut file = options.open(path).map_err(read_error)?;
+-    let metadata = file.metadata().map_err(read_error)?;
+-    if !metadata.is_file() {
+-        return Err(Error::invalid_arg("secret input must name a regular file"));
+-    }
+-    #[cfg(unix)]
+-    {
+-        use std::os::unix::fs::PermissionsExt;
+-        if metadata.permissions().mode() & 0o077 != 0 {
+-            return Err(Error::invalid_arg(
+-                "secret file must grant no permissions to group or other users",
+-            ));
+-        }
+-    }
+-    read_secret(&mut file)
+-}
+-
+-/// Read a UTF-8 credential through EOF, removing trailing CR and LF and refusing empty input.
+-/// The caller owns stream selection and keeps other consumers from reading the same stream.
+-pub fn read_secret(reader: &mut dyn Read) -> Result<String, Error> {
+-    let mut value = String::new();
+-    reader.read_to_string(&mut value).map_err(read_error)?;
+-    let value = value.trim_end_matches(['\r', '\n']);
+-    if value.is_empty() {
+-        return Err(Error::invalid_arg("secret input must not be empty"));
+-    }
+-    Ok(value.to_owned())
+-}
+-
+-fn read_error(error: std::io::Error) -> Error {
+-    Error::invalid_arg(format!("could not read secret input: {error}"))
+-}

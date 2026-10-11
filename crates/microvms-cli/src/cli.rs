@@ -625,9 +625,14 @@ pub struct AttachFlags {
     #[arg(long, required_unless_present = "name")]
     pub endpoint: Option<String>,
 
-    /// The agent token delivered to the VM at launch.
-    #[arg(long, required_unless_present = "name")]
+    /// The agent token delivered to the VM at launch. Prefer --name or --agent-token-file.
+    #[arg(long, required_unless_present_any = ["name", "agent_token_file"], conflicts_with = "agent_token_file")]
     pub agent_token: Option<String>,
+
+    /// Read the agent token from a protected file, or from stdin with `-`.
+    /// On Unix, the file must grant no permissions to group or other users.
+    #[arg(long, value_name = "FILE")]
+    pub agent_token_file: Option<PathBuf>,
 
     /// The MicroVM id, needed to mint the endpoint proxy token.
     #[arg(long, required_unless_present = "name")]
@@ -641,7 +646,7 @@ pub struct AttachFlags {
     /// without the pasting. A name this directory never registered is ERR_PRECONDITION,
     /// and a --region that disagrees with the record is ERR_INVALID_ARG. Conflicts with
     /// the explicit triple: a name *is* the triple, and both are two answers to "which VM".
-    #[arg(long, value_name = "NAME", conflicts_with_all = ["endpoint", "agent_token", "microvm_id"])]
+    #[arg(long, value_name = "NAME", conflicts_with_all = ["endpoint", "agent_token", "agent_token_file", "microvm_id"])]
     pub name: Option<String>,
 
     /// The daemon's port inside the guest.
@@ -1639,7 +1644,7 @@ pub struct TunnelArgs {
     /// `connectionsUnproven`.
     ///
     /// Needs the identity material, so it works with `--name <NAME>` (the registry record
-    /// carries it) or with the two `--identity-*` flags pasted from `run`'s envelope.
+    /// carries it) or with --identity-host-seed-file and --identity-vm-public-key.
     ///
     /// What it proves, honestly: that the far end is agentd in the VM you launched. The
     /// workload in that VM runs as root and could in principle read the daemon's memory, so
@@ -1650,10 +1655,19 @@ pub struct TunnelArgs {
 
     /// The launching host's identity secret, base64, from `run --identity`'s envelope.
     ///
-    /// For the attach-by-triple path; `--name` reads it from the registry instead. Implies
-    /// nothing alone — only read when --verify-identity is set.
-    #[arg(long, value_name = "BASE64", requires = "verify_identity")]
+    /// Prefer --name or --identity-host-seed-file. Only read with --verify-identity.
+    #[arg(
+        long,
+        value_name = "BASE64",
+        requires = "verify_identity",
+        conflicts_with = "identity_host_seed_file"
+    )]
     pub identity_host_seed: Option<String>,
+
+    /// Read the host identity secret from a protected file, or stdin with `-`.
+    /// On Unix, the file must grant no permissions to group or other users.
+    #[arg(long, value_name = "FILE", requires = "verify_identity")]
+    pub identity_host_seed_file: Option<PathBuf>,
 
     /// The VM's public key, base64, from `run --identity`'s envelope. The pin.
     #[arg(long, value_name = "BASE64", requires = "verify_identity")]
@@ -1937,7 +1951,7 @@ pub struct AttachArgs {
     #[arg(
         long,
         value_name = "FILE",
-        conflicts_with_all = ["endpoint", "agent_token", "microvm_id", "identity_host_seed", "identity_vm_public_key"]
+        conflicts_with_all = ["endpoint", "agent_token", "agent_token_file", "microvm_id", "identity_host_seed", "identity_host_seed_file", "identity_vm_public_key"]
     )]
     pub from: Option<PathBuf>,
 
@@ -1954,9 +1968,14 @@ pub struct AttachArgs {
     #[arg(long, required_unless_present = "from")]
     pub endpoint: Option<String>,
 
-    /// The agent token delivered to the VM at launch. Never echoed in the envelope.
-    #[arg(long, required_unless_present = "from")]
+    /// The agent token delivered at launch. Prefer --from or --agent-token-file.
+    #[arg(long, required_unless_present_any = ["from", "agent_token_file"], conflicts_with = "agent_token_file")]
     pub agent_token: Option<String>,
+
+    /// Read the agent token from a protected file, or stdin with `-`.
+    /// On Unix, the file must grant no permissions to group or other users.
+    #[arg(long, value_name = "FILE")]
+    pub agent_token_file: Option<PathBuf>,
 
     /// The MicroVM id, needed to mint the endpoint proxy token.
     #[arg(long, required_unless_present = "from")]
@@ -1966,11 +1985,28 @@ pub struct AttachArgs {
     ///
     /// Stored on the record so a later `tunnel --name --verify-identity` can run the
     /// handshake; the Noise KK pattern proves this side too, so the pin alone is not enough.
-    #[arg(long, value_name = "BASE64", requires = "identity_vm_public_key")]
+    /// Prefer --from or --identity-host-seed-file.
+    #[arg(
+        long,
+        value_name = "BASE64",
+        requires = "identity_vm_public_key",
+        group = "identity_host_secret",
+        conflicts_with = "identity_host_seed_file"
+    )]
     pub identity_host_seed: Option<String>,
 
+    /// Read the host identity secret from a protected file, or stdin with `-`.
+    /// On Unix, the file must grant no permissions to group or other users.
+    #[arg(
+        long,
+        value_name = "FILE",
+        requires = "identity_vm_public_key",
+        group = "identity_host_secret"
+    )]
+    pub identity_host_seed_file: Option<PathBuf>,
+
     /// The VM's public key, base64, from `run --identity`'s envelope. The pin.
-    #[arg(long, value_name = "BASE64", requires = "identity_host_seed")]
+    #[arg(long, value_name = "BASE64", requires = "identity_host_secret")]
     pub identity_vm_public_key: Option<String>,
 
     /// Prove the far end is the VM the record was created for, before writing anything.
