@@ -1,0 +1,64 @@
+diff --git a/crates/protocol/src/hook.rs b/crates/protocol/src/hook.rs
+index 6b68716..94ad3d2 100644
+--- a/crates/protocol/src/hook.rs
++++ b/crates/protocol/src/hook.rs
+@@ -23,24 +23,12 @@ pub const HOOK_PREFIX: &str = "/aws/lambda-microvms/runtime/v1";
+ /// `agent_token` from the top level answers 400, and the platform then terminates
+ /// the VM with "Run lifecycle hook returned HTTP status 400" before any traffic is
+ /// forwarded, so the mistake is invisible from the outside.
+-#[derive(Deserialize, JsonSchema, Serialize)]
++#[derive(Debug, Deserialize, JsonSchema, Serialize)]
+ pub struct RunHookEnvelope {
+     #[serde(rename = "runHookPayload")]
+     pub run_hook_payload: Option<String>,
+ }
+ 
+-impl std::fmt::Debug for RunHookEnvelope {
+-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+-        // The nested JSON string carries the same private values as RunHook.
+-        f.debug_struct("RunHookEnvelope")
+-            .field(
+-                "run_hook_payload",
+-                &self.run_hook_payload.as_ref().map(|_| "[REDACTED]"),
+-            )
+-            .finish()
+-    }
+-}
+-
+ /// The caller's own payload, carrying the per-VM secret and an optional launch
+ /// environment.
+ ///
+@@ -54,7 +42,7 @@ impl std::fmt::Debug for RunHookEnvelope {
+ /// The whole payload shares one 4096-byte budget, so a caller who fills `env`
+ /// with credentials is spending the token's room; `microvms-core` refuses an
+ /// over-budget payload locally, before the call.
+-#[derive(Default, Deserialize, JsonSchema, Serialize)]
++#[derive(Debug, Default, Deserialize, JsonSchema, Serialize)]
+ pub struct RunHook {
+     pub agent_token: String,
+     /// Base environment applied to every subsequent exec, under the per-request
+@@ -83,24 +71,6 @@ pub struct RunHook {
+     pub identity_host_public_key: Option<String>,
+ }
+ 
+-impl std::fmt::Debug for RunHook {
+-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+-        // Launch environments may contain credentials, so omit their keys as well as values.
+-        f.debug_struct("RunHook")
+-            .field("agent_token", &"[REDACTED]")
+-            .field("env", &"[REDACTED]")
+-            .field(
+-                "identity_seed",
+-                &self.identity_seed.as_ref().map(|_| "[REDACTED]"),
+-            )
+-            .field(
+-                "identity_host_public_key",
+-                &self.identity_host_public_key.as_ref().map(|_| "[REDACTED]"),
+-            )
+-            .finish()
+-    }
+-}
+-
+ /// Why a `runHookPayload` string could not be read as a [`RunHook`].
+ ///
+ /// A typed error rather than serde's own message, and the reason is the trust
