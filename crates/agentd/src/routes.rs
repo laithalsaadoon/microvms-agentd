@@ -46,15 +46,15 @@ pub fn app(state: AppState) -> Router {
     // usable. A daemon that omits them fails the build, not the run, which is a
     // confusing place to discover the omission.
     let mut open = Router::new();
+    let mut hooks = Router::new();
     let mut control = Router::new();
 
     for endpoint in surface_docs() {
         let handler = handler_for(&endpoint);
         match endpoint.auth {
             schema::Auth::Bearer => control = control.route(&endpoint.path, handler),
-            schema::Auth::Open | schema::Auth::PlatformHook => {
-                open = open.route(&endpoint.path, handler);
-            }
+            schema::Auth::Open => open = open.route(&endpoint.path, handler),
+            schema::Auth::PlatformHook => hooks = hooks.route(&endpoint.path, handler),
         }
     }
 
@@ -75,30 +75,71 @@ pub fn app(state: AppState) -> Router {
         .layer(DefaultBodyLimit::disable())
         .layer(RequestBodyLimitLayer::new(max_body));
 
-    open.merge(control)
-        .fallback(not_found)
-        // Applied last, and outside `route_layer`, so it covers every response the
-        // application can produce: handler bodies, the 401/503 the auth middleware
-        // returns before a handler runs, the 413 the body-limit layer injects, and
-        // the 404 fallback. A version header a client only sometimes receives is
-        // one it cannot use as a precondition, which is the whole reason to send it.
-        .layer(middleware::from_fn(stamp_version))
-        // Outermost, so it wraps every other layer including the version stamp and
-        // the auth middleware — a panic inside one of those is exactly as fatal as a
-        // panic in a handler, and a layer inside them could not catch it.
-        //
-        // What this buys is narrow and worth stating precisely. Without it a
-        // panicking handler drops the connection, and the client sees a transport
-        // error it cannot distinguish from a dead VM. With it the client gets a 500
-        // and the connection survives. It does *not* undo the panic: whatever the
-        // handler was doing is abandoned, and any `std::sync::Mutex` it held is now
-        // poisoned — which is why this pairs with the poison recovery in `state.rs`.
-        // Either half alone leaves the VM wedged in a different way.
-        //
-        // Requires `panic = "unwind"`; see the workspace release profile, which sets
-        // it back from `abort` for exactly this reason.
-        .layer(CatchPanicLayer::new())
-        .with_state(state)
+    open.merge(hooks.route_layer(middleware::from_fn_with_state(
+        state.clone(),
+        bound_hook_body,
+    )))
+    .merge(control)
+    .fallback(not_found)
+    // Applied last, and outside `route_layer`, so it covers every response the
+    // application can produce: handler bodies, the 401/503 the auth middleware
+    // returns before a handler runs, the 413 the body-limit layer injects, and
+    // the 404 fallback. A version header a client only sometimes receives is
+    // one it cannot use as a precondition, which is the whole reason to send it.
+    .layer(middleware::from_fn(stamp_version))
+    // Outermost, so it wraps every other layer including the version stamp and
+    // the auth middleware — a panic inside one of those is exactly as fatal as a
+    // panic in a handler, and a layer inside them could not catch it.
+    //
+    // What this buys is narrow and worth stating precisely. Without it a
+    // panicking handler drops the connection, and the client sees a transport
+    // error it cannot distinguish from a dead VM. With it the client gets a 500
+    // and the connection survives. It does *not* undo the panic: whatever the
+    // handler was doing is abandoned, and any `std::sync::Mutex` it held is now
+    // poisoned — which is why this pairs with the poison recovery in `state.rs`.
+    // Either half alone leaves the VM wedged in a different way.
+    //
+    // Requires `panic = "unwind"`; see the workspace release profile, which sets
+    // it back from `abort` for exactly this reason.
+    .layer(CatchPanicLayer::new())
+    .with_state(state)
+}
+
+/// Bound the platform envelope before JSON parsing. Escaping a 4096-byte payload
+/// can expand each byte to six bytes, so 32 KiB leaves room for the outer object.
+async fn bound_hook_body(
+    State(state): State<AppState>,
+    request: axum::extract::Request,
+    next: middleware::Next,
+) -> Response {
+    let (parts, body) = request.into_parts();
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        axum::body::to_bytes(body, 32 * 1024),
+    )
+    .await
+    {
+        Ok(Ok(bytes)) => {
+            next.run(axum::extract::Request::from_parts(parts, bytes.into()))
+                .await
+        }
+        result => {
+            // Accepted bodies are observed by their handlers; a body refusal must
+            // leave the same observation even though it never reaches a handler.
+            state.record_hook(parts.uri.path().rsplit('/').next().unwrap_or(""));
+            let status = if result.is_err() {
+                StatusCode::REQUEST_TIMEOUT
+            } else {
+                StatusCode::PAYLOAD_TOO_LARGE
+            };
+            let mut response = status.into_response();
+            response.headers_mut().insert(
+                axum::http::header::CONNECTION,
+                axum::http::HeaderValue::from_static("close"),
+            );
+            response
+        }
+    }
 }
 
 /// Maps a documented endpoint onto the handler that serves it.

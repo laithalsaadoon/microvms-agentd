@@ -124,28 +124,37 @@ pub async fn execute(
         Err(error) => return failed(format!("spawn failed: {error}")),
     };
     let pid = child.id();
-    let stdout = tokio::spawn(capture(child.stdout.take()));
-    let stderr = tokio::spawn(capture(child.stderr.take()));
-
-    let (status, timed_out) = match tokio::time::timeout(budget, child.wait()).await {
-        Ok(status) => (status.ok(), false),
-        Err(_) => {
-            // The group, not just the child: a handler that backgrounded work must
-            // not keep running past the moment the daemon answered the platform.
-            if let Some(pid) = pid.and_then(|pid| i32::try_from(pid).ok()) {
-                let _ = nix::sys::signal::killpg(
-                    nix::unistd::Pid::from_raw(pid),
-                    nix::sys::signal::Signal::SIGKILL,
-                );
-            }
-            (child.wait().await.ok(), true)
+    // Keep capture in this future: reaching the deadline drops both read ends,
+    // including when a descendant has started a separate process group.
+    let mut output = Vec::new();
+    let mut errors = Vec::new();
+    let mut stdout = Box::pin(capture(child.stdout.take(), &mut output));
+    let mut stderr = Box::pin(capture(child.stderr.take(), &mut errors));
+    let mut status = None;
+    let deadline = tokio::time::Instant::now() + budget.saturating_sub(started.elapsed());
+    let result = tokio::time::timeout_at(deadline, async {
+        // Poll output while waiting so a full pipe cannot block the leader.
+        let wait = async {
+            status = child.wait().await.ok();
+        };
+        tokio::join!(wait, &mut stdout, &mut stderr);
+    })
+    .await;
+    let timed_out = result.is_err();
+    if timed_out {
+        if let Some(pid) = pid.and_then(|pid| i32::try_from(pid).ok()) {
+            let _ = nix::sys::signal::killpg(
+                nix::unistd::Pid::from_raw(pid),
+                nix::sys::signal::Signal::SIGKILL,
+            );
         }
-    };
+        status = child.try_wait().ok().flatten().or(status);
+    }
+    drop(stdout);
+    drop(stderr);
+    let stdout = String::from_utf8_lossy(&output);
+    let stderr = String::from_utf8_lossy(&errors);
     let duration_ms = started.elapsed().as_millis() as u64;
-    let (stdout, stderr) = (
-        stdout.await.unwrap_or_default(),
-        stderr.await.unwrap_or_default(),
-    );
     if !stdout.is_empty() || !stderr.is_empty() {
         tracing::info!(hook, stdout = %stdout, stderr = %stderr, "hook handler output");
     }
@@ -173,17 +182,15 @@ fn check_executable(path: &Path) -> Result<(), String> {
 
 /// Reads a stream to its end, keeping the first [`LOGGED_OUTPUT_BYTES`]. The rest
 /// is drained so a chatty handler never blocks on a full pipe.
-async fn capture(stream: Option<impl AsyncRead + Unpin>) -> String {
+async fn capture(stream: Option<impl AsyncRead + Unpin>, kept: &mut Vec<u8>) {
     let Some(mut stream) = stream else {
-        return String::new();
+        return;
     };
-    let mut kept = Vec::new();
     let _ = (&mut stream)
         .take(LOGGED_OUTPUT_BYTES)
-        .read_to_end(&mut kept)
+        .read_to_end(kept)
         .await;
     let _ = tokio::io::copy(&mut stream, &mut tokio::io::sink()).await;
-    String::from_utf8_lossy(&kept).into_owned()
 }
 
 /// The handler path for `hook` under `dir`, for documentation and tests.
@@ -346,5 +353,110 @@ mod tests {
         let state = state_with(dir.path(), Duration::from_secs(5));
         run(&state, "suspend", None).await;
         assert!(!marker.exists());
+    }
+
+    #[tokio::test]
+    async fn handler_output_is_logged_when_either_stream_has_bytes() {
+        use std::io::Write;
+        use std::sync::{Arc, Mutex};
+        use tracing::instrument::WithSubscriber;
+
+        #[derive(Clone)]
+        struct LogWriter(Arc<Mutex<Vec<u8>>>);
+
+        impl Write for LogWriter {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().expect("log buffer").extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        for (body, stdout, stderr) in [
+            (":", "", ""),
+            ("printf out", "out", ""),
+            ("printf err >&2", "", "err"),
+            ("printf out; printf err >&2", "out", "err"),
+        ] {
+            let path = script(dir.path(), "resume", body);
+            let bytes = Arc::new(Mutex::new(Vec::new()));
+            let writer = LogWriter(bytes.clone());
+            let subscriber = tracing_subscriber::fmt()
+                .json()
+                .without_time()
+                .with_max_level(tracing::Level::INFO)
+                .with_writer(move || writer.clone())
+                .finish();
+            // Scope the subscriber to this future so concurrent handler tests
+            // cannot contribute events to its output assertions.
+            let outcome = execute(&path, "resume", Duration::from_secs(5), &HashMap::new())
+                .with_subscriber(subscriber)
+                .await;
+            assert!(outcome.succeeded(), "{outcome:?}");
+            let log =
+                String::from_utf8(bytes.lock().expect("log buffer").clone()).expect("UTF-8 log");
+            let fields: Vec<serde_json::Value> = log
+                .lines()
+                .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("JSON event"))
+                .filter_map(|event| {
+                    (event["fields"]["message"] == "hook handler output")
+                        .then(|| event["fields"].clone())
+                })
+                .collect();
+            let expected = if stdout.is_empty() && stderr.is_empty() {
+                Vec::new()
+            } else {
+                vec![serde_json::json!({
+                    "message": "hook handler output",
+                    "hook": "resume",
+                    "stdout": stdout,
+                    "stderr": stderr,
+                })]
+            };
+            assert_eq!(fields, expected, "handler body: {body}");
+        }
+    }
+
+    #[tokio::test]
+    async fn output_collection_and_surviving_group_members_share_the_handler_budget() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let marker = dir.path().join("late");
+        let path = script(
+            dir.path(),
+            "resume",
+            &format!("(sleep 2; touch {}) & exit 0", marker.display()),
+        );
+        let started = Instant::now();
+        let outcome = execute(&path, "resume", Duration::from_millis(200), &HashMap::new()).await;
+        assert!(outcome.timed_out, "{outcome:?}");
+        assert_eq!(outcome.exit_code, Some(0));
+        assert!(outcome.duration_ms >= 150, "{outcome:?}");
+        assert!(
+            started.elapsed() < Duration::from_millis(1500),
+            "{outcome:?}"
+        );
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert!(
+            !marker.exists(),
+            "group members stop at the handler deadline"
+        );
+    }
+
+    #[tokio::test]
+    async fn output_collection_finishes_when_a_detached_writer_keeps_the_pipe_open() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = script(dir.path(), "resume", "setsid sleep 2 & sleep 5");
+        let started = Instant::now();
+        let outcome = execute(&path, "resume", Duration::from_millis(200), &HashMap::new()).await;
+        assert!(outcome.timed_out, "{outcome:?}");
+        assert!(outcome.duration_ms >= 150, "{outcome:?}");
+        assert!(
+            started.elapsed() < Duration::from_millis(1500),
+            "{outcome:?}"
+        );
     }
 }

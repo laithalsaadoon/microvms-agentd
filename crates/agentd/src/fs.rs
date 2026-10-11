@@ -419,24 +419,34 @@ impl Confined {
 
     /// Creates and opens the file a data member's bytes go into.
     ///
-    /// `O_TRUNC` rather than `O_EXCL`, and the existing name is unlinked first, for
+    /// The existing name is unlinked first and created with `O_EXCL`, for
     /// the reason the previous `remove_file` plus `File::create` had: an archive may
     /// legitimately overwrite a name, and a retried partial extraction has to
     /// converge. The unlink is `unlinkat` without `AT_REMOVEDIR`, so a directory in
-    /// the way survives and the open below reports `EISDIR`, which is the same
-    /// answer `File::create` gave.
+    /// the way survives and the exclusive open reports that the name exists.
+    /// Exclusivity also preserves any file installed between unlink and create.
     fn create_file(&self, parts: &[OsString]) -> Result<std::fs::File, WalkError> {
         let (parent, name) = self.parent_of(parts)?;
         let last = parts.len() - 1;
+        self.replace(parent.as_fd(), &name);
+        let fd = Self::open_new_file(parent.as_fd(), name.as_os_str())
+            .map_err(|errno| WalkError::at(parts, last, errno))?;
+        Ok(std::fs::File::from(fd))
+    }
+
+    /// Opens only a new leaf; callers decide whether an old entry may be removed.
+    fn open_new_file(parent: BorrowedFd<'_>, name: &OsStr) -> Result<OwnedFd, Errno> {
+        let flags = OFlag::O_WRONLY
+            .union(OFlag::O_CREAT)
+            .union(OFlag::O_EXCL)
+            .union(OFlag::O_CLOEXEC);
         let how = OpenHow::new()
-            .flags(OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_TRUNC | OFlag::O_CLOEXEC)
+            .flags(flags)
             // 0o666 before umask, matching `File::create`. The archive's own mode
             // is replayed later by `apply_deferred_modes`.
             .mode(Mode::from_bits_truncate(0o666))
             .resolve(Self::RESOLVE);
-        let fd = openat2(parent.as_fd(), name.as_os_str(), how)
-            .map_err(|errno| WalkError::at(parts, last, errno))?;
-        Ok(std::fs::File::from(fd))
+        openat2(parent, name, how)
     }
 
     /// Creates a symlink at `parts` with `target` written verbatim.
@@ -516,9 +526,8 @@ impl Confined {
 
     /// Unlinks `name` under `dir`, ignoring every failure.
     ///
-    /// A link member replaces an existing name rather than failing on it, and
-    /// `symlinkat`/`linkat` have no truncating equivalent of `O_TRUNC`, so the old
-    /// name has to go first. Every error is ignored on purpose: the common one is
+    /// A file or link member replaces the directory entry before creation, so
+    /// other names for an existing inode keep their contents and permissions. Every error is ignored on purpose: the common one is
     /// `ENOENT`, which means there was nothing to replace, and any other means the
     /// create below fails and reports the real reason.
     fn replace(&self, dir: BorrowedFd<'_>, name: &OsStr) {
@@ -793,6 +802,9 @@ fn extract_into(
                             ),
                         })?;
                 }
+                // A later link replaces the member, so an earlier file's mode
+                // must not be replayed onto the link's target.
+                deferred.remove(&dest);
             }
 
             // Regular, contiguous, and anything else carrying data.
@@ -1698,6 +1710,64 @@ mod tests {
             Err(Refusal::Member { member, reason }) => format!("{member}: {reason}"),
             Err(other) => panic!("expected a member refusal, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn replacing_a_file_preserves_its_other_hard_links() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path().join("root");
+        std::fs::create_dir(&root).expect("root");
+        let original = dir.path().join("original");
+        std::fs::write(&original, b"original bytes").expect("original");
+        std::fs::set_permissions(&original, std::fs::Permissions::from_mode(0o600))
+            .expect("original permissions");
+        std::fs::hard_link(&original, root.join("member")).expect("hard link");
+        let archive = Archive::new().file("member", b"replacement bytes").bytes();
+        assert_eq!(
+            extract_into(&root, archive.as_slice(), OPEN, &roomy_guard()).unwrap(),
+            1
+        );
+        assert_eq!(std::fs::read(&original).unwrap(), b"original bytes");
+        assert_eq!(std::fs::metadata(&original).unwrap().mode() & 0o777, 0o600);
+        assert_eq!(
+            std::fs::read(root.join("member")).unwrap(),
+            b"replacement bytes"
+        );
+        assert_ne!(
+            std::fs::metadata(&original).unwrap().ino(),
+            std::fs::metadata(root.join("member")).unwrap().ino()
+        );
+    }
+
+    #[test]
+    fn a_later_hard_link_preserves_its_targets_permissions() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path().join("root");
+        std::fs::create_dir(&root).expect("root");
+        let original = dir.path().join("original");
+        std::fs::write(&original, b"original bytes").expect("original");
+        std::fs::set_permissions(&original, std::fs::Permissions::from_mode(0o600))
+            .expect("original permissions");
+        std::fs::hard_link(&original, root.join("target")).expect("hard link");
+        let archive = Archive::new()
+            .file("member", b"temporary bytes")
+            .link(EntryType::Link, "member", "target")
+            .bytes();
+        assert_eq!(
+            extract_into(&root, archive.as_slice(), OPEN, &roomy_guard()).unwrap(),
+            2
+        );
+        assert_eq!(
+            std::fs::read(root.join("member")).unwrap(),
+            b"original bytes"
+        );
+        assert_eq!(std::fs::metadata(&original).unwrap().mode() & 0o777, 0o600);
+        assert_eq!(
+            std::fs::metadata(&original).unwrap().ino(),
+            std::fs::metadata(root.join("member")).unwrap().ino()
+        );
     }
 
     #[test]
@@ -2623,5 +2693,43 @@ mod tests {
                 .len(),
             member.len() as u64,
         );
+    }
+    #[test]
+    fn a_new_archive_file_refuses_an_occupied_name() {
+        let dir = TempDir::new().expect("tempdir");
+        std::fs::write(dir.path().join("occupied"), b"original").expect("existing file");
+        let confined = Confined::open(dir.path()).expect("root");
+        assert_eq!(
+            Confined::open_new_file(confined.root.as_fd(), OsStr::new("occupied"))
+                .expect_err("an occupied name is refused"),
+            Errno::EEXIST,
+        );
+        assert_eq!(
+            std::fs::read(dir.path().join("occupied")).unwrap(),
+            b"original"
+        );
+
+        std::fs::create_dir(dir.path().join("occupied-dir")).unwrap();
+        let error = confined
+            .create_file(&[OsString::from("occupied-dir")])
+            .expect_err("an existing directory is retained");
+        assert_eq!(error.errno, Errno::EEXIST);
+        assert_eq!(error.component.as_deref(), Some(OsStr::new("occupied-dir")));
+        assert!(dir.path().join("occupied-dir").is_dir());
+    }
+
+    #[test]
+    fn a_new_archive_file_is_writable_and_closes_on_exec() {
+        use nix::fcntl::{FcntlArg, FdFlag, fcntl};
+
+        let dir = TempDir::new().expect("tempdir");
+        let confined = Confined::open(dir.path()).expect("root");
+        let fd = Confined::open_new_file(confined.root.as_fd(), OsStr::new("new"))
+            .expect("a new file opens");
+        let descriptor_flags = FdFlag::from_bits_retain(fcntl(&fd, FcntlArg::F_GETFD).unwrap());
+        assert!(descriptor_flags.contains(FdFlag::FD_CLOEXEC));
+        let mut file = std::fs::File::from(fd);
+        file.write_all(b"contents").expect("the file is writable");
+        assert_eq!(std::fs::read(dir.path().join("new")).unwrap(), b"contents");
     }
 }

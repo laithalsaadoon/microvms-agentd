@@ -53,7 +53,10 @@ not present an authentication credential to the run hook.
 3. **Authorization before request-body processing.** Protected routes reject
    unauthorized requests before parsing or buffering their body. A bounded
    drain (64 KiB by default) reduces connection resets; excess data closes the
-   connection rather than causing an unbounded allocation.
+   connection. The drain also has a two-second deadline. Hook bodies have a
+   separate 32 KiB cap and five-second collection deadline. The server bounds
+   active connections, header-read time, and idle time; [Protocol](PROTOCOL.md)
+   lists these limits.
 4. **Explicit child environments.** Exec uses `env_clear()` and adds only the
    launch/request environment and, for a user with a passwd row, that row's
    `HOME`, `USER` and `LOGNAME`. The installed agent token is never implicitly
@@ -187,8 +190,11 @@ image-owned code with the daemon's privileges:
   log's cap bounds the number of runs, and handlers run one at a time.
 - Output goes to the daemon's log, not to `/v1/health`, because health needs no
   agent token. The outcome (exit code, signal, timeout, duration) is on health.
-- The hook always answers 200. A failing handler does not stop a suspend, a
-  resume, or a launch.
+  The handler budget covers its leader and output collection. At the deadline
+  the daemon signals the process group and stops collecting output. Processes
+  that start a separate group are outside group termination.
+- A handler failure does not change the successful hook acknowledgment.
+  Request-body validation and bootstrap checks run before the handler.
 
 ## Tunnel identity: proving which VM answered
 

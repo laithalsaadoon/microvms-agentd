@@ -107,10 +107,13 @@ daemon runs it for the `run`, `suspend`, `resume`, and `terminate` hooks:
   a replayed or conflicting run hook runs none.
 - **Within a budget.** `AGENTD_HOOK_HANDLER_TIMEOUT_SECS` (default 20, clamped
   to 1 to 55) is kept below the image's hook timeout, which the client sets to 30
-  seconds. At the budget the handler's whole process group is killed.
-- **Always 200.** The hook answers 200 whatever the handler did. The platform's
-  handling of a failing or slow hook is undocumented, and a VM that cannot
-  suspend or resume is the worse outcome. Check the outcome instead.
+  seconds. The budget covers the leader and reads from its output streams. At
+  the deadline the daemon kills the handler's process group, even if the leader
+  already exited, and stops reading output. The daemon does not stop a process
+  in a new group. It still stops reading its output at the deadline.
+- **Handler results do not change the status.** After the request is valid and,
+  for `run`, bootstrap succeeds, the hook answers 200 whatever the handler did.
+  Check the recorded outcome for handler failures.
 - **One at a time,** and only for invocations the hook log kept, so the log's cap
   bounds how many handlers an in-guest caller can trigger.
 
@@ -120,6 +123,8 @@ handler could not run at all, such as `not executable`. The key is absent when
 the image has no handler for that hook, so an entry reads exactly as it did
 before handlers existed. Handler output is logged by the daemon (the image's
 log group), never returned on `/v1/health`, which needs no agent token.
+A service that needs to keep running after its handler exits should redirect
+its output streams so the daemon can finish reading them.
 
 A handler runs as the daemon's user (root) with the daemon's environment, the
 launch environment, and `AGENTD_HOOK=<hook>`; never the agent token. Any process
@@ -157,9 +162,17 @@ they do not drop the connection.
 makes the client believe an artifact is absent when it is not. One defect went
 undetected this way.
 
-**Authorization is decided before any body byte is read.** An unauthenticated
-caller must not be able to make the daemon allocate. Rejected requests still
-drain a small body so pooled client connections keep working; larger ones close.
+**Protected routes check authorization before they collect a body.**
+Rejected requests drain at most the configured byte cap within two seconds so
+clients can reuse pooled connections. Reaching either bound closes the connection.
+
+**Connections and hook bodies have fixed limits.** The daemon admits at most
+128 connections, including upgraded tunnels. Headers must arrive within five
+seconds. This also applies to the next request on an idle keep-alive connection.
+A slot stays in use while a response stream is active or a tunnel is open. Hook
+envelopes have a 32 KiB cap and a five-second read deadline. The size cap allows
+for JSON escapes around the platform payload. Larger envelopes receive 413.
+Unfinished bodies receive 408. Both responses close the connection.
 
 **Token comparison happens on bytes, in constant time.** Comparing `str` values
 raises on non-ASCII input in some languages. Any caller controls the header, so
@@ -194,7 +207,9 @@ are preserved, because harnesses legitimately pack them. Absolute link targets
 are refused. Relative targets must resolve under the root, using `normpath`
 semantics rather than `realpath`. Symlinks resolve relative to their own
 directory, while hard links resolve against the archive root. Member count and
-total size are capped. Modes are applied after content lands.
+total size are capped. Modes are applied after content lands. A regular-file
+member replaces the old entry before creation, so other hard links keep their
+bytes and modes.
 
 **A symlink an archive wrote cannot redirect a later member, and the kernel is
 what enforces that.** The `normpath` rule above judges a member at the depth its

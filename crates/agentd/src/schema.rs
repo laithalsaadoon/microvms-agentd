@@ -716,14 +716,26 @@ pub const SCHEMA: &[Status] = &[Status::new(
      it has a token, and none of it is secret.",
 )];
 
-pub const HOOK_ACK: &[Status] = &[Status::new(
-    StatusCode::OK,
+const HOOK_BODY_TIMEOUT: Status = Status::new(
+    StatusCode::REQUEST_TIMEOUT,
     "",
-    "acknowledged. The platform terminates the VM on any other status, so there is \
-     no failure a hook can usefully report.",
-)];
+    "hook body collection exceeded its deadline; connection closes",
+);
+const HOOK_BODY_TOO_LARGE: Status = Status::new(
+    StatusCode::PAYLOAD_TOO_LARGE,
+    "",
+    "hook envelope exceeded 32 KiB; connection closes",
+);
+
+pub const HOOK_ACK: &[Status] = &[
+    Status::new(StatusCode::OK, "", "acknowledged"),
+    HOOK_BODY_TIMEOUT,
+    HOOK_BODY_TOO_LARGE,
+];
 
 pub const HOOK_RUN: &[Status] = &[
+    HOOK_BODY_TIMEOUT,
+    HOOK_BODY_TOO_LARGE,
     Status::new(
         StatusCode::OK,
         "",
