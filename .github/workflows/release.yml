@@ -657,6 +657,12 @@ jobs:
             gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir retained
             test -s retained/agentd.sigstore.json
             test -s retained/agentd.intoto.jsonl
+            {
+              printf '%s\n' agentd agentd.sigstore.json agentd.intoto.jsonl SHA256SUMS
+              find cli-dist -maxdepth 1 -type f -printf '%f\n'
+            } | sort > expected-files
+            find retained -maxdepth 1 -type f -printf '%f\n' | sort > retained-files
+            cmp expected-files retained-files
             cut -c 67- SHA256SUMS > expected-assets
             cut -c 67- retained/SHA256SUMS > retained-assets
             cmp expected-assets retained-assets

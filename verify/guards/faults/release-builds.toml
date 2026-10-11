@@ -88,6 +88,11 @@ id = "release-builds-uv-pin-agreement"
 message = "FAIL: test_uv_uses_the_repository_pin"
 transform = { file = ".github/workflows/release.yml", replace = "          version: \"0.12.13\"\n          enable-cache: false\n      - name: build the wheel", with = "          version: \"0.12.12\"\n          enable-cache: false\n      - name: build the wheel" }
 
+[[family.fault]]
+id = "release-builds-draft-completeness"
+message = "FAIL: test_draft_retry_reuses_the_first_complete_assets"
+transform = { file = ".github/workflows/release.yml", replace = "            cmp expected-files retained-files", with = "            : expected-files retained-files" }
+
 [[scanner]]
 id = "release-builds"
 guard = "tools/check-release-builds.py"

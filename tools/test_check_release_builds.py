@@ -108,7 +108,15 @@ class ReleaseBuildTests(unittest.TestCase):
 
     def test_draft_retry_reuses_the_first_complete_assets(self):
         script = self.step("draft", "draft the release")["run"]
-        for state in ("", "true", "false", "incomplete", "changed", "list-error"):
+        for state in (
+            "",
+            "true",
+            "false",
+            "incomplete",
+            "cli-sidecar-missing",
+            "changed",
+            "list-error",
+        ):
             with self.subTest(state=state), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 remote = root / "remote"
@@ -116,11 +124,22 @@ class ReleaseBuildTests(unittest.TestCase):
                 (remote / "agentd").write_bytes(b"original binary")
                 for name in ("agentd.sigstore.json", "agentd.intoto.jsonl"):
                     (remote / name).write_text("bundle")
+                cli = root / "cli-dist"
+                cli.mkdir()
+                for name in (
+                    "microvm-linux.tar.gz",
+                    "microvm-linux.tar.gz.sigstore.json",
+                    "microvm-linux.tar.gz.intoto.jsonl",
+                ):
+                    (cli / name).write_text("CLI asset")
+                    (remote / name).write_text("CLI asset")
                 digest = hashlib.sha256(b"original binary").hexdigest()
                 original = f"{digest}  agentd\n"
                 (remote / "SHA256SUMS").write_text(original)
                 if state == "incomplete":
                     (remote / "agentd.sigstore.json").unlink()
+                if state == "cli-sidecar-missing":
+                    (remote / "microvm-linux.tar.gz.sigstore.json").unlink()
                 if state == "changed":
                     (remote / "agentd").write_bytes(b"changed binary")
                 (root / "SHA256SUMS").write_text("0" * 64 + "  agentd\n")
