@@ -1,4 +1,6 @@
 # ── harden-agentd: FAIL_TO_PASS entries tools/fail-to-pass.py emitted ──
+# The reverse patches retain helpers used by later unit tests, while restoring
+# the original file and connection behavior for the regression guards.
 
 # FAIL_TO_PASS: fails on 9729b82a9b14 with the fix taken out (tools/fail-to-pass.py).
 [[fault]]
@@ -99,3 +101,73 @@ run = ["cargo", "test", "-p", "agentd", "--test", "turmoil_transport", "--", "--
 expect = "test-failed"
 suite = "rust"
 transform = { file = "crates/agentd/src/serve.rs", replace = "                    tokio::select! {\n                        result = &mut connection => {", with = "                    tokio::select! {\n                        _ = tokio::time::sleep(Duration::from_secs(60 * 60)) => {},\n                        result = &mut connection => {" }
+
+# The helper is new on this branch, so its unit guard uses a direct fault.
+[[fault]]
+id = "archive-exclusive-open"
+guard = "fs::tests::a_new_archive_file_refuses_an_occupied_name"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "fs::tests::a_new_archive_file_refuses_an_occupied_name"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/fs.rs", replace = ".union(OFlag::O_EXCL)", with = ".union(OFlag::empty())" }
+
+# The helper is new on this branch, so its unit guard uses a direct fault.
+[[fault]]
+id = "archive-file-close-on-exec"
+guard = "fs::tests::a_new_archive_file_is_writable_and_closes_on_exec"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "fs::tests::a_new_archive_file_is_writable_and_closes_on_exec"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/fs.rs", replace = ".union(OFlag::O_CLOEXEC)", with = ".union(OFlag::empty())" }
+
+# The helper is new on this branch, so its unit guard uses a direct fault.
+[[fault]]
+id = "bounded-io-write-result"
+guard = "serve::tests::bounded_io_preserves_socket_writes_flushes_and_shutdown"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "serve::tests::bounded_io_preserves_socket_writes_flushes_and_shutdown"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/serve.rs", replace = "Pin::new(&mut self.inner).poll_write(cx, data)", with = "Poll::Ready(Ok(1))" }
+
+# The helper is new on this branch, so its unit guard uses a direct fault.
+[[fault]]
+id = "bounded-io-flush"
+guard = "serve::tests::bounded_io_preserves_socket_writes_flushes_and_shutdown"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "serve::tests::bounded_io_preserves_socket_writes_flushes_and_shutdown"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/serve.rs", replace = "Pin::new(&mut self.inner).poll_flush(cx)", with = "Poll::Ready(Ok(()))" }
+
+# The helper is new on this branch, so its unit guard uses a direct fault.
+[[fault]]
+id = "bounded-io-shutdown"
+guard = "serve::tests::bounded_io_preserves_socket_writes_flushes_and_shutdown"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "serve::tests::bounded_io_preserves_socket_writes_flushes_and_shutdown"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/serve.rs", replace = "Pin::new(&mut self.inner).poll_shutdown(cx)", with = "Poll::Ready(Ok(()))" }
+
+# This existing logging behavior is guarded with direct faults.
+[[fault]]
+id = "handler-output-requires-both-streams"
+guard = "hook_handlers::tests::handler_output_is_logged_when_either_stream_has_bytes"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "hook_handlers::tests::handler_output_is_logged_when_either_stream_has_bytes"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/hook_handlers.rs", replace = "if !stdout.is_empty() || !stderr.is_empty() {", with = "if !stdout.is_empty() && !stderr.is_empty() {" }
+
+[[fault]]
+id = "handler-output-inverts-stdout"
+guard = "hook_handlers::tests::handler_output_is_logged_when_either_stream_has_bytes"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "hook_handlers::tests::handler_output_is_logged_when_either_stream_has_bytes"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/hook_handlers.rs", replace = "if !stdout.is_empty() || !stderr.is_empty() {", with = "if stdout.is_empty() || !stderr.is_empty() {" }
+
+[[fault]]
+id = "handler-output-inverts-stderr"
+guard = "hook_handlers::tests::handler_output_is_logged_when_either_stream_has_bytes"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "hook_handlers::tests::handler_output_is_logged_when_either_stream_has_bytes"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/hook_handlers.rs", replace = "if !stdout.is_empty() || !stderr.is_empty() {", with = "if !stdout.is_empty() || stderr.is_empty() {" }

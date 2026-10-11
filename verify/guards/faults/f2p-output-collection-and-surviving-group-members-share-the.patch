@@ -60,10 +60,9 @@ index 32a57e4..28a5a8e 100644
  
  #[cfg(test)]
 diff --git a/crates/agentd/src/fs.rs b/crates/agentd/src/fs.rs
-index e61bc54..3afe3f1 100644
 --- a/crates/agentd/src/fs.rs
 +++ b/crates/agentd/src/fs.rs
-@@ -419,18 +419,17 @@ impl Confined {
+@@ -419,17 +419,22 @@
  
      /// Creates and opens the file a data member's bytes go into.
      ///
@@ -80,13 +79,18 @@ index e61bc54..3afe3f1 100644
          let (parent, name) = self.parent_of(parts)?;
          let last = parts.len() - 1;
 -        self.replace(parent.as_fd(), &name);
-         let how = OpenHow::new()
--            .flags(OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_CLOEXEC)
+-        let fd = Self::open_new_file(parent.as_fd(), name.as_os_str())
++        let how = OpenHow::new()
 +            .flags(OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_TRUNC | OFlag::O_CLOEXEC)
-             // 0o666 before umask, matching `File::create`. The archive's own mode
-             // is replayed later by `apply_deferred_modes`.
-             .mode(Mode::from_bits_truncate(0o666))
-@@ -517,8 +516,9 @@ impl Confined {
++            // 0o666 before umask, matching `File::create`. The archive's own mode
++            // is replayed later by `apply_deferred_modes`.
++            .mode(Mode::from_bits_truncate(0o666))
++            .resolve(Self::RESOLVE);
++        let fd = openat2(parent.as_fd(), name.as_os_str(), how)
+             .map_err(|errno| WalkError::at(parts, last, errno))?;
+         Ok(std::fs::File::from(fd))
+     }
+@@ -526,8 +531,9 @@
  
      /// Unlinks `name` under `dir`, ignoring every failure.
      ///
@@ -98,7 +102,7 @@ index e61bc54..3afe3f1 100644
      /// `ENOENT`, which means there was nothing to replace, and any other means the
      /// create below fails and reports the real reason.
      fn replace(&self, dir: BorrowedFd<'_>, name: &OsStr) {
-@@ -793,9 +793,6 @@ fn extract_into(
+@@ -802,9 +808,6 @@
                              ),
                          })?;
                  }
@@ -347,10 +351,9 @@ index d06a170..3cab117 100644
          StatusCode::OK,
          "",
 diff --git a/crates/agentd/src/serve.rs b/crates/agentd/src/serve.rs
-index c86da0d..bb7e3c6 100644
 --- a/crates/agentd/src/serve.rs
 +++ b/crates/agentd/src/serve.rs
-@@ -1,118 +1,29 @@
+@@ -1,74 +1,34 @@
  // SPDX-License-Identifier: Apache-2.0
 -//! Serving the router over real or simulated sockets with bounded connections.
 +//! Serving the router, over either a real socket or a simulated one.
@@ -361,10 +364,11 @@ index c86da0d..bb7e3c6 100644
 +//! path is generic and the production binary never links the simulator.
  
  use std::fmt::Debug;
--use std::pin::Pin;
--use std::sync::Arc;
--use std::task::{Context, Poll};
--use std::time::Duration;
+ use std::pin::Pin;
+ use std::sync::Arc;
+ use std::task::{Context, Poll};
+ use std::time::Duration;
++use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
  
  use axum::Router;
  use axum::serve::Listener;
@@ -432,53 +436,9 @@ index c86da0d..bb7e3c6 100644
 -    let _ = shutdown.send(true);
 -    while connections.join_next().await.is_some() {}
 -    Ok(())
--}
--
--/// The permit stays with the socket through an HTTP upgrade, so a tunnel counts
--/// toward connection admission until its I/O is dropped.
--struct BoundedIo<T> {
--    inner: T,
--    _permit: tokio::sync::OwnedSemaphorePermit,
--}
--
--impl<T> BoundedIo<T> {
--    fn new(inner: T, permit: tokio::sync::OwnedSemaphorePermit) -> Self {
--        Self {
--            inner,
--            _permit: permit,
--        }
--    }
--}
--
--impl<T: AsyncRead + Unpin> AsyncRead for BoundedIo<T> {
--    fn poll_read(
--        mut self: Pin<&mut Self>,
--        cx: &mut Context<'_>,
--        buffer: &mut ReadBuf<'_>,
--    ) -> Poll<std::io::Result<()>> {
--        Pin::new(&mut self.inner).poll_read(cx, buffer)
--    }
--}
--
--impl<T: AsyncWrite + Unpin> AsyncWrite for BoundedIo<T> {
--    fn poll_write(
--        mut self: Pin<&mut Self>,
--        cx: &mut Context<'_>,
--        data: &[u8],
--    ) -> Poll<std::io::Result<usize>> {
--        Pin::new(&mut self.inner).poll_write(cx, data)
--    }
--
--    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
--        Pin::new(&mut self.inner).poll_flush(cx)
--    }
--
--    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
--        Pin::new(&mut self.inner).poll_shutdown(cx)
--    }
 +    axum::serve(listener, app)
 +        .with_graceful_shutdown(shutdown_signal())
 +        .await
  }
  
- /// Resolves when the platform asks the VM to stop.
+ /// The permit stays with the socket through an HTTP upgrade, so a tunnel counts

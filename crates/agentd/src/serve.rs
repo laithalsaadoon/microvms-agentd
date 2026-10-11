@@ -146,3 +146,71 @@ async fn shutdown_signal() {
         let _ = tokio::signal::ctrl_c().await;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
+
+    #[tokio::test(start_paused = true)]
+    async fn bounded_io_preserves_socket_writes_flushes_and_shutdown() {
+        let capacity = Arc::new(tokio::sync::Semaphore::new(1));
+        let (socket, mut peer) = tokio::io::duplex(2);
+        let mut io = BoundedIo::new(socket, capacity.clone().try_acquire_owned().unwrap());
+        assert_eq!(capacity.available_permits(), 0);
+        assert_eq!(
+            io.write(b"abc").await.unwrap(),
+            2,
+            "preserves partial writes"
+        );
+        let mut bytes = [0; 2];
+        peer.read_exact(&mut bytes).await.unwrap();
+        assert_eq!(&bytes, b"ab");
+        drop(peer);
+        assert_eq!(
+            io.write(b"z").await.unwrap_err().kind(),
+            std::io::ErrorKind::BrokenPipe
+        );
+        drop(io);
+        assert_eq!(capacity.available_permits(), 1);
+
+        let (socket, mut peer) = tokio::io::duplex(32);
+        let mut io = BoundedIo::new(
+            BufWriter::new(socket),
+            capacity.clone().try_acquire_owned().unwrap(),
+        );
+        io.write_all(b"first").await.unwrap();
+        io.flush().await.unwrap();
+        let mut bytes = [0; 5];
+        tokio::time::timeout(Duration::from_secs(1), peer.read_exact(&mut bytes))
+            .await
+            .expect("flush delivers buffered bytes")
+            .unwrap();
+        assert_eq!(&bytes, b"first");
+        io.write_all(b"last").await.unwrap();
+        io.shutdown().await.unwrap();
+        let mut bytes = Vec::new();
+        tokio::time::timeout(Duration::from_secs(1), peer.read_to_end(&mut bytes))
+            .await
+            .expect("shutdown flushes and sends EOF")
+            .unwrap();
+        assert_eq!(bytes, b"last");
+        drop(io);
+
+        let (socket, peer) = tokio::io::duplex(32);
+        let mut io = BoundedIo::new(
+            BufWriter::new(socket),
+            capacity.try_acquire_owned().unwrap(),
+        );
+        io.write_all(b"pending").await.unwrap();
+        drop(peer);
+        assert_eq!(
+            io.flush().await.unwrap_err().kind(),
+            std::io::ErrorKind::BrokenPipe
+        );
+        assert_eq!(
+            io.shutdown().await.unwrap_err().kind(),
+            std::io::ErrorKind::BrokenPipe
+        );
+    }
+}

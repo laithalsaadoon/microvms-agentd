@@ -356,6 +356,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn handler_output_is_logged_when_either_stream_has_bytes() {
+        use std::io::Write;
+        use std::sync::{Arc, Mutex};
+        use tracing::instrument::WithSubscriber;
+
+        #[derive(Clone)]
+        struct LogWriter(Arc<Mutex<Vec<u8>>>);
+
+        impl Write for LogWriter {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().expect("log buffer").extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        for (body, stdout, stderr) in [
+            (":", "", ""),
+            ("printf out", "out", ""),
+            ("printf err >&2", "", "err"),
+            ("printf out; printf err >&2", "out", "err"),
+        ] {
+            let path = script(dir.path(), "resume", body);
+            let bytes = Arc::new(Mutex::new(Vec::new()));
+            let writer = LogWriter(bytes.clone());
+            let subscriber = tracing_subscriber::fmt()
+                .json()
+                .without_time()
+                .with_max_level(tracing::Level::INFO)
+                .with_writer(move || writer.clone())
+                .finish();
+            // Scope the subscriber to this future so concurrent handler tests
+            // cannot contribute events to its output assertions.
+            let outcome = execute(&path, "resume", Duration::from_secs(5), &HashMap::new())
+                .with_subscriber(subscriber)
+                .await;
+            assert!(outcome.succeeded(), "{outcome:?}");
+            let log =
+                String::from_utf8(bytes.lock().expect("log buffer").clone()).expect("UTF-8 log");
+            let fields: Vec<serde_json::Value> = log
+                .lines()
+                .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("JSON event"))
+                .filter_map(|event| {
+                    (event["fields"]["message"] == "hook handler output")
+                        .then(|| event["fields"].clone())
+                })
+                .collect();
+            let expected = if stdout.is_empty() && stderr.is_empty() {
+                Vec::new()
+            } else {
+                vec![serde_json::json!({
+                    "message": "hook handler output",
+                    "hook": "resume",
+                    "stdout": stdout,
+                    "stderr": stderr,
+                })]
+            };
+            assert_eq!(fields, expected, "handler body: {body}");
+        }
+    }
+
+    #[tokio::test]
     async fn output_collection_and_surviving_group_members_share_the_handler_budget() {
         let dir = tempfile::tempdir().expect("tempdir");
         let marker = dir.path().join("late");

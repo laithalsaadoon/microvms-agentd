@@ -429,15 +429,24 @@ impl Confined {
         let (parent, name) = self.parent_of(parts)?;
         let last = parts.len() - 1;
         self.replace(parent.as_fd(), &name);
+        let fd = Self::open_new_file(parent.as_fd(), name.as_os_str())
+            .map_err(|errno| WalkError::at(parts, last, errno))?;
+        Ok(std::fs::File::from(fd))
+    }
+
+    /// Opens only a new leaf; callers decide whether an old entry may be removed.
+    fn open_new_file(parent: BorrowedFd<'_>, name: &OsStr) -> Result<OwnedFd, Errno> {
+        let flags = OFlag::O_WRONLY
+            .union(OFlag::O_CREAT)
+            .union(OFlag::O_EXCL)
+            .union(OFlag::O_CLOEXEC);
         let how = OpenHow::new()
-            .flags(OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_CLOEXEC)
+            .flags(flags)
             // 0o666 before umask, matching `File::create`. The archive's own mode
             // is replayed later by `apply_deferred_modes`.
             .mode(Mode::from_bits_truncate(0o666))
             .resolve(Self::RESOLVE);
-        let fd = openat2(parent.as_fd(), name.as_os_str(), how)
-            .map_err(|errno| WalkError::at(parts, last, errno))?;
-        Ok(std::fs::File::from(fd))
+        openat2(parent, name, how)
     }
 
     /// Creates a symlink at `parts` with `target` written verbatim.
@@ -2684,5 +2693,43 @@ mod tests {
                 .len(),
             member.len() as u64,
         );
+    }
+    #[test]
+    fn a_new_archive_file_refuses_an_occupied_name() {
+        let dir = TempDir::new().expect("tempdir");
+        std::fs::write(dir.path().join("occupied"), b"original").expect("existing file");
+        let confined = Confined::open(dir.path()).expect("root");
+        assert_eq!(
+            Confined::open_new_file(confined.root.as_fd(), OsStr::new("occupied"))
+                .expect_err("an occupied name is refused"),
+            Errno::EEXIST,
+        );
+        assert_eq!(
+            std::fs::read(dir.path().join("occupied")).unwrap(),
+            b"original"
+        );
+
+        std::fs::create_dir(dir.path().join("occupied-dir")).unwrap();
+        let error = confined
+            .create_file(&[OsString::from("occupied-dir")])
+            .expect_err("an existing directory is retained");
+        assert_eq!(error.errno, Errno::EEXIST);
+        assert_eq!(error.component.as_deref(), Some(OsStr::new("occupied-dir")));
+        assert!(dir.path().join("occupied-dir").is_dir());
+    }
+
+    #[test]
+    fn a_new_archive_file_is_writable_and_closes_on_exec() {
+        use nix::fcntl::{FcntlArg, FdFlag, fcntl};
+
+        let dir = TempDir::new().expect("tempdir");
+        let confined = Confined::open(dir.path()).expect("root");
+        let fd = Confined::open_new_file(confined.root.as_fd(), OsStr::new("new"))
+            .expect("a new file opens");
+        let descriptor_flags = FdFlag::from_bits_retain(fcntl(&fd, FcntlArg::F_GETFD).unwrap());
+        assert!(descriptor_flags.contains(FdFlag::FD_CLOEXEC));
+        let mut file = std::fs::File::from(fd);
+        file.write_all(b"contents").expect("the file is writable");
+        assert_eq!(std::fs::read(dir.path().join("new")).unwrap(), b"contents");
     }
 }
