@@ -72,12 +72,12 @@ refusal regresses the case fails on a connection error rather than a signed requ
 
 ## The areas
 
-- `forward`: raw HTTP Host fields sent through each surface's running local port-forward to a
-  loopback upstream. `{port}` is the assigned listener port and `{wrong_port}` is a different
-  valid port; optional `bind_ip` selects an explicit local bind address. Every case compares the response status, served and refused connections, and
-  upstream request count. Core also uses a counting proxy minter to require a refusal before
-  any credential is requested. The binding runners use their default ephemeral bind; the CLI
-  reserves an ephemeral port before asking the command to bind it.
+- `forward`: each runner sends HTTP Host fields through a local forward to a
+  loopback server. `{port}` is the bound port and `{wrong_port}` is another valid
+  port. Optional `bind_ip` selects a local address. Cases check the HTTP status,
+  served and refused counts, and upstream call counts. Core checks that each
+  refusal happens before a proxy token request. Python and Node use a port from the OS.
+  The command runner reserves a port before it runs `microvm`.
 
 - `image-name`: the name `ensure_image` gives an image and the CLI's `build --reuse` gives the
   same inputs (`ensure-image`), and the name `AgentVm.image_name` gives an agent image

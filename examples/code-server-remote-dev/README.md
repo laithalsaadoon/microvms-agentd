@@ -49,8 +49,8 @@ the configuration stays in the VM for that session.
 Any local user who can reach the forward can send a request, so the guest app
 must authenticate its users. The forward requires a `Host` header matching its
 bound address and port. Loopback bindings accept `localhost` and loopback IP
-literals. Existing VMs created without the password configuration must be
-terminated and recreated with this script.
+literals. For a VM created without password authentication, run
+`microvm terminate code-server-dev --wait` and start this script again.
 
 ## Work, suspend, and reconnect
 

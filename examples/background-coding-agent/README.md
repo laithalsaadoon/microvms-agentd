@@ -108,10 +108,10 @@ export TF_VAR_github_forks='{"you/app":"your-publisher/app"}'
 ```
 
 Before deploying, create each configured direct fork under an account you
-control and disable GitHub Actions in that fork's Settings → Actions → General.
+control and turn off GitHub Actions in that fork's Settings → Actions → General.
 Use a dedicated publishing account with no repository secrets or cloud identity
 permissions. The workflow checks that the destination is a direct fork of the
-source and that Actions is disabled before writing any blobs or branches.
+source and that Actions remains off before it writes blobs or branches.
 Leave fork-PR workflow approval enabled on the source repository, and require
 review before running contributed code with privileged credentials.
 
@@ -123,7 +123,7 @@ command. The source token needs **Contents** read, **Issues** read, and **Pull
 requests** read/write on the source repositories. The publishing token needs
 **Contents** read/write and **Administration** read only on the configured
 forks (the latter reads the Actions enablement setting).
-Neither token needs **Workflows** write. Changes requiring that permission
+Omit **Workflows** write permission from both tokens. Changes requiring it
 remain unpublished. Do not give the publishing token access to the source
 repositories. Terraform stores the secret containers, never their values.
 
@@ -168,7 +168,7 @@ comments are folded into the review body instead.
 - The GitHub tokens are read only by Lambda. The guest gets a source tarball
   and the task text, and publishing happens after the VM is terminated. Branch
   writes use only the fork credential; PR and review writes use the source
-  credential. Fork Actions must stay disabled.
+  credential. Keep fork Actions off.
 - The guest has a short-lived Bedrock bearer token. Published text is scanned
   for Bedrock bearer tokens and redacted, and publishing refuses a change that
   contains one. The token is signed with the Lambda role's credentials, so it

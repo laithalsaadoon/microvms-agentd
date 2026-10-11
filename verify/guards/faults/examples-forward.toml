@@ -155,7 +155,7 @@ transform = { file = "crates/microvms-edges/src/session/serve.rs", replace = "  
 [[fault]]
 id = "js-forward-bound-host"
 guard = "stop(timeout) cuts a connection left open"
-run = [["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"], ["node", "--test", "--test-reporter=tap", "--test-name-pattern=stop\\(timeout\\) cuts a connection left open", "bindings/microvms-js/__test__/serve.mjs"]]
+run = [["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"], ["node", "--test", "--test-reporter=tap", "--test-name-pattern=stop\\(timeout\\) cuts a connection left open", "bindings/microvms-js/__test__/serve.mjs"]]
 expect = "test-failed"
 suite = "bindings"
 transform = { file = "crates/microvms-edges/src/session/serve.rs", replace = "    report.proxy_token_mints = auth.as_ref().map_or(0, |auth| auth.mint_count());", with = "    report.served = 0;\n    report.proxy_token_mints = auth.as_ref().map_or(0, |auth| auth.mint_count());" }
