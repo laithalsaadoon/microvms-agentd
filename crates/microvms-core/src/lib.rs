@@ -8,7 +8,7 @@
 //! The domain owns rules and values without I/O; the application owns use cases
 //! against ports; the edges implement those ports. This crate provides the
 //! production constructors while keeping callers independent of that wiring.
-//! It depends on neither the CLI nor the bindings.
+//! It depends on neither the CLI nor the bindings (ARCH-4).
 //!
 //! `docs/PLATFORM.md` records dated observations of AWS Lambda MicroVMs.
 //! Shared rules turn those observations into validation and defaults so callers
