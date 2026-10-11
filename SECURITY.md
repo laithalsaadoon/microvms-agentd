@@ -51,8 +51,8 @@ binaries. Release workflows use OIDC publishing and attestations where
 supported. Automatic daemon provisioning verifies the release workflow's
 Sigstore attestation in-process and refuses a release that answers it has
 none. When neither attestation source can be reached, it can fall back to the
-release's `SHA256SUMS`, fetched over HTTPS. That checksum checks transfer integrity;
-it is not independent proof of provenance. The provisioning report distinguishes
+release's `SHA256SUMS`, fetched over HTTPS. That checksum checks transfer integrity.
+It does not independently prove provenance. The provisioning report distinguishes
 attestation verification from checksum verification.
 
 `mise run security` checks shipped source, secrets, license headers,

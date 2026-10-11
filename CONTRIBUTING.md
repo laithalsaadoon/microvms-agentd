@@ -517,14 +517,14 @@ API returns that prefix. The workflow's first job, `owner`, fails a run anyone
 else started, before the run asks for a review. A red live run publishes
 nothing, but its tag and attested assets still identify that attempt. Keep the tag and draft,
 land a source fix under a new patch version. Never move or delete and recreate a release tag.
-A retry at the same immutable tagged commit is allowed; retain the existing draft and tested
+A retry can use the same immutable tagged commit. Keep the existing draft and tested
 assets when retrying the live gate or publishing jobs. Retrying the draft job reuses a complete
 draft's original assets and checksums. If an interrupted upload left an incomplete draft,
 inspect its assets and confirm that no successful live run used it. Check that
 `gh release view "$TAG" --json isDraft --jq .isDraft` returns `true`, then remove only that
 incomplete draft with `gh release delete "$TAG" --yes` and retry the failed job at the same
-tagged commit. Do not pass `--cleanup-tag`; keep the tag unchanged. A complete draft or one
-used by a successful live run must be retained. Configure a tag ruleset for `v*` that
+tagged commit. Do not pass `--cleanup-tag`. Keep the tag unchanged. Keep a complete draft or one
+used by a successful live run. Configure a tag ruleset for `v*` that
 blocks updates and deletions without bypass actors so this identity persists.
 
 Keep scheduling and pooling in consumer applications; see
