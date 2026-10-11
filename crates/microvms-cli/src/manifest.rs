@@ -21,7 +21,7 @@
 //! `globalFlags`, in the same parameter shape as a command's own (#131). They are read from the
 //! root command's arguments **without** calling `Command::build()`: building propagates every
 //! global into every subcommand's argument list, and the manifest would then list `--json`
-//! twenty-six times as if each command owned it. `supportsJson` stays on every command for the
+//! once for each command as if that command owned it. `supportsJson` stays on every command for the
 //! consumer that already reads it.
 //!
 //! # `clientDefaults` is core's, beside the flags that restate it
@@ -623,7 +623,7 @@ mod tests {
     /// `--quiet`. Read off the same clap tree as `commands`, in struct order, with the same
     /// `parameter` shape — and asserted absent from every command's `parameters`, because the
     /// wrong way to generate this is `Cli::command().build()`, which propagates a global into
-    /// every subcommand and would list `--json` twenty-six times over.
+    /// every subcommand and would repeat `--json` for each one.
     ///
     /// **Guard proof.** Remove `global = true` from `quiet` in `cli.rs` and the names
     /// assertion reads `["json", "dense"]`. Run 2026-09-12; failed exactly there.

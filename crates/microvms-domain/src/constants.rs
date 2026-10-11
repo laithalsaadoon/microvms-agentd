@@ -32,13 +32,10 @@
 //!
 //! # The drift gate (TRAP-12)
 //!
-//! [`as_json`] emits every value in this module as one object, keyed with the names the
-//! deleted Python client's `sandbox.py` used. That is what makes the gate possible:
-//! `tools/check-model-drift.py` reads this object and compares each constant against the
-//! pinned model. It used to compare the Python module the same way and then the two
-//! clients against each other; with one client left, the two values no model states —
-//! `MICROVM_REGIONS` and `SIZE_CLASSES` — are compared against pinned literals in that
-//! script instead, since a value compared only against itself passes by construction.
+//! [`as_json`] emits every value in this module as one object. The names are the
+//! keys consumed by `tools/check-model-drift.py`, which compares each value with
+//! the pinned model. `MICROVM_REGIONS` and `SIZE_CLASSES` have no model source;
+//! the gate compares them with independently pinned literals.
 //!
 //! The names are therefore a contract with a script, not a style choice. Renaming
 //! `MAX_RUN_HOOK_PAYLOAD_BYTES` here without renaming it there does not fail
@@ -628,7 +625,7 @@ pub fn is_valid_role_arn(arn: &str) -> bool {
         })
 }
 
-/// Every constant in this module as one JSON object, keyed as `sandbox.py` names them.
+/// Every constant in this module as one JSON object, keyed for the model drift gate.
 ///
 /// The drift gate's second source (TRAP-12). Emitted through `serde_json` rather than
 /// formatted by hand so the object is a function of the values above, which is the
@@ -636,8 +633,7 @@ pub fn is_valid_role_arn(arn: &str) -> bool {
 ///
 /// `MICROVM_REGIONS` is in here and is explicitly **not** model-backed — no service
 /// model states it and no API answers the question (see [`crate::region`]). It is
-/// published so the gate can at least check the Rust and Python lists against each
-/// other, which is the one comparison available for a measured-only value.
+/// published so the gate can compare it with its independently pinned region list.
 ///
 /// # A list of pairs rather than one `json!({...})` literal, and that is forced
 ///
@@ -822,7 +818,7 @@ mod tests {
         );
     }
 
-    /// The values, as literals, against the same numbers `sandbox.py` carries. Written
+    /// The values against independent expected literals. Written
     /// out rather than compared against the constants, so this test disagrees with a
     /// changed constant instead of following it.
     #[test]

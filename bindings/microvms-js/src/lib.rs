@@ -34,6 +34,10 @@
 //! `Future: Send` — so `buildImage` takes its `SizeClass` and its two hook timeouts as
 //! separate reference parameters. Either way the guarded types stay classes.
 //!
+//! `BuildImageOptions` holds reusable image inputs, including the build role and image
+//! logging. `RunOptions` holds per-VM inputs, including the execution role, connectors,
+//! idle policy, launch environment, and per-VM logging.
+//!
 //! # The four closures a binding could have given away, and what stops each
 //!
 //! * **A dollar amount as a number.** JS coerces far more eagerly than Python, so this needed

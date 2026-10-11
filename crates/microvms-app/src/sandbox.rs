@@ -13,8 +13,9 @@
 //! `bootstrap_count`. The Z3 proofs over that model (bootstrap at most once, suspend from
 //! non-RUNNING unreachable, TERMINATED never returns to RUNNING) are proofs about *this*
 //! struct's reachable states, which is only worth something if the transitions here are
-//! the only way to move it. They are: every one of those fields is private, and every
-//! mutation happens in one of the five methods below.
+//! the only way to move it. Those fields are private and transitions are guarded here.
+//! Adoption initializes an existing VM from service-observed state and is covered by
+//! the adoption tests; it does not replay the launch bootstrap.
 //!
 //! # Runtime-checked rather than typestate, deliberately
 //!
@@ -132,7 +133,8 @@ pub const LIFECYCLE_POLL_INTERVAL: Duration = Duration::from_secs(5);
 pub enum Lifecycle {
     /// The initial state, and the state a launch is accepted into (STATE-1).
     Pending,
-    /// The run hook answered with a success status and the token is installed (STATE-2).
+    /// The service reports RUNNING; launch has completed bootstrap, or adoption supplied
+    /// the existing token (STATE-2).
     Running,
     /// A suspend was accepted and the platform has not yet reported it complete (STATE-4).
     Suspending,
@@ -1078,8 +1080,9 @@ impl Sandbox {
 
     // ── run (STATE-1, STATE-2, STATE-3) ──────────────────────────────────────
 
-    /// Launches a MicroVM, waits for RUNNING and for its daemon to answer, and returns its
-    /// session.
+    /// Launches a MicroVM and returns its session. By default it waits for RUNNING
+    /// and for the daemon to answer; setting [`RunRequest::wait`] to false skips
+    /// those readiness waits.
     ///
     /// # The three state requirements this is
     ///

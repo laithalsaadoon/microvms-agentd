@@ -1,33 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
-//! The MicroVMs client: the control plane, the in-VM daemon, the cost engine, and
-//! every trap closure, behind the one library crate the CLI and the bindings depend on
-//! (ARCH-1). It depends on none of them (ARCH-4), so a consumer of the library never carries the
-//! CLI's parser and runtime.
+//! The composition root for the MicroVMs client (ARCH-8). It wires production edges
+//! into application use cases and re-exports the domain, application, edges, and
+//! protocol APIs at the paths the CLI and bindings consume (ARCH-1).
 //!
 //! # What this crate is for
 //!
-//! `docs/PLATFORM.md` records seventeen measured findings about AWS Lambda MicroVMs,
-//! fifteen of which a client can act on. Most of them are traps in the specific sense
-//! that the platform's answer points away from the cause: an unsupported region
-//! answers `AccessDeniedException` with a null message, a `clientToken` replay wedges
-//! an image in `CREATING` for fifteen hours with no error at all, a
-//! `minimumMemoryInMiB` of 512 produces a guest reporting 2 GB. Each finding cost a
-//! measurement, and this crate is where that measurement is spent once so no caller
-//! has to make it again.
+//! The domain owns rules and values without I/O; the application owns use cases
+//! against ports; the edges implement those ports. This crate provides the
+//! production constructors while keeping callers independent of that wiring.
+//! It depends on neither the CLI nor the bindings.
 //!
-//! The Python client closed the same traps and stayed in the tree as the conformance
-//! oracle and the API reference until this port had driven the live suite green; it is
-//! git history now. The reason to port was that Rust can make several of those closures
-//! *unavailable* rather than merely rejected — see the strength ladder below.
+//! `docs/PLATFORM.md` records dated observations of AWS Lambda MicroVMs.
+//! Shared rules turn those observations into validation and defaults so callers
+//! receive the same behavior through Rust, the CLI, Python, and Node.js.
 //!
 //! # How strongly a trap is closed
 //!
 //! The spec ranks each closure, strongest first:
 //!
 //! * **S1, inexpressible** — the mistake cannot be written down. [`region::Region`] is
-//!   an enum over the five regions that carry MicroVMs, so a typo'd region is a
+//!   an enum over the supported regions that carry MicroVMs, so a typo'd region is a
 //!   compile error rather than a runtime check; [`sizing::SizeClass`] is closed over
-//!   the five documented baselines; [`hooks::RunHookTimeout`] and
+//!   the documented baselines; [`hooks::RunHookTimeout`] and
 //!   [`hooks::BuildHookTimeout`] are separate types with no conversion between them,
 //!   so a 3600-second build timeout cannot reach a field that caps at 60.
 //! * **S2, expressible but rejected** — the mistake can be written and the client
@@ -44,7 +38,7 @@
 //! # Every error message names its finding
 //!
 //! A local reject explains itself by naming the `docs/PLATFORM.md` section that
-//! measured the behaviour, because the codes and the guards exist precisely so a
+//! measured the behavior, because the codes and the guards exist precisely so a
 //! reader can go to the measurement rather than to a constraint. "region
 //! 'eu-central-1' is invalid" sends someone to check their spelling; the message
 //! [`region::Region`] actually raises sends them to the null-message finding.
@@ -60,7 +54,7 @@
 //!
 //! # Layout
 //!
-//! This crate is the composition root (ARCH-8). The code lives in four crates below it, and
+//! This crate is the composition root (ARCH-8). The code lives in the crates below it, and
 //! every item they export is re-exported here at the path it had in 0.10:
 //!
 //! * `microvms-domain`: the rules and values, with no I/O (ARCH-6): [`error`], [`region`],

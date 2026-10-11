@@ -23,8 +23,8 @@ protocol = { package = "microvms-protocol", version = "0.12.0", path = "../proto
 # (measured 2026-08-29 — see docs/PLATFORM.md). axum's own extractor rather than a
 # second WebSocket stack, since the router already owns the upgrade path.
 axum = { version = "0.8.9", features = ["ws"] }
-# tower-http 0.7 is a breaking line; axum 0.8.9 pins ^0.6.8 internally, so we
-# stay on 0.6 to keep one version of the middleware types in the tree.
+# The daemon selects tower-http 0.7 for its limit and panic middleware.
+# axum may also use an earlier tower-http release internally.
 # `catch-panic` turns a panicking handler into a 500 instead of a dropped
 # connection. It is load-bearing rather than cosmetic here: the daemon is the only
 # channel into the VM, so a panic that kills a connection and poisons a lock makes

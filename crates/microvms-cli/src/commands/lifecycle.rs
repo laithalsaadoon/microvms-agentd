@@ -1,63 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 //! `run`, `build`, `exec`, `suspend`, `resume`, `terminate` — the commands that touch AWS.
 //!
-//! # Two paths, and the split is not arbitrary
+//! # Launching and attached lifecycle operations
 //!
-//! `run` and `build` go through [`microvms_core::sandbox::Sandbox`], because they *launch*
-//! and every one of the STATE-* guards is a property of that type: the bootstrap counter, the
-//! suspended window recorded at launch, the teardown ordering.
+//! `run` and `build` use [`microvms_core::sandbox::Sandbox`] to retain launch state,
+//! control teardown order, and track the suspended window. Attached lifecycle commands
+//! use [`ControlPlane`] to operate on a VM selected by the caller.
 //!
-//! `suspend`, `resume`, and `terminate` go through [`ControlPlane`] directly, because they
-//! address a VM this invocation did not launch and `Sandbox` cannot be pointed at one — its
-//! fields are private, which is exactly what makes the Z3 proofs claims about the struct
-//! rather than about prose.
-//!
-//! # There is no `Sandbox::attach`, and adding one would cost the proofs
-//!
-//! The obvious tidy-up is a `Sandbox::attach(control, microvm_id)` that hands these three
-//! commands the same type `run` and `build` use. It was assessed and refused, and the reason
-//! is not the one that looks obvious.
-//!
-//! The obvious reason is STATE-12: a process that did not issue the suspend cannot know
-//! when it began, even though `GetMicrovm` reports the window itself in `idlePolicy`. On its
-//! own that would only mean an attached sandbox lets the service answer — which is exactly
-//! what [`microvms_core::sandbox::Sandbox`]'s `require_open_suspended_window` already does
-//! when it has no suspend time, and what `cli.py:1756` chose for the same stated reason. A
-//! documented limitation, not a blocker.
-//!
-//! The real reason is the **initial state**. `verify/spec/core.symspec.json`'s state model declares
-//! exactly one — `vm_state = PENDING and token_installed = false and image_exists = false
-//! and was_terminated = false and bootstrap_count = 0` — and `crates/model/src/client.rs`'s
-//! `init_states` returns exactly that one state. Every claim proved over either model is a
-//! claim about what is *reachable from there*: "bootstrap happens at most once" is a
-//! statement about paths out of `bootstrap_count = 0`, and "TERMINATED never returns to
-//! RUNNING" is a statement about paths out of PENDING. An `attach` constructor would
-//! manufacture a sandbox at `vm_state = RUNNING, token_installed = true, bootstrap_count =
-//! 1` — a second initial state neither model enumerates, so neither proof would say anything
-//! about it. That is not a limitation to document; it is a set of green checks that quietly
-//! stop covering the code they name.
-//!
-//! And the thing the constructor was supposed to buy is already here, in a better form.
-//! [`suspend`] below reads the state with `GetMicrovm` and refuses locally from anything but
-//! RUNNING — STATE-5's local half, on the attached path, costing one read. An attached
-//! `Sandbox` could not do better: it would have to be *told* its lifecycle at construction,
-//! and a constructor with a `lifecycle` parameter is a constructor a caller can lie to. The
-//! private fields exist precisely so that nobody can, so a door that takes the state as an
-//! argument is the one door that reopens what they close. The service's answer is the
-//! stronger source here, not the weaker one.
-//!
-//! What the attached path therefore gives up, in full: no `Drop` warning naming an
-//! abandoned VM (nothing owns the id past the command), no launch-time window guard (there
-//! is no window to guard — see above), and no `bootstrap_count`, which is correct because
-//! this invocation bootstrapped nothing. Each of those is a property of *having launched*,
-//! and a process that did not launch has none of them to lose.
+//! `Sandbox::adopt` also supports an existing VM: it reads the lifecycle and idle policy
+//! from the service and requires the existing agent token. Adoption preserves the
+//! one-bootstrap rule without replaying the run hook. The attached commands here keep
+//! their direct control-plane path; they do not create an owning sandbox.
 //!
 //! # The interrupt guard is a `select!`, and the sandbox outlives it (CLI-6)
 //!
 //! [`do_run`] constructs the `Sandbox` *before* the select and only borrows it inside. So when
 //! the select drops a cancelled launch future, the sandbox is still owned here and still holds
 //! whatever core recorded before the cancellation — including the `microvm` field, which
-//! `sandbox.rs:574` assigns after `RunMicrovm` is accepted and before the RUNNING wait. That
+//! the sandbox assigns after `RunMicrovm` is accepted and before the RUNNING wait. That
 //! is what makes the teardown able to name a VM whose launch never finished, which is the
 //! whole of CLI-6: the identifiers are the remedy, and an image wedged in `CREATING` cannot be
 //! deleted later at all.
