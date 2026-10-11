@@ -64,6 +64,11 @@ class ReleaseBuildTests(unittest.TestCase):
                     else "fresh dependencies and pinned tools",
                     output.getvalue(),
                 )
+                if not expected:
+                    self.assertEqual(
+                        output.getvalue(),
+                        "release builds: fresh dependencies and pinned tools\n",
+                    )
 
     def test_node_build_commands_use_the_manifest_generator_pin(self):
         expected = self.package["devDependencies"]["@napi-rs/cli"]
@@ -203,6 +208,18 @@ class ReleaseBuildTests(unittest.TestCase):
                                 "release builds: FAILED\n  cannot read release build inputs:"
                             )
                         )
+                        if broken == "":
+                            self.assertEqual(
+                                output.getvalue(),
+                                f"release builds: FAILED\n  cannot read release build inputs: {path} is empty\n",
+                            )
+                        elif broken == "[]":
+                            self.assertEqual(
+                                output.getvalue(),
+                                "release builds: FAILED\n  cannot read release build inputs: release inputs must be mappings\n",
+                            )
+                        else:
+                            self.assertIn(f"inputs: {path}:", output.getvalue())
                     (root / path).write_text(original)
 
     def test_command_help_names_the_policy_and_root_option(self):
@@ -222,7 +239,9 @@ class ReleaseBuildTests(unittest.TestCase):
             for path in (policy.WORKFLOW, policy.PACKAGE, policy.LOCK):
                 (root / path).parent.mkdir(parents=True, exist_ok=True)
                 (root / path).write_text((ROOT / path).read_text())
-            (root / policy.WORKFLOW).write_text("jobs: {}\n")
+            package = copy.deepcopy(self.package)
+            package["devDependencies"]["@napi-rs/cli"] = "^3.8.2"
+            (root / policy.PACKAGE).write_text(json.dumps(package))
             with (
                 patch("sys.argv", ["check-release-builds.py", "--root", directory]),
                 contextlib.redirect_stdout(io.StringIO()) as output,
@@ -230,7 +249,8 @@ class ReleaseBuildTests(unittest.TestCase):
                 self.assertEqual(policy.main(), 1)
         self.assertEqual(
             output.getvalue(),
-            "release builds: FAILED\n  release workflow has no jobs\n",
+            "release builds: FAILED\n  the Node generator must have an exact version\n"
+            "  the Node lock must match the package's development dependencies\n",
         )
 
     def test_release_tags_are_validated_before_work_starts(self):
