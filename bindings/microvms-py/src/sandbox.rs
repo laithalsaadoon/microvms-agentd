@@ -1639,8 +1639,8 @@ impl PySandbox {
         Ok(PyBytes::new(py, &bytes.map_err(crate::errors::CoreError)?))
     }
 
-    /// Launches a MicroVM, waits for RUNNING and for its daemon to answer, and returns its
-    /// session.
+    /// Launches a MicroVM and returns its session. By default it waits for RUNNING
+    /// and for the daemon to answer; `wait=False` skips those readiness waits.
     ///
     /// `ready_timeout` bounds the wait for RUNNING (default
     /// `session_constants()["defaultRunningTimeoutSeconds"]`); the wait for the daemon after it

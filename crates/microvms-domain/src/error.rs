@@ -3,21 +3,12 @@
 //!
 //! # Why two
 //!
-//! The Python client made this split by accident and it turned out to be
-//! load-bearing. `errors.py` has a class per status the daemon deliberately
-//! chooses — `Conflict`, `NotFound`, `ProtocolError` — and `cli.py`'s exit table
-//! collapses all three onto one code, `ERR_PROTOCOL`, because a shell branching on
-//! `$?` cannot usefully tell them apart and a caller who needs to has a message.
+//! The daemon reports distinct statuses such as `Conflict`, `NotFound`, and
+//! `ProtocolError`. The CLI groups them into a coarse process exit category while
+//! retaining the finer wire kind in its JSON envelope.
 //!
-//! Both are contracts, to different consumers, and neither can stand in for the
-//! other. The conformance suite asserts on the exception *class*
-//! (`conformance/run.py`'s `raises()` takes `Unauthorized`, `Conflict`,
-//! `NotFound`, `ProtocolError`), so a Rust client that only knew the coarse code
-//! would make the oracle unable to tell a 400 from a 404 — and that distinction is
-//! the one the daemon's whole status discipline exists to preserve. So
-//! [`Error::kind`] answers the exit-code question and [`Error::wire_kind`] answers
-//! the which-status-did-the-daemon-choose question, and the CLI carries the second
-//! into its JSON envelope as `data.kind` so the oracle keeps its granularity.
+//! [`Error::kind`] answers the exit-category question; [`Error::wire_kind`] answers
+//! which daemon condition occurred. The conformance suite checks both contracts.
 //!
 //! # What a caller matches on
 //!
@@ -120,7 +111,7 @@ impl Error {
 
 /// The coarse failure classes, one per non-zero row of the CLI's exit table.
 ///
-/// Exactly the thirteen codes the deleted Python client's `cli.py` defined.
+/// These categories are mapped to stable process exit codes by the CLI.
 /// The integer exit code lives in the CLI, not here: a library that owned process
 /// exit codes would be a library with an opinion about being a process.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -302,10 +293,8 @@ impl WireKind {
         WireKind::OutputGap,
     ];
 
-    /// The stable name the CLI puts in `data.kind`, spelled as the Python class.
-    ///
-    /// The conformance oracle compares against these strings, so they are the
-    /// exception class names from `errors.py` and not a re-spelling of them.
+    /// The stable name the CLI puts in `data.kind` and the bindings use for the
+    /// corresponding exception. Conformance tests compare these names.
     pub fn as_str(self) -> &'static str {
         match self {
             WireKind::Unauthorized => "Unauthorized",
@@ -390,7 +379,7 @@ impl WireKind {
             // A credential, not a wait. Retrying a 401 forever is one of the two
             // mistakes the Python ordering existed to prevent.
             WireKind::Unauthorized => ErrorKind::Credentials,
-            // The five retryable conditions from `errors.py`. Failing a launch that
+            // The retryable daemon conditions. Failing a launch that
             // was 200 ms from ready is the other mistake.
             WireKind::Transport
             | WireKind::AuthTokenMint

@@ -19,9 +19,9 @@
 //!
 //! So the surface is machine-legible by construction. `microvm manifest` emits the whole command
 //! tree with its option domains, exit codes, and envelope schema, generated from the parser
-//! rather than written down. Every command honours `--json` and emits exactly one envelope object
-//! on stdout with nothing else on that stream — progress goes to stderr, always, because a CLI
-//! that writes a log line to stdout passes an "is the envelope there" check and breaks the parse.
+//! rather than written down. Ordinary commands honor `--json` with one envelope on stdout.
+//! Streaming commands use their documented event format instead. Progress goes to stderr so
+//! callers can parse either output format without filtering diagnostic text.
 //!
 //! # There is no lib target (ARCH-5)
 //!

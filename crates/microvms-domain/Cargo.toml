@@ -14,7 +14,7 @@ categories = ["virtualization"]
 # `crates/microvms-cli/tests/dependency_direction.rs` fails on a crate added here or one listed there
 # that this crate no longer uses (ARCH-6). Every crate here computes or encodes. A crate that
 # reaches the network, the filesystem, a subprocess, the clock or the OS random pool belongs
-# in `microvms-core`, behind a port this crate's callers supply.
+# in `microvms-edges`, behind a port declared by `microvms-app`.
 [dependencies]
 # The wire contract, shared with the daemon (ARCH-2). The identity seeds' validation lives
 # there so the host and the daemon can't disagree about what a seed is.

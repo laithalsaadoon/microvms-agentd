@@ -532,7 +532,7 @@ pub fn surface_docs() -> Vec<schema::Endpoint> {
             "POST",
             hook("terminate"),
             Auth::PlatformHook,
-            "acknowledged; begins graceful shutdown with in-flight requests draining",
+            "acknowledged after the terminate handler; process signals initiate shutdown",
             schema::HOOK_ACK,
         ),
         schema::Endpoint {

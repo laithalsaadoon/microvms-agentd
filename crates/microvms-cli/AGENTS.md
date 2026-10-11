@@ -8,8 +8,9 @@ belongs in a lower layer (root `AGENTS.md`, Architecture).
   that opens a second path to AWS or HTTP. `clippy.toml` refuses core's transport calls, and
   every core function that builds a signed plane or session, everywhere but `src/seam.rs`, and
   the ratchet's `operation-literal` rule refuses an operation name written as a string.
-- With `--json`, stdout carries exactly one envelope and progress goes to stderr (CLI-4, in
-  `src/envelope.rs`). A stray `println!` breaks consumers and the guard.
+- With `--json`, ordinary commands write one envelope; streaming commands use their documented
+  event format. Progress goes to stderr (CLI-4, in `src/envelope.rs`). A stray `println!`
+  breaks consumers and the guard.
 - Exit codes in `src/exit.rs` are append-only: consumers branch on them. Add a row; never
   renumber or reuse one. `tests/exit_codes.rs` checks the codes a spawned process really exits
   with.

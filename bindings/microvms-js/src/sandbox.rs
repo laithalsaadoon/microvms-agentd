@@ -1032,8 +1032,8 @@ impl Sandbox {
             .collect())
     }
 
-    /// Launches a MicroVM, waits for RUNNING and for its daemon to answer, and resolves with
-    /// its session.
+    /// Launches a MicroVM and resolves with its session. By default it waits for RUNNING
+    /// and for the daemon to answer; `wait: false` skips those readiness waits.
     ///
     /// `readyTimeout` bounds the wait for RUNNING; the wait for the daemon after it is
     /// `sessionConstants().defaultReadyTimeoutSeconds`, and a daemon that never answers

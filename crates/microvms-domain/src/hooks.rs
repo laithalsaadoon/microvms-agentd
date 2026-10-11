@@ -18,10 +18,8 @@
 //! Because the trap is the confusion, not the number. A caller who picks one value
 //! large enough for a build hook — 300, say — passes image validation and is rejected
 //! on the run family, *after* the artifact upload, reported as a constraint on a
-//! field they did not know had two different ceilings. The Python client closes this
-//! by validating a dict of hooks against a table of families (`sandbox.py:271`
-//! `require_hook_timeouts_in_range`); that is S2, and it can only fire once a whole
-//! hook block exists.
+//! field they did not know had two different ceilings. Runtime validation rejects
+//! an out-of-range value only after it has been assigned to a hook family.
 //!
 //! Here each ceiling is its own type, so a build timeout in a run-hook field is a
 //! compile error. There is deliberately **no conversion between them** — no `From`,
@@ -119,8 +117,7 @@ impl fmt::Display for BuildHookTimeout {
 /// The refusal both constructors raise, naming the family, the ceiling, and the
 /// other family's ceiling.
 ///
-/// Shared so the two messages cannot drift apart, and worded from
-/// `sandbox.py:271`'s so a reader who has seen one recognises the other.
+/// Shared so both constructors describe their family and the other ceiling consistently.
 fn out_of_range_message(block: &str, secs: u32, ceiling: u32, other: u32) -> String {
     format!(
         "{block} timeout of {secs}s is outside the accepted range 1..{ceiling} (service model \

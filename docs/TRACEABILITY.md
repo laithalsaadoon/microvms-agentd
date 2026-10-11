@@ -105,7 +105,7 @@ traced requirement is missing a layer. Requirements are defined in
 | STATE-9 | 1 | waived | waived | 2 | 1 | waived |
 | STATE-10 | 1 | waived | waived | 2 | 1 | 1 |
 | STATE-11 | 1 | waived | waived | 2 | 3 | waived |
-| STATE-12 | 1 | waived | waived | 2 | 7 | waived |
+| STATE-12 | 1 | waived | waived | 2 | 6 | waived |
 | TRAP-1 | waived | waived | waived | 9 | 19 | waived |
 | TRAP-2 | waived | waived | waived | 1 | 5 | waived |
 | TRAP-3 | waived | waived | waived | 1 | 6 | 1 |
@@ -1206,7 +1206,7 @@ If a resume is attempted after the launch-time suspended window has elapsed, the
 - **gherkin:** waived: the model walks every interleaving of caller requests and platform reports up to two cycles, and model-conformance's replay drives each path against `Sandbox`; a scenario would restate one of those paths
 - **fuzz:** waived: the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz
 - **test:** `crates/microvms-app/src/sandbox.rs`, `crates/model-conformance/tests/client_lifecycle.rs`
-- **impl:** `bindings/microvms-js/src/control.rs`, `bindings/microvms-js/src/sandbox.rs`, `bindings/microvms-py/src/control.rs`, `bindings/microvms-py/src/sandbox.rs`, `crates/microvms-app/src/control/ops.rs`, `crates/microvms-app/src/sandbox.rs`, `crates/microvms-cli/src/commands/lifecycle.rs`
+- **impl:** `bindings/microvms-js/src/control.rs`, `bindings/microvms-js/src/sandbox.rs`, `bindings/microvms-py/src/control.rs`, `bindings/microvms-py/src/sandbox.rs`, `crates/microvms-app/src/control/ops.rs`, `crates/microvms-app/src/sandbox.rs`
 - **live:** waived: the window is launch-time `suspendedDurationSeconds`, and the refusal comes before any call once the client's clock passes it; the model, its replay and the app's tests drive that clock, which a live run can only wait out
 
 ## TRAP-1
