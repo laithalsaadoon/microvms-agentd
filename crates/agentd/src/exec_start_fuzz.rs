@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-//! The fuzz harness for AGENTD-7 through AGENTD-16: start requests whose `user`, `group` and
-//! `shell` are every JSON spelling the union types admit, deserialized and resolved against
-//! a fuzzed guest.
+//! The fuzz harness for AGENTD-7 through AGENTD-16 and AGENTD-22 through AGENTD-24: start
+//! requests whose `user`, `group` and `shell` are every JSON spelling the union types admit,
+//! deserialized and resolved against a fuzzed guest whose image may set a default user.
 //!
 //! `bolero::check!` runs this as an ordinary `#[test]` under stable `cargo test`, and as a
 //! coverage-guided target under
@@ -12,8 +12,8 @@
 //!
 //! A start body built as JSON (so the union deserialization is exercised, not bypassed),
 //! a passwd file of fuzzed rows, a launch environment, the environment the daemon
-//! "inherited" (which may carry `AGENTD_*` keys and a token-shaped value), and a fake
-//! filesystem saying which shells exist. Names, keys and values come from small pools so
+//! "inherited" (which may carry `AGENTD_*` keys and a token-shaped value), the image's
+//! default user if it sets one, and a fake filesystem saying which shells exist. Names, keys and values come from small pools so
 //! the interesting collisions — a name that matches a row, digits, a key set in two
 //! layers — happen on almost every case rather than almost never.
 //!
@@ -25,7 +25,10 @@
 //! layers (AGENTD-9); the image layer is absent without the flag (AGENTD-10) and lowest with it
 //! (AGENTD-11); no `AGENTD_*` image key and no token reaches the plan (AGENTD-12); the snapshot's
 //! count is its non-`AGENTD_` keys (AGENTD-13); a named shell runs as the file it resolved to
-//! (AGENTD-14); integers and booleans mean what they did (AGENTD-16). A second check feeds raw
+//! (AGENTD-14); integers and booleans mean what they did (AGENTD-16); a request that names no
+//! user resolves the default as it would that string (AGENTD-22), a request's own user is
+//! never replaced by it (AGENTD-23), and a default that names nobody is refused naming the
+//! variable (AGENTD-24). A second check feeds raw
 //! bytes to the `StartRequest` deserializer, which must refuse or accept but never panic.
 
 use std::path::Path;
@@ -37,6 +40,7 @@ use protocol::exec::{
 };
 use serde_json::{Value, json};
 
+use crate::config::DEFAULT_USER_VAR;
 use crate::exec_start::{Env, Guest, Program, parse_passwd, plan, snapshot_image_env};
 
 const NAMES: [&str; 8] = [
@@ -109,6 +113,8 @@ struct Case {
     inherited: Vec<(u8, u8)>,
     export_token: bool,
     rows: Vec<Row>,
+    /// The image's `AGENTD_DEFAULT_USER`, a [`NAMES`] index, when it sets one.
+    default_user: Option<u8>,
 }
 
 fn env_of(pairs: &[(u8, u8)]) -> Env {
@@ -176,8 +182,9 @@ fn digits(raw: &str) -> Option<u32> {
 }
 
 /// **AGENTD-7, AGENTD-8, AGENTD-9, AGENTD-10, AGENTD-11, AGENTD-12, AGENTD-13, AGENTD-14,
-/// AGENTD-15 and AGENTD-16.** A fuzzed start request resolved against a fuzzed guest keeps
-/// each of the model's properties; the module docs say which assertion is which.
+/// AGENTD-15, AGENTD-16, AGENTD-22, AGENTD-23 and AGENTD-24.** A fuzzed start request resolved
+/// against a fuzzed guest keeps each of the model's properties; the module docs say which
+/// assertion is which.
 #[test]
 fn start_resolution() {
     bolero::check!().with_type::<Case>().for_each(|case| {
@@ -190,7 +197,10 @@ fn start_resolution() {
         let written = serde_json::to_value(&request).expect("serializes");
         for field in ["user", "group", "shell"] {
             if let Some(sent) = body.get(field) {
-                assert_eq!(&written[field], sent, "{field} changed shape on the way back");
+                assert_eq!(
+                    &written[field], sent,
+                    "{field} changed shape on the way back"
+                );
             }
         }
 
@@ -208,7 +218,10 @@ fn start_resolution() {
         assert!(snapshot.keys().all(|key| !key.starts_with("AGENTD_")));
         assert_eq!(
             snapshot.len(),
-            inherited.keys().filter(|key| !key.starts_with("AGENTD_")).count()
+            inherited
+                .keys()
+                .filter(|key| !key.starts_with("AGENTD_"))
+                .count()
         );
 
         let passwd = passwd_text(&case.rows);
@@ -216,6 +229,7 @@ fn start_resolution() {
         let group = "staff:x:50:\nagent:x:1001:\n";
         let launch = env_of(&case.launch_env);
         let exists = |path: &Path| PRESENT.iter().any(|present| Path::new(present) == path);
+        let default_user = case.default_user.map(|index| pick(&NAMES, index));
         let result = plan(
             &request,
             &Guest {
@@ -223,13 +237,20 @@ fn start_resolution() {
                 image_env: Some(&snapshot),
                 passwd: &passwd,
                 group,
+                default_user,
                 is_executable: &exists,
             },
         );
 
-        // What the resolution must decide, derived independently of it.
+        // What the resolution must decide, derived independently of it. The user is the
+        // request's own when it names one, whatever the default (AGENTD-23), and the default
+        // read as a name otherwise (AGENTD-22).
+        let user = request
+            .user
+            .clone()
+            .or_else(|| default_user.map(|name| NameOrId::Name(name.to_string())));
         let user_row = |name: &str| rows.iter().find(|row| row.name == name);
-        let user_ok = match &request.user {
+        let user_ok = match &user {
             Some(NameOrId::Name(name)) => user_row(name).is_some() || digits(name).is_some(),
             _ => true,
         };
@@ -253,6 +274,21 @@ fn start_resolution() {
                     ERROR_UNKNOWN_SHELL
                 };
                 assert_eq!(rejection.error, expected, "{rejection:?} for {body}");
+                // AGENTD-24: a refused default names itself and the variable; a refused name
+                // the request gave is about that name alone.
+                if expected == ERROR_UNKNOWN_USER {
+                    match (&request.user, default_user) {
+                        (None, Some(name)) => assert!(
+                            rejection.detail.contains(&format!("{name:?}"))
+                                && rejection.detail.contains(DEFAULT_USER_VAR),
+                            "{rejection:?}"
+                        ),
+                        _ => assert!(
+                            !rejection.detail.contains(DEFAULT_USER_VAR),
+                            "{rejection:?}"
+                        ),
+                    }
+                }
                 if let Shell::Named(name) = &request.shell
                     && expected == ERROR_UNKNOWN_SHELL
                 {
@@ -260,19 +296,22 @@ fn start_resolution() {
                 }
             }
             Ok(plan) => {
-                assert!(user_ok && group_ok, "an unresolvable name was planned: {body}");
+                assert!(
+                    user_ok && group_ok,
+                    "an unresolvable name was planned: {body}"
+                );
                 let env = plan.environment();
 
                 // AGENTD-7 and AGENTD-16: the uid is the row's for a matching name, the number
                 // otherwise; the gid is the group's, a named user's primary, or unchanged.
-                let row = match &request.user {
+                let row = match &user {
                     Some(NameOrId::Name(name)) => user_row(name).or_else(|| {
                         digits(name).and_then(|uid| rows.iter().find(|row| row.uid == uid))
                     }),
                     Some(NameOrId::Id(uid)) => rows.iter().find(|row| row.uid == *uid),
                     None => None,
                 };
-                match &request.user {
+                match &user {
                     Some(NameOrId::Name(name)) => match user_row(name) {
                         Some(named) => assert_eq!(plan.uid, Some(named.uid)),
                         None => assert_eq!(plan.uid, digits(name)),
@@ -281,7 +320,8 @@ fn start_resolution() {
                     None => assert_eq!(plan.uid, None),
                 }
                 if request.group.is_none() {
-                    let named = matches!(&request.user, Some(NameOrId::Name(name)) if user_row(name).is_some());
+                    let named =
+                        matches!(&user, Some(NameOrId::Name(name)) if user_row(name).is_some());
                     let expected = if named { row.map(|row| row.gid) } else { None };
                     assert_eq!(plan.gid, expected, "{body}");
                 }

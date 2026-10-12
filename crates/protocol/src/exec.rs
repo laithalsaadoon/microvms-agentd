@@ -232,8 +232,9 @@ pub struct StartRequest {
     #[serde(default)]
     pub env: HashMap<String, String>,
     /// The user to demote to: a numeric uid, or a name resolved against the guest's
-    /// `/etc/passwd`. Optional; omitted means run as the daemon's own user. A name the
-    /// guest does not have answers 400 `unknown_user` before anything is spawned.
+    /// `/etc/passwd`. Optional; omitted means the image's `AGENTD_DEFAULT_USER`, resolved as
+    /// that string here would be, or the daemon's own user when the image sets none. A name
+    /// the guest does not have answers 400 `unknown_user` before anything is spawned.
     ///
     /// A user with a passwd row, however it was given, gets `HOME`, `USER` and `LOGNAME`
     /// from the row, beneath the launch environment and `env`. A user given by name also
@@ -550,7 +551,8 @@ impl StartRequest {
         self
     }
 
-    /// The user to demote to; `None` runs as the daemon's own user.
+    /// The user to demote to; `None` runs as the image's `AGENTD_DEFAULT_USER`, or as the
+    /// daemon's own user when the image sets none.
     pub fn with_user(mut self, user: Option<NameOrId>) -> Self {
         self.user = user;
         self

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# The behavior spec for AGENTD-7 through AGENTD-16 in verify/spec/agentd.symspec.json (issues #224,
-# #225, #226). `crates/model/src/exec_start.rs` checks the same requirements as a Stateright model,
+# The behavior spec for AGENTD-7 through AGENTD-16 and AGENTD-22 through AGENTD-24 in
+# verify/spec/agentd.symspec.json (issues #224, #225, #226, #595). `crates/model/src/exec_start.rs` checks the same requirements as a Stateright model,
 # and the bolero harness in `crates/agentd/src/exec_start_fuzz.rs` fuzzes the resolution against
 # them. Each scenario's tags name the requirements it verifies.
 #
@@ -197,3 +197,48 @@ Feature: A start request names its user, group and shell, and may inherit the im
       And the child's environment is exactly:
         | FROM_LAUNCH | launch         |
         | LOGNAME     | launch-logname |
+
+  Rule: AGENTD-22 — a start that names no user runs as the image's default user
+
+    @AGENTD-22 @AGENTD-9
+    Scenario: a start that names no user runs as the default user's passwd row
+      Given the image sets AGENTD_DEFAULT_USER to "tester"
+      And a start of "id -u; id -g; echo $HOME $USER" under shell "true"
+      When the daemon answers the start
+      Then the start was accepted and the child exited 0
+      And output line 1 is this process's uid
+      And output line 2 is this process's gid
+      And output line 3 is "/home/tester tester"
+
+    @AGENTD-22
+    Scenario: the default is resolved at each start, so a user added after startup resolves
+      Given the image sets AGENTD_DEFAULT_USER to "latecomer"
+      And the guest's passwd also lists "latecomer" with this process's uid and gid and home "/home/latecomer"
+      And a start of "echo $HOME $USER" under shell "true"
+      When the daemon answers the start
+      Then the start was accepted and the child exited 0
+      And output line 1 is "/home/latecomer latecomer"
+
+  Rule: AGENTD-23 — a user the start names wins over the default
+
+    @AGENTD-23
+    Scenario: a start that names its user runs as that user, not the default
+      Given the guest's passwd also lists "elsewhere" with uid and gid 65534
+      And the image sets AGENTD_DEFAULT_USER to "elsewhere"
+      And a start of "id -u; echo $USER" under shell "true"
+      And the user named "tester"
+      When the daemon answers the start
+      Then the start was accepted and the child exited 0
+      And output line 1 is this process's uid
+      And output line 2 is "tester"
+
+  Rule: AGENTD-24 — a default the guest does not have is a 400 naming the setting, and nothing is spawned
+
+    @AGENTD-24
+    Scenario: a default user the guest does not have refuses a start that names no user
+      Given the image sets AGENTD_DEFAULT_USER to "nobody-here"
+      And a start that would leave a marker file, under shell "true"
+      When the daemon answers the start
+      Then the answer is 400 with error "unknown_user" naming "AGENTD_DEFAULT_USER"
+      And the answer is 400 with error "unknown_user" naming "nobody-here"
+      And no child was spawned

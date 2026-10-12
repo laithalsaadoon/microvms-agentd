@@ -128,8 +128,9 @@ log group), never returned on `/v1/health`, which needs no agent token.
 A service that needs to keep running after its handler exits should redirect
 its output streams so the daemon can finish reading them.
 
-A handler runs as the daemon's user (root) with the daemon's environment, the
-launch environment, and `AGENTD_HOOK=<hook>`; never the agent token. Any process
+A handler runs as the daemon's user (root), whatever user `AGENTD_DEFAULT_USER`
+holds, with the daemon's environment, the launch environment, and
+`AGENTD_HOOK=<hook>`; never the agent token. Any process
 in the guest can post a hook path, so a handler must be safe to run spuriously.
 See [Trust](TRUST.md).
 
@@ -338,6 +339,23 @@ however the user was given, name or uid. A uid with no row sets none of them,
 as before. A user given by *name* also gets the row's primary gid when `group` is
 omitted, the way `su` does; a user given as an integer keeps the daemon's group,
 which is what protocol 1 always did.
+
+**An image can set the user a start without `user` runs as.** The image's
+`AGENTD_DEFAULT_USER` holds a user name or a string of digits. A start request
+that omits `user` resolves that string exactly as it would resolve it in
+`user`. A name gets its row's uid, primary gid, `HOME`, `USER` and `LOGNAME`,
+and digits that match no name are a uid. The daemon resolves it at each
+request, so a user an earlier exec created resolves on the next. A request's
+own `user` always wins, `root` and `0` included, and `group` still overrides the
+primary gid. If the guest's `/etc/passwd` doesn't hold the value, the daemon
+answers each start that omits `user` with `400 unknown_user`, and the `detail`
+mentions `AGENTD_DEFAULT_USER`. The daemon refuses an empty value the same way. It still
+boots, and a request that sets `user` still runs. With the variable unset, a
+start that omits `user` runs as the daemon's own user, root, as it always has.
+Workload hook handlers ignore the variable, and the image snapshot drops it with
+every other `AGENTD_*` variable. `/v1/health` doesn't report it, because a new
+`Health` field would break the protocol crate's API. The daemon logs the value
+at startup instead.
 
 **A named shell is resolved on the child's `PATH`, the image's `PATH`, `/bin`,
 then `/usr/bin`.** The first executable regular file wins and runs as

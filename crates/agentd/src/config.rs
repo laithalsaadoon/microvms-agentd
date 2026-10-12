@@ -93,7 +93,24 @@ pub struct Config {
     /// The group database a start request's group name is resolved against. `/etc/group`
     /// outside tests, for `passwd_path`'s reason.
     pub group_path: std::path::PathBuf,
+    /// The user a start request runs as when it names no `user`, from
+    /// [`DEFAULT_USER_VAR`] (AGENTD-22). `None` keeps the daemon's own user, which is root.
+    ///
+    /// Kept as the image wrote it and resolved per request exactly as a request's `user`
+    /// string is: a passwd name, or digits that name no row as a uid. Per request because a
+    /// user an earlier exec created resolves on the next. A request's own `user` always wins,
+    /// `root` and `0` included (AGENTD-23), so an authorized caller can still ask for root.
+    ///
+    /// Read from the image's environment like every other `AGENTD_*` setting, and never from
+    /// a request or the launch environment: who a workload runs as when its caller doesn't
+    /// say is the image author's decision. Workload hook handlers don't take it; they are
+    /// image-owned code and run as the daemon's user.
+    pub default_user: Option<String>,
 }
+
+/// The variable naming [`Config::default_user`]. A refusal of the default names it, so an
+/// image author who misspelled the user can find where it was set.
+pub const DEFAULT_USER_VAR: &str = "AGENTD_DEFAULT_USER";
 
 /// The handler budget's ceiling: five seconds under the platform's 60 s hook limit.
 pub const MAX_HOOK_HANDLER_SECS: u64 = 55;
@@ -128,6 +145,7 @@ impl Default for Config {
             hook_handler_timeout: Duration::from_secs(20),
             passwd_path: std::path::PathBuf::from("/etc/passwd"),
             group_path: std::path::PathBuf::from("/etc/group"),
+            default_user: None,
         }
     }
 }
@@ -175,8 +193,30 @@ impl Config {
         if let Some(secs) = env_parse::<u64>("AGENTD_HOOK_HANDLER_TIMEOUT_SECS") {
             cfg.hook_handler_timeout = Duration::from_secs(secs.clamp(1, MAX_HOOK_HANDLER_SECS));
         }
+        cfg.default_user = default_user(std::env::var_os(DEFAULT_USER_VAR));
+        // Logged to the image's log group because `/v1/health` can't carry it yet: `Health` is
+        // constructible field by field, so a new field is a breaking change to the protocol
+        // crate.
+        if let Some(user) = &cfg.default_user {
+            tracing::info!(
+                default_user = %user,
+                "a start request that omits user runs as {DEFAULT_USER_VAR}"
+            );
+        }
         cfg
     }
+}
+
+/// [`DEFAULT_USER_VAR`] as the daemon keeps it: set means set, an empty value included.
+///
+/// Unlike the numeric knobs, a value that names nobody is not ignored. It resolves the way a
+/// request's `user` string does, so an empty or misspelled one refuses every start that
+/// names no user, naming the variable, instead of quietly running the workload as root. That
+/// costs no reachability: the daemon still boots, and a request that names its user still
+/// runs. A value that isn't UTF-8 is kept lossily, which no passwd name matches, so it is
+/// refused the same way rather than dropped.
+fn default_user(raw: Option<std::ffi::OsString>) -> Option<String> {
+    raw.map(|raw| raw.to_string_lossy().into_owned())
 }
 
 /// Parses a boolean knob, accepting the spellings a Dockerfile or a Terraform
@@ -219,5 +259,44 @@ mod tests {
         // single noisy command can kill a daemon nothing can restart.
         assert!(cfg.max_output_bytes < 64 * 1024 * 1024);
         assert!(cfg.max_drain_bytes < cfg.max_body_bytes);
+        assert_eq!(cfg.default_user, None, "unset keeps the daemon's own user");
+    }
+
+    /// **AGENTD-22.** The default user is kept as the image set it: unset is none, and any
+    /// set value, empty or not UTF-8 included, is kept to be resolved, so a value that names
+    /// nobody is refused at the first start instead of falling back to root.
+    #[test]
+    fn the_default_user_is_kept_as_set() {
+        use std::os::unix::ffi::OsStringExt;
+        assert_eq!(default_user(None), None);
+        assert_eq!(default_user(Some("agent".into())), Some("agent".into()));
+        assert_eq!(default_user(Some("1000".into())), Some("1000".into()));
+        assert_eq!(default_user(Some("".into())), Some(String::new()));
+        let lossy = default_user(Some(std::ffi::OsString::from_vec(vec![b'a', 0xff])))
+            .expect("a non-UTF-8 value is kept");
+        assert_eq!(lossy, "a\u{fffd}");
+    }
+
+    /// **AGENTD-22.** `from_env` reads the default user from the daemon's environment. The
+    /// read happens in a copy of this test binary started with the variable set, because this
+    /// crate can't set its own environment: `set_var` is `unsafe`, which the crate forbids.
+    #[test]
+    fn from_env_reads_the_default_user_from_the_environment() {
+        const CHILD: &str = "AGENTD_TEST_FROM_ENV_CHILD";
+        const NAME: &str = "config::tests::from_env_reads_the_default_user_from_the_environment";
+        if std::env::var_os(CHILD).is_some() {
+            assert_eq!(Config::from_env().default_user.as_deref(), Some("probe"));
+            return;
+        }
+        let output = std::process::Command::new(std::env::current_exe().expect("test binary"))
+            .args(["--exact", NAME])
+            .env(CHILD, "1")
+            .env(DEFAULT_USER_VAR, "probe")
+            .output()
+            .expect("child test");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(output.status.success(), "{stdout}");
+        // A filter that matched nothing would pass too, having checked nothing.
+        assert!(stdout.contains("1 passed"), "{stdout}");
     }
 }

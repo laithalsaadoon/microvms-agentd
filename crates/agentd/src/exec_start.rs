@@ -19,6 +19,15 @@
 //! fuzz harness can drive. Supplementary groups are not set: `Command::groups` is still
 //! unstable, and std clears them anyway when a root daemon demotes (`setgroups(0)`).
 //!
+//! # A request that names no user
+//!
+//! It runs as the image's default user when the image sets `AGENTD_DEFAULT_USER`, and as the
+//! daemon's own user (root) when it doesn't (AGENTD-22). The default is resolved here, per
+//! request, exactly as a request's `user` string would be, and a default that names nobody
+//! is refused as `unknown_user` with a detail that names the variable (AGENTD-24). A request's
+//! own `user` always wins over the default, `root` and `0` included (AGENTD-23): the default
+//! decides what a caller gets by not saying, not what a caller may ask for.
+//!
 //! # The environment is five layers, lowest first
 //!
 //! 1. The image environment, only when the request sets `inherit_image_env`: what the
@@ -51,6 +60,8 @@ use protocol::exec::{
     ERROR_MALFORMED_REQUEST, ERROR_UNKNOWN_GROUP, ERROR_UNKNOWN_SHELL, ERROR_UNKNOWN_USER,
     NameOrId, Shell, StartRequest,
 };
+
+use crate::config::DEFAULT_USER_VAR;
 
 /// A child's environment, or one layer of it.
 pub type Env = HashMap<String, String>;
@@ -159,6 +170,8 @@ pub struct Guest<'a> {
     pub passwd: &'a str,
     /// The group file's text. Empty when the file is absent.
     pub group: &'a str,
+    /// The image's default user (`Config::default_user`), for a request that names none.
+    pub default_user: Option<&'a str>,
     /// Whether a path is an executable regular file. The real check is
     /// [`is_executable_file`]; tests and the fuzz harness hand in a fake filesystem.
     pub is_executable: &'a dyn Fn(&Path) -> bool,
@@ -246,6 +259,35 @@ fn resolve_user<'a>(spec: &NameOrId, rows: &'a [PasswdRow]) -> Result<User<'a>, 
     }
 }
 
+/// The user a request resolves to: its own `user` when it names one (AGENTD-23), else the
+/// image's default resolved as that string would be (AGENTD-22), else none, which is the
+/// daemon's own user.
+///
+/// A default that names nobody is `unknown_user` like a request's unknown name (AGENTD-24),
+/// with a detail that says the request named no user and which variable set the one that
+/// failed, because the caller sent no name to look for and the fix is in the image.
+fn resolve_request_user<'a>(
+    request: &StartRequest,
+    default_user: Option<&str>,
+    rows: &'a [PasswdRow],
+) -> Result<Option<User<'a>>, Rejection> {
+    match (&request.user, default_user) {
+        (Some(spec), _) => resolve_user(spec, rows).map(Some),
+        (None, Some(name)) => resolve_user(&NameOrId::Name(name.to_string()), rows)
+            .map(Some)
+            .map_err(|_| {
+                Rejection::new(
+                    ERROR_UNKNOWN_USER,
+                    format!(
+                        "the request names no user, and the default user {name:?} that \
+                         {DEFAULT_USER_VAR} sets is not in the guest's /etc/passwd"
+                    ),
+                )
+            }),
+        (None, None) => Ok(None),
+    }
+}
+
 /// A group by gid or name (AGENTD-7); an unmatched name is `unknown_group` (AGENTD-8).
 fn resolve_group(spec: &NameOrId, rows: &[GroupRow]) -> Result<u32, Rejection> {
     match spec {
@@ -321,16 +363,12 @@ pub fn resolve_shell(
 /// environment's `PATH`), so the first field that cannot be resolved names the error. The
 /// empty-argv check comes last, as it did in `build_command` before this module existed.
 pub fn plan(request: &StartRequest, guest: &Guest<'_>) -> Result<Plan, Rejection> {
-    let passwd = if request.user.is_some() {
+    let passwd = if request.user.is_some() || guest.default_user.is_some() {
         parse_passwd(guest.passwd)
     } else {
         Vec::new()
     };
-    let user = request
-        .user
-        .as_ref()
-        .map(|spec| resolve_user(spec, &passwd))
-        .transpose()?;
+    let user = resolve_request_user(request, guest.default_user, &passwd)?;
 
     let groups = match &request.group {
         Some(NameOrId::Name(_)) => parse_group(guest.group),
@@ -473,6 +511,24 @@ mod tests {
         launch: &Env,
         image: Option<&Env>,
     ) -> Result<Plan, Rejection> {
+        resolve_in(request, launch, image, None)
+    }
+
+    /// [`resolve`] against a guest whose image sets `default_user`, with no launch or image
+    /// environment.
+    fn resolve_with_default(
+        request: &StartRequest,
+        default_user: Option<&str>,
+    ) -> Result<Plan, Rejection> {
+        resolve_in(request, &Env::new(), None, default_user)
+    }
+
+    fn resolve_in(
+        request: &StartRequest,
+        launch: &Env,
+        image: Option<&Env>,
+        default_user: Option<&str>,
+    ) -> Result<Plan, Rejection> {
         let exec = only(&["/usr/bin/bash", "/bin/sh", "/image/bin/zsh"]);
         plan(
             request,
@@ -481,6 +537,7 @@ mod tests {
                 image_env: image,
                 passwd: PASSWD,
                 group: GROUP,
+                default_user,
                 is_executable: &exec,
             },
         )
@@ -705,6 +762,119 @@ mod tests {
         assert_eq!(
             resolve(&empty, &Env::new(), None).unwrap_err().error,
             ERROR_MALFORMED_REQUEST
+        );
+    }
+
+    /// **AGENTD-22.** A request that names no user resolves the image's default exactly as
+    /// it would resolve that string: a name to its row's uid, primary gid and identity,
+    /// digits that name no row to that uid with the daemon's group, and a named group still
+    /// overrides the primary. With no default it runs as the daemon, as it always did.
+    #[test]
+    fn a_request_that_names_no_user_resolves_the_default_as_its_user() {
+        let nameless = request(None, None, false.into());
+
+        let plan = resolve_with_default(&nameless, None).expect("resolves");
+        assert_eq!(
+            (plan.uid, plan.gid),
+            (None, None),
+            "no default, the daemon's"
+        );
+        assert!(plan.environment().is_empty(), "no default, no identity");
+
+        let plan = resolve_with_default(&nameless, Some("agent")).expect("resolves");
+        assert_eq!((plan.uid, plan.gid), (Some(1000), Some(1001)));
+        assert_eq!(
+            plan.environment(),
+            env(&[
+                ("HOME", "/home/agent"),
+                ("USER", "agent"),
+                ("LOGNAME", "agent")
+            ])
+        );
+        assert_eq!(
+            plan,
+            resolve_with_default(&request(Some("agent".into()), None, false.into()), None)
+                .expect("resolves"),
+            "the default resolves exactly as the same name in the request"
+        );
+
+        let plan = resolve_with_default(&nameless, Some("4242")).expect("resolves");
+        assert_eq!((plan.uid, plan.gid), (Some(4242), None));
+        assert!(plan.environment().is_empty());
+        let plan = resolve_with_default(&nameless, Some("1000")).expect("resolves");
+        assert_eq!((plan.uid, plan.gid), (Some(1000), None));
+        assert_eq!(plan.environment()["USER"], "agent");
+
+        let grouped = request(None, Some("staff".into()), false.into());
+        let plan = resolve_with_default(&grouped, Some("agent")).expect("resolves");
+        assert_eq!((plan.uid, plan.gid), (Some(1000), Some(50)));
+    }
+
+    /// **AGENTD-23.** A user the request names wins over the default, `root` and `0`
+    /// included, and an unknown one is refused for its own name rather than replaced by the
+    /// default; a default that names nobody doesn't stop a request that names someone.
+    #[test]
+    fn a_user_the_request_names_wins_over_the_default() {
+        let root = resolve_with_default(
+            &request(Some("root".into()), None, false.into()),
+            Some("agent"),
+        )
+        .expect("resolves");
+        assert_eq!((root.uid, root.gid), (Some(0), Some(0)));
+        assert_eq!(root.environment()["HOME"], "/root");
+
+        let zero =
+            resolve_with_default(&request(Some(0.into()), None, false.into()), Some("agent"))
+                .expect("resolves");
+        assert_eq!(
+            (zero.uid, zero.gid),
+            (Some(0), None),
+            "an integer keeps the group"
+        );
+
+        let builder = resolve_with_default(
+            &request(Some("builder".into()), None, false.into()),
+            Some("ghost"),
+        )
+        .expect("an unknown default is never resolved for a request that names a user");
+        assert_eq!((builder.uid, builder.gid), (Some(1002), Some(1002)));
+
+        let refused = resolve_with_default(
+            &request(Some("ghost".into()), None, false.into()),
+            Some("agent"),
+        )
+        .expect_err("an unknown user the request names");
+        assert_eq!(refused.error, ERROR_UNKNOWN_USER);
+        assert!(refused.detail.contains("\"ghost\""), "{}", refused.detail);
+        assert!(
+            !refused.detail.contains(DEFAULT_USER_VAR),
+            "the caller named this user, so the detail is about it: {}",
+            refused.detail
+        );
+    }
+
+    /// **AGENTD-24.** A default that names nobody, empty included, refuses a request that
+    /// names no user as `unknown_user`, with a detail naming the value and the variable,
+    /// and it is resolved first, ahead of the group and the shell.
+    #[test]
+    fn a_default_that_names_nobody_is_refused_naming_the_variable() {
+        for default in ["ghost", "", "12a"] {
+            let refused = resolve_with_default(&request(None, None, false.into()), Some(default))
+                .expect_err(default);
+            assert_eq!(refused.error, ERROR_UNKNOWN_USER, "{default:?}");
+            assert!(
+                refused.detail.contains(&format!("{default:?}"))
+                    && refused.detail.contains(DEFAULT_USER_VAR),
+                "{}",
+                refused.detail
+            );
+        }
+        let all_bad = request(None, Some("ghosts".into()), "fish".into());
+        assert_eq!(
+            resolve_with_default(&all_bad, Some("ghost"))
+                .unwrap_err()
+                .error,
+            ERROR_UNKNOWN_USER
         );
     }
 

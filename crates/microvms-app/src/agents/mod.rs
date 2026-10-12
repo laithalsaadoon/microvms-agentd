@@ -492,7 +492,9 @@ pub fn provisioning_files(
 /// Places the provisioning files and hands `/workspace` to the agent uid (AGENT-5).
 ///
 /// The daemon writes every upload as root, so the `chown` is not optional and it runs
-/// as the daemon's own user, after the uploads, in one exec. Re-runnable: a second call
+/// as root, after the uploads, in one exec. Root is asked for as uid 0 rather than by naming
+/// no user, because an image that sets `AGENTD_DEFAULT_USER` runs a start that names no user
+/// as that user, and the `chown` would fail as anyone else. Re-runnable: a second call
 /// with a fresh token overwrites the same files, which is how a 12-hour token is
 /// refreshed on a long-lived VM (AGENT-8).
 pub async fn install_access(
@@ -510,6 +512,7 @@ pub async fn install_access(
         vec![format!("chown -R {AGENT_UID}:{AGENT_GID} {WORKDIR}")],
     )
     .with_shell(true)
+    .with_user(Some(crate::session::ROOT_UID.into()))
     .with_timeout_sec(Some(CHOWN_TIMEOUT.as_secs_f64()));
     let result = session.run_sync(request, CHOWN_TIMEOUT).await?;
     if !result.succeeded() {
@@ -1142,8 +1145,8 @@ mod tests {
     // ── install and read-back through the recorder ───────────────────────────
 
     /// **The uploads go out in file order, then exactly one root chown.** The exec that
-    /// hands the workspace over runs as the daemon's own user (no `user` on the wire),
-    /// after every PUT.
+    /// hands the workspace over asks for uid 0 on the wire, after every PUT: naming no user
+    /// would run it as the image's default user when the image sets one.
     #[tokio::test(start_paused = true)]
     async fn install_access_uploads_then_chowns_as_root() {
         let recorder = Recorder::with([
@@ -1181,10 +1184,7 @@ mod tests {
         let start: serde_json::Value = serde_json::from_slice(&seen[3].body).expect("json");
         assert_eq!(start["command"][0], "chown -R 1000:1000 /workspace");
         assert_eq!(start["shell"], true);
-        assert!(
-            start["user"].is_null(),
-            "the chown runs as the daemon's own user"
-        );
+        assert_eq!(start["user"], 0, "the chown asks for root by uid");
         assert_eq!(seen[5].path, "/v1/exec/c1/ack");
     }
 

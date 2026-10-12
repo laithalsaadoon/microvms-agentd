@@ -111,8 +111,9 @@ transfers; `Session::run` returns an `ExecHandle` for streaming and cancellation
 For built-in coding agents, start with
 [running Claude Code or Codex](https://laithalsaadoon.github.io/microvms-agentd/learn/operations/run-coding-agents-on-bedrock/).
 Rust's `agents::AgentVm` composes image preparation, launch, Bedrock credential
-installation, and prompts. Agent prompts run as uid/gid 1000; the generic command
-example above runs as the daemon's user, normally root.
+installation, and prompts. Agent prompts run as uid/gid 1000. The generic command
+example above runs as the image's `AGENTD_DEFAULT_USER` when the image sets one,
+and as the daemon's user, normally root, when it doesn't.
 
 The VM separates workload execution from your host. Processes within one guest
 share that VM; uid demotion is not a separate security boundary. Guest workloads

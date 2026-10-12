@@ -367,8 +367,11 @@ impl Session {
                 .map(String::from)
                 .chain(doomed)
                 .collect();
+            // As root, by uid: the daemon wrote the tree as root, and an image's default user
+            // would be refused deleting it.
             let request = protocol::exec::StartRequest::new(self.mint_exec_id(), command)
                 .with_cwd(Some(REMOTE_WORKDIR.into()))
+                .with_user(Some(crate::session::ROOT_UID.into()))
                 .with_timeout_sec(Some(delete_timeout.as_secs_f64()));
             let result = self.run_sync(request, delete_wait(delete_timeout)).await?;
             match result.outcome {
@@ -611,6 +614,10 @@ mod tests {
         );
         assert_eq!(body["cwd"], "/workspace");
         assert_eq!(body["timeout_sec"], 60.0);
+        assert_eq!(
+            body["user"], 0,
+            "the rm asks for root by uid, which an image's default user doesn't replace"
+        );
         assert_eq!((pass.deleted, pass.refused_deletions), (1, 1));
     }
 
