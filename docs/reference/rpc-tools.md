@@ -1,8 +1,8 @@
 # microvms-agentd · RPC tools
 
-The daemon exposes these HTTP methods through its schema-driven router. The route table supplies the census; the dispatcher connects each method and path to the handler quoted below. Shared wire types live in the protocol crate. `crates/agentd/src/routes.rs:31-56`, `crates/agentd/src/routes.rs:110-140`, `crates/protocol/src/lib.rs:1-17`.
+The daemon exposes these HTTP methods through its schema-driven router. The route table supplies the census; the dispatcher connects each method and path to the handler quoted below. Shared wire types live in the protocol crate. `crates/agentd/src/routes.rs:31-57`, `crates/agentd/src/routes.rs:151-181`, `crates/protocol/src/lib.rs:1-17`.
 
-Control routes require the bearer token; health and schema are open, while the lifecycle hooks use the platform-hook classification. `crates/agentd/src/routes.rs:51-70`, `crates/agentd/src/routes.rs:473-748`.
+Control routes require the bearer token; health and schema are open, while the lifecycle hooks use the platform-hook classification. `crates/agentd/src/routes.rs:52-70`, `crates/agentd/src/routes.rs:511-788`.
 
 ## GET `/v1/exec/{id}`
 
@@ -10,7 +10,7 @@ Control routes require the bearer token; health and schema are open, while the l
 pub async fn poll(State(state): State<AppState>, Path(id): Path<String>) -> Response {
 ```
 
-Reads an exec’s phase and buffered result without acknowledging it. `crates/agentd/src/routes.rs:552-559`.
+Reads an exec’s phase and buffered result without acknowledging it. `crates/agentd/src/routes.rs:590-597`.
 
 **Input:** The `id` path segment; no request body. `crates/agentd/src/exec.rs:429`.
 
@@ -28,7 +28,7 @@ pub async fn stream(
 ) -> Response {
 ```
 
-Replays available output from a byte offset and follows live output as Server-Sent Events. `crates/agentd/src/routes.rs:564-580`.
+Replays available output from a byte offset and follows live output as Server-Sent Events. `crates/agentd/src/routes.rs:602-618`.
 
 **Input:** The `id` path segment and optional query `offset: u64`, defaulting to zero; no request body. `crates/protocol/src/exec.rs:324-329`, `crates/agentd/src/exec.rs:477-502`.
 
@@ -42,13 +42,13 @@ Replays available output from a byte offset and follows live output as Server-Se
 pub async fn read_file(request: Request) -> Response {
 ```
 
-Streams a file or an inclusive line range. `crates/agentd/src/routes.rs:670-679`.
+Streams a file or an inclusive line range. `crates/agentd/src/routes.rs:708-717`.
 
 **Input:** Query `FileReadQuery`: required string `path` and optional unsigned `start_line` and `end_line`; line numbering starts at one, and an omitted end reads through EOF. `crates/protocol/src/fs.rs:39-57`.
 
-**Output:** `application/octet-stream` containing the selected bytes; the full-file path preserves the file’s bytes. `crates/agentd/src/fs.rs:1140-1153`.
+**Output:** `application/octet-stream` containing the selected bytes; the full-file path preserves the file’s bytes. `crates/agentd/src/fs.rs:1152-1165`.
 
-`crates/agentd/src/fs.rs:1097`
+`crates/agentd/src/fs.rs:1109`
 
 ## GET /v1/fs/tar
 
@@ -56,13 +56,13 @@ Streams a file or an inclusive line range. `crates/agentd/src/routes.rs:670-679`
 pub async fn read_tar(State(state): State<AppState>, request: Request) -> Response {
 ```
 
-Downloads a directory tree as an uncompressed tar archive. `crates/agentd/src/routes.rs:695-704`.
+Downloads a directory tree as an uncompressed tar archive. `crates/agentd/src/routes.rs:733-742`.
 
-**Input:** Query `FsQuery` with required string `path`; the shared type also carries optional `mode`, which the download handler does not use. `crates/protocol/src/fs.rs:18-24`, `crates/agentd/src/fs.rs:1375-1405`.
+**Input:** Query `FsQuery` with required string `path`; the shared type also carries optional `mode`, which the download handler does not use. `crates/protocol/src/fs.rs:18-24`, `crates/agentd/src/fs.rs:1387-1417`.
 
-**Output:** `application/x-tar`, streamed from the completed archive spool. `crates/agentd/src/fs.rs:1404-1429`.
+**Output:** `application/x-tar`, streamed from the completed archive spool. `crates/agentd/src/fs.rs:1416-1441`.
 
-`crates/agentd/src/fs.rs:1375`
+`crates/agentd/src/fs.rs:1387`
 
 ## GET /v1/health
 
@@ -70,13 +70,13 @@ Downloads a directory tree as an uncompressed tar archive. `crates/agentd/src/ro
 async fn health(State(state): State<AppState>) -> Json<Health> {
 ```
 
-Reports liveness, bootstrap state, exec activity, disk status, identity repair, and observed lifecycle hooks. `crates/agentd/src/routes.rs:373-411`.
+Reports liveness, bootstrap state, exec activity, disk status, identity repair, and observed lifecycle hooks. `crates/agentd/src/routes.rs:414-449`.
 
-**Input:** No path parameters, query, or request body. `crates/agentd/src/routes.rs:373`.
+**Input:** No path parameters, query, or request body. `crates/agentd/src/routes.rs:414`.
 
-**Output:** JSON `Health` with `version`, `bootstrapped`, `disk`, `identity_degraded`, `identity_repaired`, `busy`, `execs`, `hooks`, `hooks_dropped`, `identity_steps`, and `image_env_keys`. Nested values describe disk capacity, hook timing and optional handler outcomes, and identity-repair outcomes. `crates/protocol/src/health.rs:11-142`, `crates/protocol/src/health.rs:146-217`.
+**Output:** JSON `Health` with `version`, `bootstrapped`, `disk`, `identity_degraded`, `identity_repaired`, `busy`, `execs`, `hooks`, `hooks_dropped`, `identity_steps`, and `image_env_keys`. Nested values describe disk capacity, hook timing and optional handler outcomes, and identity-repair outcomes. `crates/protocol/src/health.rs:11-138`, `crates/protocol/src/health.rs:142-213`.
 
-`crates/agentd/src/routes.rs:373`
+`crates/agentd/src/routes.rs:414`
 
 ## GET /v1/procs
 
@@ -84,7 +84,7 @@ Reports liveness, bootstrap state, exec activity, disk status, identity repair, 
 pub async fn procs(State(state): State<AppState>) -> Response {
 ```
 
-Lists registered execs with the live process IDs in each captured process group. `crates/agentd/src/routes.rs:619-630`.
+Lists registered execs with the live process IDs in each captured process group. `crates/agentd/src/routes.rs:657-668`.
 
 **Input:** No path parameters, query, or request body. `crates/agentd/src/exec.rs:1056`.
 
@@ -98,13 +98,13 @@ Lists registered execs with the live process IDs in each captured process group.
 async fn schema_route(State(state): State<AppState>) -> Json<serde_json::Value> {
 ```
 
-Publishes the daemon’s route, shape, status, and configured-limit contract. `crates/agentd/src/routes.rs:433-435`, `crates/agentd/src/routes.rs:744-748`.
+Publishes the daemon’s route, shape, status, and configured-limit contract. `crates/agentd/src/routes.rs:471-473`, `crates/agentd/src/routes.rs:784-788`.
 
-**Input:** No path parameters, query, or request body. `crates/agentd/src/routes.rs:433`.
+**Input:** No path parameters, query, or request body. `crates/agentd/src/routes.rs:471`.
 
-**Output:** JSON produced by `schema::document`, including route metadata and shared type definitions. `crates/agentd/src/routes.rs:433-435`, `crates/agentd/src/schema.rs:232-314`.
+**Output:** JSON produced by `schema::document`, including route metadata and shared type definitions. `crates/agentd/src/routes.rs:471-473`, `crates/agentd/src/schema.rs:232-324`.
 
-`crates/agentd/src/routes.rs:433`
+`crates/agentd/src/routes.rs:471`
 
 ## GET /v1/tcp
 
@@ -130,13 +130,13 @@ Upgrades to a WebSocket and relays bytes to the requested loopback TCP port. `cr
 async fn ready_hook(State(state): State<AppState>) -> StatusCode {
 ```
 
-Records and acknowledges the image-build readiness probe. `crates/agentd/src/routes.rs:282-289`.
+Records and acknowledges the image-build readiness probe. `crates/agentd/src/routes.rs:323-330`.
 
-**Input:** No request body; the handler receives the daemon’s `AppState`. `crates/agentd/src/routes.rs:282`.
+**Input:** No request body; the handler receives the daemon’s `AppState`. `crates/agentd/src/routes.rs:323`.
 
-**Output:** HTTP 200 with no body. `crates/agentd/src/routes.rs:282-289`.
+**Output:** HTTP 200 with no body. `crates/agentd/src/routes.rs:323-330`.
 
-`crates/agentd/src/routes.rs:282`
+`crates/agentd/src/routes.rs:323`
 
 ## POST /aws/lambda-microvms/runtime/v1/resume
 
@@ -144,13 +144,13 @@ Records and acknowledges the image-build readiness probe. `crates/agentd/src/rou
 async fn resume_hook(State(state): State<AppState>) -> StatusCode {
 ```
 
-Records the resume notice and runs the configured workload resume handler before acknowledging it. `crates/agentd/src/routes.rs:328-335`.
+Records the resume notice and runs the configured workload resume handler before acknowledging it. `crates/agentd/src/routes.rs:369-376`.
 
-**Input:** No request body; the handler receives the daemon’s `AppState`. `crates/agentd/src/routes.rs:328`.
+**Input:** No request body; the handler receives the daemon’s `AppState`. `crates/agentd/src/routes.rs:369`.
 
-**Output:** HTTP 200 with no body. `crates/agentd/src/routes.rs:328-335`.
+**Output:** HTTP 200 with no body. `crates/agentd/src/routes.rs:369-376`.
 
-`crates/agentd/src/routes.rs:328`
+`crates/agentd/src/routes.rs:369`
 
 ## POST /aws/lambda-microvms/runtime/v1/run
 
@@ -161,13 +161,13 @@ async fn run_hook(
 ) -> Response {
 ```
 
-Installs the launch token and environment on the first successful bootstrap, then runs the configured workload run handler. `crates/agentd/src/routes.rs:236-267`.
+Installs the launch token and environment on the first successful bootstrap, then runs the configured workload run handler. `crates/agentd/src/routes.rs:277-308`.
 
-**Input:** JSON `RunHookEnvelope` with `runHookPayload`, a string containing the inner JSON payload. The decoded `RunHook` carries `agent_token`, `env`, `identity_seed`, and `identity_host_public_key`. `crates/protocol/src/hook.rs:27-30`, `crates/protocol/src/hook.rs:46-72`.
+**Input:** JSON `RunHookEnvelope` with `runHookPayload`, a string containing the inner JSON payload. The decoded `RunHook` carries `agent_token`, `env`, `identity_seed`, and `identity_host_public_key`. `crates/protocol/src/hook.rs:27-30`, `crates/protocol/src/hook.rs:58-84`.
 
-**Output:** An empty HTTP 200 on installation or an identical-token replay; malformed input returns HTTP 400, and a conflicting installed token returns HTTP 409. `crates/agentd/src/routes.rs:180-216`, `crates/agentd/src/routes.rs:236-272`.
+**Output:** An empty HTTP 200 on installation or an identical-token replay; malformed input returns HTTP 400, and a conflicting installed token returns HTTP 409. `crates/agentd/src/routes.rs:221-257`, `crates/agentd/src/routes.rs:277-313`.
 
-`crates/agentd/src/routes.rs:180`
+`crates/agentd/src/routes.rs:221`
 
 ## POST /aws/lambda-microvms/runtime/v1/suspend
 
@@ -175,13 +175,13 @@ Installs the launch token and environment on the first successful bootstrap, the
 async fn suspend_hook(State(state): State<AppState>) -> StatusCode {
 ```
 
-Records the suspend notice and runs the configured workload suspend handler before acknowledging it. `crates/agentd/src/routes.rs:301-308`.
+Records the suspend notice and runs the configured workload suspend handler before acknowledging it. `crates/agentd/src/routes.rs:342-349`.
 
-**Input:** No request body; the handler receives the daemon’s `AppState`. `crates/agentd/src/routes.rs:301`.
+**Input:** No request body; the handler receives the daemon’s `AppState`. `crates/agentd/src/routes.rs:342`.
 
-**Output:** HTTP 200 with no body. `crates/agentd/src/routes.rs:301-308`.
+**Output:** HTTP 200 with no body. `crates/agentd/src/routes.rs:342-349`.
 
-`crates/agentd/src/routes.rs:301`
+`crates/agentd/src/routes.rs:342`
 
 ## POST /aws/lambda-microvms/runtime/v1/terminate
 
@@ -189,13 +189,13 @@ Records the suspend notice and runs the configured workload suspend handler befo
 async fn terminate_hook(State(state): State<AppState>) -> StatusCode {
 ```
 
-Records the termination notice and runs the configured workload termination handler before acknowledging it. `crates/agentd/src/routes.rs:346-353`.
+Records the termination notice and runs the configured workload termination handler before acknowledging it. `crates/agentd/src/routes.rs:387-394`.
 
-**Input:** No request body; the handler receives the daemon’s `AppState`. `crates/agentd/src/routes.rs:346`.
+**Input:** No request body; the handler receives the daemon’s `AppState`. `crates/agentd/src/routes.rs:387`.
 
-**Output:** HTTP 200 with no body. `crates/agentd/src/routes.rs:346-353`.
+**Output:** HTTP 200 with no body. `crates/agentd/src/routes.rs:387-394`.
 
-`crates/agentd/src/routes.rs:346`
+`crates/agentd/src/routes.rs:387`
 
 ## POST /aws/lambda-microvms/runtime/v1/validate
 
@@ -203,13 +203,13 @@ Records the termination notice and runs the configured workload termination hand
 async fn validate_hook(State(state): State<AppState>) -> StatusCode {
 ```
 
-Records and acknowledges the image-build validation probe. `crates/agentd/src/routes.rs:293-300`.
+Records and acknowledges the image-build validation probe. `crates/agentd/src/routes.rs:334-341`.
 
-**Input:** No request body; the handler receives the daemon’s `AppState`. `crates/agentd/src/routes.rs:293`.
+**Input:** No request body; the handler receives the daemon’s `AppState`. `crates/agentd/src/routes.rs:334`.
 
-**Output:** HTTP 200 with no body. `crates/agentd/src/routes.rs:293-300`.
+**Output:** HTTP 200 with no body. `crates/agentd/src/routes.rs:334-341`.
 
-`crates/agentd/src/routes.rs:293`
+`crates/agentd/src/routes.rs:334`
 
 ## POST /v1/exec/start
 
@@ -220,7 +220,7 @@ pub async fn start(
 ) -> Response {
 ```
 
-Starts a command under a caller-supplied exec ID, with retries on the same ID reusing the existing exec. `crates/agentd/src/routes.rs:539-548`.
+Starts a command under a caller-supplied exec ID, with retries on the same ID reusing the existing exec. `crates/agentd/src/routes.rs:577-586`.
 
 **Input:** JSON `StartRequest`: required `exec_id: String` and `command: Vec<String>`; optional/defaulted `shell`, `cwd`, `env`, `user`, `group`, `timeout_sec`, `stdin`, `reap_group_on_exit`, and `inherit_image_env`. `shell` accepts a boolean or string; `user` and `group` accept unsigned IDs or names. `crates/protocol/src/exec.rs:219-290`, `crates/protocol/src/exec.rs:119-124`, `crates/protocol/src/exec.rs:176-182`.
 
@@ -234,7 +234,7 @@ Starts a command under a caller-supplied exec ID, with retries on the same ID re
 pub async fn ack(State(state): State<AppState>, Path(id): Path<String>) -> Response {
 ```
 
-Releases an exited exec’s buffered output and starts its collection TTL. `crates/agentd/src/routes.rs:594-603`.
+Releases an exited exec’s buffered output and starts its collection TTL. `crates/agentd/src/routes.rs:632-641`.
 
 **Input:** The `id` path segment; no request body. `crates/agentd/src/exec.rs:855`.
 
@@ -266,7 +266,7 @@ pub async fn write_stdin(
 ) -> Response {
 ```
 
-Writes bytes to an exec’s stdin and optionally closes the pipe with EOF. `crates/agentd/src/routes.rs:582-592`.
+Writes bytes to an exec’s stdin and optionally closes the pipe with EOF. `crates/agentd/src/routes.rs:620-630`.
 
 **Input:** The `id` path segment and JSON `StdinRequest` with optional `data_b64: String` and `signal: String`; `"eof"` closes the pipe after any supplied bytes. `crates/protocol/src/exec.rs:299-308`.
 
@@ -280,13 +280,13 @@ Writes bytes to an exec’s stdin and optionally closes the pipe with EOF. `crat
 pub async fn write_file(State(state): State<AppState>, request: Request) -> Response {
 ```
 
-Streams a request body into a file and applies an optional file mode. `crates/agentd/src/fs.rs:1187-1211`, `crates/agentd/src/fs.rs:1230-1296`.
+Streams a request body into a file and applies an optional file mode. `crates/agentd/src/fs.rs:1199-1223`, `crates/agentd/src/fs.rs:1242-1308`.
 
-**Input:** Query `FsQuery` with required string `path` and optional octal string `mode`, plus an `application/octet-stream` body. `crates/protocol/src/fs.rs:18-24`, `crates/agentd/src/routes.rs:683-693`.
+**Input:** Query `FsQuery` with required string `path` and optional octal string `mode`, plus an `application/octet-stream` body. `crates/protocol/src/fs.rs:18-24`, `crates/agentd/src/routes.rs:721-731`.
 
-**Output:** HTTP 204 with no body after a successful write. `crates/agentd/src/fs.rs:1296`.
+**Output:** HTTP 204 with no body after a successful write. `crates/agentd/src/fs.rs:1308`.
 
-`crates/agentd/src/fs.rs:1187`
+`crates/agentd/src/fs.rs:1199`
 
 ## PUT /v1/fs/tar
 
@@ -294,13 +294,13 @@ Streams a request body into a file and applies an optional file mode. `crates/ag
 pub async fn write_tar(State(state): State<AppState>, request: Request) -> Response {
 ```
 
-Uploads and extracts an uncompressed tar archive into the requested directory. `crates/agentd/src/routes.rs:706-720`.
+Uploads and extracts an uncompressed tar archive into the requested directory. `crates/agentd/src/routes.rs:744-758`.
 
-**Input:** Query `FsQuery` with an absolute string `path` and an `application/x-tar` body; the shared query type also includes `mode`, which extraction does not use. `crates/protocol/src/fs.rs:18-24`, `crates/agentd/src/fs.rs:1438-1464`.
+**Input:** Query `FsQuery` with an absolute string `path` and an `application/x-tar` body; the shared query type also includes `mode`, which extraction does not use. `crates/protocol/src/fs.rs:18-24`, `crates/agentd/src/fs.rs:1450-1476`.
 
-**Output:** HTTP 204 with no body after extraction completes. `crates/agentd/src/fs.rs:1484-1499`.
+**Output:** HTTP 204 with no body after extraction completes. `crates/agentd/src/fs.rs:1496-1511`.
 
-`crates/agentd/src/fs.rs:1438`
+`crates/agentd/src/fs.rs:1450`
 
 ## See also
 

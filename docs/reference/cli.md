@@ -23,7 +23,7 @@ microvm run [OPTIONS] [BINARY_OR_DIR]
 
 Build an image, launch a VM, run a command, report the cost, tear it down.
 
-`crates/microvms-cli/src/commands/lifecycle.rs:475`
+`crates/microvms-cli/src/commands/lifecycle.rs:435`
 
 Flags:
 
@@ -82,7 +82,7 @@ microvm quickstart [OPTIONS]
 
 Zero to a live exec: provision the daemon, build, launch, run, report, tear down.
 
-`crates/microvms-cli/src/commands/lifecycle.rs:990`
+`crates/microvms-cli/src/commands/lifecycle.rs:950`
 
 Flags:
 
@@ -107,7 +107,7 @@ microvm build [OPTIONS] [BINARY]
 
 Build a MicroVM image and wait for it to be usable.
 
-`crates/microvms-cli/src/commands/lifecycle.rs:1464`
+`crates/microvms-cli/src/commands/lifecycle.rs:1424`
 
 Flags:
 
@@ -274,7 +274,7 @@ microvm wait [OPTIONS]
 
 Wait until a kept MicroVM answers: RUNNING, and then its daemon.
 
-`crates/microvms-cli/src/commands/lifecycle.rs:2207`
+`crates/microvms-cli/src/commands/lifecycle.rs:2167`
 
 Flags:
 
@@ -361,7 +361,7 @@ microvm ack [OPTIONS] <EXEC_ID>
 
 Release a finished exec's buffered output, which starts its collection clock.
 
-`crates/microvms-cli/src/commands/attached.rs:1123`
+`crates/microvms-cli/src/commands/attached.rs:1120`
 
 Flags:
 
@@ -388,7 +388,7 @@ microvm kill [OPTIONS] <EXEC_ID>
 
 Stop a running exec: SIGTERM its whole process group, SIGKILL after the daemon's grace.
 
-`crates/microvms-cli/src/commands/attached.rs:1164`
+`crates/microvms-cli/src/commands/attached.rs:1161`
 
 Flags:
 
@@ -415,7 +415,7 @@ microvm ps [OPTIONS]
 
 List what is running in a MicroVM: every exec's process group and its live pids.
 
-`crates/microvms-cli/src/commands/attached.rs:1216`
+`crates/microvms-cli/src/commands/attached.rs:1213`
 
 Flags:
 
@@ -442,7 +442,7 @@ microvm stdin [OPTIONS] <EXEC_ID>
 
 Write to a running exec's stdin, and optionally close it.
 
-`crates/microvms-cli/src/commands/attached.rs:1307`
+`crates/microvms-cli/src/commands/attached.rs:1304`
 
 Flags:
 
@@ -471,7 +471,7 @@ microvm cp [OPTIONS] <SRC> <DST>
 
 Copy a file or a tar archive between here and a running MicroVM.
 
-`crates/microvms-cli/src/commands/attached.rs:1473`
+`crates/microvms-cli/src/commands/attached.rs:1470`
 
 Flags:
 
@@ -501,7 +501,7 @@ microvm exists [OPTIONS] <PATH>
 
 Say whether a path exists in a running MicroVM.
 
-`crates/microvms-cli/src/commands/attached.rs:1625`
+`crates/microvms-cli/src/commands/attached.rs:1622`
 
 Flags:
 
@@ -528,7 +528,7 @@ microvm sync [OPTIONS] <DIR>
 
 Sync a project directory into a running MicroVM's /workspace, uploading only what changed.
 
-`crates/microvms-cli/src/commands/attached.rs:1784`
+`crates/microvms-cli/src/commands/attached.rs:1781`
 
 Flags:
 
@@ -559,7 +559,7 @@ microvm attach --name <NAME> --microvm-id <ID> --endpoint <URL> --agent-token-fi
 
 Register a name for a running MicroVM this state directory did not launch.
 
-`crates/microvms-cli/src/commands/attached.rs:1973`
+`crates/microvms-cli/src/commands/attached.rs:1970`
 
 Flags:
 
@@ -618,7 +618,7 @@ microvm tunnel [OPTIONS] <LOCAL[:GUEST]>
 
 Tunnel arbitrary TCP to a guest port, so `psql` or `ssh` here reaches a server in the VM.
 
-`crates/microvms-cli/src/commands/attached.rs:2465`
+`crates/microvms-cli/src/commands/attached.rs:2462`
 
 Flags:
 
@@ -651,7 +651,7 @@ microvm port-forward [OPTIONS] <LOCAL[:GUEST]>
 
 Serve a guest port on localhost, so a browser here reaches a server in the VM.
 
-`crates/microvms-cli/src/commands/attached.rs:2319`
+`crates/microvms-cli/src/commands/attached.rs:2316`
 
 Flags:
 
@@ -680,7 +680,7 @@ microvm shell [OPTIONS]
 
 Open an interactive root shell in a running MicroVM, a real PTY, with job control, signals, and resize.
 
-`crates/microvms-cli/src/commands/attached.rs:2753`
+`crates/microvms-cli/src/commands/attached.rs:2750`
 
 Flags:
 
@@ -704,7 +704,7 @@ microvm suspend [OPTIONS] <MICROVM_ID>
 
 Freeze a MicroVM.
 
-`crates/microvms-cli/src/commands/lifecycle.rs:2052`
+`crates/microvms-cli/src/commands/lifecycle.rs:2012`
 
 Flags:
 
@@ -726,7 +726,7 @@ microvm resume [OPTIONS] <MICROVM_ID>
 
 Thaw a suspended MicroVM and report its endpoint.
 
-`crates/microvms-cli/src/commands/lifecycle.rs:2131`
+`crates/microvms-cli/src/commands/lifecycle.rs:2091`
 
 Flags:
 
@@ -748,7 +748,7 @@ microvm terminate [OPTIONS] <MICROVM_ID>
 
 Tear down a MicroVM, and optionally its image and build log group.
 
-`crates/microvms-cli/src/commands/lifecycle.rs:2252`
+`crates/microvms-cli/src/commands/lifecycle.rs:2212`
 
 Flags:
 

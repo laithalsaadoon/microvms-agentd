@@ -24,10 +24,10 @@ implementation defects.
 | 4 | Default parity intentionally omits string, zero, and `None` defaults, while TypeScript defaults appear only in prose. Expand the contract representation before asserting option-level consistency. | missing tests | M | `tools/check-parity.py:72-86` |
 | 5 | Declaration generation resolves `@napi-rs/cli@3` afresh, so an upstream release can change the expected declarations without a repository change. Pin the generator used by the task and package build together. | version pin | S | `.config/mise/tasks/contracts.toml:270-295`, `bindings/microvms-js/package.json:51-54` |
 | 6 | Formal tasks deliberately omit strict verification; their success means no error-severity findings, not a fully verified specification. Reduce unresolved findings before strengthening the gate. | missing tests | L | `.config/mise/tasks/trace.toml:3-13`, `tools/check-spec.sh:4-9` |
-| 7 | *Judgment call:* formal requirements remain outside the local `check` task and need a separately installed checker. A reproducible optional verification environment would make this tier easier to run without changing the ordinary local gate. | missing tests | M | `.config/mise/tasks/trace.toml:11-28`, `.config/mise/tasks/check.toml:11-42`, `tools/check-spec.sh:15-24` |
-| 8 | The Maturin version is repeated in stub generation, binding builds, and proof-runner commands. Centralize its ownership or assert agreement to keep coordinated upgrades from drifting. | duplicated logic | S | `tools/generate-py-stubs.py:84-89`, `.config/mise/tasks/test.toml:83-98`, `tools/fail-to-pass.py:101-107` |
+| 7 | *Judgment call:* formal requirements remain outside the local `check` task and need a separately installed checker. A reproducible optional verification environment would make this tier easier to run without changing the ordinary local gate. | missing tests | M | `.config/mise/tasks/trace.toml:11-28`, `.config/mise/tasks/check.toml:11-43`, `tools/check-spec.sh:15-24` |
+| 8 | The Maturin version is repeated in stub generation, binding builds, and proof-runner commands. Centralize its ownership or assert agreement to keep coordinated upgrades from drifting. | duplicated logic | S | `tools/generate-py-stubs.py:84-89`, `.config/mise/tasks/test.toml:89-104`, `tools/fail-to-pass.py:101-107` |
 | 9 | The daemon port default is independently declared by control, session, and daemon configuration. Give the shared default an owner while preserving the existing public paths. | duplicated logic | S | `crates/microvms-app/src/control/mod.rs:118-119`, `crates/microvms-app/src/session/proxy.rs:84-85`, `crates/agentd/src/config.rs:101-104` |
-| 10 | Lifecycle commentary says `Sandbox` cannot address a VM launched elsewhere, while `Sandbox::adopt` now supports that workflow. Rewrite the rationale around the current ownership model before using it to guide a refactor. | dead code adjacent | S | `crates/microvms-cli/src/commands/lifecycle.rs:10-18`, `crates/microvms-app/src/sandbox.rs:1335-1342` |
+| 10 | Lifecycle commentary says `Sandbox` cannot address a VM launched elsewhere, while `Sandbox::adopt` now supports that workflow. Rewrite the rationale around the current ownership model before using it to guide a refactor. | dead code adjacent | S | `crates/microvms-cli/src/commands/lifecycle.rs:10-18`, `crates/microvms-app/src/sandbox.rs:1338-1345` |
 
 ## Explicit markers
 
@@ -70,7 +70,7 @@ Formal verification is deliberately separate from `check`, and the formal task
 itself stops short of strict verification. Those are distinct boundaries: making
 the checker easy to install does not resolve specification findings, and reducing
 findings does not make the tier part of the normal local workflow
-(`.config/mise/tasks/trace.toml:6-12`, `.config/mise/tasks/check.toml:11-42`).
+(`.config/mise/tasks/trace.toml:6-12`, `.config/mise/tasks/check.toml:11-43`).
 
 Shows up in:
 
@@ -92,7 +92,7 @@ Shows up in:
 
 - `.config/mise/tasks/contracts.toml:293-306`: a declaration check that anticipates generator changes.
 - `bindings/microvms-js/package.json:51-54`: the package's own generator constraint.
-- `.config/mise/tasks/test.toml:83-98`: repeated Python build-tool version.
+- `.config/mise/tasks/test.toml:89-104`: repeated Python build-tool version.
 - `tools/fail-to-pass.py:101-113`: binding build commands repeated in the proof runner.
 
 Cost: S. Establish a shared version source or an agreement check before the next upgrade.
@@ -121,13 +121,13 @@ workflow. Independently, the daemon port default appears in control, session, an
 daemon configuration. These are different forms of the same maintenance cost:
 changing a contract requires finding copies that the type system does not connect
 (`crates/microvms-cli/src/commands/lifecycle.rs:10-18`,
-`crates/microvms-app/src/sandbox.rs:1335-1342`,
+`crates/microvms-app/src/sandbox.rs:1338-1345`,
 `crates/microvms-app/src/control/mod.rs:118-119`).
 
 Shows up in:
 
 - `crates/microvms-cli/src/commands/lifecycle.rs:10-18`: the old ownership rationale.
-- `crates/microvms-app/src/sandbox.rs:1335-1342`: the adoption workflow that requires a revised explanation.
+- `crates/microvms-app/src/sandbox.rs:1338-1345`: the adoption workflow that requires a revised explanation.
 - `crates/microvms-app/src/control/mod.rs:118-119`: control's port default.
 - `crates/microvms-app/src/session/proxy.rs:84-85`: session's port default.
 - `crates/agentd/src/config.rs:101-104`: the daemon's port default.

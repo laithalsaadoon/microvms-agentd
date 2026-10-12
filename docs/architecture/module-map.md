@@ -56,7 +56,7 @@ The application layer owns the control-plane client, sandbox lifecycle, in-VM se
 
 ## microvms-edges
 
-The edges layer implements the application ports with production I/O: signed control-plane requests, daemon HTTP calls, socket relays, local storage, release retrieval, clock, and entropy. `crates/microvms-edges/src/lib.rs:2-21` The files below lead to the connection-serving loops and provisioning paths; the crate root also identifies the smaller port implementations. `crates/microvms-edges/src/session/serve.rs:2-6` `crates/microvms-edges/src/provision.rs:2-3` `crates/microvms-edges/src/lib.rs:27-39`
+The edges layer implements the application ports with production I/O: signed control-plane requests, daemon HTTP calls, socket relays, local storage, release retrieval, clock, and entropy. `crates/microvms-edges/src/lib.rs:2-21` The files below lead to the connection-serving loops and provisioning paths; the crate root also identifies the smaller port implementations. `crates/microvms-edges/src/session/serve.rs:2-6` `crates/microvms-edges/src/provision.rs:2-3` `crates/microvms-edges/src/lib.rs:27-40`
 
 - `crates/microvms-edges/src/session/forward.rs:2`
 - `crates/microvms-edges/src/provision/release.rs:2`
@@ -69,7 +69,7 @@ The edges layer implements the application ports with production I/O: signed con
 
 ## microvms-core
 
-The composition root presents the Rust client API used by the CLI and language bindings, re-exporting the domain, application, edges, and protocol layers. `crates/microvms-core/src/lib.rs:61-101` Its prelude supplies extension traits that construct application types with production ports. `crates/microvms-core/src/prelude.rs:2-17`
+The composition root presents the Rust client API used by the CLI and language bindings, re-exporting the domain, application, edges, and protocol layers. `crates/microvms-core/src/lib.rs:55-95` Its prelude supplies extension traits that construct application types with production ports. `crates/microvms-core/src/prelude.rs:2-17`
 
 - `crates/microvms-core/src/lib.rs:2`
 - `crates/microvms-core/src/prelude.rs:2`
@@ -77,7 +77,7 @@ The composition root presents the Rust client API used by the CLI and language b
 
 ## microvms-cli
 
-The `microvm` binary parses the command tree, dispatches handlers through its library seam, and renders command results. `crates/microvms-cli/src/main.rs:80-107` `crates/microvms-cli/src/main.rs:181-232` Command modules group lifecycle work, operations on existing VMs, local operations, and coding-agent workflows; project configuration supplies another source of run options. `crates/microvms-cli/src/commands/mod.rs:25-39` `crates/microvms-cli/src/config.rs:2-6`
+The `microvm` binary parses the command tree, dispatches handlers through its library seam, and renders command results. `crates/microvms-cli/src/main.rs:81-108` `crates/microvms-cli/src/main.rs:182-240` Command modules group lifecycle work, operations on existing VMs, local operations, and coding-agent workflows; project configuration supplies another source of run options. `crates/microvms-cli/src/commands/mod.rs:25-39` `crates/microvms-cli/src/config.rs:2-6`
 
 - `crates/microvms-cli/src/cli.rs:2`
 - `crates/microvms-cli/src/commands/attached.rs:2`
@@ -103,7 +103,7 @@ The Python binding maps the core client into PyO3 classes for values, lifecycle 
 
 ## microvms-js
 
-The Node binding exposes the core client through napi-rs classes, result objects, and options. `bindings/microvms-js/src/lib.rs:17-35` Async exports return promises, and execution also has a process-style interface with separate output streams, waiting, and termination. `bindings/microvms-js/src/lib.rs:58-74` `bindings/microvms-js/src/process.rs:2-8`
+The Node binding exposes the core client through napi-rs classes, result objects, and options. `bindings/microvms-js/src/lib.rs:17-35` Async exports return promises, and execution also has a process-style interface with separate output streams, waiting, and termination. `bindings/microvms-js/src/lib.rs:62-78` `bindings/microvms-js/src/process.rs:2-8`
 
 - `bindings/microvms-js/src/session.rs:2`
 - `bindings/microvms-js/src/sandbox.rs:2`

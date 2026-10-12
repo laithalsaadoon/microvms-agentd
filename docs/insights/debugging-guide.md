@@ -15,12 +15,12 @@ This distinction separates a failed workload from a failed platform operation.
 | `ERR_BUILD_WEDGED` while an image remains in `CREATING` | The stall probe found the client-token replay signature | Inspect the first image version's build states. The diagnosis requires a nonempty list with every build still `PENDING`; an unreadable or empty list does not establish it | `crates/microvms-app/src/control/image.rs:464-500` |
 | An image reports a failed state | The failed version or its builds may carry the cause | Read the reported `stateReason` details and the build log group; the client gathers version and build reasons | `crates/microvms-app/src/control/image.rs:600-620`, `crates/microvms-app/src/control/image.rs:637-667` |
 | `ERR_LAUNCH_DIED` while waiting for a lifecycle state | The service reported a state in the wait's failure set | Read the state and `stateReason` included in the error before treating it as a connection problem | `crates/microvms-app/src/control/microvm.rs:675-681`, `crates/microvms-app/src/control/microvm.rs:698-714` |
-| `ERR_WINDOW_CLOSED` on resume | The locally known suspended duration exceeds the launch-time window | Read the elapsed duration and window in the error; a longer window applies to a later launch | `crates/microvms-app/src/sandbox.rs:1734-1762` |
-| Control requests return 503 before bootstrap | The daemon has no installed run token yet | Read `bootstrapped` from health and distinguish `NotBootstrapped` from a permanent refusal | `crates/agentd/src/auth.rs:69-81`, `crates/protocol/src/health.rs:20`, `crates/microvms-domain/src/error.rs:395-399` |
+| `ERR_WINDOW_CLOSED` on resume | The locally known suspended duration exceeds the launch-time window | Read the elapsed duration and window in the error; a longer window applies to a later launch | `crates/microvms-app/src/sandbox.rs:1737-1765` |
+| Control requests return 503 before bootstrap | The daemon has no installed run token yet | Read `bootstrapped` from health and distinguish `NotBootstrapped` from a permanent refusal | `crates/agentd/src/auth.rs:68-80`, `crates/protocol/src/health.rs:20`, `crates/microvms-domain/src/error.rs:384-388` |
 | A write returns 507 | The destination filesystem is below its configured reserve | Read the available and reserved byte values in the response, then inspect `health.disk`; missing disk data means unmeasurable | `crates/agentd/src/fs.rs:97-123`, `crates/protocol/src/health.rs:21-34` |
 | `ERR_EXEC_FAILED` | The workload completed with a nonzero exit status | Inspect the workload's stdout, stderr, exit code, and signal before investigating infrastructure | `crates/microvms-cli/src/exit.rs:97-102`, `crates/protocol/src/exec.rs:56-68` |
 | An exec reports `timed_out: true` | The daemon execution deadline expired | Inspect `timeout_sec` and the result note; this deadline signals the process group | `crates/protocol/src/exec.rs:63-66`, `crates/microvms-app/src/session/exec.rs:190-195` |
-| A wait reports `ERR_TIMEOUT` | A client-side deadline elapsed | Check whether the error is the client wait deadline before assuming the exec stopped; `ExecTimeout` leaves the VM and exec untouched | `crates/microvms-domain/src/error.rs:408-413` |
+| A wait reports `ERR_TIMEOUT` | A client-side deadline elapsed | Check whether the error is the client wait deadline before assuming the exec stopped; `ExecTimeout` leaves the VM and exec untouched | `crates/microvms-domain/src/error.rs:397-402` |
 | An exec reports `truncated: true` | A captured stream reached the daemon's output cap | Compare expected output volume with `AGENTD_MAX_OUTPUT_BYTES`; the default is 8 MiB per stream | `crates/protocol/src/exec.rs:69-72`, `crates/agentd/src/config.rs:25-27`, `crates/agentd/src/config.rs:107`, `crates/agentd/src/config.rs:148-149` |
 | An exec reports `writers_may_be_alive: true` | A descendant kept an output pipe open after the direct child exited | Check background processes and `AGENTD_OUTPUT_LINGER_SECS`; the flag means the linger deadline expired before EOF | `crates/protocol/src/exec.rs:73-77`, `crates/agentd/src/exec.rs:1460-1477`, `crates/agentd/src/config.rs:151-152` |
 | The output stream emits `gap` | Replay bytes were evicted or a live subscriber lagged | Record `from` and `to`, then reattach from the last received offset if useful. Output already outside the replay window cannot be recovered through the stream | `crates/protocol/src/exec.rs:339-344`, `crates/agentd/src/exec.rs:182-189`, `crates/agentd/src/exec.rs:641-653` |
@@ -38,7 +38,7 @@ This distinction separates a failed workload from a failed platform operation.
 | Configuration warnings | The daemon log | `ignoring unparseable configuration value`, with `key` and `raw`; the daemon retains the default | `crates/agentd/src/config.rs:135-139`, `crates/agentd/src/config.rs:199-206` |
 | Exec diagnostics | The daemon log | `exec stream subscriber lagged`, `wait on exec child failed`, `exec exceeded its timeout and its process group was signalled` | `crates/agentd/src/exec.rs:648`, `crates/agentd/src/exec.rs:1485-1493` |
 | Disk-pressure diagnostics | The daemon log and the 507 response body | `refusing a write`, `path`, `available`, `reserve` | `crates/agentd/src/fs.rs:106-121` |
-| Shutdown diagnostics | The daemon log | `SIGTERM received; draining`, `interrupt received; draining`, `cannot listen for SIGTERM` | `crates/agentd/src/serve.rs:39-51` |
+| Shutdown diagnostics | The daemon log | `SIGTERM received; draining`, `interrupt received; draining`, `cannot listen for SIGTERM` | `crates/agentd/src/serve.rs:127-139` |
 | Build log locator | `microvm logs <image-name>` returns the group and an AWS CLI tail command; it does not fetch log events | `data.logGroup`, `data.tailCommand`, `data.tailRequires`; `data.lines` is null | `crates/microvms-cli/src/commands/local.rs:778-804` |
 | Daemon health | The health response | `version`, `bootstrapped`, `disk`, `busy`, `execs`; `busy` tracks unfinished execs rather than results awaiting acknowledgment | `crates/protocol/src/health.rs:19-34`, `crates/protocol/src/health.rs:63-88` |
 | CLI failure envelope | Structured command output; normal progress is separate from stdout | `code`, `error`, `finding`, `suggestions`, `data.kind` | `crates/microvms-cli/src/envelope.rs:20-31`, `crates/microvms-cli/src/main.rs:22-24` |
@@ -51,7 +51,7 @@ This distinction separates a failed workload from a failed platform operation.
 
 1. **Preserve the structured error and exit status.** Read the coarse `ERR_*` class, then
    `data.kind`, `finding`, and `suggestions`. Retryability comes from the error class, not a
-   search for words in its message. `crates/microvms-cli/src/envelope.rs:20-31`, `crates/microvms-domain/src/error.rs:183-188`
+   search for words in its message. `crates/microvms-cli/src/envelope.rs:20-31`, `crates/microvms-domain/src/error.rs:174-179`
 2. **Separate workload failure from infrastructure failure.** An `ERR_EXEC_FAILED` means
    the workload exited nonzero. Inspect its exit code, signal, stdout, and stderr before
    changing deployment settings. `crates/microvms-cli/src/exit.rs:97-102`, `crates/protocol/src/exec.rs:56-68`
@@ -89,7 +89,7 @@ comments beside the behavior they explain.
 - **A simulator deadline racing a real child:** simulated time advances independently of a
   subprocess's wall clock. Signal: test-only missing output and `writers_may_be_alive`.
   Mitigation: synchronize the child with stdin reads, or give its real pipe drain an
-  appropriate test deadline. `crates/agentd/tests/turmoil_transport.rs:54-78`
+  appropriate test deadline. `crates/agentd/tests/turmoil_transport.rs:52-76`
 - **A malformed stream consumer:** treating streamed exec output as a single document
   fails even when the command succeeds. Signal: a parser error after valid event records.
   Mitigation: consume NDJSON events and the compact terminal envelope separately.

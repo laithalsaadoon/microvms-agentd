@@ -2,7 +2,7 @@
 
 The Rust client is `microvms-core`: its facade re-exports the shared wire contract,
 application APIs, domain values, and production adapters.
-`crates/microvms-core/src/lib.rs:98`
+`crates/microvms-core/src/lib.rs:85-95`
 
 Import `microvms_core::prelude::*` for the production constructors below; their
 extension traits connect the underlying port-based types to production adapters.
@@ -93,7 +93,7 @@ Appends the agentd startup instructions to a task Dockerfile using the supplied 
 
 Checks launch prerequisites for the supplied region or the region resolved from the environment.
 
-`crates/microvms-core/src/lib.rs:171`
+`crates/microvms-core/src/lib.rs:165`
 
 ### prelude::ControlPlaneExt::new
 
@@ -160,7 +160,7 @@ pub fn agentd(version: Option<&str>, state_dir: Option<&Path>) -> Result<Provisi
 
 Returns the requested daemon binary from an override, the cache, or a verified release download in a blocking call.
 
-`crates/microvms-edges/src/provision.rs:618`
+`crates/microvms-edges/src/provision.rs:620`
 
 ### sandbox::Sandbox::adopt
 
@@ -175,7 +175,7 @@ Returns the requested daemon binary from an override, the cache, or a verified r
 
 Reconstructs a sandbox for an existing VM from retained connection details and the lifecycle reported by the service.
 
-`crates/microvms-app/src/sandbox.rs:1360`
+`crates/microvms-app/src/sandbox.rs:1363`
 
 ### sandbox::Sandbox::detach
 
@@ -185,7 +185,7 @@ Reconstructs a sandbox for an existing VM from retained connection details and t
 
 Returns the details another process needs to adopt the VM and makes this sandbox inactive without stopping the VM.
 
-`crates/microvms-app/src/sandbox.rs:1499`
+`crates/microvms-app/src/sandbox.rs:1502`
 
 ### sandbox::Sandbox::ensure_image
 
@@ -198,7 +198,7 @@ Returns the details another process needs to adopt the VM and makes this sandbox
 
 Builds or reuses the content-addressed image selected by the request.
 
-`crates/microvms-app/src/sandbox.rs:941`
+`crates/microvms-app/src/sandbox.rs:943`
 
 ### sandbox::Sandbox::resume
 
@@ -208,7 +208,7 @@ Builds or reuses the content-addressed image selected by the request.
 
 Resumes a suspended VM within its allowed window and returns a usable session.
 
-`crates/microvms-app/src/sandbox.rs:1668`
+`crates/microvms-app/src/sandbox.rs:1671`
 
 ### sandbox::Sandbox::run
 
@@ -218,7 +218,7 @@ Resumes a suspended VM within its allowed window and returns a usable session.
 
 Launches a VM and returns its session, waiting for the running state and daemon readiness when requested.
 
-`crates/microvms-app/src/sandbox.rs:1105`
+`crates/microvms-app/src/sandbox.rs:1108`
 
 ### sandbox::Sandbox::suspend
 
@@ -228,7 +228,7 @@ Launches a VM and returns its session, waiting for the running state and daemon 
 
 Requests suspension and waits for SUSPENDED or TERMINATED, recording the resulting lifecycle on the sandbox.
 
-`crates/microvms-app/src/sandbox.rs:1584`
+`crates/microvms-app/src/sandbox.rs:1587`
 
 ### sandbox::Sandbox::terminate
 
@@ -238,7 +238,7 @@ Requests suspension and waits for SUSPENDED or TERMINATED, recording the resulti
 
 Attempts the configured teardown steps and returns a report containing any failures and remaining resources.
 
-`crates/microvms-app/src/sandbox.rs:1772`
+`crates/microvms-app/src/sandbox.rs:1775`
 
 ### session::ExecHandle::kill
 

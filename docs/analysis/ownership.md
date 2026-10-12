@@ -30,7 +30,7 @@ folders and rounding mean the displayed shares need not sum to 100%.
 Churn measures repeated editing, not complexity, defects or reviewer coverage. In particular,
 a file moved out of core starts appearing in its destination's history at that path;
 use the current composition boundary when planning changes.
-`Cargo.toml:21-27`, `crates/microvms-core/src/lib.rs:63-82`
+`Cargo.toml:21-27`, `crates/microvms-core/src/lib.rs:57-76`
 
 ## Subsystem review map
 
@@ -49,7 +49,7 @@ The review boundaries below describe what to examine, not exclusive ownership.
 | `crates/microvms-app/` | 3% | Use cases and port contracts; review behavior independently of production I/O. | `crates/microvms-app/src/lib.rs:2-12` |
 | `site/authored/` | 3% | Reader-oriented pages and navigation content; review the published route and audience. | `site/scripts/sync-docs.mjs:21-33` |
 | `examples/` | 2% | Runnable workflows; keep instructions consistent with their scripts and supported API. | `examples/s3-prefetch-at-build/README.md:20-24` |
-| `crates/microvms-core/` | 2% | Composition and public re-exports; review compatibility when a lower layer changes. | `crates/microvms-core/src/lib.rs:63-82` |
+| `crates/microvms-core/` | 2% | Composition and public re-exports; review compatibility when a lower layer changes. | `crates/microvms-core/src/lib.rs:57-76` |
 | `crates/microvms-edges/` | 2% | Production implementations of app ports; review effects and adapters with the port contract. | `crates/microvms-edges/src/lib.rs:2-20` |
 | `crates/agentd/` | 2% | Guest behavior and the shared wire contract; coordinate protocol changes with clients. | `crates/agentd/Cargo.toml:15-20` |
 | `verify/ratchet/` | 2% | Declared decisions and drift policy; distinguish accepted exceptions from new drift. | `tools/ratchet.py:7-16` |
@@ -76,7 +76,7 @@ and client together. Formal requirement checks are separate from the local `chec
 traceability checks are included in it. Passing the local task does not establish that the
 formal verification tasks ran.
 `crates/model-conformance/src/lib.rs:2-14`, `.config/mise/tasks/trace.toml:3-39`,
-`.config/mise/tasks/check.toml:13-42`
+`.config/mise/tasks/check.toml:13-43`
 
 The fault registry records ways to make guards fail. Listing the registry checks that its
 entries still apply; firing the faults is a separate task. Review evidence should identify
