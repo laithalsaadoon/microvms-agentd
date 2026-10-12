@@ -61,6 +61,21 @@ issue = "#226"
 [AGENTD-16]
 issue = "#224"
 
+# The default user, AGENTD-22 to AGENTD-24, is read from the image's environment at daemon
+# start, so a live check needs an image of its own that sets it: the live suite's images set
+# none, and setting one there would change who every other live exec runs as.
+[AGENTD-22]
+issue = "#595"
+waive.live = "the live suite's images set no AGENTD_DEFAULT_USER, and one that did would change who every other live exec runs as; the handler tests and the Gherkin tier spawn real children under a configured default"
+
+[AGENTD-23]
+issue = "#595"
+waive.live = "the live suite's images set no AGENTD_DEFAULT_USER, and one that did would change who every other live exec runs as; the handler tests and the Gherkin tier spawn real children under a configured default"
+
+[AGENTD-24]
+issue = "#595"
+waive.live = "the live suite's images set no AGENTD_DEFAULT_USER, and one that did would change who every other live exec runs as; the handler tests and the Gherkin tier refuse a start under a default the guest does not have"
+
 # The tunnel's keys, AGENTD-17 to AGENTD-21 here and BIND-21, BIND-23 and BIND-24 in BIND.toml,
 # share their gherkin waiver, so a change to one is a change to all of them. crates/model/src/
 # tunnel.rs carries their model layer, and the tunnel_fuzz harnesses in agentd and the edges

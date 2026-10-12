@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-//! The Gherkin behavior spec for AGENTD-7 through AGENTD-16, run against the daemon's real
-//! router in-process.
+//! The Gherkin behavior spec for AGENTD-7 through AGENTD-16 and AGENTD-22 through AGENTD-24,
+//! run against the daemon's real router in-process.
 //!
 //! The scenarios live in `tests/features/exec_start.feature`, tagged with the requirement each
 //! one verifies; this file is their step definitions and runner. It is a `harness = false`
@@ -46,6 +46,8 @@ struct Daemon {
     dir: tempfile::TempDir,
     /// What the daemon inherited, before it filtered anything.
     inherited: HashMap<String, String>,
+    /// The launch environment the run hook delivers.
+    launch: HashMap<String, String>,
     state: Option<AppState>,
     token: String,
     /// The start body being composed.
@@ -79,6 +81,7 @@ impl Daemon {
         Self {
             dir: tempfile::tempdir().expect("a scenario directory"),
             inherited: HashMap::new(),
+            launch: HashMap::new(),
             state: None,
             token: String::new(),
             request: json!({"exec_id": EXEC_ID}),
@@ -120,6 +123,32 @@ impl Daemon {
 
     fn authorized(&self, builder: axum::http::request::Builder) -> axum::http::request::Builder {
         builder.header("authorization", format!("Bearer {}", self.token))
+    }
+
+    /// Starts a daemon over the scenario's databases, inherited environment and
+    /// `default_user`, and bootstraps it through the run-hook route with the scenario's token
+    /// and launch environment.
+    async fn boot(&mut self, default_user: Option<String>) {
+        let config = Config {
+            passwd_path: self.passwd(),
+            group_path: self.group(),
+            default_user,
+            ..Config::default()
+        };
+        self.state = Some(AppState::with_image_env(config, self.inherited.clone()));
+        let body = json!({
+            "runHookPayload": serde_json::to_string(&json!({
+                "agent_token": self.token,
+                "env": self.launch,
+            }))
+            .expect("serializes"),
+        });
+        let request = Request::post(format!("{}/run", routes::HOOK_PREFIX))
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .expect("a request");
+        let (status, _) = self.call(request).await;
+        assert_eq!(status, StatusCode::OK, "the run hook bootstraps the daemon");
     }
 }
 
@@ -173,26 +202,46 @@ async fn inherited(world: &mut Daemon, step: &Step) {
 
 #[given(expr = "the run hook installed the token {string} with the launch environment:")]
 async fn run_hook(world: &mut Daemon, token: String, step: &Step) {
-    let config = Config {
-        passwd_path: world.passwd(),
-        group_path: world.group(),
-        ..Config::default()
-    };
-    world.state = Some(AppState::with_image_env(config, world.inherited.clone()));
-    world.token = token.clone();
-    let body = json!({
-        "runHookPayload": serde_json::to_string(&json!({
-            "agent_token": token,
-            "env": table(step),
-        }))
-        .expect("serializes"),
-    });
-    let request = Request::post(format!("{}/run", routes::HOOK_PREFIX))
-        .header("content-type", "application/json")
-        .body(Body::from(body.to_string()))
-        .expect("a request");
-    let (status, _) = world.call(request).await;
-    assert_eq!(status, StatusCode::OK, "the run hook bootstraps the daemon");
+    world.token = token;
+    world.launch = table(step);
+    world.boot(None).await;
+}
+
+/// The daemon reads its configuration once, at startup, so this starts the scenario's daemon
+/// again with the default set, the way an image's `ENV` line would have started it.
+#[given(expr = "the image sets AGENTD_DEFAULT_USER to {string}")]
+async fn default_user(world: &mut Daemon, name: String) {
+    world.boot(Some(name)).await;
+}
+
+/// [`default_user`] with the default spelled as this process's uid, which the background's
+/// "tester" row carries.
+#[given("the image sets AGENTD_DEFAULT_USER to this process's uid")]
+async fn default_user_uid(world: &mut Daemon) {
+    world.boot(Some(own("-u"))).await;
+}
+
+#[given(
+    expr = "the guest's passwd also lists {string} with this process's uid and gid and home {string}"
+)]
+async fn passwd_append_self(world: &mut Daemon, name: String, home: String) {
+    let line = format!("{name}:x:{}:{}::{home}:/bin/sh\n", own("-u"), own("-g"));
+    append_passwd(world, &line);
+}
+
+#[given(expr = "the guest's passwd also lists {string} with uid and gid {int}")]
+async fn passwd_append_id(world: &mut Daemon, name: String, id: u32) {
+    append_passwd(
+        world,
+        &format!("{name}:x:{id}:{id}::/nonexistent:/bin/sh\n"),
+    );
+}
+
+/// What a `useradd` in an earlier exec leaves behind.
+fn append_passwd(world: &Daemon, line: &str) {
+    let mut text = std::fs::read_to_string(world.passwd()).expect("reads passwd");
+    text.push_str(line);
+    std::fs::write(world.passwd(), text).expect("writes passwd");
 }
 
 #[given(expr = "a start of {string} under shell {string}")]

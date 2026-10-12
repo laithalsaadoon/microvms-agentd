@@ -24,7 +24,9 @@
 //!
 //! A handler is image-owned code and runs as the daemon's user (root), with the
 //! daemon's environment plus the launch environment and `AGENTD_HOOK=<hook>`. The
-//! agent token is never in either. The hook routes are unauthenticated and reachable
+//! agent token is never in either. `AGENTD_DEFAULT_USER` doesn't apply: it names who a
+//! start request runs as when its caller names nobody, and a handler has no caller, only
+//! the image that put it there. The hook routes are unauthenticated and reachable
 //! over loopback from inside the guest, so any process in the VM can make a handler
 //! run: handlers must be safe to run spuriously. The hook log's cap bounds how many
 //! times that can happen.
@@ -336,6 +338,39 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(&marker).expect("ran"),
             "https://example.test\n"
+        );
+    }
+
+    /// A handler runs as the daemon's own user even when the image sets a default user for
+    /// start requests. The default here is an account this test can't become (uid 65534),
+    /// so a handler demoted to it would fail to spawn rather than print this process's uid.
+    #[tokio::test]
+    async fn a_handler_runs_as_the_daemon_whatever_default_user_the_image_sets() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let passwd = dir.path().join("passwd");
+        std::fs::write(&passwd, "elsewhere:x:65534:65534::/nonexistent:/bin/sh\n").expect("passwd");
+        let marker = dir.path().join("uid");
+        script(dir.path(), "run", &format!("id -u > {}", marker.display()));
+        let state = AppState::new(Config {
+            hooks_dir: dir.path().to_path_buf(),
+            hook_handler_timeout: Duration::from_secs(5),
+            passwd_path: passwd,
+            default_user: Some("elsewhere".into()),
+            ..Config::default()
+        });
+        let slot = state.record_hook("run");
+        run(&state, "run", slot).await;
+
+        let (hooks, _) = state.hook_report();
+        let outcome = hooks[0].handler.as_ref().expect("an outcome");
+        assert!(outcome.succeeded(), "{outcome:?}");
+        let own = std::process::Command::new("/usr/bin/id")
+            .arg("-u")
+            .output()
+            .expect("id -u");
+        assert_eq!(
+            std::fs::read_to_string(&marker).expect("ran"),
+            String::from_utf8_lossy(&own.stdout)
         );
     }
 

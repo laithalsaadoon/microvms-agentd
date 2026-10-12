@@ -980,7 +980,7 @@ pub struct RunArgs {
     pub launch_env: Vec<(String, String)>,
 
     /// User to run --exec's command as: a name or a numeric uid. Omitted runs as the
-    /// daemon's own user.
+    /// image's AGENTD_DEFAULT_USER, or as the daemon's own user when the image sets none.
     ///
     /// Resolved by the daemon against the guest's `/etc/passwd`, the only place the answer
     /// exists; see `exec --user`.
@@ -1356,8 +1356,8 @@ pub struct ExecArgs {
     #[arg(long, value_name = "KEY=VALUE", value_parser = parse_env_pair)]
     pub env: Vec<(String, String)>,
 
-    /// User to run the command as: a name or a numeric uid. Omitted runs as the daemon's own
-    /// user.
+    /// User to run the command as: a name or a numeric uid. Omitted runs as the image's
+    /// AGENTD_DEFAULT_USER, or as the daemon's own user when the image sets none.
     ///
     /// All digits is sent as an integer uid, anything else as a name (AGENTD-7, AGENTD-16).
     /// The daemon resolves a name against the guest's `/etc/passwd` before it spawns anything and answers

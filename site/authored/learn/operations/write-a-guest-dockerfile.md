@@ -71,6 +71,16 @@ WORKDIR /workspace
 
 The daemon itself stays root; demotion is per command, with `exec --user 1000 --group 1000`. [Run coding agents on Bedrock](/learn/operations/run-coding-agents-on-bedrock/) shows why that uid is not decoration.
 
+An exec without `--user` runs as root unless the image sets a default user:
+
+```dockerfile
+ENV AGENTD_DEFAULT_USER=agent
+```
+
+The daemon resolves the value at each exec to its `/etc/passwd` row, so the row can come from an earlier exec. A name and its uid are the same: `AGENTD_DEFAULT_USER=1000` runs as `agent` with group 1000 and `HOME=/workspace`, and a uid with no row fails the exec rather than run it in root's group. An exec with `--user` runs as that user instead, `--user root` included, and hook handlers still run as root.
+
+Uploads don't follow the variable. `microvm cp` and `run . --exec` write through the daemon as root, so what they create is root's, with no group or other write bit on a synced tree. The default user can read the synced files but can't change them or write into the directories the sync made, even under a `/workspace` the image handed to it. An exec that must write there runs with `--user 0`. Otherwise, a `chown` run with `--user 0` gives the tree to the default user first, as this section's Dockerfile does for `/workspace`.
+
 ## 5. No secret goes in the image
 
 The image becomes a shared snapshot, so every VM launched from it sees the same bytes. Per-VM credentials are delivered through the platform's one-shot `runHookPayload` at launch: the agent token always, and anything you add with `run --launch-env KEY=VALUE`, which shares the payload's 4096-byte ceiling. Larger material goes in after bootstrap with `microvm cp --mode 0600` over the authenticated channel.
@@ -81,7 +91,7 @@ The artifact `microvm build` uploads carries exactly the Dockerfile and the `age
 
 ## 7. The daemon's knobs
 
-Every `AGENTD_*` variable is read at startup, and an unset or unparseable value keeps the default rather than refusing to boot, because a daemon that will not start strands the VM with no way in. Set them as `ENV` lines. The stanza already sets `AGENTD_PORT` and `AGENTD_LOG`; the others bound request bodies, captured output, stream replay, stdin writes, the disk reserve, and the identity repair that gives each VM restored from one snapshot its own machine-id, hostname, and boot_id. The daemon configuration is defined in `crates/agentd/src/config.rs`;
+Every `AGENTD_*` variable is read at startup, and an unset or unparseable value keeps the default rather than refusing to boot, because a daemon that will not start strands the VM with no way in. `AGENTD_DEFAULT_USER` doesn't fall back: a user the guest lacks fails each exec without `--user` with `unknown_user`, and the error mentions the variable. Set them as `ENV` lines. The stanza already sets `AGENTD_PORT` and `AGENTD_LOG`; the others bound request bodies, captured output, stream replay, stdin writes, the disk reserve, and the identity repair that gives each VM restored from one snapshot its own machine-id, hostname, and boot_id. The daemon configuration is defined in `crates/agentd/src/config.rs`;
 [Protocol](/internals/protocol/) documents the request limits and hook behavior.
 
 ## 8. Run code on suspend and resume

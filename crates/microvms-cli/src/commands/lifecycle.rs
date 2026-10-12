@@ -1898,7 +1898,8 @@ pub struct StartSpec<'a> {
     /// agent token must never leak into a child — so this map is not merged into anything:
     /// what is here is everything the child sees.
     pub env: std::collections::HashMap<String, String>,
-    /// The user to demote to, by name or uid. `None` runs as the daemon's own user.
+    /// The user to demote to, by name or uid. `None` runs as the image's default user, or as
+    /// the daemon's own user when the image sets none.
     pub user: Option<microvms_core::protocol::exec::NameOrId>,
     /// The group to demote to, by name or gid. `None` keeps the daemon's own group, or a
     /// named user's primary group.
@@ -1974,7 +1975,7 @@ pub fn start_request(spec: StartSpec<'_>) -> microvms_core::protocol::exec::Star
         // accounts are unknowable from *any* client, and the daemon resolves a name against
         // the guest's `/etc/passwd` and `/etc/group` before it spawns, answering
         // `unknown_user`/`unknown_group` for one it does not have. Omission stays the default,
-        // which is "run as the daemon's own user".
+        // which is "run as the image's `AGENTD_DEFAULT_USER`, else as the daemon's own user".
         .with_user(spec.user)
         .with_group(spec.group)
         // No `with_timeout_sec`: the client-side deadline is the caller's `--timeout`, applied

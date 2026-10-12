@@ -28,6 +28,9 @@ traced requirement is missing a layer. Requirements are defined in
 | AGENTD-19 | 1 | waived | waived | 1 | 1 | waived |
 | AGENTD-20 | 1 | waived | 1 | 3 | 1 | waived |
 | AGENTD-21 | 1 | waived | 1 | 1 | 1 | waived |
+| AGENTD-22 | 1 | 1 | 1 | 3 | 3 | waived |
+| AGENTD-23 | 1 | 1 | 1 | 2 | 2 | waived |
+| AGENTD-24 | 1 | 1 | 1 | 2 | 1 | waived |
 | ARCH-1 | waived | waived | waived | 1 | 2 | waived |
 | ARCH-2 | waived | waived | waived | 1 | 4 | waived |
 | ARCH-3 | waived | waived | waived | 1 | 1 | waived |
@@ -350,6 +353,39 @@ If a frame of an identity-verified tunnel does not authenticate at the frame's p
 - **test:** `crates/agentd/tests/tunnel_relay.rs`
 - **impl:** `crates/agentd/src/tunnel.rs`
 - **live:** waived: a live daemon and the endpoint proxy neither replay nor forge a frame, so a live run can't present one; the relay tests send both to the daemon's real route
+
+## AGENTD-22
+
+Where the image environment sets the default user, the agentd shall resolve the default user against the guest's /etc/passwd as the user of each start request that names no user.
+
+- **model:** `crates/model/src/exec_start.rs`
+- **gherkin:** `crates/agentd/tests/features/exec_start.feature`
+- **fuzz:** `crates/agentd/src/exec_start_fuzz.rs`
+- **test:** `crates/agentd/src/config.rs`, `crates/agentd/src/exec.rs`, `crates/agentd/src/exec_start.rs`
+- **impl:** `crates/agentd/src/config.rs`, `crates/agentd/src/exec.rs`, `crates/agentd/src/exec_start.rs`
+- **live:** waived: the live suite's images set no AGENTD_DEFAULT_USER, and one that did would change who every other live exec runs as; the handler tests and the Gherkin tier spawn real children under a configured default
+
+## AGENTD-23
+
+Where the image environment sets the default user, the agentd shall demote the child of a start request that names its user to the named user rather than the default user.
+
+- **model:** `crates/model/src/exec_start.rs`
+- **gherkin:** `crates/agentd/tests/features/exec_start.feature`
+- **fuzz:** `crates/agentd/src/exec_start_fuzz.rs`
+- **test:** `crates/agentd/src/exec.rs`, `crates/agentd/src/exec_start.rs`
+- **impl:** `crates/agentd/src/config.rs`, `crates/agentd/src/exec_start.rs`
+- **live:** waived: the live suite's images set no AGENTD_DEFAULT_USER, and one that did would change who every other live exec runs as; the handler tests and the Gherkin tier spawn real children under a configured default
+
+## AGENTD-24
+
+If a start request names no user and the guest's /etc/passwd does not contain the default user, then the agentd shall answer Bad Request with the unknown_user error naming the default user setting and spawn no child.
+
+- **model:** `crates/model/src/exec_start.rs`
+- **gherkin:** `crates/agentd/tests/features/exec_start.feature`
+- **fuzz:** `crates/agentd/src/exec_start_fuzz.rs`
+- **test:** `crates/agentd/src/exec.rs`, `crates/agentd/src/exec_start.rs`
+- **impl:** `crates/agentd/src/exec_start.rs`
+- **live:** waived: the live suite's images set no AGENTD_DEFAULT_USER, and one that did would change who every other live exec runs as; the handler tests and the Gherkin tier refuse a start under a default the guest does not have
 
 ## ARCH-1
 
@@ -1365,6 +1401,7 @@ trace it.
 | A guest answers a verified tunnel's handshake with a key other than the pinned VM key | BIND-21 | `crates/microvms-core/tests/tunnel_end_to_end.rs::a_wrong_pin_fails_closed_with_a_diagnosis`, `crates/microvms-core/tests/tunnel_end_to_end.rs::a_reply_that_does_not_verify_against_the_pin_fails_the_tunnel` | guarded |
 | A guest or the path replays, reorders or forges tunnel frames after the handshake | AGENTD-21, BIND-24 | `crates/agentd/tests/tunnel_relay.rs::agentd_21_a_replayed_frame_ends_the_tunnel_unrelayed`, `crates/agentd/tests/tunnel_relay.rs::agentd_21_a_forged_frame_ends_the_tunnel_unrelayed`, `crates/microvms-edges/tests/tunnel_end_of_stream.rs::bind_24_a_replayed_frame_fails_the_tunnel_unwritten`, `crates/microvms-edges/tests/tunnel_end_of_stream.rs::bind_24_a_forged_frame_fails_the_tunnel_unwritten`, `crates/model/src/tunnel.rs::bind_24_the_model_finds_a_replay_when_frames_carry_no_position`, `crates/agentd/src/tunnel_fuzz.rs::frames_open_in_order_and_the_callers_end_only_after_every_chunk`, `crates/microvms-edges/src/session/tunnel_fuzz.rs::frames_open_in_order_and_the_daemons_end_only_after_every_chunk` | guarded |
 | A guest streams hostile server-sent events to the client | BIND-22 | `crates/microvms-app/src/session/sse.rs::an_unterminated_stream_is_refused_at_the_pending_ceiling`, `crates/microvms-app/src/session/sse.rs::an_unrecognized_or_unparseable_frame_is_dropped_rather_than_raised`, `crates/microvms-app/src/session/sse_fuzz.rs::hostile_stream_bytes_stay_bounded_and_every_event_round_trips` | guarded |
+| A workload whose caller omits `user` runs as guest root | AGENTD-22, AGENTD-24 | `crates/agentd/src/exec.rs::a_start_that_names_no_user_runs_as_the_default_resolved_per_request`, `crates/agentd/src/exec.rs::a_numeric_default_runs_as_its_row_and_one_with_no_row_is_refused`, `crates/agentd/src/exec_start.rs::a_default_that_names_nobody_is_refused_naming_the_variable`, `crates/model/src/exec_start.rs::an_unknown_default_falling_back_to_the_daemon_starts_as_root`, `crates/model/src/exec_start.rs::a_default_read_as_a_request_string_keeps_the_daemons_group` | guarded when the image sets `AGENTD_DEFAULT_USER`. Without it such a workload runs as root, and with it an authorized caller can still ask for root |
 | A replaced or tampered daemon release asset | BIND-18 | `crates/microvms-edges/src/provision/release.rs::another_signer_identity_is_refused`, `crates/microvms-edges/src/provision/release.rs::one_flipped_byte_in_the_asset_is_refused` | guarded |
 | A release directory (`$MICROVM_RELEASE_DIR`) holding an asset and a matching `SHA256SUMS` but no bundle, or another release's files under the requested tag | BIND-18 | `crates/microvms-edges/src/provision/release.rs::a_release_directory_without_its_bundle_is_refused_despite_a_matching_checksum`, `crates/microvms-edges/src/provision/release.rs::another_releases_files_under_the_requested_tag_are_refused` | guarded |
 | An on-path party ends a verified tunnel early, with a plaintext close frame or by dropping the connection | BIND-23, AGENTD-19, AGENTD-20 | `crates/microvms-edges/tests/tunnel_end_of_stream.rs::a_verified_tcp_consumer_observes_the_stream_verdict`, `crates/model-conformance/tests/tunnel_end_of_stream.rs::bind_23_a_close_frame_forged_mid_stream_ends_truncated`, `crates/model-conformance/tests/tunnel_end_of_stream.rs::bind_23_a_connection_dropped_mid_stream_ends_truncated`, `crates/model-conformance/tests/tunnel_end_of_stream.rs::bind_23_the_daemons_end_of_stream_withheld_ends_truncated`, `crates/model-conformance/tests/tunnel_end_of_stream.rs::agentd_20_the_clients_end_of_stream_withheld_resets_the_guest`, `crates/agentd/tests/tunnel_relay.rs::agentd_19_a_guest_eof_reaches_the_caller_as_the_end_of_stream` | guarded. A protocol 2 peer that omits the end-of-stream offer ends `ClosedUnproven`. Each side refuses a protocol 1 handshake |

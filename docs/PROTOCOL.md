@@ -128,8 +128,9 @@ log group), never returned on `/v1/health`, which needs no agent token.
 A service that needs to keep running after its handler exits should redirect
 its output streams so the daemon can finish reading them.
 
-A handler runs as the daemon's user (root) with the daemon's environment, the
-launch environment, and `AGENTD_HOOK=<hook>`; never the agent token. Any process
+A handler runs as the daemon's user (root), whatever user `AGENTD_DEFAULT_USER`
+holds, with the daemon's environment, the launch environment, and
+`AGENTD_HOOK=<hook>`; never the agent token. Any process
 in the guest can post a hook path, so a handler must be safe to run spuriously.
 See [Trust](TRUST.md).
 
@@ -211,7 +212,8 @@ semantics rather than `realpath`. Symlinks resolve relative to their own
 directory, while hard links resolve against the archive root. Member count and
 total size are capped. Modes are applied after content lands. A regular-file
 member replaces the old entry before creation, so other hard links keep their
-bytes and modes.
+bytes and modes. Extraction drops the archive's owners, so everything it
+creates is root's, as [Upload ownership](#upload-ownership) describes.
 
 **A symlink an archive wrote cannot redirect a later member, and the kernel is
 what enforces that.** The `normpath` rule above judges a member at the depth its
@@ -339,6 +341,27 @@ as before. A user given by *name* also gets the row's primary gid when `group` i
 omitted, the way `su` does; a user given as an integer keeps the daemon's group,
 which is what protocol 1 always did.
 
+**An image can set the user a start without `user` runs as.** The image's
+`AGENTD_DEFAULT_USER` holds a user name or a string of digits. A start request
+that omits `user` resolves that string to a row of the guest's `/etc/passwd`:
+the row a name matches, or the row whose uid the digits spell. Either way the
+child gets the row's uid, primary gid, `HOME`, `USER` and `LOGNAME`. That's
+stricter than `user`, where digits keep the daemon's gid and don't need a row. The
+daemon resolves it at each request, so a user an earlier exec created resolves
+on the next. A request's own `user` always wins, `root` and `0` included, and
+`group` still overrides the primary gid. If no row matches, the daemon answers
+each start that omits `user` with `400 unknown_user`, and the `detail` mentions
+`AGENTD_DEFAULT_USER`. For digits, the `detail` also says the image needs a
+passwd row for that uid. The daemon refuses an empty value the same way. It still
+boots, and a request that sets `user` still runs. With the variable unset, a
+start that omits `user` runs as the daemon's own user, root, as it always has.
+Uploads don't follow the variable: what they create stays root's, as
+[Upload ownership](#upload-ownership) describes.
+Workload hook handlers ignore the variable, and the image snapshot drops it with
+every other `AGENTD_*` variable. `/v1/health` doesn't report it, because a new
+`Health` field would break the protocol crate's API. The daemon logs the value
+at startup instead.
+
 **A named shell is resolved on the child's `PATH`, the image's `PATH`, `/bin`,
 then `/usr/bin`.** The first executable regular file wins and runs as
 `<shell> -c <command>`. An absolute path is checked as given. A shell the guest
@@ -386,6 +409,23 @@ The model in `crates/model/src/exec_start.rs` checks these rules over every requ
 shape (AGENTD-7 through AGENTD-16 in `verify/spec/agentd.symspec.json`), including that
 no refused request ever has a child and that neither the token nor `AGENTD_*`
 configuration reaches one.
+
+## Upload ownership
+
+**Uploads are root's, whatever `AGENTD_DEFAULT_USER` holds.** `PUT /v1/fs/tar`
+and `PUT /v1/fs/file` write as the daemon's user, root, so each entry they
+create belongs to root: files, directories, symlinks, and the parent
+directories made for them. Tar extraction masks each member's mode to `0755` at
+most, so it doesn't set a group or other write bit on a file or directory.
+`PUT /v1/fs/file` gives the file the `mode` the request sets, or `0644` without
+one, and the parent directories it creates are `0755`. The image's default user
+can read an uploaded tree, then, but can't write into the directories an upload
+created, or change a file unless its requested `mode` lets other users write.
+An exec that must write there runs with
+`user: 0`, or the image or an exec started with `user: 0` hands the tree to the
+default user first with `chown`. The agent recipe's `chown` of `/workspace`
+does that. A default with no passwd row doesn't refuse an upload, because an
+upload doesn't read the variable.
 
 ## Line-ranged text reads
 

@@ -1202,10 +1202,13 @@ fn build_command(
     let launch_env = state.launch_env();
     let config = state.config();
     // Read per request rather than cached: a workload that runs `useradd` before its next
-    // exec is asking for exactly that user, and the files are a few kilobytes.
-    let passwd = match req.user {
-        Some(_) => read_database(&config.passwd_path),
-        None => String::new(),
+    // exec is asking for exactly that user, and the files are a few kilobytes. The image's
+    // default user is read the same way, for the same reason (AGENTD-22).
+    let default_user = config.default_user.as_deref();
+    let passwd = if req.user.is_some() || default_user.is_some() {
+        read_database(&config.passwd_path)
+    } else {
+        String::new()
     };
     let group = match req.group {
         Some(protocol::exec::NameOrId::Name(_)) => read_database(&config.group_path),
@@ -1218,6 +1221,7 @@ fn build_command(
             image_env: state.image_env(),
             passwd: &passwd,
             group: &group,
+            default_user,
             is_executable: &is_executable_file,
         },
     )?;
@@ -2946,6 +2950,15 @@ mod tests {
     /// `/home/tester`) and whose group file lists `crew` (this process's gid), holding
     /// `inherited` as the environment it inherited at startup, bootstrapped with `launch`.
     fn guest(inherited: &[(&str, &str)], launch: &[(&str, &str)]) -> (AppState, tempfile::TempDir) {
+        guest_with_default(inherited, launch, None)
+    }
+
+    /// [`guest`] whose image sets `AGENTD_DEFAULT_USER` to `default_user`.
+    fn guest_with_default(
+        inherited: &[(&str, &str)],
+        launch: &[(&str, &str)],
+        default_user: Option<&str>,
+    ) -> (AppState, tempfile::TempDir) {
         let dir = tempfile::tempdir().expect("a guest directory");
         let (uid, gid) = (own_id("-u"), own_id("-g"));
         std::fs::write(
@@ -2966,6 +2979,7 @@ mod tests {
         let config = Config {
             passwd_path: dir.path().join("passwd"),
             group_path: dir.path().join("group"),
+            default_user: default_user.map(str::to_string),
             ..Config::default()
         };
         let state = AppState::with_image_env(config, launch_env(inherited));
@@ -3073,6 +3087,102 @@ mod tests {
         request.user = Some("tester".into());
         let outcome = started(&state, request).await;
         assert_eq!(outcome.stdout.trim(), "/from-launch tester");
+    }
+
+    /// **AGENTD-22, AGENTD-24.** Through the real handler, a start that names no user runs as
+    /// the image's default user, with that row's identity. The default is resolved at each
+    /// request: while the guest has no such user the start is 400 `unknown_user` naming the
+    /// variable and nothing runs, and once a row for it appears the next start runs as it.
+    #[tokio::test]
+    async fn a_start_that_names_no_user_runs_as_the_default_resolved_per_request() {
+        let probe = "echo \"$(id -u) $HOME $USER\"";
+        let (state, _dir) = guest_with_default(&[], &[], Some("tester"));
+        let mut request = req("default-tester", &[probe]);
+        request.shell = true.into();
+        let outcome = started(&state, request).await;
+        assert_eq!(
+            outcome.stdout.trim(),
+            format!("{} /home/tester tester", own_id("-u"))
+        );
+
+        let (state, dir) = guest_with_default(&[], &[], Some("latecomer"));
+        let marker = dir.path().join("ran");
+        let mut request = req("default-missing", &[&format!("touch {}", marker.display())]);
+        request.shell = true.into();
+        let detail = refused(&state, request, "unknown_user", &marker).await;
+        assert!(
+            detail.contains("\"latecomer\"") && detail.contains("AGENTD_DEFAULT_USER"),
+            "{detail}"
+        );
+
+        // What a `useradd` in an earlier exec leaves behind.
+        let mut passwd = std::fs::read_to_string(dir.path().join("passwd")).expect("passwd");
+        passwd.push_str(&format!(
+            "latecomer:x:{}:{}::/home/latecomer:/bin/sh\n",
+            own_id("-u"),
+            own_id("-g")
+        ));
+        std::fs::write(dir.path().join("passwd"), passwd).expect("passwd");
+        let mut request = req("default-late", &[probe]);
+        request.shell = true.into();
+        let outcome = started(&state, request).await;
+        assert_eq!(
+            outcome.stdout.trim(),
+            format!("{} /home/latecomer latecomer", own_id("-u"))
+        );
+    }
+
+    /// **AGENTD-22, AGENTD-24.** Through the real handler, a default spelled as digits runs as
+    /// the row of that uid, with its identity, and digits no row carries are refused naming
+    /// the variable and the missing row, where a request's own digits would run.
+    #[tokio::test]
+    async fn a_numeric_default_runs_as_its_row_and_one_with_no_row_is_refused() {
+        let probe = "echo \"$(id -u) $(id -g) $HOME $USER\"";
+        let uid = own_id("-u").to_string();
+        let (state, _dir) = guest_with_default(&[], &[], Some(&uid));
+        let mut request = req("default-digits", &[probe]);
+        request.shell = true.into();
+        let outcome = started(&state, request).await;
+        assert_eq!(
+            outcome.stdout.trim(),
+            format!("{} {} /home/tester tester", own_id("-u"), own_id("-g"))
+        );
+
+        let (state, dir) = guest_with_default(&[], &[], Some("4242424"));
+        let marker = dir.path().join("ran");
+        let mut request = req(
+            "default-digits-no-row",
+            &[&format!("touch {}", marker.display())],
+        );
+        request.shell = true.into();
+        let detail = refused(&state, request, "unknown_user", &marker).await;
+        assert!(
+            detail.contains("\"4242424\"")
+                && detail.contains("AGENTD_DEFAULT_USER")
+                && detail.contains("needs a passwd row"),
+            "{detail}"
+        );
+    }
+
+    /// **AGENTD-23.** A user the start names wins over the default. The default here is an
+    /// account this non-root test cannot become (uid 65534), so a daemon that applied it
+    /// would fail the spawn; naming `tester` runs as `tester`, by name and by uid.
+    #[tokio::test]
+    async fn a_user_the_start_names_wins_over_the_default() {
+        let (state, dir) = guest_with_default(&[], &[], Some("elsewhere"));
+        let mut passwd = std::fs::read_to_string(dir.path().join("passwd")).expect("passwd");
+        passwd.push_str("elsewhere:x:65534:65534::/nonexistent:/bin/sh\n");
+        std::fs::write(dir.path().join("passwd"), passwd).expect("passwd");
+
+        let mut request = req("named-wins", &["/bin/sh", "-c", "echo $(id -u) $USER"]);
+        request.user = Some("tester".into());
+        let outcome = started(&state, request).await;
+        assert_eq!(outcome.stdout.trim(), format!("{} tester", own_id("-u")));
+
+        let mut request = req("uid-wins", &["/bin/sh", "-c", "echo $(id -u) $USER"]);
+        request.user = Some(own_id("-u").into());
+        let outcome = started(&state, request).await;
+        assert_eq!(outcome.stdout.trim(), format!("{} tester", own_id("-u")));
     }
 
     /// **AGENTD-14.** `shell: "bash"` runs the script under bash: a pipefail pipeline fails

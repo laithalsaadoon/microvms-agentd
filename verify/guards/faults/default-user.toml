@@ -1,0 +1,167 @@
+# ── default-user: AGENTD_DEFAULT_USER, the image's default user for a start that omits `user` (#595) ──
+
+# The daemon's tests call what the change adds (`Guest::default_user`, `Config::default_user`),
+# so the merge base doesn't build them and FAIL_TO_PASS can't prove them. Each fault here takes
+# one part of the change out where the tests still compile.
+
+# AGENTD-22: the default read and never applied.
+[[fault]]
+id = "default-user-ignored"
+guard = "exec_start::tests::a_request_that_names_no_user_resolves_the_default_as_its_user"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec_start::tests::a_request_that_names_no_user_resolves_the_default_as_its_user"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/exec_start.rs", replace = "    match (&request.user, default_user) {\n", with = "    let default_user: Option<&str> = default_user.and(None);\n    match (&request.user, default_user) {\n" }
+
+[[fault]]
+id = "default-user-ignored-fuzz"
+guard = "exec_start_fuzz::start_resolution"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec_start_fuzz::start_resolution"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/exec_start.rs", replace = "    match (&request.user, default_user) {\n", with = "    let default_user: Option<&str> = default_user.and(None);\n    match (&request.user, default_user) {\n" }
+
+# AGENTD-22 through the handler: the default dropped where the start builds its `Guest`, and
+# the passwd file left unread for a start that omits `user`.
+[[family]]
+guard = "exec::tests::a_start_that_names_no_user_runs_as_the_default_resolved_per_request"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec::tests::a_start_that_names_no_user_runs_as_the_default_resolved_per_request"]
+expect = "test-failed"
+suite = "rust"
+
+[[family.fault]]
+id = "default-user-dropped-at-build"
+transform = { file = "crates/agentd/src/exec.rs", replace = "            default_user,\n            is_executable: &is_executable_file,\n", with = "            default_user: None,\n            is_executable: &is_executable_file,\n" }
+
+[[family.fault]]
+id = "default-user-passwd-unread"
+transform = { file = "crates/agentd/src/exec.rs", replace = "    let passwd = if req.user.is_some() || default_user.is_some() {\n", with = "    let passwd = if req.user.is_some() {\n" }
+
+# AGENTD-23: the default applied ahead of a user the request names.
+[[fault]]
+id = "default-user-overrides-request"
+guard = "exec_start::tests::a_user_the_request_names_wins_over_the_default"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec_start::tests::a_user_the_request_names_wins_over_the_default"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/exec_start.rs", replace = "        (Some(spec), _) => resolve_user(spec, rows).map(Some),\n", with = "        (Some(_), Some(name)) => resolve_user(&NameOrId::Name(name.to_string()), rows).map(Some),\n        (Some(spec), _) => resolve_user(spec, rows).map(Some),\n" }
+
+[[fault]]
+id = "default-user-overrides-request-handler"
+guard = "exec::tests::a_user_the_start_names_wins_over_the_default"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec::tests::a_user_the_start_names_wins_over_the_default"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/exec_start.rs", replace = "        (Some(spec), _) => resolve_user(spec, rows).map(Some),\n", with = "        (Some(_), Some(name)) => resolve_user(&NameOrId::Name(name.to_string()), rows).map(Some),\n        (Some(spec), _) => resolve_user(spec, rows).map(Some),\n" }
+
+# AGENTD-24: a default the guest doesn't have falls back to the daemon's user, which is root.
+[[fault]]
+id = "default-user-unknown-runs-as-daemon"
+guard = "exec_start::tests::a_default_that_names_nobody_is_refused_naming_the_variable"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec_start::tests::a_default_that_names_nobody_is_refused_naming_the_variable"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/exec_start.rs", replace = "            Err(why) => Err(Rejection::new(\n                ERROR_UNKNOWN_USER,\n                format!(\"the request names no user, and {why}\"),\n            )),\n", with = "            Err(_) => Ok(None),\n" }
+
+# AGENTD-22: an all-digit default resolved as a request's digits are, which keeps the daemon's
+# gid 0 for a uid with a row (the review finding on #600: `uid=1000(agent) gid=0(root)`).
+[[fault]]
+id = "default-user-numeric-keeps-daemon-gid"
+guard = "exec_start::tests::a_request_that_names_no_user_resolves_the_default_as_its_user"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec_start::tests::a_request_that_names_no_user_resolves_the_default_as_its_user"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/exec_start.rs", replace = "                row: Some(row),\n                primary_gid: true,\n            })),\n", with = "                row: Some(row),\n                primary_gid: row.name == name,\n            })),\n" }
+
+[[fault]]
+id = "default-user-numeric-keeps-daemon-gid-fuzz"
+guard = "exec_start_fuzz::start_resolution"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec_start_fuzz::start_resolution"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/exec_start.rs", replace = "                row: Some(row),\n                primary_gid: true,\n            })),\n", with = "                row: Some(row),\n                primary_gid: row.name == name,\n            })),\n" }
+
+# AGENTD-24: an all-digit default with no row run as a bare uid, as a request's digits are.
+[[family]]
+guard = "exec_start::tests::a_default_that_names_nobody_is_refused_naming_the_variable"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec_start::tests::a_default_that_names_nobody_is_refused_naming_the_variable"]
+expect = "test-failed"
+suite = "rust"
+
+[[family.fault]]
+id = "default-user-digits-without-row-run"
+transform = { file = "crates/agentd/src/exec_start.rs", replace = "        (None, Some(name)) => match default_user_row(name, rows) {\n", with = "        (None, Some(name)) if digits(name).is_some() => {\n            resolve_user(&NameOrId::Name(name.to_string()), rows).map(Some)\n        }\n        (None, Some(name)) => match default_user_row(name, rows) {\n" }
+
+[[fault]]
+id = "default-user-digits-without-row-run-handler"
+guard = "exec::tests::a_numeric_default_runs_as_its_row_and_one_with_no_row_is_refused"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec::tests::a_numeric_default_runs_as_its_row_and_one_with_no_row_is_refused"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/exec_start.rs", replace = "        (None, Some(name)) => match default_user_row(name, rows) {\n", with = "        (None, Some(name)) if digits(name).is_some() => {\n            resolve_user(&NameOrId::Name(name.to_string()), rows).map(Some)\n        }\n        (None, Some(name)) => match default_user_row(name, rows) {\n" }
+
+# The model's AGENTD-22 property: an all-digit default with a row resolved as a request's digits
+# are, a bare uid in the daemon's group.
+[[fault]]
+id = "model-exec-start-numeric-default-as-request"
+guard = "exec_start::tests::the_specified_daemon_satisfies_every_property"
+run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "exec_start::tests::the_specified_daemon_satisfies_every_property"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/model/src/exec_start.rs", replace = "            DefaultUser::NameKnown | DefaultUser::DigitsWithRow => Some(UserReq::NameKnown),\n", with = "            DefaultUser::NameKnown => Some(UserReq::NameKnown),\n            DefaultUser::DigitsWithRow => Some(UserReq::IdWithRow),\n" }
+
+# An empty or non-UTF-8 value read as unset, which would run every workload as root.
+[[fault]]
+id = "default-user-empty-read-as-unset"
+guard = "config::tests::the_default_user_is_kept_as_set"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "config::tests::the_default_user_is_kept_as_set"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/config.rs", replace = "    raw.map(|raw| raw.to_string_lossy().into_owned())\n", with = "    raw.and_then(|raw| raw.into_string().ok())\n        .filter(|raw| !raw.is_empty())\n" }
+
+# `from_env` that never reads the variable, the mutant `replace Config::from_env -> Self with
+# Default::default()` stands for: only the child copy of the test binary sees the variable set.
+[[fault]]
+id = "default-user-env-unread"
+guard = "config::tests::from_env_reads_the_default_user_from_the_environment"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "config::tests::from_env_reads_the_default_user_from_the_environment"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/config.rs", replace = "        cfg.default_user = default_user(std::env::var_os(DEFAULT_USER_VAR));\n", with = "" }
+
+# A workload hook handler demoted to the image's default user (uid 65534 in the test).
+[[fault]]
+id = "default-user-hook-handler-demoted"
+guard = "hook_handlers::tests::a_handler_runs_as_the_daemon_whatever_default_user_the_image_sets"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "hook_handlers::tests::a_handler_runs_as_the_daemon_whatever_default_user_the_image_sets"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/hook_handlers.rs", replace = "        .process_group(0)\n        .kill_on_drop(true);\n", with = "        .process_group(0)\n        .uid(65534)\n        .kill_on_drop(true);\n" }
+
+# The model's AGENTD-22 property: a specification that runs a nameless request as the daemon
+# under any default.
+[[fault]]
+id = "model-exec-start-default-ignored"
+guard = "exec_start::tests::the_specified_daemon_satisfies_every_property"
+run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "exec_start::tests::the_specified_daemon_satisfies_every_property"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/model/src/exec_start.rs", replace = "        (UserReq::Absent, Some(default), _) => (Account::Default, default),\n", with = "        (UserReq::Absent, Some(_), _) => (Account::Daemon, UserReq::Absent),\n" }
+
+# FAIL_TO_PASS: fails on f410ec2f4c80 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-install-access-uploads-then-chowns-as-root"
+guard = "agents::tests::install_access_uploads_then_chowns_as_root"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "agents::tests::install_access_uploads_then_chowns_as_root"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-install-access-uploads-then-chowns-as-root.patch"
+
+# FAIL_TO_PASS: fails on f410ec2f4c80 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-a-hostile-deletion-path-is-refused-not-executed"
+guard = "workspace::tests::a_hostile_deletion_path_is_refused_not_executed"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "workspace::tests::a_hostile_deletion_path_is_refused_not_executed"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-a-hostile-deletion-path-is-refused-not-executed.patch"

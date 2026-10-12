@@ -79,6 +79,13 @@ pub const DEFAULT_READY_TIMEOUT: Duration = DEFAULT_BOOTSTRAP_TIMEOUT;
 /// How often to re-poll health while waiting for bootstrap.
 const READY_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
+/// The uid this crate's own execs that need root ask for by number.
+///
+/// Naming no user isn't asking for root: a daemon whose image sets `AGENTD_DEFAULT_USER`
+/// runs such a start as that user. A user the request names always wins, and an integer is
+/// what every daemon release accepts.
+pub(crate) const ROOT_UID: u32 = 0;
+
 /// The transport: a backend, the agent token, and the proxy auth every request needs.
 ///
 /// Separate from [`Session`] because [`ExecHandle`] needs it and holding a whole session
