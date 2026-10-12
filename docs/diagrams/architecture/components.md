@@ -16,8 +16,8 @@ classDiagram
     }
 
     namespace microvms-app {
-        %% Type: `crates/microvms-app/src/sandbox.rs:620`.
-        %% Methods: `crates/microvms-app/src/sandbox.rs:917`, `crates/microvms-app/src/sandbox.rs:1105`, `crates/microvms-app/src/sandbox.rs:1584`, `crates/microvms-app/src/sandbox.rs:1668`, `crates/microvms-app/src/sandbox.rs:1772`.
+        %% Type: `crates/microvms-app/src/sandbox.rs:622`.
+        %% Methods: `crates/microvms-app/src/sandbox.rs:919`, `crates/microvms-app/src/sandbox.rs:1108`, `crates/microvms-app/src/sandbox.rs:1587`, `crates/microvms-app/src/sandbox.rs:1671`, `crates/microvms-app/src/sandbox.rs:1775`.
         class Sandbox {
             +build_image(request)
             +run(request)
@@ -55,15 +55,15 @@ classDiagram
     }
 
     namespace agentd {
-        %% Module functions: `crates/agentd/src/routes.rs:36`, `crates/agentd/src/routes.rs:110`, `crates/agentd/src/routes.rs:443`.
+        %% Module functions: `crates/agentd/src/routes.rs:36`, `crates/agentd/src/routes.rs:151`, `crates/agentd/src/routes.rs:481`.
         class Routes {
             <<module>>
             +app(state)
             +handler_for(endpoint)
             +surface_docs()
         }
-        %% Type: `crates/agentd/src/state.rs:138`.
-        %% Methods: `crates/agentd/src/state.rs:278`, `crates/agentd/src/state.rs:284`, `crates/agentd/src/state.rs:291`, `crates/agentd/src/state.rs:455`.
+        %% Type: `crates/agentd/src/state.rs:136`.
+        %% Methods: `crates/agentd/src/state.rs:274`, `crates/agentd/src/state.rs:280`, `crates/agentd/src/state.rs:287`, `crates/agentd/src/state.rs:451`.
         class AppState {
             +config()
             +disk_guard()
@@ -85,19 +85,19 @@ classDiagram
     CoreSeam --> ControlPlane : constructs
     CoreSeam --> Sandbox : constructs
     CoreSeam --> Session : constructs
-    %% Owned fields: `crates/microvms-app/src/sandbox.rs:620-626`.
+    %% Owned fields: `crates/microvms-app/src/sandbox.rs:622-628`.
     Sandbox --> ControlPlane : owns
     Sandbox --> Session : owns
     %% Handle construction: `crates/microvms-app/src/session/mod.rs:448-472`.
     Session --> ExecHandle : creates
     %% Dashed edges are HTTP requests, not crate dependencies.
-    %% Requests and routing: `crates/microvms-app/src/session/mod.rs:383-387`, `crates/microvms-app/src/session/mod.rs:448-457`, `crates/agentd/src/routes.rs:119-136`.
+    %% Requests and routing: `crates/microvms-app/src/session/mod.rs:383-387`, `crates/microvms-app/src/session/mod.rs:448-457`, `crates/agentd/src/routes.rs:160-177`.
     Session ..> Routes : requests
-    %% Requests and routing: `crates/microvms-app/src/session/exec.rs:364-371`, `crates/microvms-app/src/session/exec.rs:760-798`, `crates/agentd/src/routes.rs:120-128`.
+    %% Requests and routing: `crates/microvms-app/src/session/exec.rs:364-371`, `crates/microvms-app/src/session/exec.rs:760-798`, `crates/agentd/src/routes.rs:161-169`.
     ExecHandle ..> Routes : requests
-    %% Handler registration: `crates/agentd/src/routes.rs:119-128`.
+    %% Handler registration: `crates/agentd/src/routes.rs:160-169`.
     Routes --> Exec : dispatches
-    %% Shared state: `crates/agentd/src/routes.rs:36-37`, `crates/agentd/src/routes.rs:373-387`.
+    %% Shared state: `crates/agentd/src/routes.rs:36-37`, `crates/agentd/src/routes.rs:414-428`.
     Routes --> AppState : reads
     %% Registry access: `crates/agentd/src/exec.rs:429-439`, `crates/agentd/src/exec.rs:477-494`.
     Exec --> AppState : accesses

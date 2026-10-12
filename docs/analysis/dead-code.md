@@ -3,7 +3,7 @@
 Reviewed at `9729b82` on 2026-10-11. These source-level findings require further reachability analysis. An empty section means no candidate was confirmed
 in this review. Public library APIs may have downstream callers, and language
 bindings register exports that need no Rust caller: the Node binding describes its
-registration mechanism at `bindings/microvms-js/src/lib.rs:82-86`.
+registration mechanism at `bindings/microvms-js/src/lib.rs:86-90`.
 
 The repository's lint task runs `cargo clippy --all-targets -- -D warnings` and
 `ruff check .`; its configured Rust invocation does not enable every feature.
@@ -46,20 +46,20 @@ application module awaiting a caller.
 
 | Path | Symbol | Imported from |
 | --- | --- | --- |
-| `crates/microvms-cli/src/commands/lifecycle.rs:2566` | `ControlPlane as _DocsOnly` | `crates/microvms-cli/src/commands/lifecycle.rs:70` |
-| `crates/microvms-cli/src/commands/attached.rs:2883` | `ErrorKind as _DocsOnly` | `crates/microvms-cli/src/commands/attached.rs:41` |
+| `crates/microvms-cli/src/commands/lifecycle.rs:2524` | `ControlPlane as _DocsOnly` | `crates/microvms-cli/src/commands/lifecycle.rs:30` |
+| `crates/microvms-cli/src/commands/attached.rs:2880` | `ErrorKind as _DocsOnly` | `crates/microvms-cli/src/commands/attached.rs:41` |
 
 These aliases have no subsequent references. Both explicitly allow
 `unused_imports`, with a documentation-related reason, so they are intentional
 exceptions to the lint rather than evidence that the source types are unused.
-`crates/microvms-cli/src/commands/lifecycle.rs:2564-2566`
-`crates/microvms-cli/src/commands/attached.rs:2881-2883`
+`crates/microvms-cli/src/commands/lifecycle.rs:2522-2524`
+`crates/microvms-cli/src/commands/attached.rs:2878-2880`
 
 The lifecycle module links `ControlPlane` in its documentation. The attached
 commands also use `ErrorKind` directly when handling a timeout. Removing either
 underlying import solely because its `_DocsOnly` alias is unused would ignore
 these uses.
-`crates/microvms-cli/src/commands/lifecycle.rs:10`
+`crates/microvms-cli/src/commands/lifecycle.rs:8`
 `crates/microvms-cli/src/commands/attached.rs:391`
 
 ## See also

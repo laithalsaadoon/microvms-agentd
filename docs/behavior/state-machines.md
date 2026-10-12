@@ -19,7 +19,7 @@ Defined at: `crates/model/src/lib.rs:73-78`
 
 ## ClientPhase
 
-The tunnel model initializes the client at `Idle`; `ClientHello` starts the handshake. `Deliver` invokes `client_reads`, which accepts a reply into `Relaying` or ends the relay at `Done`. During relay, delivered bytes preserve the phase, while an end, close, transport loss, or rejected frame can finish it. `ClientLocalEof` also finishes the relay; `Done` carries the result (`crates/model/src/tunnel.rs:421-470`, `crates/model/src/tunnel.rs:588-598`, `crates/model/src/tunnel.rs:697-742`, `crates/model/src/tunnel.rs:793-803`).
+The tunnel model initializes the client at `Idle`; `ClientHello` starts the handshake. `Deliver` invokes `client_reads`, which accepts a reply into `Relaying` or ends the relay at `Done`. During relay, delivered bytes preserve the phase, while an end, close, transport loss, or rejected frame can finish it. `ClientLocalEof` also finishes the relay; `Done` carries the result (`crates/model/src/tunnel.rs:433-494`, `crates/model/src/tunnel.rs:625-635`, `crates/model/src/tunnel.rs:735-780`, `crates/model/src/tunnel.rs:831-841`).
 
 ```mermaid
 stateDiagram-v2
@@ -34,7 +34,7 @@ stateDiagram-v2
     Done --> [*]
 ```
 
-Defined at: `crates/model/src/tunnel.rs:260-266`
+Defined at: `crates/model/src/tunnel.rs:270-276`
 
 ## ExecPhase
 
@@ -58,7 +58,7 @@ Defined at: `crates/model/src/lib.rs:83-90`
 
 ## GuestRead
 
-The tunnel model initializes the guest connection at `Open`. A delivered end marker and the guest's own EOF produce `Eof`; `caller_vanished` chooses `Reset` or `Eof` according to the negotiated end-of-stream behavior. These transitions also mark the daemon side done (`crates/model/src/tunnel.rs:479-492`, `crates/model/src/tunnel.rs:549-575`, `crates/model/src/tunnel.rs:600-613`, `crates/model/src/tunnel.rs:759-778`).
+The tunnel model initializes the guest connection at `Open`. A delivered end marker and the guest's own EOF produce `Eof`. `caller_vanished` leaves the guest at `Open` when the daemon never connected to the guest port, and otherwise chooses `Reset` or `Eof` according to the negotiated end-of-stream behavior. These transitions also mark the daemon side done (`crates/model/src/tunnel.rs:503-518`, `crates/model/src/tunnel.rs:576-612`, `crates/model/src/tunnel.rs:637-651`, `crates/model/src/tunnel.rs:797-816`).
 
 ```mermaid
 stateDiagram-v2
@@ -70,13 +70,13 @@ stateDiagram-v2
     Reset --> [*]
 ```
 
-Defined at: `crates/model/src/tunnel.rs:171-175`
+Defined at: `crates/model/src/tunnel.rs:174-178`
 
 ## Lifecycle
 
-A new `Sandbox` starts at `Pending`; `run` records an accepted launch there, and `wait_until_running` records `Running`. `suspend` first records `Suspending`, then `Suspended` or `Terminated` when its wait settles. `resume` records `Running` after its wait succeeds (`crates/microvms-app/src/sandbox.rs:762-763`, `crates/microvms-app/src/sandbox.rs:1205-1220`, `crates/microvms-app/src/sandbox.rs:1277-1306`, `crates/microvms-app/src/sandbox.rs:1584-1642`, `crates/microvms-app/src/sandbox.rs:1668-1707`).
+A new `Sandbox` starts at `Pending`; `run` records an accepted launch there, and `wait_until_running` records `Running`. `suspend` first records `Suspending`, then `Suspended` or `Terminated` when its wait settles. `resume` records `Running` after its wait succeeds (`crates/microvms-app/src/sandbox.rs:764-765`, `crates/microvms-app/src/sandbox.rs:1208-1223`, `crates/microvms-app/src/sandbox.rs:1280-1309`, `crates/microvms-app/src/sandbox.rs:1587-1645`, `crates/microvms-app/src/sandbox.rs:1671-1710`).
 
-The diagram shows the launch-driven path. `adopt` instead initializes the handle from any recognized service state. `terminate` writes `Terminating` whenever the handle still has a VM record, including on repeated calls, and only a successful requested termination wait writes `Terminated`. Consequently, `Terminated` is not an absorbing enum state. Detachment and other flags can refuse an operation without changing this enum (`crates/microvms-app/src/sandbox.rs:1387-1425`, `crates/microvms-app/src/sandbox.rs:1499-1542`, `crates/microvms-app/src/sandbox.rs:1772-1823`).
+The diagram shows the launch-driven path. `adopt` instead initializes the handle from any recognized service state. `terminate` writes `Terminating` whenever the handle still has a VM record, including on repeated calls, and only a successful requested termination wait writes `Terminated`. Consequently, `Terminated` is not an absorbing enum state. Detachment and other flags can refuse an operation without changing this enum (`crates/microvms-app/src/sandbox.rs:1390-1428`, `crates/microvms-app/src/sandbox.rs:1502-1545`, `crates/microvms-app/src/sandbox.rs:1775-1826`).
 
 ```mermaid
 stateDiagram-v2
@@ -96,7 +96,7 @@ stateDiagram-v2
     Terminating --> Terminated: terminate
 ```
 
-Defined at: `crates/microvms-app/src/sandbox.rs:132-145`
+Defined at: `crates/microvms-app/src/sandbox.rs:133-147`
 
 ## OutputEnd
 
