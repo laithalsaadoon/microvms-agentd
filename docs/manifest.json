@@ -4703,7 +4703,7 @@
         "type": "boolean"
       }
     ],
-    "version": "0.12.0"
+    "version": "1.0.0"
   },
   "status": "ok",
   "type": "microvm.manifest"
