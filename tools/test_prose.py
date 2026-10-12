@@ -469,6 +469,26 @@ class ValeIntegrationTests(unittest.TestCase):
                 ("Those observations are both retained in Platform.", 1),
                 ("The older claim that it existed only in requests was wrong.", 1),
                 ("This heading remains for existing links.", 1),
+                ("This\nrefresh did not deploy the example.", 1),
+                ("Measured\nagain 2026-09-24 with a busy exec.", 1),
+                ("**Update, 2026-09-16:** the limit is 4096 bytes.", 1),
+                ("An earlier measurement said 16 KB.", 1),
+                ("Previously this page said 16 KB.", 1),
+                ("This supersedes the 2026-08-06 entry.", 1),
+                ("Erratum: the limit is 4096 bytes.", 1),
+                ("Exec records are retained in the daemon's ledger.", 0),
+                ("Logs are retained in CloudWatch for 30 days.", 0),
+                ("The daemon applies no clock correction, so timestamps skip.", 0),
+                ("Error correction: the client retries once.", 0),
+                ("Pass the original description when you update the image.", 0),
+                (
+                    "The token refresh happens before every call; this refresh is cheap.",
+                    0,
+                ),
+                ("A finding is re-measured before it replaces an entry.", 0),
+                ("The old measurement no longer holds.", 1),
+                ("Git history holds the old entry.", 0),
+                ("A member replaces the old entry before creation.", 0),
             ]:
                 (root / "README.md").write_text(content + "\n")
                 with self.subTest(content=content):

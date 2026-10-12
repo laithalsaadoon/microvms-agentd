@@ -59,9 +59,10 @@ assumptions, reuse environments across launches, and upgrade packages without
 surprises between the CLI and language bindings. Live coverage remains scoped
 to the regions and paths actually exercised.
 
-## Corrections to the initial proposal
+## Check existing capabilities before adding an abstraction
 
-The earlier strategy prioritized a turn-boundary suspend convention even
-though existing hooks and lifecycle APIs already covered it. It also mixed
-human interactive idle time with headless batch workloads. Measure the target workload and check existing platform capabilities before
-adding an abstraction. Full research notes remain in git history.
+Existing hooks and lifecycle APIs already cover a turn-boundary suspend, so
+the project adds no convention for it. Human interactive idle time and
+headless batch workloads have different idle patterns, so plan for each
+separately. Measure the target workload and check existing platform
+capabilities before adding an abstraction. Research notes are in git history.

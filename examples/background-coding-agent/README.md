@@ -77,9 +77,8 @@ The agent's run is still a series of durable waits, with Lambda suspended
 between polls; async shortens the steps around them.
 
 Review the generated changes and reports before using them. Deployment and
-job submission create billable resources and can publish to GitHub. This
-refresh did not deploy the example. Its prior live evidence is in
-[LIVE_TEST.md](LIVE_TEST.md).
+job submission create billable resources and can publish to GitHub. The
+example's live evidence is in [LIVE_TEST.md](LIVE_TEST.md), with its date.
 
 ## Deploy once
 
