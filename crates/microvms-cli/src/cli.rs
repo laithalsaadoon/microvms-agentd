@@ -302,9 +302,9 @@ pub enum Command {
     /// Thaw a suspended MicroVM and report its endpoint.
     ///
     /// The launch-time `suspendedDurationSeconds` window terminates a VM the idle policy
-    /// suspended once it passes. A VM suspended with `microvm suspend` stayed resumable 1283 s
-    /// into a 60 s window (measured 2026-10-12, us-east-1), so the service decides. A resume of
-    /// a VM that ended, whatever ended it, exits `ERR_WINDOW_CLOSED`; launch a new one.
+    /// suspended once it passes. VMs suspended with `microvm suspend` resumed 900 s and more
+    /// into a 60 s window (2026-10-12), which AWS doesn't promise, so the service decides. A
+    /// resume of a VM that ended, whatever ended it, exits `ERR_WINDOW_CLOSED`; launch a new one.
     Resume(ResumeArgs),
 
     /// Tear down a MicroVM, and optionally its image and build log group.
@@ -1057,7 +1057,7 @@ pub struct RunArgs {
     pub max_idle_sec: u32,
 
     /// Terminate a VM the idle policy suspended once it's been suspended this long. An explicit
-    /// suspend isn't held to it.
+    /// suspend outlasted it when measured (2026-10-12), which AWS doesn't promise.
     #[arg(long, default_value_t = 600)]
     pub suspended_sec: u32,
 
@@ -2507,7 +2507,7 @@ pub struct AgentUpArgs {
     pub max_idle_sec: u32,
 
     /// Terminate a VM the idle policy suspended once it's been suspended this long. An explicit
-    /// suspend isn't held to it.
+    /// suspend outlasted it when measured (2026-10-12), which AWS doesn't promise.
     #[arg(long, default_value_t = 600)]
     pub suspended_sec: u32,
 

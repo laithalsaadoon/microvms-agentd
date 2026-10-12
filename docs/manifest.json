@@ -339,7 +339,7 @@
           {
             "choices": null,
             "default": "600",
-            "help": "Terminate a VM the idle policy suspended once it's been suspended this long. An explicit suspend isn't held to it",
+            "help": "Terminate a VM the idle policy suspended once it's been suspended this long. An explicit suspend outlasted it when measured (2026-10-12), which AWS doesn't promise",
             "name": "suspended-sec",
             "positional": false,
             "required": false,
@@ -988,7 +988,7 @@
           {
             "choices": null,
             "default": "600",
-            "help": "Terminate a VM the idle policy suspended once it's been suspended this long. An explicit suspend isn't held to it",
+            "help": "Terminate a VM the idle policy suspended once it's been suspended this long. An explicit suspend outlasted it when measured (2026-10-12), which AWS doesn't promise",
             "name": "suspended-sec",
             "positional": false,
             "required": false,
