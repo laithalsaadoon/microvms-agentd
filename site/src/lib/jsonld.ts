@@ -4,8 +4,8 @@
  * for the site, joined in a single `@graph`.
  *
  * This module is pure and takes the site's origin and base segment as arguments rather than reading
- * `import.meta.env`, so every URL and every node it emits is asserted in a unit test rather than only
- * in a validator run against a deployed page.
+ * `import.meta.env`, so every URL it emits can be checked without a deployed page:
+ * `tests/built-links.test.ts` resolves every `url` and `@id` in the built graph against `dist/`.
  *
  * Every URL is built through `siteUrl`, which resolves with `new URL()`. A base segment joined to a
  * path by string concatenation produces `//microvms-agentd/index.md` — a protocol-relative URL naming
@@ -26,7 +26,7 @@
  * present one as asserted.
  */
 
-import { type SiteContext, siteUrl } from "./agent-surface.js"
+import { rawMarkdownUrl, type SiteContext, siteUrl } from "./agent-surface.js"
 
 /**
  * The site node, described once.
@@ -89,7 +89,8 @@ const pageUrl = (entryId: string, context: SiteContext): URL =>
  * neither makes the other redundant, because they are read by different consumers.
  */
 const markdownEncoding = (entryId: string, context: SiteContext) => {
-  const href = siteUrl(`${entryId === "index" ? "" : entryId}.md`, context).href
+  // The root twin is `index.md`: `rawMarkdownUrl` owns that mapping, as it does for the head link.
+  const href = rawMarkdownUrl(entryId, context).href
   return {
     "@type": "MediaObject" as const,
     "@id": href,
