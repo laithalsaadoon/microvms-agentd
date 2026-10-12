@@ -528,7 +528,7 @@ index 544535f..dc316a4 100644
          })
      }
 diff --git a/crates/microvms-cli/src/cli.rs b/crates/microvms-cli/src/cli.rs
-index a29b47e..f3a820e 100644
+index 25b94f0..f3a820e 100644
 --- a/crates/microvms-cli/src/cli.rs
 +++ b/crates/microvms-cli/src/cli.rs
 @@ -301,10 +301,8 @@ pub enum Command {
@@ -536,9 +536,9 @@ index a29b47e..f3a820e 100644
      /// Thaw a suspended MicroVM and report its endpoint.
      ///
 -    /// The launch-time `suspendedDurationSeconds` window terminates a VM the idle policy
--    /// suspended once it passes. A VM suspended with `microvm suspend` stayed resumable 1283 s
--    /// into a 60 s window (measured 2026-10-12, us-east-1), so the service decides. A resume of
--    /// a VM that ended, whatever ended it, exits `ERR_WINDOW_CLOSED`; launch a new one.
+-    /// suspended once it passes. VMs suspended with `microvm suspend` resumed 900 s and more
+-    /// into a 60 s window (2026-10-12), which AWS doesn't promise, so the service decides. A
+-    /// resume of a VM that ended, whatever ended it, exits `ERR_WINDOW_CLOSED`; launch a new one.
 +    /// The launch-time `suspendedDurationSeconds` window terminates a suspended VM once it
 +    /// passes, so "resume later" silently stops working and the VM is gone rather than slow.
      Resume(ResumeArgs),
@@ -549,7 +549,7 @@ index a29b47e..f3a820e 100644
      pub max_idle_sec: u32,
  
 -    /// Terminate a VM the idle policy suspended once it's been suspended this long. An explicit
--    /// suspend isn't held to it.
+-    /// suspend outlasted it when measured (2026-10-12), which AWS doesn't promise.
 +    /// Terminate the VM after this long suspended. A resume past it cannot work.
      #[arg(long, default_value_t = 600)]
      pub suspended_sec: u32,
@@ -559,7 +559,7 @@ index a29b47e..f3a820e 100644
      pub max_idle_sec: u32,
  
 -    /// Terminate a VM the idle policy suspended once it's been suspended this long. An explicit
--    /// suspend isn't held to it.
+-    /// suspend outlasted it when measured (2026-10-12), which AWS doesn't promise.
 +    /// Terminate the VM after this long suspended. A resume past it cannot work.
      #[arg(long, default_value_t = 600)]
      pub suspended_sec: u32,
