@@ -8,9 +8,11 @@
 #   2. launches a VM from it with outbound network (--egress),
 #   3. copies Strands Box (from build-box.sh), the box's config, and the driver into the VM,
 #   4. mints a short-lived Bedrock API key locally and copies it in for Box, not for Codex,
-#   5. probes the VM's metadata service from outside and from inside a box,
+#   5. probes the VM's metadata service from outside a box, and checks it is refused inside one,
 #   6. runs vm/driver.py, which runs six scenarios through the SDK and checks Box's decisions,
 #   7. copies the results and Box's decision log back to out/, and terminates the VM.
+#
+# It exits 0 only when the in-box probe and every scenario pass.
 #
 # Prerequisites:
 #   - `microvm` 1.0.0 on PATH, with MICROVM_BUCKET, MICROVM_BUILD_ROLE_ARN, and
@@ -36,6 +38,12 @@ jqr() { python3 -c "import json,sys; print(json.load(sys.stdin)['data']$1)"; }
 vm() { microvm "$@" --name "$NAME" --region "$REGION"; }
 vmexec() { vm exec "$1" --timeout "${2:-120}"; }
 
+# Whatever happens below, the trap terminates the VM once it has an id, and removes the local
+# copy of the Bedrock API key and the staging directory.
+ID="" KEYFILE="" STAGE=""
+trap 'rm -f "$KEYFILE"; [ -z "$STAGE" ] || rm -rf "$STAGE"
+  [ -z "$ID" ] || microvm terminate "$ID" --region "$REGION" >/dev/null || true' EXIT
+
 # ── 1. the image ────────────────────────────────────────────────────────────
 # --project guest bakes guest/uv.lock (the Codex SDK and its Codex binary) into the image.
 # --repair-identity is what requests additionalOsCapabilities ["ALL"] for the VM: without it the
@@ -52,11 +60,19 @@ IMAGE_ARN=$(echo "$BUILT" | jqr "['imageIdentifier']")
 # ── 2. launch ───────────────────────────────────────────────────────────────
 # --egress lets the guest reach bedrock-runtime. Inside the box, Codex reaches only what
 # policy.dw permits, through Box's egress gateway.
+# With --keep the CLI leaves a VM running when the launch fails after creating it, and its failure
+# envelope still names the VM, so the id is read from whichever envelope came back.
 echo "launching..." >&2
+LAUNCH_STATUS=0
 LAUNCH=$(microvm run --json --keep --egress --image "$IMAGE_ARN" --vm-name "$NAME" \
-  --max-duration-sec 3600 --region "$REGION")
-ID=$(echo "$LAUNCH" | jqr "['microvmId']")
-trap 'microvm terminate "$ID" --region "$REGION" >/dev/null || true' EXIT
+  --max-duration-sec 3600 --region "$REGION") || LAUNCH_STATUS=$?
+ID=$(echo "$LAUNCH" | python3 -c \
+  "import json,sys; print((json.load(sys.stdin).get('data') or {}).get('microvmId') or '')" \
+  2>/dev/null || true)
+if [ "$LAUNCH_STATUS" -ne 0 ]; then
+  echo "launch failed (exit $LAUNCH_STATUS); terminating ${ID:-nothing}" >&2
+  exit "$LAUNCH_STATUS"
+fi
 echo "microvm: $ID" >&2
 
 # ── 3. Box, its config, and the driver ──────────────────────────────────────
@@ -75,6 +91,7 @@ tar -C "$STAGE/home" -cf "$STAGE/home.tar" .
 vm cp "$STAGE/opt.tar" vm:/opt/box --tar --json >/dev/null
 vm cp "$STAGE/home.tar" vm:/home/agent --tar --json >/dev/null
 rm -rf "$STAGE"
+STAGE=""
 # The daemon writes as root; Box and the driver run as uid 1000.
 vmexec "chown -R 0:0 /opt/box && chmod 0755 /opt/box /opt/box/* \
   && chown -R 1000:1000 /home/agent && chmod 0600 /home/agent/project/.env" >/dev/null
@@ -88,26 +105,41 @@ uvx --from aws-bedrock-token-generator@latest --quiet python -c \
   "from aws_bedrock_token_generator import provide_token; print(provide_token(region='$REGION'))" > "$KEYFILE"
 vm cp "$KEYFILE" vm:/home/agent/.bedrock-token --mode 0600 --json >/dev/null
 rm -f "$KEYFILE"
+KEYFILE=""
 vmexec "chown 1000:1000 /home/agent/.bedrock-token" >/dev/null
 
 # ── 5. the metadata service, outside and inside a box ───────────────────────
-# Outside, uid 1000 reaches the execution role's credentials (docs/TRUST.md). Inside, the box's
-# network namespace has no route, and the gateway refuses the address by policy.
+# Outside, uid 1000 reaches the execution role's credentials (docs/TRUST.md); that probe only
+# reports. Inside, the box's network namespace has no route, and the gateway refuses the address
+# by policy; that probe exits 1 otherwise, and `strands-box run` exits with its agent's status.
 LAUNCHER="python3.12 /opt/box/launch_in_fresh_proc.py"
 echo "--- metadata service probe ---"
 vmexec "$LAUNCHER /usr/bin/python3.12 /home/agent/probe_mmds.py" | grep '^\['
-vmexec "$LAUNCHER /opt/box/strands-box run --config /home/agent/box/probe-box.toml 2>/dev/null" | grep '^\['
+set +e
+INSIDE=$(vmexec "$LAUNCHER /opt/box/strands-box run --config /home/agent/box/probe-box.toml \
+  2>/home/agent/probe-box.err")
+PROBE_STATUS=$?
+set -e
+printf '%s\n' "$INSIDE" | grep '^\[' || true
+if [ "$PROBE_STATUS" -ne 0 ]; then
+  echo "the metadata probe inside the box failed (exit $PROBE_STATUS); Box's stderr:" >&2
+  vmexec "tail -n 20 /home/agent/probe-box.err" >&2 || true
+fi
 
 # ── 6. the scenarios ────────────────────────────────────────────────────────
 echo "--- codex sdk scenarios ---"
 set +e
 vmexec "$LAUNCHER /opt/guest/.venv/bin/python /home/agent/driver.py" 900
-STATUS=$?
+DRIVER_STATUS=$?
 set -e
 
 # ── 7. evidence back, then teardown in the trap ─────────────────────────────
+# A file missing from out/ means the driver stopped before it wrote one; an older run's copy
+# never stands in for it.
 mkdir -p "$OUT"
+rm -f "$OUT/results.json" "$OUT/records.jsonl"
 vm cp vm:/home/agent/results.json "$OUT/results.json" --json >/dev/null || true
 vm cp vm:/home/agent/box/state/private/telemetry/records.jsonl "$OUT/records.jsonl" --json >/dev/null || true
 echo "results in $OUT; terminating $ID..." >&2
-exit "$STATUS"
+[ "$PROBE_STATUS" -eq 0 ] || exit "$PROBE_STATUS"
+exit "$DRIVER_STATUS"

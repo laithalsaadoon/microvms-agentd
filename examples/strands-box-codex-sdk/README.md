@@ -15,7 +15,8 @@ examples/strands-box-codex-sdk/run.sh
 
 On first use `run.sh` builds the image. Each run then launches a VM, copies Box and the driver in,
 and runs six scenarios through the SDK. It prints the rule that decided each scenario, then runs
-`microvm terminate`. The script writes the results and Box's decision log to `out/`.
+`microvm terminate`. The script writes the results and Box's decision log to `out/`. It exits 0
+only when the metadata probe inside the box and all six scenarios pass.
 
 ## The layers
 
@@ -110,8 +111,9 @@ unless temporal {
 The Codex process has no grant on the project. Box makes the project Codex's working directory,
 and that's all. `apply_patch` and Codex's own file reads fail, and Codex opens each file through
 its shell, where the policy decides. The driver tells Codex to work that way, through the SDK's
-`developer_instructions`. Box's macOS examples grant `list` on the project. The Linux backend refuses `list`, so on
-Linux the only grant would be `read`, which skips the policy. This example grants nothing.
+`developer_instructions`. Box's macOS examples grant `list` on the project. The Linux backend
+refuses `list`, so on Linux the only grant would be `read`, which skips the policy. This example
+grants nothing.
 
 ## The scenarios
 
@@ -137,7 +139,8 @@ in its own file.
 
 `docs/TRUST.md` records that any guest process can read the execution role's credentials from
 MMDS at `169.254.169.254`. It also records that no in-guest block worked. `run.sh` probes MMDS
-twice with `vm/probe_mmds.py`, which prints status lines and never a token:
+twice with `vm/probe_mmds.py`, which prints status lines and never a token. Outside the box the
+probe only reports. Inside the box it's a check, and `run.sh` fails when it fails:
 
 ```text
 [outside the box] raw TCP connect to 169.254.169.254:80 -> connected
@@ -147,11 +150,16 @@ twice with `vm/probe_mmds.py`, which prints status lines and never a token:
 ```
 
 The box's network namespace has no route. A direct connection fails there. A connection through
-the gateway meets the `metadata_hosts` rule. The `curl` in Box's shell refuses link-local IP
-addresses itself, before the gateway sees the request. The `instance-metadata` scenario checks for that
-refusal instead, and the decision log has no entry for it. The box guards only what runs inside
-it. The driver and every other process outside the box can still connect to MMDS. Keep the
-execution role least-privilege, as `docs/TRUST.md` says.
+the gateway meets the `metadata_hosts` rule. The probe inside the box exits 1 when the raw
+connection succeeds, when Box doesn't set a proxy, or when no metadata rule refuses the token
+request. A refusal by the default deny alone also fails the probe, because it means someone
+removed the metadata rules.
+
+The `curl` in Box's shell refuses link-local IP addresses itself, before the gateway sees the
+request. The `instance-metadata` scenario checks for that refusal, and the decision log has no
+entry for it. The box guards only what runs inside it. The driver and every other process
+outside the box can still connect to MMDS. Keep the execution role least-privilege, as
+`docs/TRUST.md` says.
 
 ## Identity repair and a fresh /proc
 
@@ -181,8 +189,8 @@ also has the Linux namespace backend, which it enables on aarch64 only. Its main
 are still assessing that backend's security and its parity with macOS. Treat this example as a
 preview for that reason:
 
-- `build-box.sh` builds a pinned `main` commit. On x86_64 it cross-compiles with
-  `cargo-zigbuild` against glibc 2.34. AL2023 can't load a binary linked against a newer glibc.
+- `build-box.sh` builds a pinned `main` commit with `cargo-zigbuild` against glibc 2.34, on
+  any host. AL2023 can't load a binary linked against a newer glibc.
 - The image doesn't include Box. `run.sh` copies the three binaries into each VM.
 - Box adds a program's ELF interpreter and the libraries it links. A library that loads later,
   such as a Python extension module, needs its own `exec` grant. `box/probe-box.toml` shows the
@@ -192,6 +200,8 @@ preview for that reason:
 
 ## Cost and cleanup
 
-A trap runs `microvm terminate` when the script exits. The VM goes away after a failure too.
+A trap runs `microvm terminate` when the script exits. The VM goes away after a failure too,
+including a launch that fails after it creates the VM. The trap also deletes the host's copy of
+the Bedrock API key.
 The image stays, keyed to its build inputs, because AWS bills its snapshot for at least one week.
 Delete old images with `aws lambda-microvms delete-microvm-image`.

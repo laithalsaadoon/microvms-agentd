@@ -5,12 +5,19 @@ run.sh runs this twice: once directly as uid 1000, where docs/TRUST.md says the 
 role's credentials are reachable, and once as the agent of box/probe-box.toml, inside the box.
 It prints status lines and error names only, never a token or a credential.
 
+Outside the box it only reports, and exits 0. Inside the box (probe-box.toml sets
+PROBE_WHERE=inside) it is a check, and exits 1 unless both paths fail the way the policy says
+they should: the raw connect gets no route, and the egress gateway refuses the token PUT with
+one of policy.dw's metadata rules. A refusal by Box's default deny alone fails the check too,
+because it means those rules are gone.
+
 It speaks HTTP over a plain socket, so inside the box it needs only the interpreter's _socket
 module: urllib would pull in hashlib and OpenSSL, which probe-box.toml does not grant.
 """
 
 import os
 import socket
+import sys
 from urllib.parse import urlsplit
 
 MMDS = "169.254.169.254"
@@ -23,16 +30,25 @@ TOKEN_PUT = (
 )
 
 
-def raw_socket() -> str:
+# The rules in box/policy.dw that refuse the metadata service.
+RULES = ("metadata_hosts", "metadata_addresses")
+
+
+def raw_socket() -> tuple[bool, str]:
+    """Open a TCP connection to MMDS. Returns whether it connected, and a status line."""
     try:
         with socket.create_connection((MMDS, 80), timeout=3):
-            return "connected"
+            return True, "connected"
     except OSError as error:
-        return f"refused: {type(error).__name__}: {error.strerror or error}"
+        return False, f"refused: {type(error).__name__}: {error.strerror or error}"
 
 
-def token_put(proxy: str | None) -> str:
-    """PUT /latest/api/token, directly or through an HTTP proxy, and summarize the reply."""
+def token_put(proxy: str | None) -> tuple[bool, str, str]:
+    """PUT /latest/api/token, directly or through an HTTP proxy.
+
+    Returns whether a token was issued, the policy rule that refused it ("" when none did),
+    and a status line.
+    """
     if proxy:
         parts = urlsplit(proxy)
         address = (parts.hostname, parts.port or 80)
@@ -59,19 +75,40 @@ def token_put(proxy: str | None) -> str:
             while len(body) < length and (chunk := conn.recv(4096)):
                 body += chunk
     except OSError as error:
-        return f"refused: {type(error).__name__}: {error.strerror or error}"
+        return False, "", f"refused: {type(error).__name__}: {error.strerror or error}"
     status = lines[0]
     if status.split()[1:2] == ["200"]:
-        return f"{status} (token issued, not printed)"
+        return True, "", f"{status} (token issued, not printed)"
     marker = next(
         (h for h in lines[1:] if h.lower().startswith("x-strands-box-egress")), ""
     )
     text = body.decode(errors="replace").strip().splitlines()
-    return f"{status} {marker}: {text[0][:240] if text else ''}"
+    first = text[0][:240] if text else ""
+    rule = ""
+    if "refused" in marker:
+        rule = next((r for r in RULES if f"[policy: {r}]" in first), "")
+    return False, rule, f"{status} {marker}: {first}"
 
 
+inside = os.environ.get("PROBE_WHERE") == "inside"
+where = "inside the box" if inside else "outside the box"
 proxy = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
-where = "inside the box" if proxy else "outside the box"
 via = "the egress gateway" if proxy else "a direct connection"
-print(f"[{where}] raw TCP connect to {MMDS}:80 -> {raw_socket()}")
-print(f"[{where}] IMDSv2 token PUT via {via} -> {token_put(proxy)}")
+connected, line = raw_socket()
+print(f"[{where}] raw TCP connect to {MMDS}:80 -> {line}")
+issued, rule, line = token_put(proxy)
+print(f"[{where}] IMDSv2 token PUT via {via} -> {line}")
+
+if inside:
+    problems = []
+    if connected:
+        problems.append("the raw connect reached MMDS")
+    if not proxy:
+        problems.append("Box set no HTTP_PROXY, so the PUT bypassed the egress gateway")
+    if issued:
+        problems.append("MMDS issued a token")
+    elif not rule:
+        problems.append(f"no rule of {', '.join(RULES)} refused the PUT")
+    for problem in problems:
+        print(f"[{where}] FAIL: {problem}")
+    sys.exit(1 if problems else 0)

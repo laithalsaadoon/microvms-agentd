@@ -7,11 +7,11 @@
 # aarch64 alone. Lambda MicroVMs run on Graviton, so the guest is that target. This script
 # builds the three binaries `box run` needs side by side, from a pinned commit, into .box-bin/.
 #
-# On an x86_64 host it cross-compiles with cargo-zigbuild and zig, which also pins the glibc
-# floor: a binary linked on Ubuntu 22.04 needs GLIBC_2.35, which AL2023 lacks. On an aarch64
-# AL2023 host plain cargo builds the same binaries.
+# It builds with cargo-zigbuild and zig on every host, x86_64 or aarch64, because zig pins the
+# glibc the binaries link against: a binary linked against the host's own glibc on Ubuntu 22.04
+# needs GLIBC_2.35, which AL2023 lacks, and fails to load in the guest.
 #
-# Needs: git, rustup. On x86_64 also: zig and cargo-zigbuild (`cargo install cargo-zigbuild`).
+# Needs: git, rustup, zig, and cargo-zigbuild (`cargo install cargo-zigbuild`).
 set -euo pipefail
 
 BOX_REPO="${BOX_REPO:-https://github.com/strands-agents/box.git}"
@@ -30,16 +30,15 @@ git -C "$SRC" checkout --quiet --detach "$BOX_COMMIT"
 
 cd "$SRC"
 TOOLCHAIN=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
+# Box's own toolchain, whatever the caller's environment says: inside this repo mise exports
+# RUSTUP_TOOLCHAIN for the repo's Rust, which would win over Box's rust-toolchain.toml and lack
+# the aarch64 target installed below.
+export RUSTUP_TOOLCHAIN="$TOOLCHAIN"
 rustup toolchain install "$TOOLCHAIN" --profile minimal >/dev/null
 rustup target add "$TARGET" --toolchain "$TOOLCHAIN" >/dev/null
 
-PACKAGES=(-p strands-box -p strands-box-containment)
-if [ "$(uname -m)" = "aarch64" ]; then
-  cargo build --release --target "$TARGET" "${PACKAGES[@]}"
-else
-  # The `.2.34` suffix is cargo-zigbuild's glibc pin: link against AL2023's glibc.
-  cargo zigbuild --release --target "$TARGET.2.34" "${PACKAGES[@]}"
-fi
+# The `.2.34` suffix is cargo-zigbuild's glibc pin: link against AL2023's glibc.
+cargo zigbuild --release --target "$TARGET.2.34" -p strands-box -p strands-box-containment
 
 mkdir -p "$OUT"
 for bin in strands-box strands-box-sock-alias strands-box-contain-trampoline; do
