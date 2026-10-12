@@ -3132,6 +3132,38 @@ mod tests {
         );
     }
 
+    /// **AGENTD-22, AGENTD-24.** Through the real handler, a default spelled as digits runs as
+    /// the row of that uid, with its identity, and digits no row carries are refused naming
+    /// the variable and the missing row, where a request's own digits would run.
+    #[tokio::test]
+    async fn a_numeric_default_runs_as_its_row_and_one_with_no_row_is_refused() {
+        let probe = "echo \"$(id -u) $(id -g) $HOME $USER\"";
+        let uid = own_id("-u").to_string();
+        let (state, _dir) = guest_with_default(&[], &[], Some(&uid));
+        let mut request = req("default-digits", &[probe]);
+        request.shell = true.into();
+        let outcome = started(&state, request).await;
+        assert_eq!(
+            outcome.stdout.trim(),
+            format!("{} {} /home/tester tester", own_id("-u"), own_id("-g"))
+        );
+
+        let (state, dir) = guest_with_default(&[], &[], Some("4242424"));
+        let marker = dir.path().join("ran");
+        let mut request = req(
+            "default-digits-no-row",
+            &[&format!("touch {}", marker.display())],
+        );
+        request.shell = true.into();
+        let detail = refused(&state, request, "unknown_user", &marker).await;
+        assert!(
+            detail.contains("\"4242424\"")
+                && detail.contains("AGENTD_DEFAULT_USER")
+                && detail.contains("needs a passwd row"),
+            "{detail}"
+        );
+    }
+
     /// **AGENTD-23.** A user the start names wins over the default. The default here is an
     /// account this non-root test cannot become (uid 65534), so a daemon that applied it
     /// would fail the spawn; naming `tester` runs as `tester`, by name and by uid.

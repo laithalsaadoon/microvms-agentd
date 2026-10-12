@@ -61,7 +61,120 @@ guard = "exec_start::tests::a_default_that_names_nobody_is_refused_naming_the_va
 run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec_start::tests::a_default_that_names_nobody_is_refused_naming_the_variable"]
 expect = "test-failed"
 suite = "rust"
-transform = { file = "crates/agentd/src/exec_start.rs", replace = "            .map(Some)\n            .map_err(|_| {\n", with = "            .map(Some)\n            .or(Ok::<_, Rejection>(None))\n            .map_err(|_| {\n" }
+transform = { file = "crates/agentd/src/exec_start.rs", replace = "            Err(why) => Err(Rejection::new(\n                ERROR_UNKNOWN_USER,\n                format!(\"the request names no user, and {why}\"),\n            )),\n", with = "            Err(_) => Ok(None),\n" }
+
+# AGENTD-22: an all-digit default resolved as a request's digits are, which keeps the daemon's
+# gid 0 for a uid with a row (the review finding on #600: `uid=1000(agent) gid=0(root)`).
+[[fault]]
+id = "default-user-numeric-keeps-daemon-gid"
+guard = "exec_start::tests::a_request_that_names_no_user_resolves_the_default_as_its_user"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec_start::tests::a_request_that_names_no_user_resolves_the_default_as_its_user"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/exec_start.rs", replace = "                row: Some(row),\n                primary_gid: true,\n            })),\n", with = "                row: Some(row),\n                primary_gid: row.name == name,\n            })),\n" }
+
+[[fault]]
+id = "default-user-numeric-keeps-daemon-gid-fuzz"
+guard = "exec_start_fuzz::start_resolution"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec_start_fuzz::start_resolution"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/exec_start.rs", replace = "                row: Some(row),\n                primary_gid: true,\n            })),\n", with = "                row: Some(row),\n                primary_gid: row.name == name,\n            })),\n" }
+
+# AGENTD-24: an all-digit default with no row run as a bare uid, as a request's digits are.
+[[family]]
+guard = "exec_start::tests::a_default_that_names_nobody_is_refused_naming_the_variable"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec_start::tests::a_default_that_names_nobody_is_refused_naming_the_variable"]
+expect = "test-failed"
+suite = "rust"
+
+[[family.fault]]
+id = "default-user-digits-without-row-run"
+transform = { file = "crates/agentd/src/exec_start.rs", replace = "        (None, Some(name)) => match default_user_row(name, rows) {\n", with = "        (None, Some(name)) if digits(name).is_some() => {\n            resolve_user(&NameOrId::Name(name.to_string()), rows).map(Some)\n        }\n        (None, Some(name)) => match default_user_row(name, rows) {\n" }
+
+[[fault]]
+id = "default-user-digits-without-row-run-handler"
+guard = "exec::tests::a_numeric_default_runs_as_its_row_and_one_with_no_row_is_refused"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec::tests::a_numeric_default_runs_as_its_row_and_one_with_no_row_is_refused"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/exec_start.rs", replace = "        (None, Some(name)) => match default_user_row(name, rows) {\n", with = "        (None, Some(name)) if digits(name).is_some() => {\n            resolve_user(&NameOrId::Name(name.to_string()), rows).map(Some)\n        }\n        (None, Some(name)) => match default_user_row(name, rows) {\n" }
+
+# Uploads under the default user (the second review finding on #600): each entry an upload
+# creates belongs to the default user's row, what existed keeps its owner, and a default with
+# no row refuses the upload. The fs tests run unprivileged, so a chown to root is the EPERM
+# that shows a chown happened.
+[[fault]]
+id = "upload-owner-dropped-at-the-tar-route"
+guard = "fs::tests::the_routes_give_new_entries_the_default_users_row"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "fs::tests::the_routes_give_new_entries_the_default_users_row"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/fs.rs", replace = "        extract_into(&root, spool, caps, &guard, owner).map(|n| (root, n))\n", with = "        extract_into(&root, spool, caps, &guard, owner.and(None)).map(|n| (root, n))\n" }
+
+[[fault]]
+id = "upload-under-a-default-with-no-row-proceeds"
+guard = "fs::tests::an_upload_under_a_default_with_no_row_is_refused_before_anything_lands"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "fs::tests::an_upload_under_a_default_with_no_row_is_refused_before_anything_lands"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/fs.rs", replace = "        Err(why) => {\n            let detail = format!(", with = "        Err(_) if name.is_empty() || !name.is_empty() => Ok(None),\n        Err(why) => {\n            let detail = format!(" }
+
+[[family]]
+guard = "fs::tests::an_upload_gives_each_entry_it_creates_the_owner"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "fs::tests::an_upload_gives_each_entry_it_creates_the_owner"]
+expect = "test-failed"
+suite = "rust"
+
+[[family.fault]]
+id = "upload-new-directories-keep-roots-owner"
+transform = { file = "crates/agentd/src/fs.rs", replace = "            if created {\n                self.own(current.as_fd(), None)\n", with = "            if created && self.owner.is_none() {\n                self.own(current.as_fd(), None)\n" }
+
+[[family.fault]]
+id = "upload-new-files-keep-roots-owner"
+transform = { file = "crates/agentd/src/fs.rs", replace = "        self.own(fd.as_fd(), previous)\n", with = "        self.own(fd.as_fd(), previous.or(Some(Owner { uid: u32::MAX, gid: u32::MAX })))\n" }
+
+[[family.fault]]
+id = "upload-new-symlinks-keep-roots-owner"
+transform = { file = "crates/agentd/src/fs.rs", replace = "        if self.owner.is_some() {\n            let link = Self::open_link(", with = "        if self.owner.is_none() {\n            let link = Self::open_link(" }
+
+[[family.fault]]
+id = "upload-new-root-parents-keep-roots-owner"
+transform = { file = "crates/agentd/src/fs.rs", replace = "        if created {\n            owner.apply(current.as_fd())?;\n", with = "        if created && owner.uid == u32::MAX {\n            owner.apply(current.as_fd())?;\n" }
+
+[[fault]]
+id = "upload-replaced-entry-takes-the-default"
+guard = "fs::tests::an_upload_leaves_what_already_existed_its_owner"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "fs::tests::an_upload_leaves_what_already_existed_its_owner"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/fs.rs", replace = "            Some(owner) => previous.unwrap_or(owner).apply(fd),\n", with = "            Some(owner) => previous.and(Some(owner)).unwrap_or(owner).apply(fd),\n" }
+
+[[fault]]
+id = "upload-symlink-chown-takes-whatever-the-name-holds"
+guard = "fs::tests::a_symlinks_chown_opens_the_link_itself"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "fs::tests::a_symlinks_chown_opens_the_link_itself"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/fs.rs", replace = "        if kind == SFlag::S_IFLNK {\n", with = "        if kind == SFlag::S_IFLNK || kind != SFlag::S_IFLNK {\n" }
+
+[[fault]]
+id = "file-write-gives-a-new-file-no-owner"
+guard = "fs::tests::a_file_write_gives_the_owner_only_a_file_it_creates"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "fs::tests::a_file_write_gives_the_owner_only_a_file_it_creates"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/fs.rs", replace = "            if let (true, Some(owner)) = (created, owner)\n", with = "            if let (true, Some(owner)) = (created && owner.is_none(), owner)\n" }
+
+# The model's AGENTD-22 property: an all-digit default with a row resolved as a request's digits
+# are, a bare uid in the daemon's group.
+[[fault]]
+id = "model-exec-start-numeric-default-as-request"
+guard = "exec_start::tests::the_specified_daemon_satisfies_every_property"
+run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "exec_start::tests::the_specified_daemon_satisfies_every_property"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/model/src/exec_start.rs", replace = "            DefaultUser::NameKnown | DefaultUser::DigitsWithRow => Some(UserReq::NameKnown),\n", with = "            DefaultUser::NameKnown => Some(UserReq::NameKnown),\n            DefaultUser::DigitsWithRow => Some(UserReq::IdWithRow),\n" }
 
 # An empty or non-UTF-8 value read as unset, which would run every workload as root.
 [[fault]]

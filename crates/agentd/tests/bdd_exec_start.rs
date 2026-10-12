@@ -214,6 +214,13 @@ async fn default_user(world: &mut Daemon, name: String) {
     world.boot(Some(name)).await;
 }
 
+/// [`default_user`] with the default spelled as this process's uid, which the background's
+/// "tester" row carries.
+#[given("the image sets AGENTD_DEFAULT_USER to this process's uid")]
+async fn default_user_uid(world: &mut Daemon) {
+    world.boot(Some(own("-u"))).await;
+}
+
 #[given(
     expr = "the guest's passwd also lists {string} with this process's uid and gid and home {string}"
 )]

@@ -35,8 +35,9 @@
 //! The guest's databases are reduced to the cases that behave differently: a user given as
 //! an integer with and without a passwd row, a name that resolves, a name that does not, and
 //! an all-digit string with no row (read as a uid, the way `docker exec -u 1000` reads it).
-//! The image's default user is always a string, so it takes the three string cases, or is
-//! unset; the daemon reads it once at startup, so the model fixes it at [`Action::Boot`].
+//! The image's default user is always a string, and resolves only to a passwd row: a name
+//! with or without one, or digits with or without a row of that uid, or unset. The daemon
+//! reads it once at startup, so the model fixes it at [`Action::Boot`].
 //!
 //! # Every always-property has a sometimes-property beside it
 //!
@@ -169,7 +170,8 @@ pub enum UserReq {
     DigitsNoRow,
 }
 
-/// The image's `AGENTD_DEFAULT_USER`: unset, or a string, reduced like a string `user`.
+/// The image's `AGENTD_DEFAULT_USER`: unset, or a string, reduced to the cases that behave
+/// differently.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum DefaultUser {
     /// Not set: a request that names no user runs as the daemon's own user.
@@ -178,27 +180,48 @@ pub enum DefaultUser {
     NameKnown,
     /// A name with no row, not all digits.
     NameUnknown,
-    /// All digits naming no row: a uid.
+    /// All digits, the uid of a passwd row.
+    DigitsWithRow,
+    /// All digits, the uid of no row.
     DigitsNoRow,
 }
 
 impl DefaultUser {
     /// Every default the model boots with.
-    pub const ALL: [DefaultUser; 4] = [
+    pub const ALL: [DefaultUser; 5] = [
         DefaultUser::Unset,
         DefaultUser::NameKnown,
         DefaultUser::NameUnknown,
+        DefaultUser::DigitsWithRow,
         DefaultUser::DigitsNoRow,
     ];
 
-    /// The `user` a request would have to send to be resolved the same way, or `None` when
-    /// the default is unset.
+    /// Whether the specification resolves this default to a passwd row, by its name or by
+    /// the uid its digits spell. A set default without one is refused (AGENTD-24).
+    pub fn has_row(self) -> bool {
+        matches!(self, DefaultUser::NameKnown | DefaultUser::DigitsWithRow)
+    }
+
+    /// The `user` a request would have to send to be resolved the same way under the
+    /// specification, or `None` when the default is unset. A default with a row is that
+    /// row's name, digits included, so it takes the row's primary gid (AGENTD-22); one with
+    /// none is a name nobody has (AGENTD-24).
     pub fn as_request(self) -> Option<UserReq> {
         match self {
             DefaultUser::Unset => None,
-            DefaultUser::NameKnown => Some(UserReq::NameKnown),
-            DefaultUser::NameUnknown => Some(UserReq::NameUnknown),
+            DefaultUser::NameKnown | DefaultUser::DigitsWithRow => Some(UserReq::NameKnown),
+            DefaultUser::NameUnknown | DefaultUser::DigitsNoRow => Some(UserReq::NameUnknown),
+        }
+    }
+
+    /// The `user` the same string would be in a request: digits are a uid, with a row or
+    /// without, which keeps the daemon's group. [`Behavior::DefaultReadAsRequestUser`]
+    /// resolves the default this way.
+    fn as_request_string(self) -> Option<UserReq> {
+        match self {
+            DefaultUser::DigitsWithRow => Some(UserReq::IdWithRow),
             DefaultUser::DigitsNoRow => Some(UserReq::DigitsNoRow),
+            default => default.as_request(),
         }
     }
 }
@@ -442,6 +465,8 @@ enum Defaulting {
     OverridesRequest,
     /// As specified, except a default that names nobody falls back to the daemon's user.
     UnknownRunsAsDaemon,
+    /// As a request's `user` string: digits are a bare uid that keeps the daemon's group.
+    AsRequestString,
 }
 
 /// Which layer order a daemon uses.
@@ -465,7 +490,10 @@ fn plan(
 ) -> Result<Child, Code> {
     // The user to resolve, and whose it is. The specification is the request's own, then the
     // default's, then the daemon's.
-    let default = world.default_user.as_request();
+    let default = match defaulting {
+        Defaulting::AsRequestString => world.default_user.as_request_string(),
+        _ => world.default_user.as_request(),
+    };
     let (account, user) = match (request.user, default, defaulting) {
         (_, Some(default), Defaulting::OverridesRequest) => (Account::Default, default),
         (UserReq::Absent, Some(_), Defaulting::Ignored) => (Account::Daemon, UserReq::Absent),
@@ -562,6 +590,9 @@ pub enum Behavior {
     /// Runs a request that names no user as the daemon when the default names nobody: the
     /// silent fallback to root an image author would not see.
     UnknownDefaultRunsAsDaemon,
+    /// Resolves the default as the same string in a request's `user`: an all-digit default
+    /// runs as a bare uid in the daemon's group 0, with a row or without one.
+    DefaultReadAsRequestUser,
 }
 
 impl Behavior {
@@ -609,6 +640,7 @@ impl Behavior {
             Behavior::DefaultIgnored => Defaulting::Ignored,
             Behavior::DefaultOverridesRequest => Defaulting::OverridesRequest,
             Behavior::UnknownDefaultRunsAsDaemon => Defaulting::UnknownRunsAsDaemon,
+            Behavior::DefaultReadAsRequestUser => Defaulting::AsRequestString,
             _ => Defaulting::Specified,
         };
         plan(
@@ -1116,25 +1148,21 @@ impl Model for ExecStart {
             ),
             // ── AGENTD-22 ─────────────────────────────────────────────────────
             //
-            // A default that names nobody never starts, which is AGENTD-24's to say.
+            // A default with no row never starts, which is AGENTD-24's to say. One with a row
+            // runs as that row however the image spelled it: its uid, its primary gid unless
+            // the request names a group, and its identity.
             Property::<Self>::always(
                 "AGENTD-22 a request that names no user runs as the default user",
                 |_, s| match started(s) {
                     Some((r, c)) if r.user == UserReq::Absent => match s.default_user {
                         DefaultUser::Unset => c.account == Account::Daemon && c.uid == Uid::Daemon,
-                        DefaultUser::NameKnown => {
+                        default if default.has_row() => {
                             c.account == Account::Default
                                 && c.uid == Uid::Row
                                 && (r.group != GroupReq::Absent || c.gid == Gid::RowPrimary)
                                 && c.env.get(Key::User) == Some(Source::Passwd)
                         }
-                        DefaultUser::DigitsNoRow => {
-                            c.account == Account::Default
-                                && c.uid == Uid::Requested
-                                && (r.group != GroupReq::Absent || c.gid == Gid::Daemon)
-                                && c.env.get(Key::User).is_none()
-                        }
-                        DefaultUser::NameUnknown => true,
+                        _ => true,
                     },
                     _ => true,
                 },
@@ -1151,7 +1179,7 @@ impl Model for ExecStart {
                 "AGENTD-22 witness: a request that names no user runs as an all-digit default",
                 |_, s| {
                     started(s).is_some_and(|(r, _)| {
-                        r.user == UserReq::Absent && s.default_user == DefaultUser::DigitsNoRow
+                        r.user == UserReq::Absent && s.default_user == DefaultUser::DigitsWithRow
                     })
                 },
             ),
@@ -1173,12 +1201,15 @@ impl Model for ExecStart {
                 },
             ),
             // ── AGENTD-24 ─────────────────────────────────────────────────────
+            // A default with no row, digits included: a request's same digits would run as a
+            // bare uid, and the default refuses instead.
             Property::<Self>::always(
                 "AGENTD-24 a default that names nobody is refused unknown_user and spawns no child",
                 |_, s| match (&s.request, s.answer) {
                     (Some(r), Some(answer))
                         if r.user == UserReq::Absent
-                            && s.default_user == DefaultUser::NameUnknown =>
+                            && s.default_user != DefaultUser::Unset
+                            && !s.default_user.has_row() =>
                     {
                         answer == Answer::Refused(Code::UnknownUser) && s.child.is_none()
                     }
@@ -1191,6 +1222,16 @@ impl Model for ExecStart {
                     refused(s).is_some_and(|(r, code)| {
                         r.user == UserReq::Absent
                             && s.default_user == DefaultUser::NameUnknown
+                            && code == Code::UnknownUser
+                    })
+                },
+            ),
+            Property::<Self>::sometimes(
+                "AGENTD-24 witness: an all-digit default with no row is refused",
+                |_, s| {
+                    refused(s).is_some_and(|(r, code)| {
+                        r.user == UserReq::Absent
+                            && s.default_user == DefaultUser::DigitsNoRow
                             && code == Code::UnknownUser
                     })
                 },
@@ -1366,8 +1407,33 @@ mod tests {
             )
             .into_actions();
         assert!(
-            path.contains(&Action::Boot(DefaultUser::NameUnknown)),
+            path.contains(&Action::Boot(DefaultUser::NameUnknown))
+                || path.contains(&Action::Boot(DefaultUser::DigitsNoRow)),
             "the fallback needs a default that names nobody, got {path:?}"
+        );
+    }
+
+    /// **AGENTD-22, AGENTD-24.** A default read as a request's `user` string runs an
+    /// all-digit default as a bare uid: in the daemon's group 0 when the uid has a row, and
+    /// at all when it has none.
+    #[test]
+    fn a_default_read_as_a_request_string_keeps_the_daemons_group() {
+        let checker = checked(Behavior::DefaultReadAsRequestUser);
+        let path = checker
+            .assert_any_discovery("AGENTD-22 a request that names no user runs as the default user")
+            .into_actions();
+        assert!(
+            path.contains(&Action::Boot(DefaultUser::DigitsWithRow)),
+            "the daemon's group needs an all-digit default with a row, got {path:?}"
+        );
+        let path = checker
+            .assert_any_discovery(
+                "AGENTD-24 a default that names nobody is refused unknown_user and spawns no child",
+            )
+            .into_actions();
+        assert!(
+            path.contains(&Action::Boot(DefaultUser::DigitsNoRow)),
+            "the start needs an all-digit default with no row, got {path:?}"
         );
     }
 
@@ -1472,6 +1538,42 @@ mod tests {
         assert_eq!(
             specified(&own, &nobody).map(|child| child.account),
             Ok(Account::Requested)
+        );
+
+        // Digits the default spells are the row of that uid, primary gid and identity
+        // included, where a request's digits keep the daemon's group; with no row of that uid
+        // the default is refused, where a request's digits run as a bare uid.
+        let numbered = World {
+            default_user: DefaultUser::DigitsWithRow,
+            ..world
+        };
+        let child = specified(&base, &numbered).expect("starts");
+        assert_eq!(
+            (child.account, child.uid, child.gid, child.env),
+            (Account::Default, Uid::Row, Gid::RowPrimary, {
+                specified(&named, &world).expect("starts").env
+            })
+        );
+        let numbered_request = Request {
+            user: UserReq::IdWithRow,
+            ..base
+        };
+        assert_eq!(
+            specified(&numbered_request, &world).map(|child| child.gid),
+            Ok(Gid::Daemon)
+        );
+        let unnumbered = World {
+            default_user: DefaultUser::DigitsNoRow,
+            ..world
+        };
+        assert_eq!(specified(&base, &unnumbered), Err(Code::UnknownUser));
+        let digits_request = Request {
+            user: UserReq::DigitsNoRow,
+            ..base
+        };
+        assert_eq!(
+            specified(&digits_request, &unnumbered).map(|child| child.uid),
+            Ok(Uid::Requested)
         );
 
         // Flag set: image < passwd < launch < request.

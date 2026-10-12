@@ -65,7 +65,25 @@
 //! resolution that would leave the root stops with `EXDEV`. Both become a 400 that
 //! names the member. The daemon no longer has to reason about whether a redirect is
 //! safe, because a redirected write cannot happen.
+//!
+//! # Who owns what an upload creates
+//!
+//! The daemon writes as root, so without `AGENTD_DEFAULT_USER` every entry an upload creates
+//! is root's, as it always was. With it set, each entry `PUT /v1/fs/tar` or
+//! `PUT /v1/fs/file` creates, parent directories included, is owned by the default user's
+//! uid and primary gid, resolved by the rule a start that names no user uses
+//! (`exec_start::default_user_row`), so the user a nameless exec runs as can write the tree
+//! an upload made for it. An entry that was already there keeps its owner: an existing
+//! directory, a file `PUT /v1/fs/file` truncates, and a name the archive replaces, whose new
+//! entry takes the old one's owner. A hard link is a name for an inode that already exists,
+//! so it changes no owner. A default with no passwd row refuses the upload with
+//! `400 unknown_user` before anything is written.
+//!
+//! Each chown goes through a descriptor of the entry itself, never a path: the open file,
+//! or a directory or symlink opened in its confined parent without following a symlink. A
+//! name swapped between the create and the chown can't move the chown onto another file.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -75,19 +93,22 @@ use std::path::{Component, Path, PathBuf};
 
 use nix::errno::Errno;
 use nix::fcntl::{AT_FDCWD, AtFlags, OFlag, OpenHow, ResolveFlag, openat2};
-use nix::sys::stat::{FchmodatFlags, Mode, fchmodat, mkdirat};
-use nix::unistd::{UnlinkatFlags, linkat, symlinkat, unlinkat};
+use nix::sys::stat::{FchmodatFlags, Mode, SFlag, fchmodat, fstat, fstatat, mkdirat};
+use nix::unistd::{Gid, Uid, UnlinkatFlags, fchownat, linkat, symlinkat, unlinkat};
 
+use axum::Json;
 use axum::body::Body;
 use axum::extract::{Request, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use futures_util::TryStreamExt;
+use protocol::exec::{ERROR_UNKNOWN_USER, ErrorBody};
 use tar::EntryType;
 use tokio_util::io::{ReaderStream, StreamReader};
 
 use crate::disk::{self, CopyError};
+use crate::exec_start::{default_user_row, parse_passwd, read_database};
 use crate::state::AppState;
 
 /// The two typed shapes in this module, re-exported from their original paths. The
@@ -121,6 +142,116 @@ fn insufficient_storage(path: &Path, reading: disk::Reading) -> Response {
         ),
     )
         .into_response()
+}
+
+/// The owner of an entry an upload creates: the image's default user's uid and primary gid.
+/// `None` in place of one, throughout this module, leaves an entry the daemon's, which is
+/// root.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct Owner {
+    uid: u32,
+    gid: u32,
+}
+
+impl Owner {
+    /// Gives the entry `fd` refers to this owner. `fd` may be `O_PATH`: with an empty path
+    /// and `AT_EMPTY_PATH`, `fchownat` changes the descriptor's own inode, a symlink's
+    /// included.
+    fn apply(self, fd: BorrowedFd<'_>) -> Result<(), Errno> {
+        fchownat(
+            fd,
+            "",
+            Some(Uid::from_raw(self.uid)),
+            Some(Gid::from_raw(self.gid)),
+            AtFlags::AT_EMPTY_PATH,
+        )
+    }
+}
+
+/// The owner of what this upload creates, or the detail of the `400 unknown_user` that
+/// refuses it.
+///
+/// Resolved at each upload from the guest's `/etc/passwd`, the way a start resolves the
+/// default, so a user an earlier exec created owns the next upload. A default with no row
+/// is refused here, before the body is read, because extracting it as root would leave
+/// the default user a tree it can't write. The `Err` is the detail rather than a
+/// `Response` so the variant stays small (clippy's `result_large_err`);
+/// [`unknown_default_user`] builds the answer.
+fn upload_owner(state: &AppState) -> Result<Option<Owner>, String> {
+    let config = state.config();
+    let Some(name) = config.default_user.as_deref() else {
+        return Ok(None);
+    };
+    let rows = parse_passwd(&read_database(&config.passwd_path));
+    match default_user_row(name, &rows) {
+        Ok(row) => Ok(Some(Owner {
+            uid: row.uid,
+            gid: row.gid,
+        })),
+        Err(why) => {
+            let detail = format!("an upload's new entries belong to the default user, and {why}");
+            Err(detail)
+        }
+    }
+}
+
+/// The `400 unknown_user` that refuses an upload under a default with no passwd row. The
+/// body is the exec routes' JSON `ErrorBody`, since the slug is theirs, where this module's
+/// other refusals are plain text.
+fn unknown_default_user(detail: String) -> Response {
+    tracing::warn!(detail, "upload refused");
+    (
+        StatusCode::BAD_REQUEST,
+        Json(ErrorBody {
+            error: Cow::Borrowed(ERROR_UNKNOWN_USER),
+            detail,
+        }),
+    )
+        .into_response()
+}
+
+/// Opens the directory `path`, creating each missing component as `create_dir_all` would,
+/// and gives each component it creates to `owner`.
+///
+/// Walked a component at a time from `/`, or from the working directory for a relative
+/// path, each step relative to the descriptor of the last. A component that already exists
+/// is followed wherever it leads, symlinks included, as `create_dir_all` follows them,
+/// because the path is the caller's. A component this walk creates is opened with
+/// [`Confined::RESOLVE`] and chowned through that descriptor, so a symlink put in its
+/// place after the `mkdirat` stops the walk instead of taking the chown.
+fn open_dirs_owned(path: &Path, owner: Owner) -> io::Result<OwnedFd> {
+    let open = |dir: BorrowedFd<'_>, name: &OsStr, resolve: ResolveFlag| {
+        let how = OpenHow::new().flags(Confined::DIRECTORY).resolve(resolve);
+        openat2(dir, name, how)
+    };
+    let start = if path.is_absolute() { "/" } else { "." };
+    let mut current = open(
+        AT_FDCWD,
+        OsStr::new(start),
+        ResolveFlag::RESOLVE_NO_MAGICLINKS,
+    )?;
+    for component in path.components() {
+        let name = match component {
+            Component::Normal(name) => name,
+            Component::ParentDir => OsStr::new(".."),
+            Component::RootDir | Component::CurDir | Component::Prefix(_) => continue,
+        };
+        let created = match mkdirat(&current, name, Mode::from_bits_truncate(0o777)) {
+            Ok(()) => true,
+            Err(Errno::EEXIST) => false,
+            Err(errno) => return Err(errno.into()),
+        };
+        let resolve = if created {
+            Confined::RESOLVE
+        } else {
+            ResolveFlag::RESOLVE_NO_MAGICLINKS
+        };
+        current = open(current.as_fd(), name, resolve)?;
+        if created {
+            owner.apply(current.as_fd())?;
+        }
+    }
+    Ok(current)
 }
 
 /// Why an archive or member was refused.
@@ -296,6 +427,9 @@ fn resolve_member(root: &Path, path: &Path) -> Landing {
 /// read from or written to even if the descriptor leaks somewhere it should not.
 struct Confined {
     root: OwnedFd,
+    /// Who owns each entry the extraction creates (see the module comment). `None` leaves
+    /// them the daemon's.
+    owner: Option<Owner>,
 }
 
 impl Confined {
@@ -329,7 +463,19 @@ impl Confined {
         .union(ResolveFlag::RESOLVE_NO_SYMLINKS)
         .union(ResolveFlag::RESOLVE_NO_MAGICLINKS);
 
-    /// Opens `root`, creating it if it is absent, and holds it.
+    /// The open flags of every directory on a walk: a path for `*at` calls only, which
+    /// fails unless the name is a directory.
+    const DIRECTORY: OFlag = OFlag::O_CLOEXEC
+        .union(OFlag::O_PATH)
+        .union(OFlag::O_DIRECTORY);
+
+    /// The open flags of a symlink opened as itself, for its chown ([`Confined::open_link`]).
+    const LINK: OFlag = OFlag::O_CLOEXEC
+        .union(OFlag::O_PATH)
+        .union(OFlag::O_NOFOLLOW);
+
+    /// Opens `root`, creating it if it is absent, and holds it. With an `owner`, each
+    /// directory created on the way to `root` is that owner's ([`open_dirs_owned`]).
     ///
     /// The root itself is opened by absolute path with only
     /// `RESOLVE_NO_MAGICLINKS`, not with [`Self::RESOLVE`]. `RESOLVE_BENEATH`
@@ -347,13 +493,18 @@ impl Confined {
     /// and `File::create` this replaced: falling back would mean the confinement a
     /// caller cannot see silently became the weaker one, and issue #15 is what the
     /// weaker one allows.
-    fn open(root: &Path) -> io::Result<Self> {
-        std::fs::create_dir_all(root)?;
-        let how = OpenHow::new()
-            .flags(OFlag::O_PATH | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC)
-            .resolve(ResolveFlag::RESOLVE_NO_MAGICLINKS);
-        let root = openat2(AT_FDCWD, root, how).map_err(io::Error::from)?;
-        Ok(Self { root })
+    fn open(root: &Path, owner: Option<Owner>) -> io::Result<Self> {
+        let root = match owner {
+            Some(owner) => open_dirs_owned(root, owner)?,
+            None => {
+                std::fs::create_dir_all(root)?;
+                let how = OpenHow::new()
+                    .flags(Self::DIRECTORY)
+                    .resolve(ResolveFlag::RESOLVE_NO_MAGICLINKS);
+                openat2(AT_FDCWD, root, how).map_err(io::Error::from)?
+            }
+        };
+        Ok(Self { root, owner })
     }
 
     /// Opens the single component `name` under `dir` as a directory.
@@ -363,9 +514,7 @@ impl Confined {
     /// the error name which component failed, and a 400 that names the component
     /// is the difference between an operator fixing their tree and re-reading it.
     fn open_dir(&self, dir: BorrowedFd<'_>, name: &OsStr) -> Result<OwnedFd, Errno> {
-        let how = OpenHow::new()
-            .flags(OFlag::O_PATH | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC)
-            .resolve(Self::RESOLVE);
+        let how = OpenHow::new().flags(Self::DIRECTORY).resolve(Self::RESOLVE);
         openat2(dir, name, how)
     }
 
@@ -375,7 +524,8 @@ impl Confined {
     /// not an error: an archive may name the same directory twice, and a partial
     /// extraction that is retried has to converge. The open that follows decides
     /// whether the existing name is usable, and a symlink there fails with
-    /// `ELOOP` rather than being traversed.
+    /// `ELOOP` rather than being traversed. A directory this walk creates is given the
+    /// extraction's owner through that descriptor; one that existed keeps its own.
     fn make_dirs(&self, parts: &[OsString]) -> Result<OwnedFd, WalkError> {
         let mut current = self.root.try_clone().map_err(|err| WalkError {
             component: None,
@@ -386,15 +536,31 @@ impl Confined {
             // replayed by `apply_deferred_modes` after every member has landed.
             // Applying it here is the defect that pass exists to avoid: a 0o500
             // directory blocks the writes of its own children.
-            match mkdirat(&current, part.as_os_str(), Mode::from_bits_truncate(0o777)) {
-                Ok(()) | Err(Errno::EEXIST) => {}
+            let created = match mkdirat(&current, part.as_os_str(), Mode::from_bits_truncate(0o777))
+            {
+                Ok(()) => true,
+                Err(Errno::EEXIST) => false,
                 Err(errno) => return Err(WalkError::at(parts, index, errno)),
-            }
+            };
             current = self
                 .open_dir(current.as_fd(), part)
                 .map_err(|errno| WalkError::at(parts, index, errno))?;
+            if created {
+                self.own(current.as_fd(), None)
+                    .map_err(|errno| WalkError::at(parts, index, errno))?;
+            }
         }
         Ok(current)
+    }
+
+    /// Gives an entry this extraction created its owner: `previous`, the owner of the entry
+    /// it replaced, when there was one, and the extraction's otherwise. Nothing without an
+    /// extraction owner, so an unset default leaves every entry the daemon's.
+    fn own(&self, fd: BorrowedFd<'_>, previous: Option<Owner>) -> Result<(), Errno> {
+        match self.owner {
+            Some(owner) => previous.unwrap_or(owner).apply(fd),
+            None => Ok(()),
+        }
     }
 
     /// Splits `parts` into the parent directory descriptor and the final name.
@@ -428,8 +594,12 @@ impl Confined {
     fn create_file(&self, parts: &[OsString]) -> Result<std::fs::File, WalkError> {
         let (parent, name) = self.parent_of(parts)?;
         let last = parts.len() - 1;
-        self.replace(parent.as_fd(), &name);
+        let previous = self.replace(parent.as_fd(), &name);
         let fd = Self::open_new_file(parent.as_fd(), name.as_os_str())
+            .map_err(|errno| WalkError::at(parts, last, errno))?;
+        // Through the descriptor `O_EXCL` created, which is this file whatever the name
+        // holds by now.
+        self.own(fd.as_fd(), previous)
             .map_err(|errno| WalkError::at(parts, last, errno))?;
         Ok(std::fs::File::from(fd))
     }
@@ -458,9 +628,34 @@ impl Confined {
     fn create_symlink(&self, parts: &[OsString], target: &Path) -> Result<(), WalkError> {
         let (parent, name) = self.parent_of(parts)?;
         let last = parts.len() - 1;
-        self.replace(parent.as_fd(), &name);
+        let previous = self.replace(parent.as_fd(), &name);
         symlinkat(target, parent.as_fd(), name.as_os_str())
-            .map_err(|errno| WalkError::at(parts, last, errno))
+            .map_err(|errno| WalkError::at(parts, last, errno))?;
+        if self.owner.is_some() {
+            let link = Self::open_link(parent.as_fd(), &name)
+                .map_err(|errno| WalkError::at(parts, last, errno))?;
+            self.own(link.as_fd(), previous)
+                .map_err(|errno| WalkError::at(parts, last, errno))?;
+        }
+        Ok(())
+    }
+
+    /// Opens the symlink `name` under `dir` itself, `O_PATH` and without following it, for
+    /// its chown.
+    ///
+    /// The name is opened rather than chowned in place, and the result has to be a
+    /// symlink, because a process that can write `dir` can swap the link for a hard link
+    /// to another file between the `symlinkat` and the chown, and a chown by name would then
+    /// hand that file to the default user. `EEXIST` says the name no longer holds the link.
+    fn open_link(dir: BorrowedFd<'_>, name: &OsStr) -> Result<OwnedFd, Errno> {
+        let how = OpenHow::new().flags(Self::LINK).resolve(Self::RESOLVE);
+        let link = openat2(dir, name, how)?;
+        let kind = SFlag::from_bits_truncate(fstat(&link)?.st_mode) & SFlag::S_IFMT;
+        if kind == SFlag::S_IFLNK {
+            Ok(link)
+        } else {
+            Err(Errno::EEXIST)
+        }
     }
 
     /// Creates a hard link at `parts` pointing at `source`, an archive-root-relative
@@ -479,6 +674,7 @@ impl Confined {
     ) -> Result<(), HardLinkError> {
         let (parent, name) = self.parent_of(parts).map_err(HardLinkError::Dest)?;
         let last = parts.len() - 1;
+        // No chown: the link names an inode that already exists, whose owner it keeps.
         self.replace(parent.as_fd(), &name);
 
         // An empty source is the archive naming the root as a hard-link target.
@@ -524,14 +720,25 @@ impl Confined {
         Ok(current)
     }
 
-    /// Unlinks `name` under `dir`, ignoring every failure.
+    /// Unlinks `name` under `dir`, ignoring every failure, and returns the owner of what
+    /// was there when the extraction gives its entries an owner, so the new entry can keep
+    /// it.
     ///
     /// A file or link member replaces the directory entry before creation, so
     /// other names for an existing inode keep their contents and permissions. Every error is ignored on purpose: the common one is
     /// `ENOENT`, which means there was nothing to replace, and any other means the
-    /// create below fails and reports the real reason.
-    fn replace(&self, dir: BorrowedFd<'_>, name: &OsStr) {
+    /// create below fails and reports the real reason. The owner is read without following
+    /// a symlink, so a replaced link reports its own.
+    fn replace(&self, dir: BorrowedFd<'_>, name: &OsStr) -> Option<Owner> {
+        let previous = self
+            .owner
+            .and_then(|_| fstatat(dir, name, AtFlags::AT_SYMLINK_NOFOLLOW).ok())
+            .map(|stat| Owner {
+                uid: stat.st_uid,
+                gid: stat.st_gid,
+            });
         let _ = unlinkat(dir, name, UnlinkatFlags::NoRemoveDir);
+        previous
     }
 
     /// Applies `mode` to `parts`, without following a symlink at the last component.
@@ -646,10 +853,11 @@ pub fn fuzz_extract(
         probe: disk::available_bytes,
         reserve: 0,
     };
-    extract_into(root, archive, caps, &guard).map_err(|refusal| format!("{refusal:?}"))
+    extract_into(root, archive, caps, &guard, None).map_err(|refusal| format!("{refusal:?}"))
 }
 
-/// Extracts `archive` into `root`, enforcing the data-filter contract.
+/// Extracts `archive` into `root`, enforcing the data-filter contract, with each entry it
+/// creates given to `owner` when there is one (see the module comment).
 ///
 /// Synchronous on purpose: `tar`'s reader is blocking, so callers hand this to
 /// `spawn_blocking` rather than pretending it is async.
@@ -658,17 +866,18 @@ fn extract_into(
     archive: impl Read,
     caps: Caps,
     guard: &disk::Guard,
+    owner: Option<Owner>,
 ) -> Result<u64, Refusal> {
     // The kernel's half of the confinement, held for the whole extraction. Every
     // member below is created through this rather than by absolute path, so a
     // component that turns out to be a symlink stops the write instead of
     // redirecting it. See the module comment.
-    let confined = Confined::open(root)?;
+    let confined = Confined::open(root, owner)?;
 
     let mut ar = tar::Archive::new(archive);
-    // Ownership is dropped for the same reason CPython's `data` filter drops it:
-    // the archive's uid/gid are the packing host's, meaningless here, and honoring
-    // them would need privilege we should not spend.
+    // The archive's ownership is dropped for the same reason CPython's `data` filter
+    // drops it: its uid/gid are the packing host's, meaningless here, and honoring them
+    // would need privilege we should not spend. Who owns an entry is `owner`'s to say.
     ar.set_preserve_permissions(false);
     ar.set_preserve_ownerships(false);
     ar.set_unpack_xattrs(false);
@@ -1195,7 +1404,8 @@ fn sliced_stream(
     })
 }
 
-/// Writes one file. Not confined to a root; see the module comment.
+/// Writes one file. Not confined to a root; see the module comment, which also says who
+/// owns the file and the parents this creates.
 pub async fn write_file(State(state): State<AppState>, request: Request) -> Response {
     let query = match fs_query(&request) {
         Ok(query) => query,
@@ -1222,6 +1432,13 @@ pub async fn write_file(State(state): State<AppState>, request: Request) -> Resp
         },
     };
 
+    // Like the mode, before anything lands: a default user with no passwd row refuses the
+    // write rather than leaving it a root-owned file.
+    let owner = match upload_owner(&state) {
+        Ok(owner) => owner,
+        Err(detail) => return unknown_default_user(detail),
+    };
+
     // Checked before the parent directory is created and before the file is
     // opened, so a refused write leaves nothing behind — not even an empty file
     // where the caller's data was supposed to go. An empty file at the target path
@@ -1230,24 +1447,61 @@ pub async fn write_file(State(state): State<AppState>, request: Request) -> Resp
         return insufficient_storage(&path, reading);
     }
 
-    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty())
-        && let Err(err) = tokio::fs::create_dir_all(parent).await
-    {
-        tracing::warn!(path = %path.display(), %err, "cannot create parent directory");
-        return (StatusCode::INTERNAL_SERVER_ERROR, "cannot create parent").into_response();
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        let created = match owner {
+            None => tokio::fs::create_dir_all(parent).await,
+            Some(owner) => {
+                let parent = parent.to_path_buf();
+                tokio::task::spawn_blocking(move || open_dirs_owned(&parent, owner).map(drop))
+                    .await
+                    .unwrap_or_else(|err| Err(io::Error::other(err)))
+            }
+        };
+        if let Err(err) = created {
+            tracing::warn!(path = %path.display(), %err, "cannot create parent directory");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "cannot create parent").into_response();
+        }
     }
 
-    let mut options = tokio::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    if let Some(mode) = mode {
-        // Set at open, so the file never exists with a wider mode than asked for
-        // even briefly. A separate chmod after writing leaves that window open,
-        // which matters when the file is a credential.
-        options.mode(mode);
-    }
-
-    let mut file = match options.open(&path).await {
-        Ok(file) => file,
+    let options = |create_new: bool| {
+        let mut options = tokio::fs::OpenOptions::new();
+        options.write(true).truncate(true);
+        if create_new {
+            options.create_new(true);
+        } else {
+            options.create(true);
+        }
+        if let Some(mode) = mode {
+            // Set at open, so the file never exists with a wider mode than asked for
+            // even briefly. A separate chmod after writing leaves that window open,
+            // which matters when the file is a credential.
+            options.mode(mode);
+        }
+        options
+    };
+    // With an owner to give, `O_EXCL` first, so the daemon knows whether this write
+    // created the file: one it only truncates keeps its owner.
+    let opened = match owner {
+        None => options(false).open(&path).await.map(|file| (file, false)),
+        // The usual failure is that the file exists, which the plain open truncates; any
+        // other, the plain open meets again and reports.
+        Some(_) => match options(true).open(&path).await {
+            Ok(file) => Ok((file, true)),
+            Err(_) => options(false).open(&path).await.map(|file| (file, false)),
+        },
+    };
+    let mut file = match opened {
+        Ok((file, created)) => {
+            if let (true, Some(owner)) = (created, owner)
+                && let Err(errno) = owner.apply(file.as_fd())
+            {
+                // The file is new and empty, and nobody was told it exists.
+                let _ = tokio::fs::remove_file(&path).await;
+                tracing::warn!(path = %path.display(), %errno, "cannot give the file its owner");
+                return (StatusCode::INTERNAL_SERVER_ERROR, "cannot set owner").into_response();
+            }
+            file
+        }
         Err(err) => {
             tracing::warn!(path = %path.display(), %err, "cannot open file for write");
             return (StatusCode::INTERNAL_SERVER_ERROR, "cannot write file").into_response();
@@ -1464,6 +1718,13 @@ pub async fn write_tar(State(state): State<AppState>, request: Request) -> Respo
             .into_response();
     }
 
+    // Before the body is spooled, so a default user with no passwd row refuses the upload
+    // without receiving it and before any member lands.
+    let owner = match upload_owner(&state) {
+        Ok(owner) => owner,
+        Err(detail) => return unknown_default_user(detail),
+    };
+
     let caps = Caps {
         max_members: state.config().max_tar_members,
         max_bytes: state.config().max_tar_bytes,
@@ -1494,7 +1755,7 @@ pub async fn write_tar(State(state): State<AppState>, request: Request) -> Respo
     };
 
     let extracted = tokio::task::spawn_blocking(move || {
-        extract_into(&root, spool, caps, &guard).map(|n| (root, n))
+        extract_into(&root, spool, caps, &guard, owner).map(|n| (root, n))
     })
     .await;
 
@@ -1700,7 +1961,7 @@ mod tests {
     ) -> (TempDir, Result<u64, Refusal>) {
         let dir = TempDir::new().expect("tempdir");
         let root = dir.path().join("root");
-        let result = extract_into(&root, archive.as_slice(), caps, &guard);
+        let result = extract_into(&root, archive.as_slice(), caps, &guard, None);
         (dir, result)
     }
 
@@ -1725,7 +1986,7 @@ mod tests {
         std::fs::hard_link(&original, root.join("member")).expect("hard link");
         let archive = Archive::new().file("member", b"replacement bytes").bytes();
         assert_eq!(
-            extract_into(&root, archive.as_slice(), OPEN, &roomy_guard()).unwrap(),
+            extract_into(&root, archive.as_slice(), OPEN, &roomy_guard(), None).unwrap(),
             1
         );
         assert_eq!(std::fs::read(&original).unwrap(), b"original bytes");
@@ -1756,7 +2017,7 @@ mod tests {
             .link(EntryType::Link, "member", "target")
             .bytes();
         assert_eq!(
-            extract_into(&root, archive.as_slice(), OPEN, &roomy_guard()).unwrap(),
+            extract_into(&root, archive.as_slice(), OPEN, &roomy_guard(), None).unwrap(),
             2
         );
         assert_eq!(
@@ -1995,7 +2256,7 @@ mod tests {
         // /tmp would leave nothing to find and would read as a pass.
         let dir = TempDir::new().expect("tempdir");
         let root = dir.path().join("nested/deeper/root");
-        let result = extract_into(&root, archive.as_slice(), OPEN, &roomy_guard());
+        let result = extract_into(&root, archive.as_slice(), OPEN, &roomy_guard(), None);
 
         // 400 naming the member, not a 500. The property tier asserts that every
         // refusal names a member the archive contained, and the member's name here is
@@ -2698,7 +2959,7 @@ mod tests {
     fn a_new_archive_file_refuses_an_occupied_name() {
         let dir = TempDir::new().expect("tempdir");
         std::fs::write(dir.path().join("occupied"), b"original").expect("existing file");
-        let confined = Confined::open(dir.path()).expect("root");
+        let confined = Confined::open(dir.path(), None).expect("root");
         assert_eq!(
             Confined::open_new_file(confined.root.as_fd(), OsStr::new("occupied"))
                 .expect_err("an occupied name is refused"),
@@ -2723,7 +2984,7 @@ mod tests {
         use nix::fcntl::{FcntlArg, FdFlag, fcntl};
 
         let dir = TempDir::new().expect("tempdir");
-        let confined = Confined::open(dir.path()).expect("root");
+        let confined = Confined::open(dir.path(), None).expect("root");
         let fd = Confined::open_new_file(confined.root.as_fd(), OsStr::new("new"))
             .expect("a new file opens");
         let descriptor_flags = FdFlag::from_bits_retain(fcntl(&fd, FcntlArg::F_GETFD).unwrap());
@@ -2731,5 +2992,312 @@ mod tests {
         let mut file = std::fs::File::from(fd);
         file.write_all(b"contents").expect("the file is writable");
         assert_eq!(std::fs::read(dir.path().join("new")).unwrap(), b"contents");
+    }
+
+    // ── ownership under AGENTD_DEFAULT_USER ─────────────────────────────────
+
+    /// The uid and gid of this test process, which it can always chown an entry to.
+    fn own_owner() -> Owner {
+        Owner {
+            uid: nix::unistd::getuid().as_raw(),
+            gid: nix::unistd::getgid().as_raw(),
+        }
+    }
+
+    /// An owner this unprivileged test can't give an entry: root's. A chown to it is
+    /// `EPERM`, so an extraction that chowns an entry fails, and one that leaves every entry
+    /// alone succeeds. These tests run unprivileged, like the exec tests that name uid 65534.
+    const ROOT: Owner = Owner { uid: 0, gid: 0 };
+
+    fn is_eperm(result: &Result<u64, Refusal>) -> bool {
+        matches!(result, Err(Refusal::Io(err)) if err.raw_os_error() == Some(Errno::EPERM as i32))
+    }
+
+    /// Extracts `archive` into an existing root holding nothing, with `owner`.
+    fn extract_owned(archive: Vec<u8>, owner: Owner) -> (TempDir, Result<u64, Refusal>) {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path().join("root");
+        std::fs::create_dir(&root).expect("root");
+        let result = extract_into(&root, archive.as_slice(), OPEN, &roomy_guard(), Some(owner));
+        (dir, result)
+    }
+
+    /// Each kind of entry an archive creates is chowned: a file, a directory member, a
+    /// parent directory the archive only implies, and a symlink, each alone in an existing
+    /// root, and the directories on the way to a root that doesn't exist yet. With an owner
+    /// the process may give, the same archives land.
+    #[test]
+    fn an_upload_gives_each_entry_it_creates_the_owner() {
+        use std::os::unix::fs::MetadataExt;
+        let archives = [
+            ("a file", Archive::new().file("f", b"x").bytes()),
+            ("a directory", Archive::new().dir("d", 0o755).bytes()),
+            (
+                "an implied parent",
+                Archive::new().file("p/f", b"x").bytes(),
+            ),
+            (
+                "a symlink",
+                Archive::new().link(EntryType::Symlink, "s", "f").bytes(),
+            ),
+        ];
+        for (kind, archive) in archives {
+            let (_dir, result) = extract_owned(archive.clone(), ROOT);
+            assert!(is_eperm(&result), "{kind} wasn't chowned: {result:?}");
+            let (dir, result) = extract_owned(archive, own_owner());
+            assert!(result.is_ok(), "{kind}: {result:?}");
+            for entry in std::fs::read_dir(dir.path().join("root")).expect("root") {
+                let meta = entry.expect("entry").metadata().expect("lstat");
+                assert_eq!((meta.uid(), meta.gid()), (own_owner().uid, own_owner().gid));
+            }
+        }
+
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path().join("a/b/root");
+        let empty = Archive::new().bytes();
+        let result = extract_into(&root, empty.as_slice(), OPEN, &roomy_guard(), Some(ROOT));
+        assert!(
+            is_eperm(&result),
+            "the root's new parents weren't chowned: {result:?}"
+        );
+        let result = extract_into(
+            &root,
+            empty.as_slice(),
+            OPEN,
+            &roomy_guard(),
+            Some(own_owner()),
+        );
+        assert!(result.is_ok() && root.is_dir(), "{result:?}");
+        let result = extract_into(&root, empty.as_slice(), OPEN, &roomy_guard(), Some(ROOT));
+        assert!(
+            result.is_ok(),
+            "an existing root keeps its owner: {result:?}"
+        );
+    }
+
+    /// What was already there keeps its owner: an existing directory isn't chowned, a file
+    /// or symlink the archive replaces takes the owner of the entry it replaced, and a hard
+    /// link changes no inode's owner. Under an owner this process can't give, the archive
+    /// lands only if none of them is chowned to it.
+    #[test]
+    fn an_upload_leaves_what_already_existed_its_owner() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path().join("root");
+        std::fs::create_dir_all(root.join("d")).expect("dirs");
+        std::fs::write(root.join("d/f"), b"old").expect("file");
+        std::os::unix::fs::symlink("old-target", root.join("l")).expect("symlink");
+        let archive = Archive::new()
+            .dir("d", 0o755)
+            .file("d/f", b"new")
+            .link(EntryType::Symlink, "l", "d/f")
+            .link(EntryType::Link, "h", "d/f")
+            .bytes();
+        let result = extract_into(&root, archive.as_slice(), OPEN, &roomy_guard(), Some(ROOT));
+        assert_eq!(result.expect("nothing was chowned to root"), 4);
+        assert_eq!(std::fs::read(root.join("l")).expect("link"), b"new");
+        assert_eq!(std::fs::read(root.join("h")).expect("hard link"), b"new");
+    }
+
+    /// A symlink the kernel won't create is refused naming the link, the member's last
+    /// component. This test runs unprivileged: root writes through a 0o555 directory.
+    #[test]
+    fn a_symlink_its_directory_refuses_is_refused_naming_the_link() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path().join("root");
+        std::fs::create_dir_all(root.join("ro")).expect("dirs");
+        std::fs::set_permissions(root.join("ro"), std::fs::Permissions::from_mode(0o555))
+            .expect("read-only");
+        let archive = Archive::new().link(EntryType::Symlink, "ro/s", "x").bytes();
+        let reason = refusal_reason(extract_into(
+            &root,
+            archive.as_slice(),
+            OPEN,
+            &roomy_guard(),
+            None,
+        ));
+        assert!(
+            reason.contains("cannot create under s: directory permissions"),
+            "{reason}"
+        );
+    }
+
+    /// A symlink is chowned through a descriptor of the link itself, and a name that holds
+    /// anything else by the time it's opened is refused, so a hard link swapped in for the
+    /// link can't take the chown.
+    #[test]
+    fn a_symlinks_chown_opens_the_link_itself() {
+        let dir = TempDir::new().expect("tempdir");
+        std::fs::write(dir.path().join("plain"), b"x").expect("file");
+        std::os::unix::fs::symlink("plain", dir.path().join("link")).expect("symlink");
+        let confined = Confined::open(dir.path(), None).expect("root");
+        let link = Confined::open_link(confined.root.as_fd(), OsStr::new("link")).expect("a link");
+        let kind = SFlag::from_bits_truncate(fstat(&link).expect("fstat").st_mode) & SFlag::S_IFMT;
+        assert_eq!(kind, SFlag::S_IFLNK);
+        assert_eq!(
+            Confined::open_link(confined.root.as_fd(), OsStr::new("plain"))
+                .expect_err("a file isn't the link"),
+            Errno::EEXIST
+        );
+    }
+
+    /// A root reached through a symlink the caller named still opens: the components that
+    /// already exist are followed, as `create_dir_all` follows them, and only the ones the
+    /// walk creates are opened without following one.
+    #[test]
+    fn an_owned_root_follows_the_callers_symlinks() {
+        let dir = TempDir::new().expect("tempdir");
+        std::fs::create_dir(dir.path().join("real")).expect("dir");
+        std::os::unix::fs::symlink("real", dir.path().join("via")).expect("symlink");
+        let root = dir.path().join("via/root");
+        let archive = Archive::new().file("f", b"x").bytes();
+        let result = extract_into(
+            &root,
+            archive.as_slice(),
+            OPEN,
+            &roomy_guard(),
+            Some(own_owner()),
+        );
+        assert_eq!(result.expect("extracts"), 1);
+        assert!(dir.path().join("real/root/f").is_file());
+    }
+
+    /// A daemon whose image sets `AGENTD_DEFAULT_USER` to `default`, over a passwd that lists
+    /// root and `me`, this process's own uid and gid.
+    fn defaulted_state(dir: &TempDir, default: &str) -> AppState {
+        let passwd = dir.path().join("passwd");
+        let me = own_owner();
+        std::fs::write(
+            &passwd,
+            format!(
+                "root:x:0:0::/root:/bin/sh\nme:x:{}:{}::/home/me:/bin/sh\n",
+                me.uid, me.gid
+            ),
+        )
+        .expect("passwd");
+        AppState::with_probe(
+            Config {
+                passwd_path: passwd,
+                default_user: Some(default.into()),
+                ..Config::default()
+            },
+            roomy_probe,
+            crate::identity::no_repair(),
+        )
+    }
+
+    fn put(route: &str, path: &Path, body: Vec<u8>) -> Request {
+        axum::http::Request::builder()
+            .method("PUT")
+            .uri(format!("/v1/fs/{route}?path={}", path.display()))
+            .body(Body::from(body))
+            .expect("request")
+    }
+
+    async fn error_body(response: Response) -> serde_json::Value {
+        let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("body");
+        serde_json::from_slice(&body).expect("a JSON error body")
+    }
+
+    /// A default user with no passwd row, a name or digits, refuses a tar upload and a file
+    /// write as `400 unknown_user` naming the variable, as it refuses a start, and before
+    /// anything is written: not the root, not a parent, not the file.
+    #[tokio::test]
+    async fn an_upload_under_a_default_with_no_row_is_refused_before_anything_lands() {
+        for default in ["ghost", "4242"] {
+            let dir = TempDir::new().expect("tempdir");
+            let state = defaulted_state(&dir, default);
+            let root = dir.path().join("tree/root");
+            let archive = Archive::new().file("f", b"x").bytes();
+            let response = write_tar(State(state.clone()), put("tar", &root, archive)).await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let body = error_body(response).await;
+            assert_eq!(body["error"], ERROR_UNKNOWN_USER, "{body}");
+            let detail = body["detail"].as_str().expect("detail");
+            assert!(
+                detail.contains(&format!("{default:?}")) && detail.contains("AGENTD_DEFAULT_USER"),
+                "{detail}"
+            );
+            assert_eq!(
+                detail.contains("needs a passwd row"),
+                default == "4242",
+                "{detail}"
+            );
+
+            let file = dir.path().join("file/new.txt");
+            let response = write_file(State(state), put("file", &file, b"x".to_vec())).await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            assert_eq!(error_body(response).await["error"], ERROR_UNKNOWN_USER);
+            assert!(!dir.path().join("tree").exists() && !dir.path().join("file").exists());
+        }
+    }
+
+    /// The handlers resolve the default to its row and hand that owner to the write: under
+    /// `root`, by name or as `0`, a new entry's chown is the `EPERM` this unprivileged test
+    /// expects, and under its own row everything lands.
+    #[tokio::test]
+    async fn the_routes_give_new_entries_the_default_users_row() {
+        for default in ["root", "0"] {
+            let dir = TempDir::new().expect("tempdir");
+            let state = defaulted_state(&dir, default);
+            let archive = Archive::new().file("f", b"x").bytes();
+            let response = write_tar(
+                State(state.clone()),
+                put("tar", &dir.path().join("t"), archive),
+            )
+            .await;
+            assert_eq!(
+                response.status(),
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "{default}"
+            );
+            let response = write_file(
+                State(state),
+                put("file", &dir.path().join("p/f"), b"x".to_vec()),
+            )
+            .await;
+            assert_eq!(
+                response.status(),
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "{default}"
+            );
+        }
+
+        let dir = TempDir::new().expect("tempdir");
+        let state = defaulted_state(&dir, "me");
+        let archive = Archive::new().file("sub/f", b"tar").bytes();
+        let root = dir.path().join("t");
+        let response = write_tar(State(state.clone()), put("tar", &root, archive)).await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            std::fs::read(root.join("sub/f")).expect("extracted"),
+            b"tar"
+        );
+        let file = dir.path().join("p/q/f");
+        let response = write_file(State(state), put("file", &file, b"file".to_vec())).await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(std::fs::read(&file).expect("written"), b"file");
+    }
+
+    /// A file write chowns only what it creates. A new file it can't give the owner is
+    /// removed and answered 500; an existing file is truncated in place and keeps its owner.
+    #[tokio::test]
+    async fn a_file_write_gives_the_owner_only_a_file_it_creates() {
+        let dir = TempDir::new().expect("tempdir");
+        let state = defaulted_state(&dir, "root");
+        let file = dir.path().join("f");
+        let response = write_file(State(state.clone()), put("file", &file, b"x".to_vec())).await;
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(
+            !file.exists(),
+            "a file that couldn't take its owner is removed"
+        );
+
+        std::fs::write(&file, b"old").expect("existing file");
+        let response = write_file(State(state), put("file", &file, b"new".to_vec())).await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(std::fs::read(&file).expect("written"), b"new");
     }
 }

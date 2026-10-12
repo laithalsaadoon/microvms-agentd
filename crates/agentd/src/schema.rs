@@ -602,7 +602,12 @@ pub const FS_READ_FILE: &[Status] = &[
 ];
 
 pub const FS_WRITE_FILE: &[Status] = &[
-    Status::new(StatusCode::NO_CONTENT, "", "written, with the mode applied"),
+    Status::new(
+        StatusCode::NO_CONTENT,
+        "",
+        "written, with the mode applied. With AGENTD_DEFAULT_USER set, a file or \
+         parent directory the write creates belongs to the default user.",
+    ),
     Status::new(
         StatusCode::BAD_REQUEST,
         "",
@@ -610,6 +615,7 @@ pub const FS_WRITE_FILE: &[Status] = &[
          mode. Checked before a byte lands, so a rejected mode leaves nothing \
          behind.",
     ),
+    UPLOAD_UNKNOWN_USER,
     UNAUTHORIZED,
     NOT_BOOTSTRAPPED,
     BODY_TOO_LARGE,
@@ -617,7 +623,8 @@ pub const FS_WRITE_FILE: &[Status] = &[
     Status::new(
         StatusCode::INTERNAL_SERVER_ERROR,
         "",
-        "the parent could not be created, or the write or chmod failed",
+        "the parent could not be created, the write or chmod failed, or a file the \
+         write created could not be given the default user, in which case it is removed",
     ),
 ];
 
@@ -654,8 +661,24 @@ pub const FS_READ_TAR: &[Status] = &[
     ),
 ];
 
+/// The refusal both upload routes share when the image's default user has no passwd row.
+/// Unlike the routes' other refusals, its body is the JSON `ErrorBody`, since the slug is
+/// the one a start answers.
+const UPLOAD_UNKNOWN_USER: Status = Status::new(
+    StatusCode::BAD_REQUEST,
+    "unknown_user",
+    "AGENTD_DEFAULT_USER names no row of the guest's /etc/passwd, by name or by uid, so \
+     nothing the upload creates could belong to it. Checked before the body is read; \
+     nothing was written, and detail names the value and the variable.",
+);
+
 pub const FS_WRITE_TAR: &[Status] = &[
-    Status::new(StatusCode::NO_CONTENT, "", "extracted under ?path="),
+    Status::new(
+        StatusCode::NO_CONTENT,
+        "",
+        "extracted under ?path=. With AGENTD_DEFAULT_USER set, each entry the extraction \
+         creates belongs to the default user.",
+    ),
     Status::new(
         StatusCode::BAD_REQUEST,
         "",
@@ -664,6 +687,7 @@ pub const FS_WRITE_TAR: &[Status] = &[
          path, an absolute or out-of-tree link target, or a device or fifo member. \
          The refused member's name is in the body.",
     ),
+    UPLOAD_UNKNOWN_USER,
     UNAUTHORIZED,
     NOT_BOOTSTRAPPED,
     Status::new(

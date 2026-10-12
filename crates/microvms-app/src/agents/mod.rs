@@ -16,7 +16,8 @@
 //! 2. **The daemon's execs start from an empty environment**, so the agent's subshells
 //!    find no `PATH` and every command exits 127. The environment file sets it.
 //! 3. **The daemon writes uploaded files as root, mode 0600**, which a demoted agent
-//!    cannot read. One root `chown` follows the uploads.
+//!    cannot read, unless the image sets `AGENTD_DEFAULT_USER`. One root `chown` follows the
+//!    uploads either way.
 //! 4. **Codex reaches Bedrock through `bedrock-runtime`'s `/openai/v1`** on the Responses
 //!    wire API, with an inference-profile model id and hosted web search disabled. Its
 //!    config file names that host for the launch region, and its credential comes from
@@ -491,8 +492,8 @@ pub fn provisioning_files(
 
 /// Places the provisioning files and hands `/workspace` to the agent uid (AGENT-5).
 ///
-/// The daemon writes every upload as root, so the `chown` is not optional and it runs
-/// as root, after the uploads, in one exec. Root is asked for as uid 0 rather than by naming
+/// The daemon writes an upload as root unless the image sets `AGENTD_DEFAULT_USER`, so the
+/// `chown` is not optional and it runs as root, after the uploads, in one exec. Root is asked for as uid 0 rather than by naming
 /// no user, because an image that sets `AGENTD_DEFAULT_USER` runs a start that names no user
 /// as that user, and the `chown` would fail as anyone else. Re-runnable: a second call
 /// with a fresh token overwrites the same files, which is how a 12-hour token is

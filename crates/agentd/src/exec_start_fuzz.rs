@@ -26,9 +26,10 @@
 //! (AGENTD-11); no `AGENTD_*` image key and no token reaches the plan (AGENTD-12); the snapshot's
 //! count is its non-`AGENTD_` keys (AGENTD-13); a named shell runs as the file it resolved to
 //! (AGENTD-14); integers and booleans mean what they did (AGENTD-16); a request that names no
-//! user resolves the default as it would that string (AGENTD-22), a request's own user is
-//! never replaced by it (AGENTD-23), and a default that names nobody is refused naming the
-//! variable (AGENTD-24). A second check feeds raw
+//! user runs as the default's passwd row, found by name or by the uid its digits spell, with
+//! that row's primary gid (AGENTD-22), a request's own user is never replaced by it
+//! (AGENTD-23), and a default with no row is refused naming the variable (AGENTD-24). A
+//! second check feeds raw
 //! bytes to the `StartRequest` deserializer, which must refuse or accept but never panic.
 
 use std::path::Path;
@@ -243,16 +244,17 @@ fn start_resolution() {
         );
 
         // What the resolution must decide, derived independently of it. The user is the
-        // request's own when it names one, whatever the default (AGENTD-23), and the default
-        // read as a name otherwise (AGENTD-22).
-        let user = request
-            .user
-            .clone()
-            .or_else(|| default_user.map(|name| NameOrId::Name(name.to_string())));
+        // request's own when it names one, whatever the default (AGENTD-23), and otherwise the
+        // default's row: the one its name matches, else the one with the uid its digits spell
+        // (AGENTD-22). A default with neither is refused (AGENTD-24).
         let user_row = |name: &str| rows.iter().find(|row| row.name == name);
-        let user_ok = match &user {
-            Some(NameOrId::Name(name)) => user_row(name).is_some() || digits(name).is_some(),
-            _ => true,
+        let uid_row = |uid: u32| rows.iter().find(|row| row.uid == uid);
+        let default_row =
+            default_user.map(|name| user_row(name).or_else(|| digits(name).and_then(uid_row)));
+        let user_ok = match (&request.user, default_row) {
+            (Some(NameOrId::Name(name)), _) => user_row(name).is_some() || digits(name).is_some(),
+            (Some(NameOrId::Id(_)), _) | (None, None) => true,
+            (None, Some(row)) => row.is_some(),
         };
         let group_ok = match &request.group {
             Some(NameOrId::Name(name)) => {
@@ -274,13 +276,16 @@ fn start_resolution() {
                     ERROR_UNKNOWN_SHELL
                 };
                 assert_eq!(rejection.error, expected, "{rejection:?} for {body}");
-                // AGENTD-24: a refused default names itself and the variable; a refused name
-                // the request gave is about that name alone.
+                // AGENTD-24: a refused default names itself and the variable, and says the
+                // image needs a row when its digits are a uid; a refused name the request
+                // gave is about that name alone.
                 if expected == ERROR_UNKNOWN_USER {
                     match (&request.user, default_user) {
                         (None, Some(name)) => assert!(
                             rejection.detail.contains(&format!("{name:?}"))
-                                && rejection.detail.contains(DEFAULT_USER_VAR),
+                                && rejection.detail.contains(DEFAULT_USER_VAR)
+                                && (digits(name).is_none()
+                                    || rejection.detail.contains("needs a passwd row")),
                             "{rejection:?}"
                         ),
                         _ => assert!(
@@ -302,27 +307,35 @@ fn start_resolution() {
                 );
                 let env = plan.environment();
 
-                // AGENTD-7 and AGENTD-16: the uid is the row's for a matching name, the number
-                // otherwise; the gid is the group's, a named user's primary, or unchanged.
-                let row = match &user {
-                    Some(NameOrId::Name(name)) => user_row(name).or_else(|| {
-                        digits(name).and_then(|uid| rows.iter().find(|row| row.uid == uid))
-                    }),
-                    Some(NameOrId::Id(uid)) => rows.iter().find(|row| row.uid == *uid),
-                    None => None,
+                // AGENTD-7, AGENTD-16 and AGENTD-22: the uid is the row's for a matching name
+                // or a default, the number otherwise; the gid is the group's, a named user's or
+                // the default's primary, or unchanged.
+                let row = match &request.user {
+                    Some(NameOrId::Name(name)) => {
+                        user_row(name).or_else(|| digits(name).and_then(uid_row))
+                    }
+                    Some(NameOrId::Id(uid)) => uid_row(*uid),
+                    None => default_row.flatten(),
                 };
-                match &user {
+                match &request.user {
                     Some(NameOrId::Name(name)) => match user_row(name) {
                         Some(named) => assert_eq!(plan.uid, Some(named.uid)),
                         None => assert_eq!(plan.uid, digits(name)),
                     },
                     Some(NameOrId::Id(uid)) => assert_eq!(plan.uid, Some(*uid)),
-                    None => assert_eq!(plan.uid, None),
+                    None => assert_eq!(plan.uid, row.map(|row| row.uid), "{body}"),
                 }
                 if request.group.is_none() {
-                    let named =
-                        matches!(&user, Some(NameOrId::Name(name)) if user_row(name).is_some());
-                    let expected = if named { row.map(|row| row.gid) } else { None };
+                    let primary = match &request.user {
+                        Some(NameOrId::Name(name)) => user_row(name).is_some(),
+                        Some(NameOrId::Id(_)) => false,
+                        None => default_user.is_some(),
+                    };
+                    let expected = if primary {
+                        row.map(|row| row.gid)
+                    } else {
+                        None
+                    };
                     assert_eq!(plan.gid, expected, "{body}");
                 }
 

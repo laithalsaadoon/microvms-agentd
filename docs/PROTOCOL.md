@@ -212,7 +212,8 @@ semantics rather than `realpath`. Symlinks resolve relative to their own
 directory, while hard links resolve against the archive root. Member count and
 total size are capped. Modes are applied after content lands. A regular-file
 member replaces the old entry before creation, so other hard links keep their
-bytes and modes.
+bytes and modes. Extraction drops the archive's owners, as
+[Upload ownership](#upload-ownership) describes.
 
 **A symlink an archive wrote cannot redirect a later member, and the kernel is
 what enforces that.** The `normpath` rule above judges a member at the depth its
@@ -342,16 +343,20 @@ which is what protocol 1 always did.
 
 **An image can set the user a start without `user` runs as.** The image's
 `AGENTD_DEFAULT_USER` holds a user name or a string of digits. A start request
-that omits `user` resolves that string exactly as it would resolve it in
-`user`. A name gets its row's uid, primary gid, `HOME`, `USER` and `LOGNAME`,
-and digits that match no name are a uid. The daemon resolves it at each
-request, so a user an earlier exec created resolves on the next. A request's
-own `user` always wins, `root` and `0` included, and `group` still overrides the
-primary gid. If the guest's `/etc/passwd` doesn't hold the value, the daemon
-answers each start that omits `user` with `400 unknown_user`, and the `detail`
-mentions `AGENTD_DEFAULT_USER`. The daemon refuses an empty value the same way. It still
+that omits `user` resolves that string to a row of the guest's `/etc/passwd`:
+the row a name matches, or the row whose uid the digits spell. Either way the
+child gets the row's uid, primary gid, `HOME`, `USER` and `LOGNAME`. That's
+stricter than `user`, where digits keep the daemon's gid and don't need a row. The
+daemon resolves it at each request, so a user an earlier exec created resolves
+on the next. A request's own `user` always wins, `root` and `0` included, and
+`group` still overrides the primary gid. If no row matches, the daemon answers
+each start that omits `user` with `400 unknown_user`, and the `detail` mentions
+`AGENTD_DEFAULT_USER`. For digits, the `detail` also says the image needs a
+passwd row for that uid. The daemon refuses an empty value the same way. It still
 boots, and a request that sets `user` still runs. With the variable unset, a
 start that omits `user` runs as the daemon's own user, root, as it always has.
+What an upload creates belongs to the same row, as
+[Upload ownership](#upload-ownership) describes.
 Workload hook handlers ignore the variable, and the image snapshot drops it with
 every other `AGENTD_*` variable. `/v1/health` doesn't report it, because a new
 `Health` field would break the protocol crate's API. The daemon logs the value
@@ -404,6 +409,25 @@ The model in `crates/model/src/exec_start.rs` checks these rules over every requ
 shape (AGENTD-7 through AGENTD-16 in `verify/spec/agentd.symspec.json`), including that
 no refused request ever has a child and that neither the token nor `AGENTD_*`
 configuration reaches one.
+
+## Upload ownership
+
+**With `AGENTD_DEFAULT_USER` set, what an upload creates belongs to the image's
+default user.** `PUT /v1/fs/tar` and `PUT /v1/fs/file` give each entry they
+create the uid and primary gid of the row a start without `user` resolves to.
+That covers files, directories, symlinks, and the parent directories the daemon
+makes for them, so a nameless exec can write the tree an upload made for it. An
+entry that was already there keeps its owner: an existing directory, the
+extraction root among them, and a file `PUT /v1/fs/file` truncates. When an
+archive member replaces an existing file or symlink, the new entry takes the old
+one's owner, and a hard link doesn't change an owner. The daemon
+changes each owner through a descriptor of the entry itself, opened without
+following a symlink, never by path, so a name swapped mid-upload can't redirect
+it. A failed change of owner answers 500. With the variable unset, every entry
+an upload creates is root's, as it always was. If the default has no passwd
+row, the daemon refuses the upload before writing anything, with the start's
+`400 unknown_user`. That body is the JSON `{error, detail}` of the exec routes,
+where the other fs refusals are plain text.
 
 ## Line-ranged text reads
 

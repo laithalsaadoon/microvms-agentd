@@ -77,7 +77,9 @@ To make that user the default for every `exec` and `run --exec` without `--user`
 ENV AGENTD_DEFAULT_USER=agent
 ```
 
-The daemon resolves the value at each exec, the way it resolves `--user agent`, so the row can come from an earlier exec. An exec with `--user` runs as that user instead, `--user root` included, and hook handlers still run as root.
+The daemon resolves the value at each exec to its `/etc/passwd` row, so the row can come from an earlier exec. A name and its uid are the same: `AGENTD_DEFAULT_USER=1000` runs as `agent` with group 1000 and `HOME=/workspace`, and a uid with no row fails the exec rather than run it in root's group. An exec with `--user` runs as that user instead, `--user root` included, and hook handlers still run as root.
+
+The default user also owns what `microvm cp` and `run . --exec` upload. The files and directories an upload creates are that user's, so the default user can edit the synced tree. Anything already in the guest keeps its owner. That includes `/workspace` itself, which the image's `chown 1000:1000 /workspace` hands to the agent. The daemon refuses an upload as `unknown_user` when the default has no row.
 
 ## 5. No secret goes in the image
 

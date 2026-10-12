@@ -210,6 +210,16 @@ Feature: A start request names its user, group and shell, and may inherit the im
       And output line 2 is this process's gid
       And output line 3 is "/home/tester tester"
 
+    @AGENTD-22 @AGENTD-9
+    Scenario: an all-digit default runs as the passwd row of that uid
+      Given the image sets AGENTD_DEFAULT_USER to this process's uid
+      And a start of "id -u; id -g; echo $HOME $USER" under shell "true"
+      When the daemon answers the start
+      Then the start was accepted and the child exited 0
+      And output line 1 is this process's uid
+      And output line 2 is this process's gid
+      And output line 3 is "/home/tester tester"
+
     @AGENTD-22
     Scenario: the default is resolved at each start, so a user added after startup resolves
       Given the image sets AGENTD_DEFAULT_USER to "latecomer"
@@ -241,4 +251,13 @@ Feature: A start request names its user, group and shell, and may inherit the im
       When the daemon answers the start
       Then the answer is 400 with error "unknown_user" naming "AGENTD_DEFAULT_USER"
       And the answer is 400 with error "unknown_user" naming "nobody-here"
+      And no child was spawned
+
+    @AGENTD-24
+    Scenario: an all-digit default with no passwd row refuses a start that names no user
+      Given the image sets AGENTD_DEFAULT_USER to "4242424"
+      And a start that would leave a marker file, under shell "true"
+      When the daemon answers the start
+      Then the answer is 400 with error "unknown_user" naming "AGENTD_DEFAULT_USER"
+      And the answer is 400 with error "unknown_user" naming "needs a passwd row"
       And no child was spawned

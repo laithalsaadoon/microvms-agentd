@@ -23,10 +23,13 @@
 //!
 //! It runs as the image's default user when the image sets `AGENTD_DEFAULT_USER`, and as the
 //! daemon's own user (root) when it doesn't (AGENTD-22). The default is resolved here, per
-//! request, exactly as a request's `user` string would be, and a default that names nobody
-//! is refused as `unknown_user` with a detail that names the variable (AGENTD-24). A request's
+//! request, to a passwd row: the row its name matches, or the row of the uid its digits
+//! spell. Either way the child takes the row's uid, primary gid and identity, so a numeric
+//! default doesn't keep the daemon's gid 0. A default with no row, digits included, is
+//! refused as `unknown_user` with a detail that names the variable (AGENTD-24). A request's
 //! own `user` always wins over the default, `root` and `0` included (AGENTD-23): the default
-//! decides what a caller gets by not saying, not what a caller may ask for.
+//! decides what a caller gets by not saying, not what a caller may ask for. The same row
+//! owns what an upload creates (`fs.rs`).
 //!
 //! # The environment is five layers, lowest first
 //!
@@ -214,8 +217,10 @@ impl Plan {
 struct User<'a> {
     uid: u32,
     row: Option<&'a PasswdRow>,
-    /// Given as a name that matched a row, as opposed to a number.
-    named: bool,
+    /// Takes the row's primary gid when the request names no group: a name the request
+    /// gave that matched a row, or the image's default user. A uid the request gave, as an
+    /// integer or as digits, keeps the daemon's group (AGENTD-16).
+    primary_gid: bool,
 }
 
 /// All ASCII digits that fit a `u32`: a string read as an id when it names no row.
@@ -234,21 +239,21 @@ fn resolve_user<'a>(spec: &NameOrId, rows: &'a [PasswdRow]) -> Result<User<'a>, 
         NameOrId::Id(uid) => Ok(User {
             uid: *uid,
             row: by_uid(*uid),
-            named: false,
+            primary_gid: false,
         }),
         NameOrId::Name(name) => {
             if let Some(row) = rows.iter().find(|row| row.name == *name) {
                 return Ok(User {
                     uid: row.uid,
                     row: Some(row),
-                    named: true,
+                    primary_gid: true,
                 });
             }
             match digits(name) {
                 Some(uid) => Ok(User {
                     uid,
                     row: by_uid(uid),
-                    named: false,
+                    primary_gid: false,
                 }),
                 None => Err(Rejection::new(
                     ERROR_UNKNOWN_USER,
@@ -259,13 +264,34 @@ fn resolve_user<'a>(spec: &NameOrId, rows: &'a [PasswdRow]) -> Result<User<'a>, 
     }
 }
 
-/// The user a request resolves to: its own `user` when it names one (AGENTD-23), else the
-/// image's default resolved as that string would be (AGENTD-22), else none, which is the
-/// daemon's own user.
+/// The image's default user as its passwd row (AGENTD-22): the row its name matches, or the
+/// row of the uid its digits spell.
 ///
-/// A default that names nobody is `unknown_user` like a request's unknown name (AGENTD-24),
-/// with a detail that says the request named no user and which variable set the one that
-/// failed, because the caller sent no name to look for and the fix is in the image.
+/// Stricter than a request's `user`, where digits with no row run as a bare uid. The default
+/// runs every start that names no user and owns every entry an upload creates, and a uid
+/// with no row has no primary gid to give either, so the child would keep the daemon's gid
+/// 0. A default with no row is refused instead (AGENTD-24). The error is the clause a
+/// refusal's detail ends with, naming the value and the variable that set it, because the
+/// caller sent no name to look for and the fix is in the image.
+pub fn default_user_row<'a>(name: &str, rows: &'a [PasswdRow]) -> Result<&'a PasswdRow, String> {
+    match resolve_user(&NameOrId::Name(name.to_string()), rows) {
+        Ok(User { row: Some(row), .. }) => Ok(row),
+        Ok(User { row: None, .. }) => Err(format!(
+            "the default user {name:?} that {DEFAULT_USER_VAR} sets is a uid with no row in \
+             the guest's /etc/passwd (the image needs a passwd row for it)"
+        )),
+        Err(_) => Err(format!(
+            "the default user {name:?} that {DEFAULT_USER_VAR} sets is not in the guest's \
+             /etc/passwd"
+        )),
+    }
+}
+
+/// The user a request resolves to: its own `user` when it names one (AGENTD-23), else the
+/// image's default user's row (AGENTD-22), else none, which is the daemon's own user.
+///
+/// A default with no row is `unknown_user` like a request's unknown name (AGENTD-24), with
+/// a detail that says the request named no user and which variable set the one that failed.
 fn resolve_request_user<'a>(
     request: &StartRequest,
     default_user: Option<&str>,
@@ -273,17 +299,17 @@ fn resolve_request_user<'a>(
 ) -> Result<Option<User<'a>>, Rejection> {
     match (&request.user, default_user) {
         (Some(spec), _) => resolve_user(spec, rows).map(Some),
-        (None, Some(name)) => resolve_user(&NameOrId::Name(name.to_string()), rows)
-            .map(Some)
-            .map_err(|_| {
-                Rejection::new(
-                    ERROR_UNKNOWN_USER,
-                    format!(
-                        "the request names no user, and the default user {name:?} that \
-                         {DEFAULT_USER_VAR} sets is not in the guest's /etc/passwd"
-                    ),
-                )
-            }),
+        (None, Some(name)) => match default_user_row(name, rows) {
+            Ok(row) => Ok(Some(User {
+                uid: row.uid,
+                row: Some(row),
+                primary_gid: true,
+            })),
+            Err(why) => Err(Rejection::new(
+                ERROR_UNKNOWN_USER,
+                format!("the request names no user, and {why}"),
+            )),
+        },
         (None, None) => Ok(None),
     }
 }
@@ -376,11 +402,12 @@ pub fn plan(request: &StartRequest, guest: &Guest<'_>) -> Result<Plan, Rejection
     };
     let gid = match &request.group {
         Some(spec) => Some(resolve_group(spec, &groups)?),
-        // A named user takes its row's primary group, the way `su` and `docker -u name` do.
-        // A numeric uid keeps the daemon's group, which is what protocol 1 did (AGENTD-16).
+        // A named user takes its row's primary group, the way `su` and `docker -u name` do,
+        // and so does the default user, however the image spelled it (AGENTD-22). A uid the
+        // request gives keeps the daemon's group, which is what protocol 1 did (AGENTD-16).
         None => user
             .as_ref()
-            .filter(|user| user.named)
+            .filter(|user| user.primary_gid)
             .and_then(|user| user.row)
             .map(|row| row.gid),
     };
@@ -765,10 +792,10 @@ mod tests {
         );
     }
 
-    /// **AGENTD-22.** A request that names no user resolves the image's default exactly as
-    /// it would resolve that string: a name to its row's uid, primary gid and identity,
-    /// digits that name no row to that uid with the daemon's group, and a named group still
-    /// overrides the primary. With no default it runs as the daemon, as it always did.
+    /// **AGENTD-22.** A request that names no user resolves the image's default to a passwd
+    /// row: a name to its row, digits to the row of that uid, each with the row's uid,
+    /// primary gid and identity, and a named group still overrides the primary. With no
+    /// default it runs as the daemon, as it always did.
     #[test]
     fn a_request_that_names_no_user_resolves_the_default_as_its_user() {
         let nameless = request(None, None, false.into());
@@ -798,16 +825,23 @@ mod tests {
             "the default resolves exactly as the same name in the request"
         );
 
-        let plan = resolve_with_default(&nameless, Some("4242")).expect("resolves");
-        assert_eq!((plan.uid, plan.gid), (Some(4242), None));
-        assert!(plan.environment().is_empty());
+        // Digits are the row of that uid, with its primary gid: a request's "1000" keeps the
+        // daemon's group, and a default's doesn't, or the child would keep gid 0.
         let plan = resolve_with_default(&nameless, Some("1000")).expect("resolves");
-        assert_eq!((plan.uid, plan.gid), (Some(1000), None));
-        assert_eq!(plan.environment()["USER"], "agent");
+        assert_eq!(
+            plan,
+            resolve_with_default(&nameless, Some("agent")).expect("resolves"),
+            "a uid the default spells resolves as its row's name"
+        );
+        let plan = resolve_with_default(&nameless, Some("0")).expect("resolves");
+        assert_eq!((plan.uid, plan.gid), (Some(0), Some(0)));
+        assert_eq!(plan.environment()["HOME"], "/root");
 
         let grouped = request(None, Some("staff".into()), false.into());
         let plan = resolve_with_default(&grouped, Some("agent")).expect("resolves");
         assert_eq!((plan.uid, plan.gid), (Some(1000), Some(50)));
+        let plan = resolve_with_default(&grouped, Some("1002")).expect("resolves");
+        assert_eq!((plan.uid, plan.gid), (Some(1002), Some(50)));
     }
 
     /// **AGENTD-23.** A user the request names wins over the default, `root` and `0`
@@ -853,12 +887,13 @@ mod tests {
         );
     }
 
-    /// **AGENTD-24.** A default that names nobody, empty included, refuses a request that
-    /// names no user as `unknown_user`, with a detail naming the value and the variable,
-    /// and it is resolved first, ahead of the group and the shell.
+    /// **AGENTD-24.** A default with no passwd row, empty and all-digit included, refuses a
+    /// request that names no user as `unknown_user`, with a detail naming the value and the
+    /// variable, and it is resolved first, ahead of the group and the shell. Digits with no
+    /// row say the image needs one, since a request's same digits would run.
     #[test]
     fn a_default_that_names_nobody_is_refused_naming_the_variable() {
-        for default in ["ghost", "", "12a"] {
+        for default in ["ghost", "", "12a", "4242"] {
             let refused = resolve_with_default(&request(None, None, false.into()), Some(default))
                 .expect_err(default);
             assert_eq!(refused.error, ERROR_UNKNOWN_USER, "{default:?}");
@@ -868,7 +903,22 @@ mod tests {
                 "{}",
                 refused.detail
             );
+            assert_eq!(
+                refused.detail.contains("needs a passwd row"),
+                default == "4242",
+                "{}",
+                refused.detail
+            );
         }
+        assert_eq!(
+            resolve_with_default(
+                &request(Some("4242".into()), None, false.into()),
+                Some("4242")
+            )
+            .expect("a request's own digits run with no row")
+            .uid,
+            Some(4242)
+        );
         let all_bad = request(None, Some("ghosts".into()), "fish".into());
         assert_eq!(
             resolve_with_default(&all_bad, Some("ghost"))
@@ -876,6 +926,23 @@ mod tests {
                 .error,
             ERROR_UNKNOWN_USER
         );
+    }
+
+    /// **AGENTD-22, AGENTD-24.** The default's row is the one a name matches before the one a
+    /// uid matches, so a user named with digits is that user, and a miss is the clause a
+    /// refusal ends with.
+    #[test]
+    fn the_default_user_row_prefers_a_name_to_a_uid() {
+        let rows =
+            parse_passwd("1000:x:1500:1500::/home/digits:/bin/sh\nagent:x:1000:1001::/a:/bin/sh\n");
+        assert_eq!(default_user_row("1000", &rows).map(|row| row.uid), Ok(1500));
+        assert_eq!(default_user_row("1500", &rows).map(|row| row.gid), Ok(1500));
+        assert_eq!(
+            default_user_row("agent", &rows).map(|row| row.gid),
+            Ok(1001)
+        );
+        let missing = default_user_row("77", &rows).expect_err("no row");
+        assert!(missing.starts_with("the default user \"77\""), "{missing}");
     }
 
     /// **AGENTD-12.** The snapshot drops every `AGENTD_` variable and anything not UTF-8.
