@@ -463,7 +463,7 @@ mod tests {
     fn a_platform_trap_failure_names_its_finding_in_the_envelope() {
         let envelope = error(&classify(&Error::new(
             ErrorKind::WindowClosed,
-            "microvm mvm-1 terminated while suspended",
+            "microvm mvm-1 can't be resumed",
         )));
         assert_eq!(envelope["code"], "ERR_WINDOW_CLOSED");
         assert_eq!(envelope["exitCode"], 8);

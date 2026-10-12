@@ -582,8 +582,8 @@ class ControlPlane:
         """
     def resume(self, /, microvm_id: str) -> None:
         """
-        `ResumeMicrovm`. Returns once accepted; `wait_for_state` for RUNNING. A VM that
-        terminated while suspended raises `WindowClosedError` (STATE-12).
+        `ResumeMicrovm`. Returns once accepted; `wait_for_state` for RUNNING. A VM that ended
+        before the resume, whatever ended it, raises `WindowClosedError` (STATE-12).
         """
     async def resume_async(self, /, microvm_id: str) -> None:
         """
@@ -3855,7 +3855,8 @@ class UnexpectedError(MicrovmError):
 
 class WindowClosedError(MicrovmError):
     """
-    ERR_WINDOW_CLOSED — the MicroVM terminated while suspended, so there is nothing to
-    resume. The suspended window ends a VM the idle policy suspended; an explicit suspend
-    stayed resumable 1283 s into a 60 s window (measured 2026-10-12, us-east-1).
+    ERR_WINDOW_CLOSED — the MicroVM ended before the resume (the suspended window, the
+    maximum duration, or a terminate), and it can't be resumed; launch a new one. The
+    suspended window ends a VM the idle policy suspended; an explicit suspend stayed
+    resumable 1283 s into a 60 s window (measured 2026-10-12, us-east-1).
     """

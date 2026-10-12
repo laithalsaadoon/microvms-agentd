@@ -4623,7 +4623,7 @@
         "code": "ERR_WINDOW_CLOSED",
         "exit": 8,
         "finding": "`idlePolicy`",
-        "meaning": "the MicroVM terminated while suspended, so there is nothing to resume"
+        "meaning": "the MicroVM ended before the resume (the suspended window, the maximum duration, or a terminate), and it can't be resumed; launch a new one"
       },
       {
         "code": "ERR_PLATFORM",

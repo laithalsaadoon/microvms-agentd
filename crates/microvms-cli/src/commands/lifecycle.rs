@@ -2086,8 +2086,8 @@ pub async fn suspend<O: std::io::Write, E: std::io::Write>(
 /// The suspended window is **not** checked here, and that is correct rather than a gap: the
 /// service ends a VM the idle policy suspended once `suspendedDurationSeconds` passes and keeps
 /// an explicitly suspended one resumable past it (measured 2026-10-12, us-east-1), so only the
-/// service can answer. Core's `ControlPlane::resume` reports its refusal of a VM that
-/// terminated while suspended as `ERR_WINDOW_CLOSED`. A VM that dies after the resume is
+/// service can answer. Core's `ControlPlane::resume` reports its refusal of a VM that ended
+/// before the resume as `ERR_WINDOW_CLOSED`. A VM that dies after the resume is
 /// accepted fails the wait at once through `fail_on: DEAD_STATES`, with `stateReason`, instead
 /// of burning the poll timeout.
 pub async fn resume<O: std::io::Write, E: std::io::Write>(

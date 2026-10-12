@@ -703,8 +703,8 @@ impl PyControlPlane {
         Ok(runtime::spawn_shielded(self.suspend_op(microvm_id)).await?)
     }
 
-    /// `ResumeMicrovm`. Returns once accepted; `wait_for_state` for RUNNING. A VM that
-    /// terminated while suspended raises `WindowClosedError` (STATE-12).
+    /// `ResumeMicrovm`. Returns once accepted; `wait_for_state` for RUNNING. A VM that ended
+    /// before the resume, whatever ended it, raises `WindowClosedError` (STATE-12).
     fn resume(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {
         Ok(runtime::block_on(py, self.resume_op(microvm_id))?)
     }

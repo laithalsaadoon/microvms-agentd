@@ -344,8 +344,8 @@ impl ControlPlane {
         self.inner.suspend(&microvm_id).await.map_err(js_async)
     }
 
-    /// `ResumeMicrovm`. Resolves once accepted; `waitForState` for RUNNING. A VM that
-    /// terminated while suspended rejects with `ERR_WINDOW_CLOSED` (STATE-12).
+    /// `ResumeMicrovm`. Resolves once accepted; `waitForState` for RUNNING. A VM that ended
+    /// before the resume, whatever ended it, rejects with `ERR_WINDOW_CLOSED` (STATE-12).
     #[napi]
     pub async fn resume(&self, microvm_id: String) -> Result<(), AsyncError> {
         self.inner.resume(&microvm_id).await.map_err(js_async)

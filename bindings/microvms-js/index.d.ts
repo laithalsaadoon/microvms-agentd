@@ -208,8 +208,8 @@ export declare class ControlPlane {
   /** `SuspendMicrovm`. Resolves once accepted; `waitForState` for SUSPENDED. */
   suspend(microvmId: string): Promise<void>
   /**
-   * `ResumeMicrovm`. Resolves once accepted; `waitForState` for RUNNING. A VM that
-   * terminated while suspended rejects with `ERR_WINDOW_CLOSED` (STATE-12).
+   * `ResumeMicrovm`. Resolves once accepted; `waitForState` for RUNNING. A VM that ended
+   * before the resume, whatever ended it, rejects with `ERR_WINDOW_CLOSED` (STATE-12).
    */
   resume(microvmId: string): Promise<void>
   /** `TerminateMicrovm`. Resolves once accepted; `waitForState` for TERMINATED. */

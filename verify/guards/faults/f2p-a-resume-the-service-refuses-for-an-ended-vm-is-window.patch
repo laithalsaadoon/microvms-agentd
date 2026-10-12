@@ -1,5 +1,5 @@
 diff --git a/bindings/microvms-js/src/control.rs b/bindings/microvms-js/src/control.rs
-index 8f0ee5e..66a7dd9 100644
+index ead8c40..66a7dd9 100644
 --- a/bindings/microvms-js/src/control.rs
 +++ b/bindings/microvms-js/src/control.rs
 @@ -279,8 +279,8 @@ pub struct DeleteImageOptions {
@@ -17,8 +17,8 @@ index 8f0ee5e..66a7dd9 100644
          self.inner.suspend(&microvm_id).await.map_err(js_async)
      }
  
--    /// `ResumeMicrovm`. Resolves once accepted; `waitForState` for RUNNING. A VM that
--    /// terminated while suspended rejects with `ERR_WINDOW_CLOSED` (STATE-12).
+-    /// `ResumeMicrovm`. Resolves once accepted; `waitForState` for RUNNING. A VM that ended
+-    /// before the resume, whatever ended it, rejects with `ERR_WINDOW_CLOSED` (STATE-12).
 +    /// `ResumeMicrovm`. Resolves once accepted; `waitForState` for RUNNING.
      #[napi]
      pub async fn resume(&self, microvm_id: String) -> Result<(), AsyncError> {
@@ -50,7 +50,7 @@ index 509cc87..55d1e84 100644
      /// Nothing is re-delivered: no run-hook payload, no token, no bootstrap. The in-memory
      /// token survived the freeze, and re-delivering it would hit the daemon's one-shot
 diff --git a/bindings/microvms-py/src/control.rs b/bindings/microvms-py/src/control.rs
-index c1d1165..5fbe783 100644
+index ce0752e..5fbe783 100644
 --- a/bindings/microvms-py/src/control.rs
 +++ b/bindings/microvms-py/src/control.rs
 @@ -444,9 +444,9 @@ impl PyImageBuild {
@@ -70,23 +70,24 @@ index c1d1165..5fbe783 100644
          Ok(runtime::spawn_shielded(self.suspend_op(microvm_id)).await?)
      }
  
--    /// `ResumeMicrovm`. Returns once accepted; `wait_for_state` for RUNNING. A VM that
--    /// terminated while suspended raises `WindowClosedError` (STATE-12).
+-    /// `ResumeMicrovm`. Returns once accepted; `wait_for_state` for RUNNING. A VM that ended
+-    /// before the resume, whatever ended it, raises `WindowClosedError` (STATE-12).
 +    /// `ResumeMicrovm`. Returns once accepted; `wait_for_state` for RUNNING.
      fn resume(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {
          Ok(runtime::block_on(py, self.resume_op(microvm_id))?)
      }
 diff --git a/bindings/microvms-py/src/errors.rs b/bindings/microvms-py/src/errors.rs
-index 0a27914..a664785 100644
+index be8962a..a664785 100644
 --- a/bindings/microvms-py/src/errors.rs
 +++ b/bindings/microvms-py/src/errors.rs
-@@ -87,9 +87,8 @@ create_exception!(
+@@ -87,10 +87,8 @@ create_exception!(
      microvms,
      WindowClosedError,
      MicrovmError,
--    "ERR_WINDOW_CLOSED — the MicroVM terminated while suspended, so there is nothing to \
--     resume. The suspended window ends a VM the idle policy suspended; an explicit suspend \
--     stayed resumable 1283 s into a 60 s window (measured 2026-10-12, us-east-1)."
+-    "ERR_WINDOW_CLOSED — the MicroVM ended before the resume (the suspended window, the \
+-     maximum duration, or a terminate), and it can't be resumed; launch a new one. The \
+-     suspended window ends a VM the idle policy suspended; an explicit suspend stayed \
+-     resumable 1283 s into a 60 s window (measured 2026-10-12, us-east-1)."
 +    "ERR_WINDOW_CLOSED — the launch-time suspended window passed, so there is nothing to \
 +     resume. A longer window has to be set at launch on the next VM."
  );
@@ -119,15 +120,15 @@ index 0e111a5..f7d6371 100644
      /// Nothing is re-delivered: no run-hook payload, no token, no bootstrap. The in-memory
      /// token survived the freeze, and re-delivering it would hit the daemon's one-shot
 diff --git a/crates/microvms-app/src/control/microvm.rs b/crates/microvms-app/src/control/microvm.rs
-index b1b59c0..ca1932f 100644
+index 9764a5d..14ec339 100644
 --- a/crates/microvms-app/src/control/microvm.rs
 +++ b/crates/microvms-app/src/control/microvm.rs
-@@ -799,53 +799,11 @@ impl ControlPlane {
+@@ -799,56 +799,11 @@ impl ControlPlane {
      }
  
      /// `ResumeMicrovm`. Thaws the VM; no token re-delivery and no re-bootstrap.
 -    ///
--    /// # A VM the service ended while suspended is `WindowClosed` (STATE-12)
+-    /// # A VM that ended before the resume is `WindowClosed` (STATE-12)
 -    ///
 -    /// Nothing is checked against the suspended window before the call, because the service
 -    /// decides whether a suspended VM can still resume. It terminates a VM the idle policy
@@ -135,9 +136,13 @@ index b1b59c0..ca1932f 100644
 -    /// `SuspendMicrovm` to that window: measured 2026-10-12 in us-east-1, an explicitly
 -    /// suspended VM resumed 1283 s into a 60 s window (#597). A resume of a VM that has
 -    /// terminated is refused with a `ValidationException` ("The MicroVM <id> has been
--    /// terminated and its state cannot be changed."), the same status as any refused value.
--    /// So a refusal reads the VM's state rather than the message, and a VM that's
--    /// TERMINATING or TERMINATED is [`ErrorKind::WindowClosed`] with its `stateReason`.
+-    /// terminated and its state cannot be changed."), the same status as any refused value,
+-    /// and it was the same refusal for a VM the service ended and one `TerminateMicrovm`
+-    /// ended (measured 2026-10-12, us-east-1). So a refusal reads the VM's state rather than
+-    /// the message, and a VM that's TERMINATING or TERMINATED is [`ErrorKind::WindowClosed`]
+-    /// with its state and `stateReason`, carrying the refusal as its source. The error names
+-    /// no cause, because the client doesn't know which of the suspended window, the maximum
+-    /// duration, or a terminate ended the VM; the `stateReason` is the service's word on it.
 -    /// Every other refusal comes back as the service gave it.
      pub async fn resume(&self, id: &str) -> Result<(), Error> {
          super::require_valid_identifier("microvmIdentifier", id)?;
@@ -145,15 +150,16 @@ index b1b59c0..ca1932f 100644
 -        match send_with_retry(self.transport(), call).await {
 -            Ok(_) => Ok(()),
 -            Err(refused) if refused.kind() == ErrorKind::Platform => {
--                Err(self.ended_while_suspended(id, refused).await)
+-                Err(self.ended_before_resume(id, refused).await)
 -            }
 -            Err(error) => Err(error),
 -        }
 -    }
 -
--    /// The error a refused resume reports: [`ErrorKind::WindowClosed`] when `GetMicrovm`
--    /// reports the VM dead, and `refused` otherwise, including when that read fails.
--    async fn ended_while_suspended(&self, id: &str, refused: Error) -> Error {
+-    /// The error a refused resume reports: [`ErrorKind::WindowClosed`] with `refused` as its
+-    /// source when `GetMicrovm` reports the VM dead, and `refused` otherwise, including when
+-    /// that read fails.
+-    async fn ended_before_resume(&self, id: &str, refused: Error) -> Error {
 -        let Ok(vm) = self.get_microvm(id).await else {
 -            return refused;
 -        };
@@ -163,16 +169,14 @@ index b1b59c0..ca1932f 100644
 -        Error::new(
 -            ErrorKind::WindowClosed,
 -            format!(
--                "microvm {id} terminated while suspended, so there is nothing to resume: the \
--                 service refused ResumeMicrovm, and GetMicrovm reports {}: {}. The service ends \
--                 a VM the idle policy suspended once its suspendedDurationSeconds window passes, \
--                 and any VM at its maximumDurationInSeconds (docs/PLATFORM.md, '`idlePolicy`'). \
--                 No call brings it back; a longer window or lifetime is set when the next VM \
--                 launches.",
+-                "microvm {id} can't be resumed: the service refused ResumeMicrovm, and \
+-                 GetMicrovm reports the VM {} ({}). A VM that has ended doesn't come back; \
+-                 launch a new one.",
 -                vm.state,
 -                vm.reason(),
 -            ),
 -        )
+-        .with_source(refused)
 +        send_with_retry(self.transport(), call).await?;
 +        Ok(())
      }
@@ -448,7 +452,7 @@ index 6f60df5..3f84498 100644
  
      /// Tears down, best-effort, never erroring.
 diff --git a/crates/microvms-cli/src/cli.rs b/crates/microvms-cli/src/cli.rs
-index c7676b5..f3a820e 100644
+index a29b47e..f3a820e 100644
 --- a/crates/microvms-cli/src/cli.rs
 +++ b/crates/microvms-cli/src/cli.rs
 @@ -301,10 +301,8 @@ pub enum Command {
@@ -457,8 +461,8 @@ index c7676b5..f3a820e 100644
      ///
 -    /// The launch-time `suspendedDurationSeconds` window terminates a VM the idle policy
 -    /// suspended once it passes. A VM suspended with `microvm suspend` stayed resumable 1283 s
--    /// into a 60 s window (measured 2026-10-12, us-east-1), so the service decides, and a resume
--    /// of a VM that terminated while suspended exits `ERR_WINDOW_CLOSED`.
+-    /// into a 60 s window (measured 2026-10-12, us-east-1), so the service decides. A resume of
+-    /// a VM that ended, whatever ended it, exits `ERR_WINDOW_CLOSED`; launch a new one.
 +    /// The launch-time `suspendedDurationSeconds` window terminates a suspended VM once it
 +    /// passes, so "resume later" silently stops working and the VM is gone rather than slow.
      Resume(ResumeArgs),
@@ -485,7 +489,7 @@ index c7676b5..f3a820e 100644
      pub suspended_sec: u32,
  
 diff --git a/crates/microvms-cli/src/commands/lifecycle.rs b/crates/microvms-cli/src/commands/lifecycle.rs
-index fb158f8..ef6a544 100644
+index c4c0b8b..ef6a544 100644
 --- a/crates/microvms-cli/src/commands/lifecycle.rs
 +++ b/crates/microvms-cli/src/commands/lifecycle.rs
 @@ -2084,12 +2084,10 @@ pub async fn suspend<O: std::io::Write, E: std::io::Write>(
@@ -494,8 +498,8 @@ index fb158f8..ef6a544 100644
  /// The suspended window is **not** checked here, and that is correct rather than a gap: the
 -/// service ends a VM the idle policy suspended once `suspendedDurationSeconds` passes and keeps
 -/// an explicitly suspended one resumable past it (measured 2026-10-12, us-east-1), so only the
--/// service can answer. Core's `ControlPlane::resume` reports its refusal of a VM that
--/// terminated while suspended as `ERR_WINDOW_CLOSED`. A VM that dies after the resume is
+-/// service can answer. Core's `ControlPlane::resume` reports its refusal of a VM that ended
+-/// before the resume as `ERR_WINDOW_CLOSED`. A VM that dies after the resume is
 -/// accepted fails the wait at once through `fail_on: DEAD_STATES`, with `stateReason`, instead
 -/// of burning the poll timeout.
 +/// window is in `GetMicrovm`'s `idlePolicy`, but when the suspend began is known only to the
@@ -520,26 +524,24 @@ index 9693850..6020ef2 100644
      /// `run --max-duration-sec`: hard ceiling on the VM's life.
      pub max_duration_sec: Option<u32>,
 diff --git a/crates/microvms-cli/src/exit.rs b/crates/microvms-cli/src/exit.rs
-index 9007d88..887f3cb 100644
+index 84342b9..4bba5a5 100644
 --- a/crates/microvms-cli/src/exit.rs
 +++ b/crates/microvms-cli/src/exit.rs
-@@ -254,7 +254,7 @@ pub const EXIT_TABLE: [ExitRow; 17] = [
+@@ -254,8 +254,7 @@ pub const EXIT_TABLE: [ExitRow; 17] = [
      ExitRow {
          exit: Exit::WindowClosed,
          code: Some("ERR_WINDOW_CLOSED"),
--        meaning: "the MicroVM terminated while suspended, so there is nothing to resume",
+-        meaning: "the MicroVM ended before the resume (the suspended window, the maximum \
+-                  duration, or a terminate), and it can't be resumed; launch a new one",
 +        meaning: "the launch-time suspended window passed, so there is nothing to resume",
          finding: "`idlePolicy`",
      },
      ExitRow {
-@@ -442,10 +442,9 @@ pub fn classify(error: &Error) -> CliError {
+@@ -443,7 +442,9 @@ pub fn classify(error: &Error) -> CliError {
          (Exit::LaunchDied, _) => {
              &["`microvm logs <image-name>` names the build log group the hook wrote to"]
          }
--        (Exit::WindowClosed, _) => &[
--            "the VM is gone: launch a new one; --suspended-sec sets how long a VM the idle \
--             policy suspended lasts, and --max-duration-sec how long any VM does",
--        ],
+-        (Exit::WindowClosed, _) => &["the VM ended and no call brings it back: launch a new one"],
 +        (Exit::WindowClosed, _) => {
 +            &["a longer window is set at launch with --suspended-sec; no call extends this one"]
 +        }
@@ -547,15 +549,16 @@ index 9007d88..887f3cb 100644
      };
      classified
 diff --git a/crates/microvms-domain/src/error.rs b/crates/microvms-domain/src/error.rs
-index da8836a..15ed493 100644
+index bbbd0ed..15ed493 100644
 --- a/crates/microvms-domain/src/error.rs
 +++ b/crates/microvms-domain/src/error.rs
-@@ -130,8 +130,7 @@ pub enum ErrorKind {
+@@ -130,9 +130,7 @@ pub enum ErrorKind {
      BuildWedged,
      /// The MicroVM reached a terminal state before RUNNING; read `stateReason`.
      LaunchDied,
--    /// The MicroVM terminated while suspended, so there is nothing to resume: the service
--    /// refused the resume, and `GetMicrovm` reports the VM TERMINATING or TERMINATED.
+-    /// The MicroVM ended before the resume (the suspended window, the maximum duration, or a
+-    /// terminate), and it can't be resumed; launch a new one. The service refused the resume,
+-    /// and `GetMicrovm` reports the VM TERMINATING or TERMINATED.
 +    /// The launch-time suspended window passed, so there is nothing to resume.
      WindowClosed,
      /// A control-plane failure with no more specific class.

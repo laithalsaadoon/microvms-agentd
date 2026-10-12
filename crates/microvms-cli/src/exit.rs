@@ -254,7 +254,8 @@ pub const EXIT_TABLE: [ExitRow; 17] = [
     ExitRow {
         exit: Exit::WindowClosed,
         code: Some("ERR_WINDOW_CLOSED"),
-        meaning: "the MicroVM terminated while suspended, so there is nothing to resume",
+        meaning: "the MicroVM ended before the resume (the suspended window, the maximum \
+                  duration, or a terminate), and it can't be resumed; launch a new one",
         finding: "`idlePolicy`",
     },
     ExitRow {
@@ -442,10 +443,7 @@ pub fn classify(error: &Error) -> CliError {
         (Exit::LaunchDied, _) => {
             &["`microvm logs <image-name>` names the build log group the hook wrote to"]
         }
-        (Exit::WindowClosed, _) => &[
-            "the VM is gone: launch a new one; --suspended-sec sets how long a VM the idle \
-             policy suspended lasts, and --max-duration-sec how long any VM does",
-        ],
+        (Exit::WindowClosed, _) => &["the VM ended and no call brings it back: launch a new one"],
         _ => &[],
     };
     classified
@@ -699,8 +697,10 @@ mod tests {
         );
     }
 
-    /// A launch that died and a VM that ended while suspended each carry the remedy that
-    /// says what to run next, which is all that separates them from an exit with no hint.
+    /// A launch that died and a VM that ended before its resume each carry the remedy that
+    /// says what to run next, which is all that separates them from an exit with no hint. The
+    /// closed window's remedy names no flag: the error can't tell which of the suspended
+    /// window, the maximum duration, or a terminate ended the VM.
     #[test]
     fn a_died_launch_and_a_closed_window_each_carry_their_remedy() {
         let died = classify(&Error::new(
@@ -714,7 +714,7 @@ mod tests {
         );
         let closed = classify(&Error::new(
             ErrorKind::WindowClosed,
-            "the VM terminated while suspended",
+            "microvm mvm-1 can't be resumed",
         ));
         assert_eq!(closed.exit, Exit::WindowClosed);
         assert!(
@@ -723,6 +723,10 @@ mod tests {
                 .iter()
                 .any(|s| s.contains("launch a new one")),
             "{closed:?}"
+        );
+        assert!(
+            closed.suggestions.iter().all(|s| !s.contains("--")),
+            "no flag for a cause the error doesn't know: {closed:?}"
         );
     }
 
