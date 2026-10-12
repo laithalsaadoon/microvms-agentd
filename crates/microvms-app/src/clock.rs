@@ -7,11 +7,11 @@
 //! sources: the control plane's read `std::time::Instant` and the session's read tokio's.
 //! Under a deterministic simulator those disagree. tokio's clock is virtual there and `std`'s
 //! isn't, so a control-plane wait whose sleeps advanced virtual time measured its deadline
-//! on the host's real time and never reached it. `Sandbox` already times the suspended window
-//! on the plane's clock rather than its own, so a window isn't measured on one clock while
-//! the polls run on another. One trait, with tokio's clock in production, keeps that property
-//! for everything that reads time. The trait is re-exported at `control::Clock` and at
-//! `session::Clock`, the paths each half had.
+//! on the host's real time and never reached it. `Sandbox` already waits on the plane's clock
+//! rather than one of its own, so a deadline isn't measured on one clock while the polls sleep
+//! on another. One trait, with tokio's clock in production, keeps that property for everything
+//! that reads time. The trait is re-exported at `control::Clock` and at `session::Clock`, the
+//! paths each half had.
 //!
 //! # Why a trait rather than `tokio::time::pause`
 //!
@@ -24,11 +24,11 @@
 //! # Monotonic and wall time are separate readings
 //!
 //! [`Clock::elapsed`] is monotonic, the same reasoning the Python client's injectable
-//! `time.monotonic` carried: the suspended window is a *duration*, and a wall clock that steps
-//! backward would reopen a closed one. [`Clock::unix_now`] is the wall reading, for the values
-//! that are dates rather than durations: a name record's timestamp, an exec id, the cost
-//! engine's today. Deriving one from the other would make a stepped wall clock move a
-//! deadline.
+//! `time.monotonic` carried: a wait's deadline and a proxy token's age are *durations*, and a
+//! wall clock that steps backward would hold a passed deadline open. [`Clock::unix_now`] is the
+//! wall reading, for the values that are dates rather than durations: a name record's
+//! timestamp, an exec id, the cost engine's today. Deriving one from the other would make a
+//! stepped wall clock move a deadline.
 
 use std::fmt;
 use std::future::Future;

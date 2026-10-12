@@ -29,8 +29,12 @@
 //!   answers SUSPENDED and the two steps are one call. Otherwise it answers SUSPENDING until the
 //!   wait times out, which leaves the sandbox SUSPENDING, where the model is.
 //! - `ResumeRequested` is `resume`, the same way: RUNNING when `ResumeComplete` is next, and
-//!   SUSPENDED until the wait times out otherwise. A closed window first moves the test clock
-//!   past the launch's suspended window, which is the only way the sandbox can know it closed.
+//!   SUSPENDED until the wait times out otherwise. A resume the service refuses is `resume`
+//!   with `ResumeMicrovm` answering the `ValidationException` the service gave for a VM it had
+//!   terminated (2026-10-12, #597), which the sandbox has to report as `ERR_WINDOW_CLOSED` and
+//!   record as TERMINATED.
+//! - `SuspendedVmEnded` calls nothing: from then on the fake's `GetMicrovm` answers TERMINATED,
+//!   the platform's side of a VM the idle policy ended while it was suspended.
 //! - `TerminateRequested` is `terminate`, waiting for TERMINATED when `TerminateComplete` is the
 //!   next step and returning once the call is accepted otherwise.
 //! - A platform report the model ignores changes nothing, so nothing is called.
@@ -45,10 +49,9 @@
 //! `&mut self` across its wait, so no second call can land between a request and its
 //! completion, and a completion the sandbox stopped waiting for is never observed. Those
 //! interleavings are the platform side of the model (a resume that completes after a
-//! terminate), not our code. The same goes for a closed window that opens again: the model draws
-//! the window per request, and the test clock only runs forward. Such paths are counted and
-//! skipped. The planted configs (`guards_skipped`, `double_bootstrap_planted`) describe clients
-//! other than this one, so they aren't replayed either.
+//! terminate), not our code. Such paths are counted and skipped. The planted configs
+//! (`guards_skipped`, `double_bootstrap_planted`) describe clients other than this one, so they
+//! aren't replayed either.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
@@ -64,10 +67,6 @@ use microvms_app::testing::{
 use microvms_app::{Error, ErrorKind, Region};
 use serde_json::Value;
 use stateright::{Checker, Expectation, Model, PathRecorder};
-
-/// The suspended window every replayed launch asks for. Wide enough that the waits a path can
-/// time out inside one suspension (three resumes at five minutes each) leave it open.
-const WINDOW: Duration = Duration::from_secs(3_600);
 
 /// How long `wait_until_running` may take. The fake answers RUNNING on the first poll.
 const READY: Duration = Duration::from_secs(60);
@@ -85,7 +84,9 @@ enum Call {
     Suspend { completes: bool },
     SuspendRefused,
     Resume { completes: bool },
-    ResumeRefused { closes: bool },
+    ResumeRefused,
+    ResumeEnded,
+    Ended,
     Terminate { completes: bool },
     Nothing,
 }
@@ -102,8 +103,9 @@ impl Call {
             Call::SuspendRefused => "suspend refused",
             Call::Resume { completes: true } => "resume completed",
             Call::Resume { completes: false } => "resume unanswered",
-            Call::ResumeRefused { closes: true } => "resume refused window closed",
-            Call::ResumeRefused { closes: false } => "resume refused",
+            Call::ResumeRefused => "resume refused",
+            Call::ResumeEnded => "resume refused by the service",
+            Call::Ended => "platform ends the suspended VM",
             Call::Terminate { completes: true } => "terminate completed",
             Call::Terminate { completes: false } => "terminate",
             Call::Nothing => "platform report ignored",
@@ -113,7 +115,7 @@ impl Call {
     fn refused(self) -> bool {
         matches!(
             self,
-            Call::HookRefused | Call::SuspendRefused | Call::ResumeRefused { .. }
+            Call::HookRefused | Call::SuspendRefused | Call::ResumeRefused
         )
     }
 }
@@ -121,7 +123,7 @@ impl Call {
 /// Every call the replay has to make. A walk that shrank to a corner of the model would pass
 /// every step it took; this is what it would miss. A planner that came to skip paths is held
 /// apart: every path the recorder kept has to plan, and [`SKIPPED`] pins the rest.
-const COVERED: [&str; 14] = [
+const COVERED: [&str; 15] = [
     "launch",
     "hook",
     "hook refused",
@@ -132,7 +134,8 @@ const COVERED: [&str; 14] = [
     "resume completed",
     "resume unanswered",
     "resume refused",
-    "resume refused window closed",
+    "resume refused by the service",
+    "platform ends the suspended VM",
     "terminate",
     "terminate completed",
     "platform report ignored",
@@ -142,10 +145,7 @@ const COVERED: [&str; 14] = [
 /// gives. Every recorded path plans, so these are all paths that end in a step no recorded path
 /// takes. A change to the model or the planner that moves these counts is a change to what the
 /// replay drives, so it edits this table in the same diff.
-const SKIPPED: [(&str, usize); 2] = [
-    ("a closed window opens again", 11),
-    ("a completion arrives after another step", 122),
-];
+const SKIPPED: [(&str, usize); 1] = [("a completion arrives after another step", 121)];
 
 /// One sandbox call, and the model's state after the steps it stands for.
 struct Step<'a> {
@@ -161,8 +161,6 @@ fn verdict(state: &State) -> Verdict {
 /// The path as sandbox calls, or why it can't be one.
 fn plan(path: &Path) -> Result<Vec<Step<'_>>, &'static str> {
     let mut steps = Vec::new();
-    // Whether the clock has passed the window of the suspension the sandbox is in.
-    let mut window_closed = false;
     let mut at = 0;
     while at + 1 < path.len() {
         let (before, Some(action)) = &path[at] else {
@@ -182,23 +180,17 @@ fn plan(path: &Path) -> Result<Vec<Step<'_>>, &'static str> {
             (Action::HookSucceeded, Verdict::Ignored) => (Call::HookRefused, 1),
             (Action::ExecRequested, Verdict::Issued) => (Call::Exec, 1),
             (Action::SuspendRequested, Verdict::Issued) => {
-                window_closed = false;
                 let completes = completed_by(Action::SuspendComplete);
                 (Call::Suspend { completes }, 1 + usize::from(completes))
             }
             (Action::SuspendRequested, Verdict::RefusedLocally) => (Call::SuspendRefused, 1),
-            (Action::ResumeRequested { .. }, Verdict::Issued) if window_closed => {
-                return Err("a closed window opens again");
-            }
-            (Action::ResumeRequested { .. }, Verdict::Issued) => {
+            (Action::ResumeRequested, Verdict::Issued) => {
                 let completes = completed_by(Action::ResumeComplete);
                 (Call::Resume { completes }, 1 + usize::from(completes))
             }
-            (Action::ResumeRequested { window_open }, Verdict::RefusedLocally) => {
-                let closes = !window_open && before.vm_state == VmState::Suspended;
-                window_closed |= closes;
-                (Call::ResumeRefused { closes }, 1)
-            }
+            (Action::ResumeRequested, Verdict::RefusedLocally) => (Call::ResumeRefused, 1),
+            (Action::ResumeRequested, Verdict::RefusedByService) => (Call::ResumeEnded, 1),
+            (Action::SuspendedVmEnded, Verdict::Issued) => (Call::Ended, 1),
             (Action::ResumeComplete, Verdict::Ignored) => (Call::Nothing, 1),
             (Action::TerminateRequested, Verdict::Issued) => {
                 let completes = completed_by(Action::TerminateComplete);
@@ -308,6 +300,17 @@ fn lifecycle(state: VmState) -> Lifecycle {
     }
 }
 
+/// `ResumeMicrovm`'s refusal of a VM the service terminated, as it answered on 2026-10-12 in
+/// us-east-1 (#597): a 400 whose error type is `ValidationException`.
+fn terminated_refusal() -> Answer {
+    Answer {
+        status: 400,
+        body: r#"{"message": "The MicroVM mvm-abc123 has been terminated and its state cannot be changed."}"#
+            .to_string(),
+        error_type: Some("ValidationException".to_string()),
+    }
+}
+
 /// A fresh sandbox for one path, over a fake that answers every call a path makes.
 struct Replay {
     sandbox: Sandbox,
@@ -319,12 +322,34 @@ struct Replay {
 }
 
 impl Replay {
-    fn new() -> Self {
+    /// A replay of `steps`, whose `ResumeMicrovm` answers are queued here, in the order the
+    /// path's resumes take them.
+    ///
+    /// Up front, because the fake serves a queued answer only once every answer before it has
+    /// been read, and repeats the last: a refusal queued after an acceptance the path already
+    /// read would be read after one more acceptance. A path's one refused resume is its last
+    /// resume call, since the sandbox refuses every resume after it with no call (STATE-11).
+    fn new(steps: &[Step<'_>]) -> Self {
         let plane = Arc::new(FakeControlPlane::new());
+        let mut resumes: Vec<Answer> = steps
+            .iter()
+            .filter_map(|step| match step.call {
+                Call::Resume { .. } => Some(Answer::ok(empty_response())),
+                Call::ResumeEnded => Some(terminated_refusal()),
+                _ => None,
+            })
+            .collect();
+        // A path with no resume still answers one, so a sandbox that resumes anyway is caught
+        // by the call count rather than by the fake's panic.
+        if resumes.is_empty() {
+            resumes.push(Answer::ok(empty_response()));
+        }
+        for answer in resumes {
+            plane.answer("ResumeMicrovm", answer);
+        }
         plane
             .answer("RunMicrovm", Answer::ok(microvm_response("PENDING", None)))
             .answer("SuspendMicrovm", Answer::ok(empty_response()))
-            .answer("ResumeMicrovm", Answer::ok(empty_response()))
             .answer("TerminateMicrovm", Answer::ok(empty_response()))
             .answer(
                 "CreateMicrovmAuthToken",
@@ -374,9 +399,7 @@ impl Replay {
         let calls = self.plane.calls().len();
         match step.call {
             Call::Launch => {
-                let mut request = RunRequest::new()
-                    .with_image("arn:image")
-                    .with_suspended_sec(u32::try_from(WINDOW.as_secs()).expect("fits"));
+                let mut request = RunRequest::new().with_image("arn:image");
                 request.wait = false;
                 self.sandbox
                     .run(request)
@@ -416,14 +439,38 @@ impl Replay {
                 self.reports(if completes { "RUNNING" } else { "SUSPENDED" });
                 waited(self.sandbox.resume().await.map(|_| ()), completes, "resume")?;
             }
-            Call::ResumeRefused { closes, .. } => {
-                if closes {
-                    self.clock.advance(WINDOW + Duration::from_secs(1));
+            Call::ResumeRefused => refusal(self.sandbox.resume().await.map(|_| ()), None)?,
+            Call::ResumeEnded => match self.sandbox.resume().await {
+                Err(error) if error.kind() == ErrorKind::WindowClosed => {}
+                Err(error) => {
+                    return Err(format!(
+                        "the service refused the resume of a VM the platform ended, and the \
+                         sandbox reported {:?} rather than WindowClosed: {error}",
+                        error.kind()
+                    ));
                 }
-                refusal(
-                    self.sandbox.resume().await.map(|_| ()),
-                    closes.then_some(ErrorKind::WindowClosed),
-                )?;
+                Ok(_) => return Err("the sandbox resumed a VM the platform ended".into()),
+            },
+            Call::Ended => {
+                // The fake serves the answer the last wait ended on once more before a newer
+                // one, so the platform's new state is read once here, by a plane of the
+                // replay's own, and the sandbox's next read is TERMINATED.
+                self.plane.answer(
+                    "GetMicrovm",
+                    Answer::ok(microvm_response(
+                        "TERMINATED",
+                        Some("MicroVM exceeded maximum lifetime."),
+                    )),
+                );
+                let platform = control_plane(
+                    Arc::clone(&self.plane) as Arc<dyn Transport>,
+                    Region::UsEast1,
+                    self.clock.clone(),
+                );
+                platform
+                    .get_microvm("mvm-abc123")
+                    .await
+                    .map_err(|error| format!("the platform's own read failed: {error}"))?;
             }
             Call::Terminate { completes } => {
                 let opts = if completes {
@@ -564,7 +611,7 @@ fn waited(result: Result<(), Error>, completes: bool, what: &str) -> Result<(), 
 }
 
 async fn replay(steps: &[Step<'_>]) -> Result<(), String> {
-    let mut sandbox = Replay::new();
+    let mut sandbox = Replay::new(steps);
     for (index, step) in steps.iter().enumerate() {
         let outcome = match sandbox.apply(step).await {
             Ok(()) => sandbox.observe(step.after),
@@ -591,9 +638,10 @@ async fn replay(steps: &[Step<'_>]) -> Result<(), String> {
 /// after every call: the transitions STATE-1, STATE-2, STATE-4, STATE-6, STATE-7, STATE-9 and
 /// STATE-10 (the lifecycle and the three flags), STATE-3 (the bootstrap count never passes one),
 /// STATE-5 (no suspend call leaves a state other than RUNNING), STATE-7's payload count, STATE-8
-/// (a completed resume leaves no proxy token cached), and STATE-11 and STATE-12 (the resume
-/// calls a terminated VM or a closed window never gets). The guarded model offers a
-/// launch only while none was made, so no path calls `run` twice: for STATE-3 the replay holds
+/// (a completed resume leaves no proxy token cached), STATE-11 (the resume calls a terminated
+/// VM never gets), and STATE-12 (a resume from SUSPENDED reaches `ResumeMicrovm`, and the
+/// service's refusal of a VM the platform ended is `WindowClosed` and leaves the sandbox
+/// TERMINATED). The guarded model offers a launch only while none was made, so no path calls `run` twice: for STATE-3 the replay holds
 /// the count against an extra bootstrap from a resume or a hook, and the refusal of a second
 /// `run` is `a_second_run_on_one_sandbox_is_refused_before_any_call` in the app's sandbox.rs.
 ///
@@ -758,7 +806,7 @@ fn claims(items: &[syn::Item], known: &BTreeSet<String>, claimed: &mut BTreeSet<
 /// The client model's safety properties that carry a requirement key, each exactly as named in
 /// `crates/model/src/client.rs`. A key that moves onto another property changes this set, though the
 /// key still starts some property's name.
-const KEYED: [&str; 15] = [
+const KEYED: [&str; 16] = [
     "STATE-1 an accepted launch leaves the VM PENDING with its image recorded",
     "STATE-2 a successful hook leaves the VM RUNNING with its token installed",
     "STATE-4 an accepted suspend leaves the VM SUSPENDING",
@@ -766,11 +814,12 @@ const KEYED: [&str; 15] = [
     "STATE-7 a completed resume leaves the VM RUNNING",
     "STATE-9 an accepted terminate leaves the VM TERMINATING and recorded terminated",
     "STATE-10 a reported termination leaves the VM TERMINATED",
+    "STATE-12 a resume refused for an ended VM leaves it TERMINATED and recorded terminated",
     "STATE-3 bootstrap happens at most once",
     "STATE-5 no suspend call outside RUNNING",
     "STATE-11 a terminated VM never reaches RUNNING",
     "STATE-11 no resume call after a terminate",
-    "STATE-12 no resume call with the window closed",
+    "STATE-12 a resume from SUSPENDED reaches the service",
     "STATE-7 a resume re-delivers no run-hook payload",
     "STATE-7 the installed token is never replaced",
     "STATE-8 a resume completion drops the proxy token",

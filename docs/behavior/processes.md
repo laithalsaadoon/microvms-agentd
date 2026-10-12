@@ -44,14 +44,14 @@ Entry point: `crates/microvms-app/src/sandbox.rs:1108`
 
 ## Suspend and resume
 
-Entry point: `crates/microvms-app/src/sandbox.rs:1587`
+Entry point: `crates/microvms-app/src/sandbox.rs:1585`
 
-1. `suspend` requires a running, attached VM before sending the suspension request. `crates/microvms-app/src/sandbox.rs:1588`
-2. Once the request succeeds, it records `Suspending` and the suspension time, then waits for `SUSPENDED` or `TERMINATED`. `crates/microvms-app/src/sandbox.rs:1606`
-3. The returned state updates the local lifecycle, including the terminal marker when the VM terminated during suspension. `crates/microvms-app/src/sandbox.rs:1627`
-4. `resume` rejects a terminated VM or a lifecycle other than suspended, then checks the suspension window when both a window and an observed suspension time are available. `crates/microvms-app/src/sandbox.rs:1671` `crates/microvms-app/src/sandbox.rs:1737`
-5. It sends the resume request and waits for `RUNNING`, treating dead states as failures. `crates/microvms-app/src/sandbox.rs:1694`
-6. The running response updates the VM record, rebinds the session to its endpoint, and clears the previous suspension time. `crates/microvms-app/src/sandbox.rs:1710`
+1. `suspend` requires a running, attached VM before sending the suspension request. `crates/microvms-app/src/sandbox.rs:1586`
+2. Once the request succeeds, it records `Suspending`, then waits for `SUSPENDED` or `TERMINATED`. `crates/microvms-app/src/sandbox.rs:1605`
+3. The returned state updates the local lifecycle, including the terminal marker when the VM terminated during suspension. `crates/microvms-app/src/sandbox.rs:1621`
+4. `resume` rejects a terminated VM or a lifecycle other than suspended. It doesn't check the time spent suspended; the service decides. `crates/microvms-app/src/sandbox.rs:1675` `crates/microvms-app/src/sandbox.rs:1682`
+5. It sends the resume request and waits for `RUNNING`, treating dead states as failures. `crates/microvms-app/src/sandbox.rs:1694` `crates/microvms-app/src/sandbox.rs:1708`
+6. The running response updates the VM record and rebinds the session to its endpoint. A resume the service refuses for a VM that ended records the sandbox `Terminated`. `crates/microvms-app/src/sandbox.rs:1716` `crates/microvms-app/src/sandbox.rs:1697`
 
 ### Related
 

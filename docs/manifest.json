@@ -339,7 +339,7 @@
           {
             "choices": null,
             "default": "600",
-            "help": "Terminate the VM after this long suspended. A resume past it cannot work",
+            "help": "Terminate a VM the idle policy suspended once it's been suspended this long. An explicit suspend outlasted it when measured (2026-10-12), which AWS doesn't promise",
             "name": "suspended-sec",
             "positional": false,
             "required": false,
@@ -988,7 +988,7 @@
           {
             "choices": null,
             "default": "600",
-            "help": "Terminate the VM after this long suspended. A resume past it cannot work",
+            "help": "Terminate a VM the idle policy suspended once it's been suspended this long. An explicit suspend outlasted it when measured (2026-10-12), which AWS doesn't promise",
             "name": "suspended-sec",
             "positional": false,
             "required": false,
@@ -4623,7 +4623,7 @@
         "code": "ERR_WINDOW_CLOSED",
         "exit": 8,
         "finding": "`idlePolicy`",
-        "meaning": "the launch-time suspended window passed, so there is nothing to resume"
+        "meaning": "the MicroVM ended before the resume (the suspended window, the maximum duration, or a terminate), and it can't be resumed; launch a new one"
       },
       {
         "code": "ERR_PLATFORM",

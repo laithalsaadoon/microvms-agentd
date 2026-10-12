@@ -2084,10 +2084,12 @@ pub async fn suspend<O: std::io::Write, E: std::io::Write>(
 /// Thaws a suspended MicroVM and reports its endpoint.
 ///
 /// The suspended window is **not** checked here, and that is correct rather than a gap: the
-/// window is in `GetMicrovm`'s `idlePolicy`, but when the suspend began is known only to the
-/// process that issued it. Guessing would either reject an open window or accept a closed
-/// one, both worse than letting the service answer — which is what `fail_on: DEAD_STATES`
-/// does, failing fast with `stateReason` instead of burning the poll timeout.
+/// service ends a VM the idle policy suspended once `suspendedDurationSeconds` passes and keeps
+/// an explicitly suspended one resumable past it (measured 2026-10-12, us-east-1), so only the
+/// service can answer. Core's `ControlPlane::resume` reports its refusal of a VM that ended
+/// before the resume as `ERR_WINDOW_CLOSED`. A VM that dies after the resume is
+/// accepted fails the wait at once through `fail_on: DEAD_STATES`, with `stateReason`, instead
+/// of burning the poll timeout.
 pub async fn resume<O: std::io::Write, E: std::io::Write>(
     ctx: &mut Ctx<'_, O, E>,
     args: &ResumeArgs,

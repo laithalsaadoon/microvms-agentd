@@ -588,6 +588,50 @@ async fn a_resume_polls_the_thawed_daemon_and_lands_its_hook_observations() {
     assert_eq!(read[0]["event"], "resumed");
 }
 
+/// **`resume` of a VM the service ended exits `ERR_WINDOW_CLOSED` and records no resume.**
+/// (#597, STATE-12) The service refuses the resume with the `ValidationException` it gave on
+/// 2026-10-12 for a VM the idle policy terminated, and `GetMicrovm` reports TERMINATED. The
+/// CLI calls core's `ControlPlane::resume`, so it exits 8 with the code both bindings raise,
+/// rather than `ERR_PLATFORM`.
+#[tokio::test]
+async fn a_resume_of_a_vm_the_service_ended_exits_window_closed_and_records_no_resume() {
+    let dir = TempDir::new("history-resume-ended");
+    let transport = Arc::new(ScriptedTransport::new());
+    transport
+        .answer(
+            "ResumeMicrovm",
+            400,
+            r#"{"message": "The MicroVM mvm-abc123 has been terminated and its state cannot be changed."}"#,
+        )
+        .answer("GetMicrovm", 200, &microvm_body("TERMINATED"));
+    let seam = ScriptedSeam {
+        transport: Arc::clone(&transport),
+        clock: Arc::new(YieldingClock::default()),
+    };
+    let command = Command::Resume(ResumeArgs {
+        microvm_id: "mvm-abc123".into(),
+        timeout: Duration::from_secs(30),
+        state_dir: Some(dir.0.clone()),
+        region: region_flags(),
+    });
+
+    let (result, _) = dispatch_with(&seam, &command, full_infra()).await;
+    let failure = result.expect_err("the VM is gone");
+
+    assert_eq!(failure.exit, Exit::WindowClosed, "{}", failure.message);
+    assert_eq!(failure.code(), "ERR_WINDOW_CLOSED");
+    assert!(
+        failure.message.contains("TERMINATED"),
+        "the state GetMicrovm reported: {}",
+        failure.message
+    );
+    let read = crate::history::read_events(&dir.0, "mvm-abc123");
+    assert!(
+        read.iter().all(|event| event["event"] != "resumed"),
+        "a refused resume records no `resumed` event: {read:?}"
+    );
+}
+
 /// **`microvm health` carries each hook handler's outcome and the identity steps.**
 /// (#198, #205) A hook without a handler keeps its two-key shape; one with a handler
 /// gains a camelCase `handler`; `identitySteps` names the failed step.

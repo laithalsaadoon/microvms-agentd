@@ -367,11 +367,9 @@ pub struct RunMicrovmWire {
 /// "autoResumeEnabled": false}` (measured 2026-08-15, us-east-1, one read-only
 /// `GetMicrovm`).
 ///
-/// The claim mattered because STATE-12 was resting on it: if only the client could name the
-/// suspended window, the client's own record is the only authority on it. The readback
-/// means there is a second one, and [`crate::control::Microvm::idle_policy`] carries it —
-/// so a suspended window that disagrees with what was asked for is now observable rather
-/// than assumed.
+/// The readback means the client's own record isn't the only authority on the suspended
+/// window: [`crate::control::Microvm::idle_policy`] carries the service's, so a window that
+/// disagrees with what was asked for is observable rather than assumed.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IdlePolicy {

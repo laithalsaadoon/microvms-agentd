@@ -52,7 +52,7 @@ Most field names match their flags; the repeatable connector flag uses the plura
 | `shell`            | `run --shell`          | Launch shell-capable, so `microvm shell` can attach later.                                                                                       |
 | `auto-resume`      | `run --auto-resume`    | Let the platform resume a suspended VM on an incoming request.                                                                                   |
 | `max-idle-sec`     | `run --max-idle-sec`   | Suspend after this much inbound-traffic idleness.                                                                                                |
-| `suspended-sec`    | `run --suspended-sec`  | The platform terminates a VM the idle policy suspended after this long suspended.                                                               |
+| `suspended-sec`    | `run --suspended-sec`  | Terminate a VM the idle policy suspended once it's been suspended this long. An explicit `microvm suspend` isn't held to it.                     |
 | `max-duration-sec` | `run --max-duration-sec` | Hard ceiling on the VM's life. Refused outside 1 through 28800, eight hours being the platform's ceiling.                                       |
 | `[env]`            | `run --launch-env`     | The launch environment, as a table. Merged per key, with a `--launch-env` pair winning on a shared key. A key containing `=` or an empty key is refused. |
 | `artifacts`        | none                   | Globs for `run <DIR>`: which files to bring back from the VM's synced working directory. Deliberately no flag spelling. Each glob must compile.   |

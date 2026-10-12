@@ -67,4 +67,4 @@ waive.live = "a refusal before any call never reaches the service; the model and
 issue = "#302"
 waive.gherkin = "the model walks every interleaving of caller requests and platform reports up to two cycles, and model-conformance's replay drives each path against `Sandbox`; a scenario would restate one of those paths"
 waive.fuzz = "the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz"
-waive.live = "the window is launch-time `suspendedDurationSeconds`, and the refusal comes before any call once the client's clock passes it; the model, its replay and the app's tests drive that clock, which a live run can only wait out"
+waive.live = "the service's two answers are the 2026-10-12 us-east-1 measurement in #597 (an idle-suspended VM refused once its window passed, an explicit suspend resumed 1283 s into a 60 s window), which the app's tests, the CLI's and the replay script verbatim; a live check holds a billed VM through an idle suspend and its whole window, which the suite doesn't run yet"

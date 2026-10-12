@@ -444,9 +444,9 @@ impl PyImageBuild {
 /// MicroVM lifecycle by ID (get, list, suspend, resume, terminate, and wait) and image
 /// administration (list, delete, versions and their status, builds).
 ///
-/// Holds no lifecycle state, so it checks nothing a `Sandbox` would (STATE-5, STATE-7,
-/// STATE-12): a suspend of a SUSPENDED VM is the service's to refuse. Use it when a
-/// process has only an identifier, such as a durable workflow step in a fresh process.
+/// Holds no lifecycle state, so it checks nothing a `Sandbox` would (STATE-5, STATE-7): a
+/// suspend of a SUSPENDED VM is the service's to refuse. Use it when a process has only an
+/// identifier, such as a durable workflow step in a fresh process.
 #[pyclass(frozen, name = "ControlPlane", module = "microvms")]
 pub struct PyControlPlane {
     inner: Arc<ControlPlane>,
@@ -703,7 +703,8 @@ impl PyControlPlane {
         Ok(runtime::spawn_shielded(self.suspend_op(microvm_id)).await?)
     }
 
-    /// `ResumeMicrovm`. Returns once accepted; `wait_for_state` for RUNNING.
+    /// `ResumeMicrovm`. Returns once accepted; `wait_for_state` for RUNNING. A VM that ended
+    /// before the resume, whatever ended it, raises `WindowClosedError` (STATE-12).
     fn resume(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {
         Ok(runtime::block_on(py, self.resume_op(microvm_id))?)
     }

@@ -76,7 +76,9 @@ pub enum ErrorKind {
     BuildWedged,
     /// The MicroVM reached a terminal state before RUNNING; read `stateReason`.
     LaunchDied,
-    /// The launch-time suspended window passed, so there is nothing to resume.
+    /// The MicroVM ended before the resume (the suspended window, the maximum duration, or a
+    /// terminate), and it can't be resumed; launch a new one. The service refused the resume,
+    /// and `GetMicrovm` reports the VM TERMINATING or TERMINATED.
     WindowClosed,
     /// A control-plane failure with no more specific class.
     Platform,

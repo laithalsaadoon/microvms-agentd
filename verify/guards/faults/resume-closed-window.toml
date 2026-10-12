@@ -1,0 +1,13 @@
+# ── a resume of a VM that ended: `ERR_WINDOW_CLOSED` from the service's refusal (#597) ─────
+
+# A closed window that drops the service's refusal (#601's review): the error carried the state
+# and `stateReason` and nothing the service said, so a Rust caller couldn't reach the refusal's
+# own text through `std::error::Error::source`.
+[[fault]]
+id = "resume-window-closed-drops-the-refusal"
+guard = "control::microvm::tests::a_resume_refused_for_a_vm_a_terminate_ended_names_no_cause_and_keeps_the_refusal"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::microvm::tests::a_resume_refused_for_a_vm_a_terminate_ended_names_no_cause_and_keeps_the_refusal"]
+expect = "test-failed"
+suite = "rust"
+message = "the refusal is the source"
+transform = { file = "crates/microvms-app/src/control/microvm.rs", replace = "        .with_source(refused)\n", with = "" }

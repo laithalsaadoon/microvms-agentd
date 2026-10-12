@@ -3,8 +3,8 @@
 //! model describes made true of the code.
 //!
 //! Composes [`crate::control`] and [`crate::session`] into the surface the CLI and the
-//! bindings use: build, run, suspend, resume, terminate, the launch-time suspended
-//! window (STATE-12), and teardown in the order that does not leak.
+//! bindings use: build, run, suspend, resume, terminate, a resume of a VM that ended
+//! before it (STATE-12), and teardown in the order that does not leak.
 //!
 //! # The lifecycle is a field, and every transition is guarded
 //!
@@ -32,16 +32,20 @@
 //! control-plane calls rather than answered by AWS. The test asserts the call count, which
 //! is the observable that distinguishes the two.
 //!
-//! # The suspended window is checked before the call (STATE-12)
+//! # The service decides whether a suspended VM resumes (STATE-12)
 //!
-//! The launch-time `idlePolicy` *terminates* a suspended VM once `suspendedDurationSeconds`
-//! passes, which means "resume later" silently stops working. A resume past the window is
-//! refused locally, before `ResumeMicrovm`, because the alternative is calling and reading
-//! the failure: the service answers about a terminated id, which is not the same statement
-//! as "the window you set at launch closed", and getting there costs the full poll timeout
-//! first. The window comes from this sandbox's own `RunMicrovm` request, falling back to the
-//! `idlePolicy` that `GetMicrovm` reports (measured 2026-08-15, `docs/PLATFORM.md`). Only
-//! the suspend's start time is the client's alone.
+//! The launch-time `idlePolicy` *terminates* a VM the idle policy suspended once
+//! `suspendedDurationSeconds` passes, and the service doesn't hold an explicit
+//! `SuspendMicrovm` to that window: measured 2026-10-12 in us-east-1, a VM this client
+//! suspended resumed 1283 s into a 60 s window (#597). So a resume is never refused here for
+//! the time it has spent suspended. It goes to the service, and the service's refusal for a
+//! VM that ended, whatever ended it, comes back from [`ControlPlane::resume`] as
+//! [`ErrorKind::WindowClosed`], which this sandbox records as a termination (STATE-11).
+//!
+//! A suspend the idle policy makes isn't seen here: the sandbox still holds the VM as
+//! RUNNING, and its resume is refused before any call (STATE-7). That suspend reaches a
+//! caller only through [`Sandbox::adopt`], which reads the state from the service, or
+//! [`ControlPlane::resume`], which holds no lifecycle to refuse from.
 //!
 //! # Teardown never raises, and the log group is last
 //!
@@ -266,7 +270,8 @@ pub struct RunRequest {
     pub shell: bool,
     /// `idlePolicy.maxIdleDurationSeconds`.
     pub max_idle_sec: u32,
-    /// `idlePolicy.suspendedDurationSeconds` — the window STATE-12 refuses past.
+    /// `idlePolicy.suspendedDurationSeconds`: how long a VM the idle policy suspended lasts
+    /// before the service terminates it. An explicit suspend isn't held to it (STATE-12).
     pub suspended_sec: u32,
     /// `idlePolicy.autoResumeEnabled`.
     pub auto_resume: bool,
@@ -404,7 +409,8 @@ impl RunRequest {
         self
     }
 
-    /// Sets the suspended window this sandbox will refuse a resume past (STATE-12).
+    /// Sets `idlePolicy.suspendedDurationSeconds`, how long a VM the idle policy suspended
+    /// lasts before the service terminates it. See [`RunRequest::suspended_sec`].
     #[must_use]
     pub fn with_suspended_sec(mut self, seconds: u32) -> Self {
         self.suspended_sec = seconds;
@@ -618,7 +624,8 @@ impl TokenMinter for ControlPlaneMinter {
 
 /// One MicroVM's whole life.
 ///
-/// See the module docs for the state machine, the window, and why teardown is explicit.
+/// See the module docs for the state machine, the resume of an ended VM, and why teardown is
+/// explicit.
 pub struct Sandbox {
     control: Arc<ControlPlane>,
     image: Option<Image>,
@@ -644,8 +651,8 @@ pub struct Sandbox {
     was_terminated: bool,
     bootstrap_count: u32,
 
-    /// The window from *our own* `RunMicrovm` request. `GetMicrovm` also reports it (in
-    /// `idlePolicy`), which is the fallback when this sandbox has no request of its own.
+    /// The suspended window from *our own* `RunMicrovm` request, or `None` for a sandbox that
+    /// launched nothing. `GetMicrovm` reports the service's in `idlePolicy`.
     suspended_window: Option<Duration>,
     /// Whether the accepted launch carried a caller client token, and so may have adopted
     /// a VM an earlier attempt launched (#195).
@@ -659,8 +666,6 @@ pub struct Sandbox {
     /// `maxIdleDurationSeconds` from our own `RunMicrovm` request: a keepalive's cadence
     /// is checked against it.
     idle_window: Option<Duration>,
-    /// The clock reading when the suspend call was accepted, or `None` when not suspended.
-    suspended_at: Option<Duration>,
     /// Set by [`Sandbox::terminate`], so `Drop` can tell an abandoned VM from a torn-down
     /// one.
     torn_down: bool,
@@ -749,10 +754,10 @@ impl Sandbox {
     /// `Sandbox::from_name`, which resolve credentials for a region, are in
     /// `microvms_core::prelude`.
     ///
-    /// The plane's own clock is what times the suspended window, rather than a second one
+    /// The plane's own clock is what every wait here sleeps on, rather than a second one
     /// this type would own. Two clocks in one lifecycle is the trap the daemon's turmoil
-    /// tests record: a window measured on one clock while the poll loop sleeps on another
-    /// calls a closed window open.
+    /// tests record: a deadline measured on one clock while the poll loop sleeps on another
+    /// reads the wrong elapsed time.
     pub fn with_control_plane(control: ControlPlane) -> Self {
         Self {
             control: Arc::new(control),
@@ -772,7 +777,6 @@ impl Sandbox {
             launch_posture: None,
             pending_agent_token: None,
             idle_window: None,
-            suspended_at: None,
             torn_down: false,
             adopted: false,
             detached: false,
@@ -1351,12 +1355,6 @@ impl Sandbox {
     /// finishes through [`Sandbox::wait_until_running`], which counts the bootstrap once
     /// when the service reports RUNNING, the same as a launch this sandbox made itself.
     ///
-    /// # The suspended window (STATE-12)
-    ///
-    /// The window comes from the `idlePolicy` `GetMicrovm` reports. A VM adopted while
-    /// already SUSPENDED has no suspend time this client observed, so the local check has
-    /// nothing to measure and the service answers the resume instead.
-    ///
     /// `endpoint` must agree with the service's when the service reports one: a mismatch
     /// means the identifiers came from two different records. `agent_token` is the bearer
     /// credential the VM was launched with; it never appears in `Debug` or an error.
@@ -1605,10 +1603,6 @@ impl Sandbox {
         // neither suspend nor resume accepts, bricking the handle over one bad request.
         self.control.suspend(&id).await?;
         self.set_lifecycle(Lifecycle::Suspending);
-        // Stamped after the call and before the wait, not after the wait: the idlePolicy's
-        // window starts when the platform begins suspending, so timing it from SUSPENDED
-        // would under-count the transition and call a closed window open.
-        self.suspended_at = Some(self.control.clock().elapsed());
 
         let settled = self
             .control
@@ -1655,12 +1649,16 @@ impl Sandbox {
     /// the freeze, and re-delivering it would hit the daemon's one-shot bootstrap and be
     /// refused — a 409 that reads like a broken VM.
     ///
-    /// # The window is checked first (STATE-12)
+    /// # The service decides, and a VM it ended is `WindowClosed` (STATE-12)
     ///
-    /// Before any wire call, because the answer is already known and calling costs the poll
-    /// timeout to learn something worse. The falsification is a service reporting
-    /// TERMINATED: without this check the resume burns the full deadline and then reports a
-    /// state the client could have named at once.
+    /// No resume is refused here for the time the VM has spent suspended. The service ends a
+    /// VM the idle policy suspended once `suspendedDurationSeconds` passes, and it kept a VM
+    /// this client suspended resumable 1283 s into a 60 s window (measured 2026-10-12,
+    /// us-east-1, #597). A resume the service refuses because the VM ended, whatever ended
+    /// it, is [`ErrorKind::WindowClosed`] ([`ControlPlane::resume`]), and this records the VM
+    /// as terminated, so a second resume is refused here with no call (STATE-11). A VM the
+    /// idle policy suspended is still RUNNING here, so its resume is refused before any call
+    /// (STATE-7); see the module docs.
     ///
     /// # The proxy token is dropped (STATE-8)
     ///
@@ -1673,7 +1671,7 @@ impl Sandbox {
         let id = self.require_microvm("resume")?;
 
         // STATE-11's local half: a terminated VM never returns to RUNNING, so the refusal
-        // comes before the window check and before any call.
+        // comes before any call.
         if self.was_terminated || self.lifecycle == Lifecycle::Terminated {
             return Err(Error::invalid_arg(format!(
                 "microvm {id} was terminated, and a terminated VM never returns to RUNNING \
@@ -1688,15 +1686,23 @@ impl Sandbox {
             )));
         }
 
-        // STATE-12, first and locally.
-        self.require_open_suspended_window(&id)?;
-
-        self.control.resume(&id).await?;
+        // STATE-12: a `WindowClosed` refusal is a VM that ended before this resume. It's
+        // recorded as TERMINATED whichever of TERMINATING or TERMINATED `GetMicrovm` read,
+        // because the service has said the VM's state can't change, and as a termination, so
+        // the next resume is refused before any call (STATE-11). Any other refusal leaves the
+        // sandbox SUSPENDED, and a retry goes to the service again.
+        if let Err(refused) = self.control.resume(&id).await {
+            if refused.kind() == ErrorKind::WindowClosed {
+                self.was_terminated = true;
+                self.set_lifecycle(Lifecycle::Terminated);
+            }
+            return Err(refused);
+        }
         // `fail_on` is the *dead* states rather than the terminal ones: SUSPENDED is the
-        // state this call was made from, so failing on it would fail every resume. A VM the
-        // idlePolicy terminated during suspension never reaches RUNNING, and waiting only
-        // for RUNNING there burns the full timeout and then reports a timeout message
-        // hiding a cause the service had already stated in `stateReason`.
+        // state this call was made from, so failing on it would fail every resume. A VM that
+        // terminates once the resume is accepted never reaches RUNNING, and waiting only for
+        // RUNNING there burns the full timeout and then reports a timeout message hiding a
+        // cause the service had already stated in `stateReason`.
         let running = self
             .control
             .wait_for_state(
@@ -1716,10 +1722,6 @@ impl Sandbox {
         if let Some(session) = self.session.as_mut() {
             session.rebind(endpoint);
         }
-        // Cleared on success so the next cycle's window is measured from the next suspend.
-        // Leaving it set would accumulate every suspension's elapsed time into one total and
-        // reject a resume whose own window is wide open.
-        self.suspended_at = None;
 
         self.session.as_mut().ok_or_else(|| {
             Error::new(
@@ -1728,41 +1730,6 @@ impl Sandbox {
                     .to_string(),
             )
         })
-    }
-
-    /// Rejects a resume the launch-time `idlePolicy` has already made impossible (STATE-12).
-    ///
-    /// The message names the elapsed time, the window, and the `idlePolicy` finding, because
-    /// "cannot resume" alone sends a reader looking for the flag that reopens it.
-    fn require_open_suspended_window(&self, id: &str) -> Result<(), Error> {
-        let reported = self
-            .microvm
-            .as_ref()
-            .and_then(|vm| vm.idle_policy.as_ref())
-            .map(|policy| Duration::from_secs(u64::from(policy.suspended_duration_seconds)));
-        let (Some(window), Some(since)) = (self.suspended_window.or(reported), self.suspended_at)
-        else {
-            // No window or no suspend time means this sandbox cannot know how long the VM
-            // has been suspended, and guessing would refuse a resume the service would honour.
-            return Ok(());
-        };
-        let elapsed = self.control.clock().elapsed().saturating_sub(since);
-        if elapsed <= window {
-            return Ok(());
-        }
-        Err(Error::new(
-            ErrorKind::WindowClosed,
-            format!(
-                "microvm {id} has been suspended {}s, past the {}s suspendedDurationSeconds \
-                 window set at launch — the idlePolicy terminates a suspended VM once that window \
-                 passes, so there is nothing left to resume (docs/PLATFORM.md, '`idlePolicy`'). \
-                 Refused before ResumeMicrovm, because calling would cost the full poll timeout \
-                 to learn the same thing less clearly. A longer window has to be set at launch \
-                 on the next VM; there is no call that extends this one.",
-                elapsed.as_secs(),
-                window.as_secs(),
-            ),
-        ))
     }
 
     // ── terminate (STATE-9, STATE-10) ────────────────────────────────────────
@@ -1907,11 +1874,14 @@ impl Sandbox {
         let vm = self.microvm.as_ref()?;
         self.lifecycle.is_live().then(|| {
             format!(
-                "warning: the Sandbox for microvm {} was dropped in {} without terminate() or \
-                 detach(). Nothing was torn down — Drop cannot await, so a teardown here would \
-                 deadlock inside a runtime. The VM bills until its maximumDurationInSeconds \
-                 ceiling: terminate it with `microvm terminate {}`.",
-                vm.id, self.lifecycle, vm.id,
+                "warning: the Sandbox for microvm {id} was dropped in {state} without \
+                 terminate() or detach(). Nothing was torn down — Drop cannot await, so a \
+                 teardown here would deadlock inside a runtime. {state} is the state this \
+                 sandbox last saw, and the platform may have suspended or ended the VM since. A \
+                 VM that's still live bills until it ends, at its maximumDurationInSeconds \
+                 ceiling at the latest: terminate it with `microvm terminate {id}`.",
+                id = vm.id,
+                state = self.lifecycle,
             )
         })
     }
@@ -2476,7 +2446,9 @@ mod tests {
     }
 
     /// **A dropped live sandbox warns through the plane's adapters**, not a stream of its
-    /// own, so the driving adapter decides where the warning goes (ARCH-7).
+    /// own, so the driving adapter decides where the warning goes (ARCH-7). The warning names
+    /// the state as the one the sandbox last saw, since the platform can suspend or end the VM
+    /// without telling it, and says only that a VM still live bills.
     ///
     /// **Falsification**: write the warning straight to stderr in `Drop` and the recorded
     /// list comes back empty (and the crate's `clippy.toml` refuses `std::io::stderr`).
@@ -2504,6 +2476,11 @@ mod tests {
         let warnings = adapters.warnings();
         assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(warnings[0].contains(&id), "{warnings:?}");
+        assert!(
+            warnings[0].contains("RUNNING is the state this sandbox last saw")
+                && warnings[0].contains("A VM that's still live bills"),
+            "{warnings:?}"
+        );
     }
 
     /// **Detach hands off, and nothing warns or moves afterwards.** A launched sandbox
@@ -2606,9 +2583,9 @@ mod tests {
     /// answer, so a queue left at `[RUNNING]` after the launch and then appended to becomes
     /// `[RUNNING, SUSPENDED]` — the suspend wait pops the stale RUNNING, sleeps a poll
     /// interval, and the fake's `sleep` **advances the clock**. That five seconds is
-    /// invisible until it lands in the middle of the STATE-12 window arithmetic, which is
-    /// exactly where it first showed up. Queueing both up front means every wait matches on
-    /// its first poll and no test clock moves except when a test moves it.
+    /// invisible until a test reads the clock, which then counts the fake's poll interval as
+    /// time the VM spent suspended. Queueing both up front means every wait matches on its
+    /// first poll and no test clock moves except when a test moves it.
     async fn suspended_with_window(
         suspended_sec: u32,
     ) -> (Sandbox, Arc<FakeControlPlane>, Arc<TestClock>) {
@@ -2644,7 +2621,7 @@ mod tests {
         assert_eq!(
             clock.now(),
             Duration::ZERO,
-            "no wait may have slept, or the window arithmetic below is measuring the fake's \
+            "no wait may have slept, or a test that reads the clock is measuring the fake's \
              poll interval as well as the elapsed suspension"
         );
         (sandbox, recorder, clock)
@@ -2916,14 +2893,11 @@ mod tests {
         assert_eq!(sandbox.bootstrap_count(), 1, "STATE-3: never above one");
     }
 
-    /// **STATE-12 for an adopted VM.** With no window from a request of its own, the
-    /// sandbox refuses a late resume using the `idlePolicy` window `GetMicrovm` reported.
-    ///
-    /// **Falsification** — 2026-09-24. Drop the reported-window fallback in
-    /// `require_open_suspended_window` and this resume reaches `ResumeMicrovm`; restored
-    /// after.
+    /// **STATE-12 for an adopted VM.** An adopted VM this sandbox suspended resumes past the
+    /// 600 s `idlePolicy` window `GetMicrovm` reported: the resume goes to the service, which
+    /// doesn't hold an explicit suspend to that window (#597).
     #[tokio::test]
-    async fn an_adopted_vm_refuses_a_resume_past_the_reported_window() {
+    async fn an_adopted_vm_resumes_past_the_reported_window_through_the_service() {
         let (plane, recorder, clock) = adopt_plane();
         recorder
             .answer(
@@ -2934,7 +2908,12 @@ mod tests {
                 "GetMicrovm",
                 Answer::ok(fake::microvm_response("SUSPENDED", None)),
             )
-            .answer("SuspendMicrovm", Answer::ok(fake::empty_response()));
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("RUNNING", None)),
+            )
+            .answer("SuspendMicrovm", Answer::ok(fake::empty_response()))
+            .answer("ResumeMicrovm", Answer::ok(fake::empty_response()));
         let mut sandbox = Sandbox::adopt(plane, "mvm-abc123", ADOPT_ENDPOINT, ADOPT_TOKEN)
             .await
             .expect("adopts");
@@ -2942,12 +2921,12 @@ mod tests {
         sandbox.suspend().await.expect("suspends");
 
         clock.advance(Duration::from_secs(601));
-        let error = sandbox
+        sandbox
             .resume()
             .await
-            .expect_err("past the 600 s window the service reported");
-        assert_eq!(error.kind(), ErrorKind::WindowClosed);
-        assert_eq!(recorder.call_count("ResumeMicrovm"), 0);
+            .expect("past the 600 s window the service reported, the service resumes it");
+        assert_eq!(sandbox.lifecycle(), Lifecycle::Running);
+        assert_eq!(recorder.call_count("ResumeMicrovm"), 1);
     }
 
     /// A VM adopted while already SUSPENDED has no locally observed suspend time, so the
@@ -3825,21 +3804,6 @@ mod tests {
         );
     }
 
-    /// **STATE-12, the guard proof.** A resume past the launch-time suspended window is
-    /// refused locally, with **zero** resume calls, and the message names the window.
-    ///
-    /// Four assertions, and the packet asks for all four because each rules out a different
-    /// wrong implementation. `ErrorKind::WindowClosed` rather than `Timeout` separates this
-    /// from the client that waits. Zero `ResumeMicrovm` calls is what "before any wire call"
-    /// means. The elapsed reading rules out an implementation that polled to the deadline
-    /// first — the fake's clock advances on every `sleep`, so a poll loop here would show up
-    /// as time passed. And the message naming both numbers plus `idlePolicy` is what sends a
-    /// reader to the finding rather than looking for the flag that reopens the window.
-    ///
-    /// **Falsification** — delete the `require_open_suspended_window` call from `resume` and
-    /// the fake answers TERMINATED, so this test fails with an `ErrorKind::LaunchDied` after
-    /// a `ResumeMicrovm` call, naming neither the window nor the seconds elapsed. Verified;
-    /// see the packet's guard proofs.
     /// A keepalive reads this receiver instead of the lock, so every transition must reach
     /// it: a suspend it missed would be undone by the keepalive's next poll auto-resuming
     /// the VM.
@@ -3876,9 +3840,24 @@ mod tests {
         assert_eq!(*watch.borrow(), sandbox.lifecycle());
     }
 
+    /// `ResumeMicrovm`'s refusal of a VM the service terminated, as it answered on 2026-10-12
+    /// in us-east-1 (#597): a 400 whose error type is `ValidationException`.
+    fn terminated_refusal() -> Answer {
+        Answer {
+            status: 400,
+            body: r#"{"message": "The MicroVM mvm-abc123 has been terminated and its state cannot be changed."}"#
+                .to_string(),
+            error_type: Some("ValidationException".to_string()),
+        }
+    }
+
+    /// **STATE-12, the regression (#597).** A resume 1283 s into a 60 s window, on a sandbox
+    /// that suspended the VM itself, reaches `ResumeMicrovm` and comes back RUNNING. Those are
+    /// the numbers measured on 2026-10-12 in us-east-1: the service doesn't hold an explicit
+    /// suspend to `suspendedDurationSeconds`, so a client that refused here refused a resume
+    /// the service honors.
     #[tokio::test]
-    async fn a_resume_past_the_suspended_window_is_refused_before_the_wire() {
-        // A short window, so the arithmetic is legible: sixty seconds asked for at launch.
+    async fn a_resume_past_the_window_of_an_explicit_suspend_reaches_the_service_and_resumes() {
         let (mut sandbox, recorder, clock) = suspended_with_window(60).await;
         assert_eq!(sandbox.suspended_window(), Some(Duration::from_secs(60)));
         assert_eq!(
@@ -3887,68 +3866,128 @@ mod tests {
             "the launch's own maxIdleDurationSeconds, which a keepalive checks its cadence against"
         );
 
-        // The window closes. This is the whole of what the clock injection buys.
-        clock.advance(Duration::from_secs(61));
-
-        // What a service says about a VM the idlePolicy already terminated — which is what a
-        // client without the local check would spend its poll timeout discovering.
+        clock.advance(Duration::from_secs(1283));
         recorder
             .answer("ResumeMicrovm", Answer::ok(fake::empty_response()))
             .answer(
                 "GetMicrovm",
-                Answer::ok(fake::microvm_response(
-                    "TERMINATED",
-                    Some("suspended window elapsed"),
-                )),
+                Answer::ok(fake::microvm_response("RUNNING", None)),
             );
-        let elapsed_before = clock.now();
-        let resumes_before = recorder.call_count("ResumeMicrovm");
-
-        let error = sandbox
+        sandbox
             .resume()
             .await
-            .expect_err("the window the launch set has closed");
+            .expect("the service resumes an explicit suspend past its window");
 
-        assert_eq!(error.kind(), ErrorKind::WindowClosed);
-        assert_eq!(error.code(), "ERR_WINDOW_CLOSED");
-        let message = error.to_string();
-        assert!(message.contains("61s"), "the elapsed time: {message}");
-        assert!(
-            message.contains("60s suspendedDurationSeconds"),
-            "the window has to be named: {message}"
-        );
-        assert!(message.contains("idlePolicy"), "the finding: {message}");
-        assert!(
-            message.contains("Refused before ResumeMicrovm"),
-            "why the refusal is local: {message}"
-        );
+        assert_eq!(sandbox.lifecycle(), Lifecycle::Running);
+        assert!(!sandbox.was_terminated());
         assert_eq!(
             recorder.call_count("ResumeMicrovm"),
-            resumes_before,
-            "the refusal must come before ResumeMicrovm"
-        );
-        assert_eq!(
-            clock.now(),
-            elapsed_before,
-            "the refusal must be immediate rather than polled to the deadline"
+            1,
+            "the resume has to reach the service"
         );
     }
 
-    /// **STATE-12's fallback.** With no window from its own request, the sandbox uses the
-    /// `suspendedDurationSeconds` that `GetMicrovm` reported (600 in the fake).
+    /// **STATE-12, a VM the service ended.** The service refuses the resume with the
+    /// `ValidationException` it gave on 2026-10-12 for a VM the idle policy terminated, and
+    /// `GetMicrovm` reports TERMINATED. That's `ERR_WINDOW_CLOSED` naming the state and the
+    /// `stateReason`, and the sandbox records the termination: a second resume is refused
+    /// with no call (STATE-11), and dropping it warns about no live VM.
     #[tokio::test]
-    async fn the_window_falls_back_to_the_idle_policy_the_service_reported() {
-        let (mut sandbox, recorder, clock) = suspended_with_window(60).await;
-        sandbox.suspended_window = None;
-        recorder.answer("ResumeMicrovm", Answer::ok(fake::empty_response()));
-        clock.advance(Duration::from_secs(601));
+    async fn a_resume_the_service_refuses_for_an_ended_vm_is_window_closed_and_recorded() {
+        let (mut sandbox, recorder, _clock) = planted();
+        // Every `GetMicrovm` answer queued up front, in the order the launch wait, the suspend
+        // wait and the refused resume's read take them; `suspended_with_window` says why.
+        recorder
+            .answer(
+                "RunMicrovm",
+                Answer::ok(fake::microvm_response("PENDING", None)),
+            )
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("RUNNING", None)),
+            )
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("SUSPENDED", None)),
+            )
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response(
+                    "TERMINATED",
+                    Some("MicroVM exceeded maximum lifetime."),
+                )),
+            )
+            .answer(
+                "CreateMicrovmAuthToken",
+                Answer::ok(fake::auth_token_response("proxy-token")),
+            )
+            .answer("SuspendMicrovm", Answer::ok(fake::empty_response()))
+            .answer("ResumeMicrovm", terminated_refusal());
+        sandbox
+            .run(
+                RunRequest::new()
+                    .with_image("arn:image")
+                    .with_suspended_sec(60),
+            )
+            .await
+            .expect("launches");
+        sandbox.suspend().await.expect("suspends");
+
         let error = sandbox
             .resume()
             .await
-            .expect_err("past the reported window");
-        assert_eq!(error.kind(), ErrorKind::WindowClosed);
-        assert!(error.to_string().contains("600s"), "{error}");
-        assert_eq!(recorder.call_count("ResumeMicrovm"), 0);
+            .expect_err("the service ended the VM");
+        assert_eq!(error.kind(), ErrorKind::WindowClosed, "{error}");
+        assert_eq!(error.code(), "ERR_WINDOW_CLOSED");
+        let message = error.to_string();
+        assert!(message.contains("TERMINATED"), "the state: {message}");
+        assert!(
+            message.contains("MicroVM exceeded maximum lifetime."),
+            "the stateReason: {message}"
+        );
+        assert_eq!(sandbox.lifecycle(), Lifecycle::Terminated);
+        assert!(sandbox.was_terminated());
+        assert_eq!(recorder.call_count("ResumeMicrovm"), 1);
+
+        let again = sandbox.resume().await.expect_err("STATE-11");
+        assert!(again.to_string().contains("STATE-11"), "{again}");
+        assert_eq!(
+            recorder.call_count("ResumeMicrovm"),
+            1,
+            "the second resume makes no call"
+        );
+        assert_eq!(
+            sandbox.drop_warning(),
+            None,
+            "a VM the service ended bills nothing, so dropping its sandbox isn't a leak"
+        );
+    }
+
+    /// A resume the service refuses while `GetMicrovm` still reports SUSPENDED is the
+    /// service's answer, and the sandbox stays SUSPENDED: only a VM the service reports dead
+    /// is recorded as terminated (STATE-12), so a retry reaches the service and resumes.
+    #[tokio::test]
+    async fn a_resume_refused_for_a_live_vm_leaves_the_sandbox_suspended_and_resumable() {
+        let (mut sandbox, recorder, _clock) = suspended().await;
+        recorder
+            .answer(
+                "ResumeMicrovm",
+                Answer::failure(409, "The MicroVM is changing state."),
+            )
+            .answer("ResumeMicrovm", Answer::ok(fake::empty_response()));
+
+        let error = sandbox.resume().await.expect_err("the service refused");
+        assert_eq!(error.kind(), ErrorKind::Platform, "{error}");
+        assert_eq!(sandbox.lifecycle(), Lifecycle::Suspended);
+        assert!(!sandbox.was_terminated());
+
+        recorder.answer(
+            "GetMicrovm",
+            Answer::ok(fake::microvm_response("RUNNING", None)),
+        );
+        sandbox.resume().await.expect("the retry resumes");
+        assert_eq!(sandbox.lifecycle(), Lifecycle::Running);
+        assert_eq!(recorder.call_count("ResumeMicrovm"), 2);
     }
 
     /// **#195 at the sandbox.** A client-token launch that adopts an idle-suspended VM is
@@ -4035,121 +4074,6 @@ mod tests {
             .expect_err("a running launch has nothing to wait for");
         assert_eq!(error.kind(), ErrorKind::InvalidArg);
         assert_eq!(sandbox.bootstrap_count(), 1, "counted once (STATE-3)");
-    }
-
-    /// A resume **inside** the window goes through, so the guard is a comparison rather than
-    /// a blanket refusal of every resume.
-    ///
-    /// The boundary is inclusive: elapsed exactly equal to the window is still open, matching
-    /// the Python's `elapsed <= window`.
-    #[tokio::test]
-    async fn a_resume_inside_the_window_is_allowed_and_the_boundary_is_inclusive() {
-        let (mut sandbox, recorder, clock) = suspended_with_window(60).await;
-
-        // Exactly at the window.
-        clock.advance(Duration::from_secs(60));
-        recorder
-            .answer("ResumeMicrovm", Answer::ok(fake::empty_response()))
-            .answer(
-                "GetMicrovm",
-                Answer::ok(fake::microvm_response("RUNNING", None)),
-            );
-        sandbox
-            .resume()
-            .await
-            .expect("60s == the 60s window is open");
-        assert_eq!(sandbox.lifecycle(), Lifecycle::Running);
-        assert_eq!(recorder.call_count("ResumeMicrovm"), 1);
-    }
-
-    /// A successful resume clears the stamp, so the next cycle's window is measured from the
-    /// next suspend rather than from the first one.
-    ///
-    /// The failure this rules out is subtle and would only show on a second cycle:
-    /// accumulating every suspension's elapsed time into one total refuses a resume whose own
-    /// window is wide open. The clock is advanced past the window *between* the two cycles,
-    /// which is what makes the accumulating implementation fail here.
-    #[tokio::test]
-    async fn a_successful_resume_clears_the_stamp_so_a_second_cycle_measures_its_own_window() {
-        let (mut sandbox, recorder, clock) = planted();
-        // Every `GetMicrovm` answer for both cycles, in the order the waits consume them:
-        // the launch's RUNNING, then SUSPENDED / RUNNING twice. Queued up front for the
-        // reason `suspended_with_window` documents — a stale answer left at the head makes a
-        // wait poll twice, and the fake's `sleep` moves the very clock this test is measuring.
-        recorder
-            .answer(
-                "RunMicrovm",
-                Answer::ok(fake::microvm_response("PENDING", None)),
-            )
-            .answer(
-                "CreateMicrovmAuthToken",
-                Answer::ok(fake::auth_token_response("proxy-token")),
-            )
-            .answer("SuspendMicrovm", Answer::ok(fake::empty_response()))
-            .answer("ResumeMicrovm", Answer::ok(fake::empty_response()))
-            .answer(
-                "GetMicrovm",
-                Answer::ok(fake::microvm_response("RUNNING", None)),
-            )
-            .answer(
-                "GetMicrovm",
-                Answer::ok(fake::microvm_response("SUSPENDED", None)),
-            )
-            .answer(
-                "GetMicrovm",
-                Answer::ok(fake::microvm_response("RUNNING", None)),
-            )
-            .answer(
-                "GetMicrovm",
-                Answer::ok(fake::microvm_response("SUSPENDED", None)),
-            )
-            .answer(
-                "GetMicrovm",
-                Answer::ok(fake::microvm_response("RUNNING", None)),
-            );
-        sandbox
-            .run(
-                RunRequest::new()
-                    .with_image("arn:image")
-                    .with_suspended_sec(60),
-            )
-            .await
-            .expect("launches");
-
-        for cycle in 0..2 {
-            sandbox
-                .suspend()
-                .await
-                .unwrap_or_else(|error| panic!("cycle {cycle} suspend: {error}"));
-            assert_eq!(sandbox.lifecycle(), Lifecycle::Suspended, "cycle {cycle}");
-
-            // Forty-five seconds each time — inside the sixty-second window on its own, and
-            // ninety in total. An implementation that never cleared the stamp measures the
-            // total and refuses the second resume, which is the whole point of the loop.
-            clock.advance(Duration::from_secs(45));
-
-            sandbox.resume().await.unwrap_or_else(|error| {
-                panic!("cycle {cycle} resume, whose own window is wide open: {error}")
-            });
-            assert_eq!(sandbox.lifecycle(), Lifecycle::Running, "cycle {cycle}");
-            assert_eq!(
-                sandbox.bootstrap_count(),
-                1,
-                "cycle {cycle}: no re-bootstrap"
-            );
-        }
-
-        assert_eq!(
-            clock.now(),
-            Duration::from_secs(90),
-            "ninety seconds of accumulated suspension against a sixty-second window: this is \
-             the total an implementation that never cleared the stamp would have compared"
-        );
-        assert_eq!(
-            recorder.call_count("ResumeMicrovm"),
-            2,
-            "both cycles resumed"
-        );
     }
 
     /// **STATE-11, the resume-after-terminate case the packet names.** A terminated VM never
