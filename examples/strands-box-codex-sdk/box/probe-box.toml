@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+# A second box with the same policy as box.toml, whose agent is a short Python probe in place of
+# Codex. run.sh starts it once to check what a contained process gets when it tries the
+# MicroVM's metadata service, by raw socket and through the egress gateway, and fails the run
+# when the policy lets either one through.
+name = "mmds-probe"
+box_dir = "/home/agent/box/probe-state"
+policy = "policy.dw"
+
+[agent]
+command = ["/usr/bin/python3.12", "/home/agent/probe_mmds.py"]
+workspace = "/home/agent/project"
+# PROBE_WHERE tells the probe it runs in the box, where it checks the result and exits 1 on a
+# reachable metadata service.
+env = { PATH = "/usr/bin:/bin", PROBE_WHERE = "inside" }
+
+[agent.filesystem]
+# The interpreter's standard library and the probe script.
+read = ["/usr/lib64/python3.12"]
+read_file = ["/home/agent/probe_mmds.py"]
+# Linux maps an extension module (_socket, _ssl) as code only from an exec grant.
+exec = ["/usr/lib64/python3.12/lib-dynload"]

@@ -1,0 +1,83 @@
+// SPDX-License-Identifier: Apache-2.0
+// The Dogwood policy for Codex in the box. Box denies every operation it checks unless a permit
+// matches, and a matching forbid overrides any permit. A path under the operator's home
+// (/home/agent in the guest) starts with "~" here.
+//
+// Box's reference for each action and field:
+// https://github.com/strands-agents/box/blob/main/docs/user/policy/actions.md
+
+// ── The model ────────────────────────────────────────────────────────────────
+// Connect to bedrock-runtime in us-east-1, and send it requests. This is the only host Codex
+// reaches; the egress gateway adds the Bedrock API key to each request.
+@id("model_connect")
+permit (principal, action == Box::Action::"net:connect", resource)
+when { context.input.host == "bedrock-runtime.us-east-1.amazonaws.com" && context.input.port == 443 };
+
+@id("model_request")
+permit (principal, action == Box::Action::"http:request", resource)
+when { context.input.host == "bedrock-runtime.us-east-1.amazonaws.com" };
+
+// ── The shell and the project ────────────────────────────────────────────────
+// Run any command Strands Shell implements. Each file a command touches is still its own decision,
+// and a host program (shell:spawn) has no permit, so none runs.
+@id("shell_commands")
+permit (principal, action == Box::Action::"shell:exec", resource);
+
+@id("project_read")
+permit (principal, action == Box::Action::"fs:read", resource)
+when { context.input.path == "~/project" || context.input.path like "~/project/*" };
+
+@id("project_write")
+permit (principal, action == Box::Action::"fs:write", resource)
+when { context.input.path like "~/project/*" };
+
+// Agents redirect output to /dev/null all the time.
+@id("dev_null")
+permit (principal, action in [Box::Action::"fs:read", Box::Action::"fs:write"], resource)
+when { context.input.path == "/dev/null" };
+
+// ── What stays refused whatever the permits say ──────────────────────────────
+@id("no_env")
+@description("The .env file holds credentials the agent must not read.")
+forbid (principal, action == Box::Action::"fs:read", resource)
+when {
+  context.input.path == "~/project/.env" &&
+  context.input.operation == Box::FsReadOperation::"read_content"
+};
+
+@id("no_deletes")
+@description("This agent writes the project and runs commands in it. It deletes nothing.")
+forbid (principal, action == Box::Action::"fs:delete", resource);
+
+// The MicroVM's execution role is served at 169.254.169.254 through Firecracker MMDS, and no
+// in-guest block works for a process outside the box (docs/TRUST.md). Inside the box every
+// connection goes through the egress gateway, so this rule refuses the address by name and by
+// the address the gateway resolved.
+@id("metadata_hosts")
+@description("Refuse the instance metadata service by name, before resolution.")
+forbid (principal, action == Box::Action::"net:connect", resource)
+when { context.input.host == "169.254.169.254" || context.input.host == "fd00:ec2::254" };
+
+@id("metadata_addresses")
+@description("Refuse link-local and cloud metadata addresses, on the address resolution pinned.")
+forbid (principal, action == Box::Action::"net:connect", resource)
+when {
+  context.input has ip && (
+    context.input.ip like "169.254.*" ||
+    context.input.ip == "fd00:ec2::254" ||
+    context.input.ip like "fe8*" || context.input.ip like "fe9*" ||
+    context.input.ip like "fea*" || context.input.ip like "feb*")
+};
+
+// ── A rule over time ─────────────────────────────────────────────────────────
+// RELEASE.md may be written only after a `python3` run in the box's shell exited 0 in the last
+// 15 minutes. Before the first passing run it is refused; after a pass it is allowed.
+@id("tests_before_release")
+@description("Write RELEASE.md only after the tests pass: run python3 test_calc.py first, and it must exit 0.")
+forbid (principal, action == Box::Action::"fs:write", resource)
+when { context.input.path == "~/project/RELEASE.md" }
+unless temporal {
+  formerly within 15m (
+    Box::Action::"shell:exec"::response{ input.program: "python3", output.status: 0 }
+  )
+};

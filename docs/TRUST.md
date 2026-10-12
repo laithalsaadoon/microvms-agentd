@@ -180,10 +180,14 @@ root, so it can only be shadowed by a bind mount, which needs `CAP_SYS_ADMIN`;
 `EPERM`, and VMs from one image keep the same `boot_id` and hostname while their
 machine-ids differ. Do not key uniqueness on either.
 
-The August 2026 measurement succeeded with `additionalOsCapabilities: ["ALL"]`.
-September measurements found a restricted capability set even when repair was
-requested. Those observations are both retained in [Platform](PLATFORM.md);
-requesting `ALL` is not proof that every repair operation succeeded.
+An image built with `--repair-identity` requests
+`additionalOsCapabilities: ["ALL"]`, and its guest gets every capability
+(measured 2026-10-12). All three steps succeeded on such a guest (measured
+2026-08-06 and 2026-09-24, [Platform](PLATFORM.md)). A guest from an image built
+without it lacks `CAP_SYS_ADMIN`, and passing `--repair-identity` to
+`microvm run --image` doesn't add it, because the flag applies only to an image
+`run` builds. `identity_steps` reports each step either
+way, so a caller that needs repaired identity checks it and `identity_degraded`.
 
 ## Workload hook handlers
 
@@ -257,10 +261,14 @@ its region and account; live verification checks both actions and resource
 scope. Deliver additional workload credentials with their own scope and lifetime
 instead of broadening the shared VM role.
 
-Tested in-guest metadata blocks failed: the capability set lacked
-`CAP_NET_ADMIN`, and route/rule/link changes returned `EPERM`. Relevant sysctl
-paths were read-only. No tested guest-side block was effective. VPC internet
-isolation does not remove metadata access or make an overprivileged role safe.
+Blocking MMDS inside the guest takes `CAP_NET_ADMIN`. A guest from an image
+built without `--repair-identity` lacks it, and route, rule, and link changes
+return `EPERM`. On a guest from an image built with it, root can replace the guest's host route for `169.254.169.254`
+with a blackhole. Afterward, a process that isn't root can neither reach MMDS
+nor remove the route ([Platform](PLATFORM.md), measured 2026-10-12). Any root
+process can remove it, including an exec that doesn't ask for another user. The
+block protects only workloads that run as another user. VPC internet isolation
+does not remove metadata access or make an overprivileged role safe.
 
 ## Outside this contract
 

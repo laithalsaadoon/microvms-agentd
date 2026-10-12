@@ -1143,7 +1143,7 @@ CONTRIBUTING.md, "Changelog", says how to write one.
   root and to a `--user 1000` exec, on both VMs. `ip`, `iptables` and `nft` are absent from
   `al2023-minimal`; with `iproute` installed, `ip route add blackhole 169.254.169.254/32`
   is `Operation not permitted` as root because the exec child's bounding set
-  (`CapBnd a80425fb`) has no `CAP_NET_ADMIN`, and `--repair-identity` does not widen it.
+  (`CapBnd a80425fb`) has no `CAP_NET_ADMIN`, and passing `--repair-identity` to `run --image` does not widen it.
   `docs/TRUST.md` gains "The execution role is the boundary": least privilege on the role
   is the first control and the only one this client can name today. The suite now reads
   the conformance execution role back from IAM and fails on any action outside `logs:`,

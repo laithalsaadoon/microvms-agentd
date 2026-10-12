@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+# Codex's configuration inside the box (CODEX_HOME=/home/agent/codex-home).
+#
+# The model is GPT-6.1 Sol on Amazon Bedrock's bedrock-runtime endpoint, through Codex's
+# built-in `amazon-bedrock-runtime` provider, which targets
+# https://bedrock-runtime.<region>.amazonaws.com/openai/v1 on the Responses wire API. The
+# Mantle endpoint is the separate `amazon-bedrock` provider, and no proxy sits in between.
+# The model id is the Global cross-region inference profile; the bare `openai.gpt-6.1-sol`
+# id has no on-demand throughput.
+model = "global.openai.gpt-6.1-sol"
+model_provider = "amazon-bedrock-runtime"
+model_reasoning_effort = "medium"
+
+# Bedrock serves no hosted web search, and a turn that advertises it fails with "web search
+# is not supported for this request".
+web_search = "disabled"
+
+# The box contains Codex. Codex's own sandbox stays off, so each command it runs goes to the
+# box's shell, where the Dogwood policy decides it; nothing asks a human for approval.
+sandbox_mode = "danger-full-access"
+approval_policy = "never"
+
+# The provider authenticates with AWS_BEARER_TOKEN_BEDROCK when it is set. In the box it holds a
+# placeholder, and the egress gateway puts the real key on each request to bedrock-runtime.
+[model_providers.amazon-bedrock-runtime.aws]
+region = "us-east-1"
