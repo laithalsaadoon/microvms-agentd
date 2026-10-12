@@ -161,6 +161,10 @@ description = "CI's `mutants` job's command: the wrapper over cargo-mutants. The
 # `--in-place` mutates this checkout, which the runner throws away, so rust-cache can restore
 # dependencies into its target. Run from a worktree you keep, pass it without `--in-place`, or
 # run `mise run mutants`.
+# The CLI's parity test spawns microvms-core's `parity-tunnel-peer` example from the test
+# binary's target directory, and a mutant's `cargo test -p microvms-cli` never builds another
+# package's example, so the fixture is built first into the target `--in-place` tests use.
+depends = ["parity:fixtures"]
 tools = { "cargo:cargo-mutants" = "{{vars.cargo_mutants}}" }
 run = "./tools/check-mutants.py"
 
