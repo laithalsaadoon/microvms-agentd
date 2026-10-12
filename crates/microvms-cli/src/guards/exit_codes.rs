@@ -44,10 +44,10 @@ async fn each_induced_failure_class_earns_its_own_code_and_finding() {
             "`runHookPayload` arrives wrapped, not as the body",
         ),
         (
-            "expired suspended window",
+            "a VM that terminated while suspended",
             Error::new(
                 ErrorKind::WindowClosed,
-                "suspended 301s, past the 300s suspendedDurationSeconds window",
+                "microvm mvm-1 terminated while suspended, so there is nothing to resume",
             ),
             Exit::WindowClosed,
             "`idlePolicy`",

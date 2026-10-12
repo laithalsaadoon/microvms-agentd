@@ -128,7 +128,7 @@ runner must own health checks, artifact collection, cancellation and cleanup.
 | --- | --- | --- |
 | `--memory` | `1024` | 1 GiB billing baseline, 4 GiB guest ceiling |
 | `--max-idle-sec` | `600` | Suspend after this many seconds without inbound traffic |
-| `--suspended-sec` | `600` | Terminate an idle-suspended VM after this many seconds suspended |
+| `--suspended-sec` | `600` | Terminate a VM the idle policy suspended after this many seconds suspended |
 | `--max-duration-sec` | `3600` | Maximum VM lifetime; upper limit is 28800 seconds (8 hours) |
 | `--auto-resume` | off | Let an inbound request wake a suspended VM |
 | `--token-ttl-hours` | `12` | Maximum Bedrock token lifetime; signing credentials may expire sooner |

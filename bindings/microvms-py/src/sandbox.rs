@@ -1904,11 +1904,16 @@ impl PySandbox {
     /// # What the core refuses, before any wire call
     ///
     /// A resume after `terminate` (STATE-11) — a terminated VM never returns to RUNNING,
-    /// and even a call the service accepted would hand back a different machine. A resume
-    /// from anything but SUSPENDED (STATE-7). And a resume past the launch-time suspended
-    /// window (STATE-12), which is the one worth knowing about: the `idlePolicy` terminates
-    /// a suspended VM once that window passes, so there is nothing left to resume, and
-    /// calling would cost the full poll timeout to learn something worse.
+    /// and even a call the service accepted would hand back a different machine. And a
+    /// resume from anything but SUSPENDED (STATE-7).
+    ///
+    /// # What the service decides (STATE-12)
+    ///
+    /// How long the VM has been suspended. The `idlePolicy` terminates a VM the idle policy
+    /// suspended once `suspended_sec` passes, and a VM this sandbox suspended stayed
+    /// resumable 1283 s into a 60 s window (measured 2026-10-12, us-east-1). A resume of a VM
+    /// that terminated while suspended raises `WindowClosedError`, and the sandbox is
+    /// TERMINATED after it.
     ///
     /// Nothing is re-delivered: no run-hook payload, no token, no bootstrap. The in-memory
     /// token survived the freeze, and re-delivering it would hit the daemon's one-shot

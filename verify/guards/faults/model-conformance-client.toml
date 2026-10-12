@@ -14,7 +14,7 @@ suite = "rust"
 id = "model-conformance-client-resume-resends-payload"
 note = "crates/model-conformance/tests/client_lifecycle.rs::every_walked_path_of_the_client_model_replays_against_the_sandbox"
 message = "run-hook payloads: sandbox 2, model 1"
-transform = { file = "crates/microvms-app/src/sandbox.rs", replace = "        self.control.resume(&id).await?;\n", with = "        self.control.resume(&id).await?;\n        let token = self.pending_agent_token.clone().unwrap_or_default();\n        let payload = RunHookPayload::for_launch(&token, &Default::default())?;\n        self.control.run_microvm(RunMicrovmRequest::new(&id, payload)).await?;\n" }
+transform = { file = "crates/microvms-app/src/sandbox.rs", replace = "            return Err(refused);\n        }\n", with = "            return Err(refused);\n        }\n        let token = self.pending_agent_token.clone().unwrap_or_default();\n        let payload = RunHookPayload::for_launch(&token, &Default::default())?;\n        self.control.run_microvm(RunMicrovmRequest::new(&id, payload)).await?;\n" }
 
 # A suspend that records SUSPENDING only once the wait settles. A wait that times out leaves the
 # sandbox RUNNING while the platform suspends, and the next suspend is issued outside RUNNING.
@@ -97,11 +97,12 @@ message = "a path the recorder kept doesn't plan"
 transform = { file = "crates/model-conformance/tests/client_lifecycle.rs", replace = "    Ok(steps)\n}\n", with = "    if steps.len() > 6 {\n        return Err(\"a completion arrives after another step\");\n    }\n    Ok(steps)\n}\n" }
 
 # The untaken-step paths the planner skips are pinned: a planner that skips another set, here
-# one that stops skipping a closed window that opens again, fails before it replays anything.
+# one that stops skipping a completion that arrives after another step, fails before it replays
+# anything.
 [[family.fault]]
 id = "model-conformance-client-skips-moved"
 message = "the planner skips a different set of untaken-step paths than SKIPPED names"
-transform = { file = "crates/model-conformance/tests/client_lifecycle.rs", replace = "(Action::ResumeRequested { .. }, Verdict::Issued) if window_closed => {", with = "(Action::ResumeRequested { .. }, Verdict::Issued) if false && window_closed => {" }
+transform = { file = "crates/model-conformance/tests/client_lifecycle.rs", replace = "            ) => return Err(\"a completion arrives after another step\"),\n", with = "            ) => (Call::Nothing, 1),\n" }
 
 # A key that moves onto a property stating another rule: STATE-8 still starts some property's
 # name, so the claimed-key check alone passed, and `cargo test -p agentd-model` stays green.

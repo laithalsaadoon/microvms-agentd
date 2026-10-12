@@ -254,7 +254,7 @@ pub const EXIT_TABLE: [ExitRow; 17] = [
     ExitRow {
         exit: Exit::WindowClosed,
         code: Some("ERR_WINDOW_CLOSED"),
-        meaning: "the launch-time suspended window passed, so there is nothing to resume",
+        meaning: "the MicroVM terminated while suspended, so there is nothing to resume",
         finding: "`idlePolicy`",
     },
     ExitRow {
@@ -442,9 +442,10 @@ pub fn classify(error: &Error) -> CliError {
         (Exit::LaunchDied, _) => {
             &["`microvm logs <image-name>` names the build log group the hook wrote to"]
         }
-        (Exit::WindowClosed, _) => {
-            &["a longer window is set at launch with --suspended-sec; no call extends this one"]
-        }
+        (Exit::WindowClosed, _) => &[
+            "the VM is gone: launch a new one; --suspended-sec sets how long a VM the idle \
+             policy suspended lasts, and --max-duration-sec how long any VM does",
+        ],
         _ => &[],
     };
     classified

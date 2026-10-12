@@ -56,7 +56,7 @@ Flags:
 - `--no-vm-logs`: Turn the VM's own logging off. `crates/microvms-cli/src/cli.rs:770`.
 - `--timeout`: How long to wait for the exec, in seconds. `crates/microvms-cli/src/cli.rs:1050`.
 - `--max-idle-sec`: Suspend the VM after this much inbound-traffic idleness. `crates/microvms-cli/src/cli.rs:1054`.
-- `--suspended-sec`: Terminate the VM after this long suspended. A resume past it cannot work. `crates/microvms-cli/src/cli.rs:1058`.
+- `--suspended-sec`: Terminate a VM the idle policy suspended once it's been suspended this long. An explicit suspend isn't held to it. `crates/microvms-cli/src/cli.rs:1059`.
 - `--auto-resume`: Let the platform resume a suspended VM on an incoming request. `crates/microvms-cli/src/cli.rs:1062`.
 - `--max-duration-sec`: Hard ceiling on the VM's life. Refused above 28800 (eight hours) before any call. `crates/microvms-cli/src/cli.rs:1066`.
 - `--port`: The daemon's port inside the guest. `crates/microvms-cli/src/cli.rs:1070`.
@@ -167,7 +167,7 @@ Flags:
 - `--memory-mib`: MiB of memory the workload needs, instead of --memory: any figure, which selects the smallest class whose baseline covers it (1500 selects 2048). Combines with --cpus. `crates/microvms-cli/src/cli.rs:511`.
 - `--token-ttl-hours`: How long the Bedrock bearer token lives, in hours. Default and ceiling 12. `crates/microvms-cli/src/cli.rs:2499`.
 - `--max-idle-sec`: Suspend the VM after this much inbound-traffic idleness. `crates/microvms-cli/src/cli.rs:2503`.
-- `--suspended-sec`: Terminate the VM after this long suspended. A resume past it cannot work. `crates/microvms-cli/src/cli.rs:2507`.
+- `--suspended-sec`: Terminate a VM the idle policy suspended once it's been suspended this long. An explicit suspend isn't held to it. `crates/microvms-cli/src/cli.rs:2509`.
 - `--auto-resume`: Let the platform resume a suspended VM on an incoming request. `crates/microvms-cli/src/cli.rs:2511`.
 - `--max-duration-sec`: Hard ceiling on the VM's life. Refused above 28800 (eight hours) before any call. `crates/microvms-cli/src/cli.rs:2515`.
 - `--port`: The daemon's port inside the guest. `crates/microvms-cli/src/cli.rs:2519`.

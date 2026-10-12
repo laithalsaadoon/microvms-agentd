@@ -83,7 +83,8 @@ pub struct ProjectConfig {
     pub auto_resume: Option<bool>,
     /// `run --max-idle-sec`: suspend after this much inbound-traffic idleness.
     pub max_idle_sec: Option<u32>,
-    /// `run --suspended-sec`: terminate after this long suspended.
+    /// `run --suspended-sec`: terminate a VM the idle policy suspended once it's been suspended
+    /// this long.
     pub suspended_sec: Option<u32>,
     /// `run --max-duration-sec`: hard ceiling on the VM's life.
     pub max_duration_sec: Option<u32>,

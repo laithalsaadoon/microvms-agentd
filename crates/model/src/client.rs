@@ -41,15 +41,16 @@
 //! only worth reading next to `a resume is attempted after a terminate`, which proves the
 //! checker got there.
 //!
-//! # The window is a boolean, not a clock
+//! # The end of a suspended VM is the platform's action, not a clock
 //!
-//! [`Action::ResumeRequested`] carries `window_open`, which is the model's whole
-//! representation of `suspendedDurationSeconds`. Time is not in the state space, and it
-//! should not be: what the model has to settle is whether the client *checks* before
-//! calling, and both answers to that check are reachable in one step. The arithmetic — a
-//! monotonic clock, a stamp taken before the wait, the inclusive boundary — is what the
-//! Rust test suite drives with an injectable clock. Putting a counter in here instead would
-//! multiply the state space by the window's width and prove the same one bit.
+//! [`Action::SuspendedVmEnded`] is the platform terminating a SUSPENDED VM: the idle
+//! policy's `suspendedDurationSeconds` passing, or the VM's maximum duration. It sets
+//! [`State::platform_ended`], which the client can't read: it learns of the end only from
+//! the service's refusal of its next resume (STATE-12). Time is not in the state space, and
+//! it should not be. The client doesn't decide on the window, because the service doesn't
+//! hold an explicit suspend to it (measured 2026-10-12, us-east-1, #597), so the model
+//! settles two things that need no clock: a resume from SUSPENDED always reaches the
+//! service, and the service's refusal leaves the client TERMINATED.
 
 use stateright::{Model, Property};
 
@@ -84,8 +85,7 @@ pub struct Wire {
     pub launches: u8,
     /// `SuspendMicrovm` calls. Must only ever increment from RUNNING (STATE-5).
     pub suspends: u8,
-    /// `ResumeMicrovm` calls. Must never increment once `was_terminated` (STATE-11), nor
-    /// with the suspended window closed (STATE-12).
+    /// `ResumeMicrovm` calls. Must never increment once `was_terminated` (STATE-11).
     pub resumes: u8,
     /// `TerminateMicrovm` calls.
     pub terminates: u8,
@@ -100,8 +100,11 @@ pub struct Wire {
 pub enum Verdict {
     /// The client issued the call.
     Issued,
-    /// The client refused locally, before any call. Every STATE-5/11/12 refusal is this.
+    /// The client refused locally, before any call. Every STATE-5/7/11 refusal is this.
     RefusedLocally,
+    /// The client issued the call and the service refused it: a resume of a VM the platform
+    /// ended while it was suspended (STATE-12).
+    RefusedByService,
     /// The action did not apply — the platform reporting something the client is not
     /// waiting for.
     Ignored,
@@ -130,10 +133,10 @@ pub enum Action {
     /// The platform reporting suspension complete (STATE-6).
     SuspendComplete,
     /// The caller asking for a resume (STATE-7, STATE-11, STATE-12).
-    ///
-    /// `window_open` is the launch-time `suspendedDurationSeconds` window, as the client
-    /// knows it. See the module docs on why a boolean rather than a clock.
-    ResumeRequested { window_open: bool },
+    ResumeRequested,
+    /// The platform ending a SUSPENDED VM, which the client doesn't see until its next resume
+    /// is refused (STATE-12). See the module docs on why an action rather than a clock.
+    SuspendedVmEnded,
     /// The platform reporting the resume complete, which is where the cached proxy token is
     /// dropped (STATE-8).
     ResumeComplete,
@@ -184,6 +187,11 @@ pub struct State {
     /// waiting for one *and* still SUSPENDED. The terminate wins, which is what the real
     /// client does: `terminate` clears the session and the lifecycle before anything else.
     pub resume_in_flight: bool,
+    /// Whether the platform ended the VM while it was SUSPENDED ([`Action::SuspendedVmEnded`]).
+    ///
+    /// The platform's state, not the client's: no guard reads it, and the client learns it
+    /// only when the service refuses its next resume (STATE-12).
+    pub platform_ended: bool,
 
     // ── audit counters, in the daemon model's idiom ───────────────────────────
     //
@@ -196,8 +204,6 @@ pub struct State {
     pub suspends_outside_running: u8,
     /// Incremented when a resume call was issued on a terminated VM (STATE-11).
     pub resumes_after_terminate: u8,
-    /// Incremented when a resume call was issued with the window closed (STATE-12).
-    pub resumes_window_closed: u8,
     /// Incremented if the installed token is ever replaced (STATE-3, STATE-7).
     pub token_replacements: u8,
 
@@ -212,17 +218,16 @@ pub struct State {
 pub struct Config {
     /// How many suspend/resume cycles a caller may drive.
     ///
-    /// Two, not one: the defect a single cycle cannot see is a client that accumulates
-    /// every suspension's elapsed time into one total and refuses the second resume even
-    /// though its own window is wide open. That is a real bug the Rust suite has a test
-    /// for, and one cycle is blind to it.
+    /// Two, not one: the defect a single cycle cannot see is state the first cycle leaves
+    /// behind, such as a proxy token the first resume should have dropped, and one cycle is
+    /// blind to it.
     pub max_cycles: u8,
     /// Whether the client is allowed to skip its local guards.
     ///
     /// The falsification switch, and the reason the model is worth running: with this true
-    /// the client issues suspends from non-RUNNING states, resumes after a terminate, and
-    /// resumes with a closed window, and stateright hands back the path. That is how the
-    /// properties are shown to be capable of failing rather than merely green.
+    /// the client issues suspends from non-RUNNING states and resumes after a terminate, and
+    /// stateright hands back the path. That is how the properties are shown to be capable of
+    /// failing rather than merely green.
     pub skip_local_guards: bool,
     /// Whether a second bootstrap may be attempted — the planted double-bootstrap the
     /// packet's guard proofs name.
@@ -296,9 +301,9 @@ impl Model for ClientLifecycle {
             mints: 0,
             installed_token: None,
             resume_in_flight: false,
+            platform_ended: false,
             suspends_outside_running: 0,
             resumes_after_terminate: 0,
-            resumes_window_closed: 0,
             token_replacements: 0,
             last: None,
             cycles: 0,
@@ -350,15 +355,23 @@ impl Model for ClientLifecycle {
                 actions.push(Action::TerminateRequested);
             }
             if state.wire.resumes <= self.cfg.max_cycles {
-                for window_open in [true, false] {
-                    actions.push(Action::ResumeRequested { window_open });
-                }
+                actions.push(Action::ResumeRequested);
             }
         }
 
         // Platform completion reports, each only where the client is waiting for it.
         if state.vm_state == VmState::Suspending {
             actions.push(Action::SuspendComplete);
+        }
+        // The platform ending a SUSPENDED VM, once. Not while a resume is in flight: the
+        // service accepted that resume, so the VM is no longer waiting out a suspension, and
+        // the sandbox's wait leaves no gap for the end to land in.
+        if state.vm_state == VmState::Suspended
+            && !state.was_terminated
+            && !state.resume_in_flight
+            && !state.platform_ended
+        {
+            actions.push(Action::SuspendedVmEnded);
         }
         if state.wire.resumes > 0 && state.vm_state != VmState::Running {
             actions.push(Action::ResumeComplete);
@@ -459,29 +472,40 @@ impl Model for ClientLifecycle {
             }
 
             // STATE-7, STATE-11, STATE-12.
-            Action::ResumeRequested { window_open } => {
+            Action::ResumeRequested => {
                 let terminated = last.was_terminated || last.vm_state == VmState::Terminated;
                 let wrong_state = last.vm_state != VmState::Suspended;
-                if self.guarded() && (terminated || wrong_state || !window_open) {
-                    // All three refusals are local and cost no call. The window is checked
-                    // *first* in the real client, but the model does not order the three
-                    // because the observable — zero resume calls — is the same.
+                if self.guarded() && (terminated || wrong_state) {
+                    // Both refusals are local and cost no call. Nothing else is: how long the
+                    // VM has spent suspended is the service's to judge (STATE-12).
                     Verdict::RefusedLocally
                 } else {
                     next.wire.resumes += 1;
-                    next.resume_in_flight = true;
                     // Recorded at the decision, for the same reason the suspend is: the
                     // resulting state cannot say whether the call should have been made.
                     if terminated {
                         next.resumes_after_terminate += 1;
                     }
-                    if !window_open {
-                        next.resumes_window_closed += 1;
-                    }
                     // STATE-7's other half: no payload is added here. A resume that
                     // re-delivered would show up as `payloads > launches`.
-                    Verdict::Issued
+                    if last.platform_ended {
+                        // STATE-12. The service's refusal is the first the client hears of the
+                        // end, and it records the VM the way a completed terminate does: gone,
+                        // and never offered a resume again (STATE-11).
+                        (next.vm_state, next.was_terminated) = (VmState::Terminated, true);
+                        Verdict::RefusedByService
+                    } else {
+                        next.resume_in_flight = true;
+                        Verdict::Issued
+                    }
                 }
+            }
+
+            // STATE-12's platform half. The client's state doesn't move: nothing it holds
+            // says the VM is gone until a call is answered.
+            Action::SuspendedVmEnded => {
+                next.platform_ended = true;
+                Verdict::Issued
             }
 
             // STATE-8. The resume completing is where the cached token is dropped, and the
@@ -621,6 +645,15 @@ impl Model for ClientLifecycle {
                     _ => true,
                 },
             ),
+            Property::<Self>::always(
+                "STATE-12 a resume refused for an ended VM leaves it TERMINATED and recorded terminated",
+                |_, state| match state.last {
+                    Some((Action::ResumeRequested, Verdict::RefusedByService)) => {
+                        state.vm_state == VmState::Terminated && state.was_terminated
+                    }
+                    _ => true,
+                },
+            ),
             // ── the three Z3 already proved, restated over interleavings ─────
             //
             // Stated unconditionally rather than consulting the config, for the reason the
@@ -665,8 +698,19 @@ impl Model for ClientLifecycle {
                 state.resumes_after_terminate == 0
             }),
             Property::<Self>::always(
-                "STATE-12 no resume call with the window closed",
-                |_, state| state.resumes_window_closed == 0,
+                "STATE-12 a resume from SUSPENDED reaches the service",
+                |_, state| {
+                    // #597: the client refused a resume the service honors, because it judged
+                    // the suspended window itself. A local refusal leaves the state as it
+                    // was, so the state after one is the state it was refused in, and a VM
+                    // still SUSPENDED and not terminated there was refused on nothing but
+                    // the client's own judgment.
+                    !matches!(
+                        state.last,
+                        Some((Action::ResumeRequested, Verdict::RefusedLocally))
+                    ) || state.was_terminated
+                        || state.vm_state != VmState::Suspended
+                },
             ),
             Property::<Self>::always(
                 "STATE-7 a resume re-delivers no run-hook payload",
@@ -721,8 +765,7 @@ impl Model for ClientLifecycle {
                 (state.wire.suspends == 0 || launched)
                     && (state.wire.resumes == 0
                         || state.wire.suspends > 0
-                        || state.resumes_after_terminate > 0
-                        || state.resumes_window_closed > 0)
+                        || state.resumes_after_terminate > 0)
                     && state.mints <= state.wire.resumes
             }),
             // ── coverage, so none of the above can pass by measuring nothing ──
@@ -744,21 +787,17 @@ impl Model for ClientLifecycle {
                 // checker really did try it, and really was refused.
                 matches!(
                     state.last,
-                    Some((Action::ResumeRequested { .. }, Verdict::RefusedLocally))
+                    Some((Action::ResumeRequested, Verdict::RefusedLocally))
                 ) && state.was_terminated
             }),
-            Property::<Self>::sometimes(
-                "a resume is attempted with the window closed",
-                |_, state| {
-                    matches!(
-                        state.last,
-                        Some((
-                            Action::ResumeRequested { window_open: false },
-                            Verdict::RefusedLocally
-                        ))
-                    )
-                },
-            ),
+            Property::<Self>::sometimes("a resume reaches a VM the platform ended", |_, state| {
+                // The witness that makes both STATE-12 properties non-vacuous: the checker
+                // reached a VM the platform ended, and its resume went to the service.
+                matches!(
+                    state.last,
+                    Some((Action::ResumeRequested, Verdict::RefusedByService))
+                )
+            }),
             Property::<Self>::sometimes("a suspend is attempted outside RUNNING", |_, state| {
                 matches!(
                     state.last,
@@ -822,29 +861,59 @@ mod tests {
             "the counterexample must terminate before it resumes, got {steps:?}"
         );
         assert!(
-            steps
-                .iter()
-                .any(|a| matches!(a, Action::ResumeRequested { .. })),
+            steps.iter().any(|a| matches!(a, Action::ResumeRequested)),
             "and it must then resume, got {steps:?}"
         );
     }
 
-    /// **STATE-12's guard proof, in the model.** The unguarded client issues a resume with
-    /// the window closed, and the counterexample names the closed window.
+    /// **STATE-12, in the model.** A VM the platform ended while SUSPENDED still looks
+    /// SUSPENDED to the client, so its resume reaches the service, which refuses it; the
+    /// refusal leaves the client TERMINATED, and the next resume is refused with no call
+    /// (STATE-11). Driven through the transition function, since the sequence reads more
+    /// clearly than a search for it.
     #[test]
-    fn skipping_the_local_guards_issues_a_resume_with_the_window_closed() {
-        let checker = ClientLifecycle::new(Config::guards_skipped())
-            .checker()
-            .spawn_bfs()
-            .join();
-        let path = checker.assert_any_discovery("STATE-12 no resume call with the window closed");
-        let steps = path.into_actions();
-        assert!(
-            steps
-                .iter()
-                .any(|a| matches!(a, Action::ResumeRequested { window_open: false })),
-            "the counterexample must resume on a closed window, got {steps:?}"
+    fn a_resume_of_a_vm_the_platform_ended_reaches_the_service_and_records_the_end() {
+        let model = ClientLifecycle::new(Config::guards_held());
+        let start = model.init_states().pop().expect("one init state");
+        let mut state = start;
+        for action in [
+            Action::LaunchAccepted,
+            Action::HookSucceeded,
+            Action::SuspendRequested,
+            Action::SuspendComplete,
+            Action::SuspendedVmEnded,
+        ] {
+            state = model
+                .next_state(&state, action)
+                .unwrap_or_else(|| panic!("{action:?} applies"));
+        }
+        assert_eq!(
+            state.vm_state,
+            VmState::Suspended,
+            "the client doesn't see the end"
         );
+        assert!(state.platform_ended && !state.was_terminated);
+
+        let refused = model
+            .next_state(&state, Action::ResumeRequested)
+            .expect("the resume is a step");
+        assert_eq!(
+            refused.wire.resumes, 1,
+            "the resume reaches the service rather than being refused here"
+        );
+        assert_eq!(
+            refused.last.expect("a verdict").1,
+            Verdict::RefusedByService
+        );
+        assert_eq!(refused.vm_state, VmState::Terminated);
+        assert!(refused.was_terminated);
+        assert!(!refused.resume_in_flight, "nothing is waited for");
+
+        let again = model
+            .next_state(&refused, Action::ResumeRequested)
+            .expect("a refusal still records a verdict");
+        assert_eq!(again.wire.resumes, 1, "STATE-11: no second call");
+        assert_eq!(again.last.expect("a verdict").1, Verdict::RefusedLocally);
     }
 
     /// **STATE-5's guard proof, in the model.** Without the RUNNING check the client issues
@@ -920,7 +989,7 @@ mod tests {
         );
     }
 
-    /// A resume from SUSPENDED with an open window reaches RUNNING, re-delivers nothing, and
+    /// A resume from SUSPENDED reaches RUNNING, re-delivers nothing, and
     /// drops the proxy token — asserted against the transition function directly, since a
     /// three-step sequence is clearer read than searched for.
     #[test]
@@ -955,8 +1024,8 @@ mod tests {
         assert_eq!(suspended.vm_state, VmState::Suspended);
 
         let resuming = model
-            .next_state(&suspended, Action::ResumeRequested { window_open: true })
-            .expect("an open window resumes");
+            .next_state(&suspended, Action::ResumeRequested)
+            .expect("a resume from SUSPENDED is issued");
         assert_eq!(resuming.wire.resumes, 1);
         let resumed = model
             .next_state(&resuming, Action::ResumeComplete)
@@ -1037,24 +1106,22 @@ mod tests {
             .expect("terminated");
         assert!(terminated.was_terminated);
 
-        for window_open in [true, false] {
-            let refused = model
-                .next_state(&terminated, Action::ResumeRequested { window_open })
-                .expect("a refusal still records a verdict");
-            assert_eq!(
-                refused.wire.resumes, 0,
-                "window_open={window_open}: no resume may reach the wire once terminated"
-            );
-            assert_ne!(
-                refused.vm_state,
-                VmState::Running,
-                "window_open={window_open}: a terminated VM must not return to RUNNING"
-            );
-        }
+        let refused = model
+            .next_state(&terminated, Action::ResumeRequested)
+            .expect("a refusal still records a verdict");
+        assert_eq!(
+            refused.wire.resumes, 0,
+            "no resume may reach the wire once terminated"
+        );
+        assert_ne!(
+            refused.vm_state,
+            VmState::Running,
+            "a terminated VM must not return to RUNNING"
+        );
     }
 
     /// The state space really is explored rather than cut short by the cycle bound: two
-    /// cycles are reachable, which is what the second-cycle window defect needs.
+    /// cycles are reachable, which is what a defect the first cycle leaves behind needs.
     #[test]
     fn two_suspend_resume_cycles_are_reachable() {
         ClientLifecycle::new(Config::guards_held())

@@ -279,8 +279,8 @@ pub struct DeleteImageOptions {
 /// MicroVM lifecycle by ID (get, list, suspend, resume, terminate, and wait) and image
 /// administration (list, delete, versions and their status, builds).
 ///
-/// Holds no lifecycle state, so it checks nothing a `Sandbox` would (STATE-5, STATE-7,
-/// STATE-12). Use it when a process has only an identifier.
+/// Holds no lifecycle state, so it checks nothing a `Sandbox` would (STATE-5, STATE-7). Use
+/// it when a process has only an identifier.
 #[napi]
 pub struct ControlPlane {
     inner: Arc<CoreControlPlane>,
@@ -344,7 +344,8 @@ impl ControlPlane {
         self.inner.suspend(&microvm_id).await.map_err(js_async)
     }
 
-    /// `ResumeMicrovm`. Resolves once accepted; `waitForState` for RUNNING.
+    /// `ResumeMicrovm`. Resolves once accepted; `waitForState` for RUNNING. A VM that
+    /// terminated while suspended rejects with `ERR_WINDOW_CLOSED` (STATE-12).
     #[napi]
     pub async fn resume(&self, microvm_id: String) -> Result<(), AsyncError> {
         self.inner.resume(&microvm_id).await.map_err(js_async)

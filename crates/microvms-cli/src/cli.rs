@@ -301,8 +301,10 @@ pub enum Command {
 
     /// Thaw a suspended MicroVM and report its endpoint.
     ///
-    /// The launch-time `suspendedDurationSeconds` window terminates a suspended VM once it
-    /// passes, so "resume later" silently stops working and the VM is gone rather than slow.
+    /// The launch-time `suspendedDurationSeconds` window terminates a VM the idle policy
+    /// suspended once it passes. A VM suspended with `microvm suspend` stayed resumable 1283 s
+    /// into a 60 s window (measured 2026-10-12, us-east-1), so the service decides, and a resume
+    /// of a VM that terminated while suspended exits `ERR_WINDOW_CLOSED`.
     Resume(ResumeArgs),
 
     /// Tear down a MicroVM, and optionally its image and build log group.
@@ -1054,7 +1056,8 @@ pub struct RunArgs {
     #[arg(long, default_value_t = 600)]
     pub max_idle_sec: u32,
 
-    /// Terminate the VM after this long suspended. A resume past it cannot work.
+    /// Terminate a VM the idle policy suspended once it's been suspended this long. An explicit
+    /// suspend isn't held to it.
     #[arg(long, default_value_t = 600)]
     pub suspended_sec: u32,
 
@@ -2503,7 +2506,8 @@ pub struct AgentUpArgs {
     #[arg(long, default_value_t = 600)]
     pub max_idle_sec: u32,
 
-    /// Terminate the VM after this long suspended. A resume past it cannot work.
+    /// Terminate a VM the idle policy suspended once it's been suspended this long. An explicit
+    /// suspend isn't held to it.
     #[arg(long, default_value_t = 600)]
     pub suspended_sec: u32,
 

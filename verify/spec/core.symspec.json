@@ -841,14 +841,14 @@
         "a17fdfa5-73a1-490b-b548-2afc37025055"
       ],
       "satisfies": [],
-      "sentence": "If a resume is attempted after the launch-time suspended window has elapsed, then the microvms-core shall reject the resume with an error naming the elapsed suspended window.",
+      "sentence": "If a resume is requested for a suspended MicroVM that the service terminated while it was suspended, then the microvms-core shall issue the resume to the service and report its refusal as a window-closed error naming the state and stateReason that GetMicrovm reports.",
       "status": "approved",
       "systemName": "microvms-core",
-      "systemResponse": "reject the resume with an error naming the elapsed suspended window",
-      "trigger": "a resume is attempted after the launch-time suspended window has elapsed",
-      "updatedAt": "2026-08-08T02:13:09.454Z",
+      "systemResponse": "issue the resume to the service and report its refusal as a window-closed error naming the state and stateReason that GetMicrovm reports",
+      "trigger": "a resume is requested for a suspended MicroVM that the service terminated while it was suspended",
+      "updatedAt": "2026-10-12T00:00:00.000Z",
       "verificationMethod": "test",
-      "verificationNote": "PLATFORM.md: idlePolicy terminates a suspended VM after suspendedDurationSeconds",
+      "verificationNote": "#597, measured 2026-10-12 in us-east-1: the service terminates a VM the idle policy suspended once suspendedDurationSeconds passes and refuses its resume with a ValidationException, and an explicit SuspendMicrovm resumed 1283 s into a 60 s window; the client issues every resume from SUSPENDED and leaves the window to the service",
       "verifies": []
     },
     "763ab89b-4db5-4daf-9a97-b9e40bcebda6": {

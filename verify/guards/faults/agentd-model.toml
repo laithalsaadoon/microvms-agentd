@@ -125,3 +125,16 @@ transform = { file = "crates/model/src/client.rs", replace = "next.vm_state = Vm
 id = "model-client-state-10-termination-stays-terminating"
 message = "\"STATE-10 a reported termination leaves the VM TERMINATED\" counterexample"
 transform = { file = "crates/model/src/client.rs", replace = "next.vm_state = VmState::Terminated;", with = "next.vm_state = VmState::Terminating;" }
+
+# A resume the service refuses for a VM the platform ended leaves the client SUSPENDED (#597).
+[[family.fault]]
+id = "model-client-state-12-refused-resume-unrecorded"
+message = "\"STATE-12 a resume refused for an ended VM leaves it TERMINATED and recorded terminated\" counterexample"
+transform = { file = "crates/model/src/client.rs", replace = "(next.vm_state, next.was_terminated) = (VmState::Terminated, true);", with = "next.was_terminated = true;" }
+
+# A client that refuses a resume from SUSPENDED on its own reading of the VM's end, the shape
+# #597 removed: the client refused a resume past the window that the service honors.
+[[family.fault]]
+id = "model-client-state-12-resume-refused-locally"
+message = "\"STATE-12 a resume from SUSPENDED reaches the service\" counterexample"
+transform = { file = "crates/model/src/client.rs", replace = "if self.guarded() && (terminated || wrong_state) {", with = "if self.guarded() && (terminated || wrong_state || last.platform_ended) {" }

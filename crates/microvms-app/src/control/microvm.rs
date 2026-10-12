@@ -799,11 +799,53 @@ impl ControlPlane {
     }
 
     /// `ResumeMicrovm`. Thaws the VM; no token re-delivery and no re-bootstrap.
+    ///
+    /// # A VM the service ended while suspended is `WindowClosed` (STATE-12)
+    ///
+    /// Nothing is checked against the suspended window before the call, because the service
+    /// decides whether a suspended VM can still resume. It terminates a VM the idle policy
+    /// suspended once `suspendedDurationSeconds` passes, and it doesn't hold an explicit
+    /// `SuspendMicrovm` to that window: measured 2026-10-12 in us-east-1, an explicitly
+    /// suspended VM resumed 1283 s into a 60 s window (#597). A resume of a VM that has
+    /// terminated is refused with a `ValidationException` ("The MicroVM <id> has been
+    /// terminated and its state cannot be changed."), the same status as any refused value.
+    /// So a refusal reads the VM's state rather than the message, and a VM that's
+    /// TERMINATING or TERMINATED is [`ErrorKind::WindowClosed`] with its `stateReason`.
+    /// Every other refusal comes back as the service gave it.
     pub async fn resume(&self, id: &str) -> Result<(), Error> {
         super::require_valid_identifier("microvmIdentifier", id)?;
         let call = Call::post_empty("ResumeMicrovm", paths::resume(id));
-        send_with_retry(self.transport(), call).await?;
-        Ok(())
+        match send_with_retry(self.transport(), call).await {
+            Ok(_) => Ok(()),
+            Err(refused) if refused.kind() == ErrorKind::Platform => {
+                Err(self.ended_while_suspended(id, refused).await)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// The error a refused resume reports: [`ErrorKind::WindowClosed`] when `GetMicrovm`
+    /// reports the VM dead, and `refused` otherwise, including when that read fails.
+    async fn ended_while_suspended(&self, id: &str, refused: Error) -> Error {
+        let Ok(vm) = self.get_microvm(id).await else {
+            return refused;
+        };
+        if !crate::constants::DEAD_STATES.contains(&vm.state.as_str()) {
+            return refused;
+        }
+        Error::new(
+            ErrorKind::WindowClosed,
+            format!(
+                "microvm {id} terminated while suspended, so there is nothing to resume: the \
+                 service refused ResumeMicrovm, and GetMicrovm reports {}: {}. The service ends \
+                 a VM the idle policy suspended once its suspendedDurationSeconds window passes, \
+                 and any VM at its maximumDurationInSeconds (docs/PLATFORM.md, '`idlePolicy`'). \
+                 No call brings it back; a longer window or lifetime is set when the next VM \
+                 launches.",
+                vm.state,
+                vm.reason(),
+            ),
+        )
     }
 
     /// `TerminateMicrovm`.
@@ -1743,6 +1785,106 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    /// `ResumeMicrovm`'s refusal of a VM the service terminated, as it answered on 2026-10-12
+    /// in us-east-1 (#597): a 400 whose error type is `ValidationException`.
+    fn terminated_refusal() -> Answer {
+        Answer {
+            status: 400,
+            body: r#"{"message": "The MicroVM mvm-abc123 has been terminated and its state cannot be changed."}"#
+                .to_string(),
+            error_type: Some("ValidationException".to_string()),
+        }
+    }
+
+    /// **STATE-12 at the control plane.** A resume the service refuses for a VM `GetMicrovm`
+    /// reports in either dead state is `WindowClosed`, naming the state and its `stateReason`.
+    /// The CLI's `resume`, both bindings' `ControlPlane.resume` and `Sandbox::resume` call
+    /// this, so every surface reports a VM that terminated while suspended the same way.
+    #[tokio::test]
+    async fn a_resume_refused_for_a_vm_that_terminated_while_suspended_is_window_closed() {
+        for state in crate::constants::DEAD_STATES {
+            let (plane, fake, _) = planted();
+            fake.answer("ResumeMicrovm", terminated_refusal()).answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response(
+                    state,
+                    Some("MicroVM exceeded maximum lifetime."),
+                )),
+            );
+
+            let error = plane
+                .resume("mvm-abc123")
+                .await
+                .expect_err("the VM is gone");
+
+            assert_eq!(error.kind(), ErrorKind::WindowClosed, "{state}: {error}");
+            let message = error.to_string();
+            assert!(message.contains(state), "{state}: {message}");
+            assert!(
+                message.contains("MicroVM exceeded maximum lifetime."),
+                "{state}: the stateReason: {message}"
+            );
+            assert_eq!(
+                fake.operations(),
+                ["ResumeMicrovm", "GetMicrovm"],
+                "{state}: one refused resume, then one read"
+            );
+        }
+    }
+
+    /// A refused resume of a VM `GetMicrovm` reports alive, or whose state that read can't
+    /// get, comes back as the service's refusal: only a VM reported dead is `WindowClosed`.
+    #[tokio::test]
+    async fn a_resume_refused_for_a_live_or_unreadable_vm_keeps_the_services_answer() {
+        let (plane, fake, _) = planted();
+        fake.answer(
+            "ResumeMicrovm",
+            Answer::failure(409, "The MicroVM is changing state."),
+        )
+        .answer(
+            "GetMicrovm",
+            Answer::ok(fake::microvm_response("SUSPENDED", None)),
+        );
+        let error = plane
+            .resume("mvm-abc123")
+            .await
+            .expect_err("the service refused");
+        assert_eq!(error.kind(), ErrorKind::Platform, "{error}");
+        assert!(error.to_string().contains("ConflictException"), "{error}");
+
+        let (plane, fake, _) = planted();
+        fake.answer("ResumeMicrovm", terminated_refusal())
+            .answer("GetMicrovm", Answer::failure(404, "not found"));
+        let error = plane
+            .resume("mvm-abc123")
+            .await
+            .expect_err("the service refused");
+        assert_eq!(error.kind(), ErrorKind::Platform, "{error}");
+        let message = error.to_string();
+        assert!(
+            message.contains("ResumeMicrovm failed") && !message.contains("GetMicrovm"),
+            "the resume's refusal rather than the read's: {message}"
+        );
+    }
+
+    /// A resume denied for its credentials is not the service's word on the VM, so no state
+    /// is read and the denial comes back as it was.
+    #[tokio::test]
+    async fn a_resume_denied_for_its_credentials_reads_no_state() {
+        let (plane, fake, _) = planted();
+        fake.answer(
+            "ResumeMicrovm",
+            Answer::failure(403, "User is not authorized to perform ResumeMicrovm"),
+        )
+        .answer(
+            "GetMicrovm",
+            Answer::ok(fake::microvm_response("TERMINATED", None)),
+        );
+        let error = plane.resume("mvm-abc123").await.expect_err("denied");
+        assert_eq!(error.kind(), ErrorKind::Credentials, "{error}");
+        assert_eq!(fake.call_count("GetMicrovm"), 0);
     }
 
     /// **TRAP-7.** The minted token is read out of the `authToken` **map**, and

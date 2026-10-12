@@ -50,7 +50,9 @@ and `.venv`; other project files are included.
 `agent-up` leaves the VM running. Terminate it when finished; its reusable
 image remains. By default the VM has a one-hour lifetime ceiling, suspends
 after ten minutes of inbound inactivity, and terminates after ten more
-minutes suspended. See the [agent guide](https://laithalsaadoon.github.io/microvms-agentd/learn/operations/run-coding-agents-on-bedrock/)
+minutes in that idle suspension. A VM you suspend with `microvm suspend`
+isn't held to that window: one stayed resumable 1283 s into a 60 s window
+(measured 2026-10-12, us-east-1). See the [agent guide](https://laithalsaadoon.github.io/microvms-agentd/learn/operations/run-coding-agents-on-bedrock/)
 for both agents together, longer sessions, and credential refresh.
 
 ## Run commands or connect an SDK

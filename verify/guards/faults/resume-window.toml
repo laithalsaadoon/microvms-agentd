@@ -1,0 +1,55 @@
+# ── resume-window: FAIL_TO_PASS entries tools/fail-to-pass.py emitted ──
+
+# FAIL_TO_PASS: fails on 78e5f1d22d56 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-a-resume-of-a-vm-the-service-ended-exits-window-closed"
+guard = "guards::history::a_resume_of_a_vm_the_service_ended_exits_window_closed_and_records_no_resume"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::history::a_resume_of_a_vm_the_service_ended_exits_window_closed_and_records_no_resume"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-a-resume-of-a-vm-the-service-ended-exits-window-closed.patch"
+
+# FAIL_TO_PASS: fails on 78e5f1d22d56 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-every-walked-path-of-the-client-model-replays-against"
+guard = "every_walked_path_of_the_client_model_replays_against_the_sandbox"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "every_walked_path_of_the_client_model_replays_against_the_sandbox"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-every-walked-path-of-the-client-model-replays-against.patch"
+
+# FAIL_TO_PASS: fails on 78e5f1d22d56 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-a-resume-refused-for-a-vm-that-terminated-while"
+guard = "control::microvm::tests::a_resume_refused_for_a_vm_that_terminated_while_suspended_is_window_closed"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::microvm::tests::a_resume_refused_for_a_vm_that_terminated_while_suspended_is_window_closed"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-a-resume-refused-for-a-vm-that-terminated-while.patch"
+
+# FAIL_TO_PASS: fails on 78e5f1d22d56 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-an-adopted-vm-resumes-past-the-reported-window-through"
+guard = "sandbox::tests::an_adopted_vm_resumes_past_the_reported_window_through_the_service"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "sandbox::tests::an_adopted_vm_resumes_past_the_reported_window_through_the_service"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-an-adopted-vm-resumes-past-the-reported-window-through.patch"
+
+# FAIL_TO_PASS: fails on 78e5f1d22d56 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-a-resume-past-the-window-of-an-explicit-suspend-reaches"
+guard = "sandbox::tests::a_resume_past_the_window_of_an_explicit_suspend_reaches_the_service_and_resumes"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "sandbox::tests::a_resume_past_the_window_of_an_explicit_suspend_reaches_the_service_and_resumes"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-a-resume-past-the-window-of-an-explicit-suspend-reaches.patch"
+
+# FAIL_TO_PASS: fails on 78e5f1d22d56 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-a-resume-the-service-refuses-for-an-ended-vm-is-window"
+guard = "sandbox::tests::a_resume_the_service_refuses_for_an_ended_vm_is_window_closed_and_recorded"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "sandbox::tests::a_resume_the_service_refuses_for_an_ended_vm_is_window_closed_and_recorded"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-a-resume-the-service-refuses-for-an-ended-vm-is-window.patch"

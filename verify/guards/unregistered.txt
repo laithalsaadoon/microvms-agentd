@@ -79,13 +79,11 @@ crates/microvms-app/src/sandbox.rs::a_suspend_from_a_non_running_state_reaches_n
 crates/microvms-app/src/sandbox.rs::a_suspend_whose_call_fails_stays_running_and_can_be_retried
 crates/microvms-app/src/sandbox.rs::adopt_refuses_bad_records_and_never_prints_the_token
 crates/microvms-app/src/sandbox.rs::an_adopted_sandbox_reports_the_services_idle_window_and_watches_its_lifecycle
-crates/microvms-app/src/sandbox.rs::an_adopted_vm_refuses_a_resume_past_the_reported_window
 crates/microvms-app/src/sandbox.rs::an_adopted_vm_takes_its_lifecycle_from_the_service_and_refuses_run
 crates/microvms-app/src/sandbox.rs::an_over_budget_launch_env_is_refused_before_any_control_plane_call
 crates/microvms-app/src/sandbox.rs::asking_for_egress_and_the_deny_together_is_refused_before_any_call
 crates/microvms-app/src/sandbox.rs::ensure_image_builds_its_services_through_the_planes_adapters
 crates/microvms-app/src/sandbox.rs::the_advisory_deny_reaches_the_launch_environment_in_both_spellings
-crates/microvms-app/src/sandbox.rs::the_lifecycle_watch_follows_every_transition
 crates/microvms-app/src/sandbox.rs::the_request_after_a_resume_mints_a_fresh_proxy_token
 crates/microvms-app/src/session/complete.rs::a_client_deadline_kills_then_acks_within_the_grace
 crates/microvms-app/src/session/complete.rs::a_cut_stream_falls_back_to_wait_and_ack
