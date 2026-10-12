@@ -29,6 +29,7 @@ misconfigurations:
       - examples/coding-agents-on-bedrock/Dockerfile
       - examples/code-server-remote-dev/Dockerfile
       - examples/s3-prefetch-at-build/Dockerfile
+      - examples/strands-box-codex-sdk/Dockerfile
     statement: >-
       The daemon runs as root in the guest deliberately, and the trust contract
       says so: the control API grants root by design, so a token holder and a
@@ -37,4 +38,7 @@ misconfigurations:
       Firecracker VM with its own kernel, rather than from a uid inside it. A
       USER line would also break the examples: agentd must chmod uploaded files
       and demote execs to the uid a caller names through `exec --user`, both of
-      which need root. Revisit if the daemon ever stops needing to demote.
+      which need root. The strands-box-codex-sdk example also needs root to
+      give its sandbox a private mount namespace with a fresh /proc before it
+      drops to uid 1000 (its vm/launch_in_fresh_proc.py). Revisit if the daemon
+      ever stops needing to demote.
