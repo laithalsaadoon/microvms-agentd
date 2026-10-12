@@ -181,9 +181,12 @@ root, so it can only be shadowed by a bind mount, which needs `CAP_SYS_ADMIN`;
 machine-ids differ. Do not key uniqueness on either.
 
 An image built with `--repair-identity` requests
-`additionalOsCapabilities: ["ALL"]`, and its guest gets every capability, so
-all three steps succeed ([Platform](PLATFORM.md), measured 2026-10-12). Without
-it the guest lacks `CAP_SYS_ADMIN`. `identity_steps` reports each step either
+`additionalOsCapabilities: ["ALL"]`, and its guest gets every capability
+(measured 2026-10-12). All three steps succeeded on such a guest (measured
+2026-08-06 and 2026-09-24, [Platform](PLATFORM.md)). A guest from an image built
+without it lacks `CAP_SYS_ADMIN`, and passing `--repair-identity` to
+`microvm run --image` doesn't add it, because the flag applies only to an image
+`run` builds. `identity_steps` reports each step either
 way, so a caller that needs repaired identity checks it and `identity_degraded`.
 
 ## Workload hook handlers
@@ -258,9 +261,9 @@ its region and account; live verification checks both actions and resource
 scope. Deliver additional workload credentials with their own scope and lifetime
 instead of broadening the shared VM role.
 
-Blocking MMDS inside the guest takes `CAP_NET_ADMIN`. Without
-`--repair-identity` the guest lacks it, and route, rule, and link changes return
-`EPERM`. With it, root can replace the guest's host route for `169.254.169.254`
+Blocking MMDS inside the guest takes `CAP_NET_ADMIN`. A guest from an image
+built without `--repair-identity` lacks it, and route, rule, and link changes
+return `EPERM`. On a guest from an image built with it, root can replace the guest's host route for `169.254.169.254`
 with a blackhole. Afterward, a process that isn't root can neither reach MMDS
 nor remove the route ([Platform](PLATFORM.md), measured 2026-10-12). Any root
 process can remove it, including an exec that doesn't ask for another user. The

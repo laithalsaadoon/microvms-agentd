@@ -35,13 +35,16 @@ misconfigurations:
       deliberately. It demotes each exec to the user a caller names
       (CAP_SETUID, CAP_SETGID), writes uploads into any path
       (CAP_DAC_OVERRIDE), signals workloads of other users (CAP_KILL), and
-      repairs the VM's identity once (CAP_SYS_ADMIN). A USER line can't lower
-      that: a process holding CAP_SETUID can call setuid(0). The trust contract
+      repairs the VM's identity once (CAP_SYS_ADMIN). A USER line would start
+      agentd with none of those capabilities and break all four jobs, and
+      granting them back to a non-root agentd would make it root in effect,
+      because CAP_SETUID allows setuid(0). The trust contract
       already treats a token holder and a root workload as the same principal
       (docs/TRUST.md), and the MicroVM, one tenant per Firecracker VM with its
       own kernel, is the isolation boundary for the host. DS-0002's goal, an
-      unprivileged workload process, applies to agentd's execs, which run as
-      the daemon's user unless the caller names another. The
+      unprivileged workload process, applies to agentd's execs: an exec runs
+      as the user its caller names, and as root when it names none. Revisit
+      this exception if agentd stops needing to demote execs. The
       strands-box-codex-sdk example also needs root at start to give its
       sandbox a private mount namespace with a fresh /proc before
       vm/launch_in_fresh_proc.py drops to uid 1000.

@@ -160,11 +160,13 @@ def drive_platform_posture(
     2026-09-11 (microvm 0.5.0) and 2026-09-12 (this tree's binaries) measured rather
     than what `docs/PLATFORM.md` used to claim: the platform gives a connector-less VM
     outbound network, Firecracker's MMDS answers the IMDSv2 handshake, and the
-    execution role's credential document is served to root and non-root alike. No
-    in-guest block was found — `ip`, `iptables` and `nft` are absent from
-    `al2023-minimal`, and the exec child's bounding set (`CapBnd a80425fb`) carries no
-    `CAP_NET_ADMIN` even under `--repair-identity`, so a blackhole route is `EPERM` as
-    root — which is why the role check is about the role and not about the guest.
+    execution role's credential document is served to root and non-root alike. `ip`,
+    `iptables` and `nft` are absent from `al2023-minimal`. On a guest from an image built
+    without `--repair-identity` the exec child's bounding set (`CapBnd a80425fb`) carries
+    no `CAP_NET_ADMIN`, so a blackhole route is `EPERM` as root. On a guest from an image
+    built with it, root can blackhole MMDS for processes that aren't root, and any root
+    process can remove the route (docs/PLATFORM.md, 2026-10-12). Either way the role
+    check is about the role and not about the guest.
 
     Three checks were added on 2026-09-13, after an external review of an unrelated tool
     reported "the VM reached `extensions.duckdb.org` without `--egress`" as a defect in this

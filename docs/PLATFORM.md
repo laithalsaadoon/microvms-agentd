@@ -121,10 +121,15 @@ model's only capability value:
 Without the capabilities, root can still rewrite `/etc/machine-id`. The
 `sethostname` call and the bind mount over `/proc/sys/kernel/random/boot_id`
 return `EPERM` (measured 2026-08-06). Both need `CAP_SYS_ADMIN`, which the
-2026-10-12 set lacks. With them, all three identity-repair steps succeed (measured 2026-08-06
+set without identity repair lacks. With them, all three identity-repair steps succeed (measured 2026-08-06
 and 2026-09-24, the next section). agentd reports each step in
 `identity_steps` and sets `identity_degraded` when one fails, so a caller that
 needs repaired identity checks those fields.
+
+The capabilities come from the image build. `microvm run --image <arn>
+--repair-identity` applies the flag only when `run` builds the image, so a VM
+it launched from an image built without the flag kept `00000000a80425fb`, and
+root's route changes returned `EPERM` (measured 2026-09-12).
 
 On both images, uid 1000 could create a user namespace. A fresh procfs inside
 one returned `EPERM` on both, because the kernel refuses that mount while every
