@@ -19,6 +19,7 @@ import { baseRawLinks } from "./src/lib/base-raw-links.js"
 import { citationLinks } from "./src/lib/citation-links.js"
 import { focusableScrollers } from "./src/lib/focusable-scrollers.js"
 import mermaid from "./src/lib/mermaid.js"
+import { relativeMdLinks } from "./src/lib/relative-md-links.js"
 import { robotsPolicyFile } from "./src/lib/robots.js"
 import { rootTwin } from "./src/lib/root-twin.js"
 
@@ -60,6 +61,7 @@ const here = fileURLToPath(new URL(".", import.meta.url))
 const REPO_ROOT = resolve(here, "..")
 const TREE_ROOT = resolve(REPO_ROOT, "docs")
 const MANIFEST = "src/content/docs/.sync-manifest.json"
+const CONTENT_ROOT = resolve(here, "src/content/docs")
 
 /** Where `scripts/gen-reference.mjs` writes the two SDK references, as absolute directories. */
 const SDK_REFERENCE_DIRS = ["python", "typescript"].map(
@@ -204,6 +206,12 @@ export default defineConfig({
     processor: satteri({
       mdastPlugins: [
         agentNotePlugin(),
+        /*
+         * Relative `.md` links become page routes here, before `starlightBasePath()` (pushed after
+         * these) prefixes the base onto them. Emitted as written, `rpc-tools.md` on
+         * `/reference/public-api/` resolves one directory too deep and 404s.
+         */
+        relativeMdLinks(CONTENT_ROOT),
         citationLinks({
           commit: manifest.commit,
           repoUrl: REPO_URL,
@@ -550,20 +558,23 @@ export default defineConfig({
           /*
            * The raw `.md` twins come from an injected dynamic route, so they are absent from the page
            * list this validator checks against and every link to one reports `InvalidLink` while
-           * resolving perfectly in the browser. The exclusion is only allowed because two stricter gates
-           * replace it: `tests/raw-route-links.test.ts` and `tests/agent-surface.test.ts` resolve every
-           * link against the files actually present in `dist/`, which needs no side table at all.
+           * resolving perfectly in the browser. Only root-relative twin links are excluded: a relative
+           * `.md` link is one `relativeMdLinks` missed, and it reaches the check below. The exclusion is
+           * only allowed because stricter gates
+           * replace it: `tests/raw-route-links.test.ts` resolves every link in the twins and
+           * `tests/built-links.test.ts` every link on every built surface, each
+           * against the files actually present in `dist/`, which needs no side table at all.
            */
-          exclude: ({ link }) => link.endsWith(".md"),
+          exclude: ({ link }) => link.startsWith("/") && link.endsWith(".md")
 
           /*
-           * The generated tree cross-links with relative targets — `../insights/contract-map.md` and
-           * siblings, hundreds of them — and that is the correct form here rather than something to
-           * migrate. A relative target is the ONE link shape that resolves on both surfaces under a base
-           * segment: Astro rewrites it to a route in the rendered page, and on the raw twin it resolves
-           * against the twin's own directory, which already carries the base.
+           * `errorOnRelativeLinks` keeps its default, `true`. The tree cross-links with relative `.md`
+           * targets, which resolve on GitHub and on the raw twins, and `relativeMdLinks` above rewrites
+           * each one to its page route before this validator reads the tree, because in the rendered
+           * page a relative target resolves one directory too deep. A relative link reaching this
+           * validator is therefore one that rewrite missed, and it fails the build.
+           * `tests/built-links.test.ts` then resolves every link on every built surface against `dist/`.
            */
-          errorOnRelativeLinks: false
         }),
 
         // A return-to-top control on long pages; Platform alone runs past a thousand lines of source.

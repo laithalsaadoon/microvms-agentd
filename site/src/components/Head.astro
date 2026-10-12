@@ -24,10 +24,11 @@
  * the `/microvms-agentd` segment and yields a 404 that only appears in production.
  * `import.meta.env.BASE_URL` is the accessor that includes it.
  */
+import { getCollection } from "astro:content"
 import Default from "@astrojs/starlight/components/Head.astro"
 
 import { APPLE_TOUCH_SIZE, ICO_SIZES, ICON_PNG_SIZE } from "../branding/mark.js"
-import { OG_HEIGHT, OG_WIDTH, ogAlt, ogSlug } from "../branding/og-card.js"
+import { OG_HEIGHT, OG_WIDTH, ogAlt, ogId, ogSlug } from "../branding/og-card.js"
 import { discoveryLinks, siteUrl } from "../lib/agent-surface.js"
 import { jsonLdGraph, jsonLdText, type SiteDescription } from "../lib/jsonld.js"
 
@@ -72,6 +73,13 @@ const asset = (file: string): string => siteUrl(file, context).pathname
 
 /* `og:image` is the one URL that must be absolute: a crawler resolves it against nothing. */
 const card = siteUrl(`og/${ogSlug(entry.id)}`, context)
+/*
+ * The card route renders one card per `docs` collection entry, keyed by `ogId`, which maps the root
+ * page's two id spellings to one card; this reads the collection the same way.
+ * Starlight's built-in 404 page is a fallback entry outside that collection, so it has no card and
+ * names none.
+ */
+const hasCard = (await getCollection("docs", ({ id }) => ogId(id) === ogId(entry.id))).length > 0
 const cardAlt = ogAlt(entry.data.title)
 
 const icoSizes = ICO_SIZES.map((size) => `${size}x${size}`).join(" ")
@@ -119,13 +127,19 @@ const graph = jsonLdGraph(
   Starlight emits `twitter:card: summary_large_image` and no image (read from its `utils/head.ts`), so
   these are additions and not a second `og:image` beside a default one.
 */}
-<meta property="og:image" content={card.href} />
-<meta property="og:image:type" content="image/png" />
-<meta property="og:image:width" content={String(OG_WIDTH)} />
-<meta property="og:image:height" content={String(OG_HEIGHT)} />
-<meta property="og:image:alt" content={cardAlt} />
-<meta name="twitter:image" content={card.href} />
-<meta name="twitter:image:alt" content={cardAlt} />
+{
+  hasCard && (
+    <>
+      <meta property="og:image" content={card.href} />
+      <meta property="og:image:type" content="image/png" />
+      <meta property="og:image:width" content={String(OG_WIDTH)} />
+      <meta property="og:image:height" content={String(OG_HEIGHT)} />
+      <meta property="og:image:alt" content={cardAlt} />
+      <meta name="twitter:image" content={card.href} />
+      <meta name="twitter:image:alt" content={cardAlt} />
+    </>
+  )
+}
 
 {
   links.map((link) => (
