@@ -70,7 +70,7 @@ IMAGE=$(microvm build --project . --reuse --name ci --json \
 microvm run . --image "$IMAGE" --exec "make test"
 ```
 
-The exec environment carries no `PATH` and no `HOME`, so a Python workload should call `/project/.venv/bin/python` directly or receive a `PATH` through `--launch-env`.
+A default exec environment carries no `PATH` and no `HOME` ([Protocol](/internals/protocol/) lists what adds them), so a Python workload should call `/project/.venv/bin/python` directly or receive a `PATH` through `--launch-env`.
 
 ## 6. Keep syncing while you work
 

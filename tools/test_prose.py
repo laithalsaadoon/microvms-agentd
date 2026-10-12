@@ -435,6 +435,72 @@ class ValeIntegrationTests(unittest.TestCase):
                         ):
                             self.assertEqual(P["main"]([]), expected)
 
+    def test_correction_trail_phrasing_is_an_error(self):
+        # The repository's own rule, run by real Vale: platform docs give one current answer,
+        # so phrasing that keeps a replaced answer beside it fails the gate.
+        rule = (
+            Path(__file__).resolve().parents[1]
+            / ".vale/styles/Microvms/CorrectionTrail.yml"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            (root / ".vale/styles/Microvms").mkdir(parents=True)
+            (root / ".vale.ini").write_text(
+                "StylesPath = .vale/styles\n[*.md]\nBasedOnStyles = Microvms\n"
+            )
+            (root / ".vale/styles/Microvms/CorrectionTrail.yml").write_text(
+                rule.read_text()
+            )
+            (root / ".vale/warnings.json").write_text('{"version":1,"warnings":{}}')
+            for content, expected in [
+                ("Measured 2026-08-15. The limit is 4096 bytes.", 0),
+                ("Output retained in the hook log is capped.", 0),
+                ("**Correction, 2026-09-16:** the limit is 4096 bytes.", 1),
+                ("**Correction candidate, 2026-09-23:** it resumed.", 1),
+                ("**Later evidence, 2026-09-12:** the set lacked it.", 1),
+                ("This corrects the earlier 16 KB claim.", 1),
+                ("These observations corrected the earlier claim.", 1),
+                ("Measured again 2026-09-24 with a busy exec.", 1),
+                ("Re-measured 2026-09-24 against a running VM.", 1),
+                ("The old claim was disproved in September.", 1),
+                ("It was not live-measured in this refresh.", 1),
+                ("Earlier measurements are retained in Platform.", 1),
+                ("Those observations are both retained in Platform.", 1),
+                ("The older claim that it existed only in requests was wrong.", 1),
+                ("This heading remains for existing links.", 1),
+                ("This\nrefresh did not deploy the example.", 1),
+                ("Measured\nagain 2026-09-24 with a busy exec.", 1),
+                ("**Update, 2026-09-16:** the limit is 4096 bytes.", 1),
+                ("An earlier measurement said 16 KB.", 1),
+                ("Previously this page said 16 KB.", 1),
+                ("This supersedes the 2026-08-06 entry.", 1),
+                ("Erratum: the limit is 4096 bytes.", 1),
+                ("Exec records are retained in the daemon's ledger.", 0),
+                ("Logs are retained in CloudWatch for 30 days.", 0),
+                ("The daemon applies no clock correction, so timestamps skip.", 0),
+                ("Error correction: the client retries once.", 0),
+                ("Pass the original description when you update the image.", 0),
+                (
+                    "The token refresh happens before every call; this refresh is cheap.",
+                    0,
+                ),
+                ("A finding is re-measured before it replaces an entry.", 0),
+                ("The old measurement no longer holds.", 1),
+                ("Git history holds the old entry.", 0),
+                ("A member replaces the old entry before creation.", 0),
+            ]:
+                (root / "README.md").write_text(content + "\n")
+                with self.subTest(content=content):
+                    with patch.dict(
+                        PROSE_GLOBALS, ROOT=root, baseline_growth=lambda *_: []
+                    ):
+                        with (
+                            redirect_stdout(io.StringIO()),
+                            redirect_stderr(io.StringIO()),
+                        ):
+                            self.assertEqual(P["main"]([]), expected)
+
 
 if __name__ == "__main__":
     unittest.main()

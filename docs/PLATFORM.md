@@ -1,25 +1,27 @@
 # AWS Lambda MicroVMs: measured platform behavior
 
-A compact record of runtime observations. Unless stated otherwise, measurements
-used us-east-1, MicroVM API `2025-09-09`, and an ARM64 `al2023-minimal` guest.
-Dates apply to observations, not guarantees about current service behavior.
-Use [Protocol](PROTOCOL.md) for the current daemon contract and the installed
-`microvm manifest` for the CLI surface.
-Original experiments and full narratives remain in git history.
+A compact record of runtime observations, with one current answer to each
+question. Unless stated otherwise, measurements used us-east-1, MicroVM API
+`2025-09-09`, and the managed ARM64 base image `al2023-1`, built from
+`amazonlinux:2023-minimal`. Each entry carries its measurement date, which dates
+an observation rather than guaranteeing current service behavior. A newer
+measurement replaces the entry it contradicts, and git history holds the entry
+it replaced. Use [Protocol](PROTOCOL.md) for the current daemon contract and the
+installed `microvm manifest` for the CLI surface.
 
 For current operation shapes, see the [AWS MicroVM documentation](https://docs.aws.amazon.com/lambda/latest/microvm-api/Welcome.html).
 For internet isolation, use [Networking](NETWORKING.md): a VPC without an IGW
 or NAT gateway is required; connector omission and proxy variables do not seal
-the default network. The September 2026 correction below distinguishes the
-separate Lambda core API from the MicroVM API.
+the default network. VPC connectors belong to the separate Lambda core API, not
+the MicroVM API.
 
 ## The service provides no exec and no file transfer
 
 Lambda MicroVMs have no addressable command-execution or file-transfer API;
-`agentd` supplies those operations. The service does offer a programmatically
-usable PTY through `CreateMicrovmShellAuthToken` (measured 2026-08-15), which
-corrects the earlier claim that its shell was console-only. A PTY does not
-provide detached exec IDs, separated output streams, or exit-status records.
+`agentd` supplies those operations. The service's shell is a PTY reached through
+`CreateMicrovmShellAuthToken`, described under the shell endpoint below. A PTY
+does not provide detached exec IDs, separated output streams, or exit-status
+records.
 
 ## Hooks are served under a fixed prefix, and two of them are build-time
 
@@ -44,18 +46,20 @@ from `GetMicrovm` when launch fails.
 
 ## The `runHookPayload` ceiling is 4096 bytes, and the service model states it twice, differently
 
-Measured 2026-08-07; model rechecked 2026-09-16 with botocore 1.43.95.
-The inclusive limit is **4096 bytes of the serialized payload**. The model's
-member documentation still says 16,384, but its referenced shape says 4096.
-The client checks the smaller, measured limit before calling AWS.
+Measured 2026-08-07 with a token-only payload and 2026-08-15 with a payload
+holding both `agent_token` and an `env` map; model read 2026-10-12 with botocore
+1.43.106. The inclusive limit is **4096 bytes of the complete serialized
+payload**, whatever fields it combines. The model's member documentation says
+16,384, but its referenced shape says 4096. The client checks the smaller,
+measured limit against the full serialized string before calling AWS.
 
-| Payload size | Measured response with an invalid image identifier |
+| Payload size | Measured response with an invalid image identifier, both payload kinds |
 |---|---|
 | 4096 bytes | Passed length validation, then rejected the image ARN |
-| 4097 bytes | Rejected `runHookPayload` length |
+| 4097 bytes | Rejected `runHookPayload` length before image resolution |
 
-This corrects the earlier 16 KB claim. The budget includes the token, launch
-environment, identity material, and JSON escaping. See the
+The budget includes the token, launch environment, identity material, and JSON
+escaping. See the
 [AWS RunMicrovm documentation](https://docs.aws.amazon.com/lambda/latest/microvm-api/API_RunMicrovm.html) for current shape constraints.
 
 ## Calling an unpriced region returns `AccessDeniedException` with a null message
@@ -78,11 +82,10 @@ Measured 2026-08-05. Managed connectors use ARNs such as
 The bare value `ALL_INGRESS` fails with `Malformed network connector ARN`.
 `INTERNET_EGRESS`, `HTTP_INGRESS`, and `SHELL_INGRESS` use the same form.
 
-**Correction, 2026-09-16:** custom VPC connectors are created by the separate
-`lambda-core` service and attached through `egressNetworkConnectors`. The
-old claim that omitting a managed connector disables egress was disproved in
-September. Use a VPC without an IGW or NAT gateway for internet isolation;
-see [Networking](NETWORKING.md).
+Custom VPC connectors are created by the separate `lambda-core` service and
+attached through `egressNetworkConnectors`. Omitting a managed connector does
+not disable egress (measured below). Use a VPC without an IGW or NAT gateway
+for internet isolation; see [Networking](NETWORKING.md).
 
 ## `CreateMicrovmAuthToken` returns a header map
 
@@ -173,9 +176,9 @@ documented size classes:
 
 The service team confirmed in August 2026 that the ceiling is provisioned at
 launch; there is no resize event. AWS documents billing at the requested
-baseline while running, plus consumption above it. This corrects the earlier
-inference that the reported peak was the billing floor. Memory-pressure tests
-must use the guest's ceiling, not the requested baseline. Swap was absent.
+baseline while running, plus consumption above it; the reported peak is not the
+billing floor. Memory-pressure tests must use the guest's ceiling, not the
+requested baseline. Swap was absent.
 
 ## What actually costs money
 
@@ -198,10 +201,9 @@ be removed before comparing the same dimension.
 Image storage has a one-week minimum. Running idle VMs still incur baseline
 charges; suspended VMs incur snapshot storage and transitions incur reads and
 writes. Data transfer is separate. Server-side build compute billing remains
-unverified and is reported as unpriced, not zero. The old $0.08/GiB-month
-storage estimate was rounded low; the API rate gives $0.081111103 at 730 hours.
-Use `microvm cost` and `tools/check-live-rates.py` rather than copying rates
-from this record.
+unverified and is reported as unpriced, not zero. At 730 hours a month, the
+storage rate is $0.081111103 per GiB-month. Use `microvm cost` and
+`tools/check-live-rates.py` rather than copying rates from this record.
 
 ## Seeing an OOM: the process case works, the VM case is still unmeasured
 
@@ -217,14 +219,32 @@ what AWS reports after a guest-wide OOM.
 
 ## Suspend and resume preserve execution state
 
-Measured 2026-08-05, `al2023-1`, 1024 MiB baseline, held suspended for 45
-seconds. Token, files, exec records, unread output, background process, and
-endpoint URL all survived. A one-second ticker had a 51-second gap, then
-advanced six times in six seconds after resume.
+Measured 2026-08-05 (`al2023-1`, 1024 MiB baseline, a 45-second hold),
+2026-09-23 (us-east-1, API `2025-09-09`, `al2023-1`, two VMs from one image, a
+124-second hold, one sample per observation), and 2026-09-24 (suspend and resume
+latency, two samples each, one-second polling). Live requests; the summary is in
+[Suspend and resume](SUSPEND-RESUME.md).
 
 Resume continues frozen memory and processes; it does not require bootstrap
-again. Wall-clock leases and credentials can expire during suspension. These
-observations corrected the earlier claim that an in-memory token was lost.
+again. Wall-clock leases and credentials can expire during suspension.
+
+| Observation | Result |
+|---|---|
+| Agent token, exec records, unread output, background process | survived; the original token was still accepted |
+| Process, PID, in-memory nonce, `boot_id` | unchanged |
+| `/tmp`, `/dev/shm`, `/workspace` files; endpoint URL | unchanged |
+| A ticker printing epoch seconds once a second | no tick lost; its timestamps skipped the suspended time (51 s across the 45 s hold), then advanced once a second |
+| `time.time()`, `CLOCK_MONOTONIC`, `CLOCK_BOOTTIME` across a 124 s hold | each jumped +124 s, equal within microseconds |
+| Four held outbound TLS sockets | all aborted on resume (`ECONNABORTED`); three of the same peers kept an idle socket 210 s without a suspend |
+| New outbound request after resume | succeeded |
+| Explicit suspend to `SUSPENDED` | about 1 to 2 s, three samples; `stateReason` null |
+| Resume call to `RUNNING` / first health | about 1.2 to 1.5 s, three samples / 1.9 s |
+| CPU-busy exec, no inbound traffic, 60 s idle window | `SUSPENDED` between 60 and 70 s after the last request |
+| First request to a suspended VM with auto-resume | succeeded in about 1.2 s; `GetMicrovm` showed `PENDING`, then `RUNNING` |
+| Held-open exec output stream with steady output, no other requests | stayed `RUNNING` for 150 s |
+
+Whether the suspended window ends a suspended VM depends on what suspended it;
+see `idlePolicy` below.
 
 ## Traffic ordering around the `/run` hook
 
@@ -304,20 +324,39 @@ from `ListMicrovmImageBuilds` contained the reason. Follow
 `latestFailedImageVersion`, list its builds, and inspect every failed build.
 
 Observed reasons included `The container image build failed.` and
-`Ready hook invocation timed out after PT5M`. CloudWatch logs provide the
-container-level detail; a summary reason does not replace them.
+`Ready hook invocation timed out after PT5M`. The record of that timeout does
+not include the build's configured `readyTimeoutInSeconds`, so it does not
+establish a five-minute platform limit; the model allows up to 3600 seconds.
+CloudWatch logs provide the container-level detail; a summary reason does not
+replace them.
 
 ## `idlePolicy`
 
 AWS documents idleness as inbound endpoint traffic, not guest CPU activity.
 Set `maxIdleDurationSeconds`, `suspendedDurationSeconds`, and
-`autoResumeEnabled` deliberately. The suspended timeout can terminate a VM
-before a later manual resume; the maximum VM duration also applies.
+`autoResumeEnabled` deliberately; the maximum VM duration also applies.
 
 Measured 2026-08-15: `GetMicrovm` echoed all three policy fields unchanged in
-`RUNNING` and `SUSPENDED`. The older claim that the suspended timeout existed
-only in requests was wrong. External health polls kept a VM running; guest
+`RUNNING` and `SUSPENDED`. External health polls kept a VM running; guest
 loopback requests do not traverse the endpoint's idle accounting.
+
+`suspendedDurationSeconds` ends a VM that the idle policy suspended. VMs
+suspended by an explicit `SuspendMicrovm` call, under the same idle policy,
+stayed `SUSPENDED` long past the window, and `ResumeMicrovm` still worked.
+AWS describes the field as the longest a MicroVM can remain suspended before it
+ends, and the description doesn't exempt an explicit suspend. Treat the
+explicit case as measured behavior that AWS doesn't promise. Measured 2026-10-12,
+us-east-1, API `2025-09-09`, from one image, `autoResumeEnabled` false,
+`maximumDurationInSeconds` 3600, with `GetMicrovm` echoing each policy as set:
+
+| Case | Result |
+|---|---|
+| Idle suspend, one VM: `maxIdleDurationSeconds` 60, `suspendedDurationSeconds` 60, no inbound traffic | `SUSPENDED` about 60 s after launch, then `TERMINATED` about 60 s later with `stateReason` `MicroVM exceeded maximum lifetime.`; a later `ResumeMicrovm` returned `ValidationException`, naming the VM as terminated |
+| Explicit `SuspendMicrovm` within 10 s of `RUNNING`, two VMs: `maxIdleDurationSeconds` 60, `suspendedDurationSeconds` 60 | still `SUSPENDED` 906 s and 917 s later, polled every 15 s with `stateReason` null; `ResumeMicrovm` was accepted, and both were `RUNNING` within 20 s |
+| Explicit `SuspendMicrovm`, one VM: `maxIdleDurationSeconds` 3600, `suspendedDurationSeconds` 60 | still `SUSPENDED` 1283 s later; `ResumeMicrovm` was accepted, and the VM was `RUNNING` within 20 s |
+
+On 2026-09-23 a VM with a 60-second window was still `SUSPENDED` 240 s after
+an explicit suspend, and it resumed.
 
 ## Pagination cursors are URL-safe base64, and the padding still has to be encoded
 
@@ -417,44 +456,27 @@ Measured 2026-08-14 with `al2023-1`: kernel
 `RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS`, available since Linux 5.6. Unsupported
 kernels fail extraction rather than silently weakening confinement.
 
-## A WebSocket reaches a guest server through the endpoint, and the proxy strips its own subprotocols
-
-The independent 2026-08-15 run confirmed the same handshake, stripping,
-application negotiation, and opaque failure behavior. Its observations are
-consolidated in the earlier WebSocket section; this heading remains for
-existing links.
-
 ## An outside poll of `/v1/health` does reset the idle timer, and the control half proves it
 
-Measured 2026-08-15 with two VMs running detached `sleep 300`, a 60-second
-idle timeout, and a 900-second suspended timeout. The VM polled through its
-endpoint every roughly 20 seconds remained `RUNNING` through 311 seconds.
-The unpolled control was `SUSPENDED` at 66 seconds and remained so.
+Measured 2026-08-15 and 2026-09-24, us-east-1, API `2025-09-09`, live requests,
+each with a 60-second idle timeout. External polling keeps a busy VM alive;
+guest work alone does not, and a local ledger watcher does not either. Poll
+health at an interval below the idle timeout when preserving an active exec is
+the caller's intention.
 
-External polling keeps a busy VM alive; guest work alone does not. Poll health
-at an interval below the idle timeout when preserving an active exec is the
-caller's intention. A local ledger watcher does not have this effect.
+| Date | Guest work | Outside traffic | Result |
+|---|---|---|---|
+| 2026-08-15 | detached `sleep 300`, 900 s suspended timeout | a health poll through the endpoint about every 20 s | `RUNNING` through 311 s |
+| 2026-08-15 | the same, as the control | none | `SUSPENDED` at 66 s, and stayed suspended |
+| 2026-09-24 | a CPU-busy exec | `microvm keepalive --for 170`, a poll every 20 s (9 polls) | `RUNNING` at 170 s; `SUSPENDED` within 150 s of the keepalive stopping, its exec still busy |
+| 2026-09-24 | a CPU-busy exec | Python `Session.keep_awake`, a poll every 15 s (12 polls) | `RUNNING` for 170 s |
+| 2026-09-24 | a CPU-busy exec | JavaScript `session.keepAwake`, a poll every 15 s (12 polls) | `RUNNING` for 170 s; `SUSPENDED` within 150 s of `stop()`, its exec still busy |
 
-Measured again 2026-09-24 in us-east-1 (API `2025-09-09`, live requests) with a
-CPU-busy exec instead of `sleep`, through the supported keepalive
-(`conformance/run_rs.py`, `drive_keepalive_helper`, and a Python binding run).
-With a 60-second idle timeout, `microvm keepalive --for 170` polled every 20
-seconds (9 polls) and the VM was `RUNNING` at 170 seconds. Once the keepalive
-stopped, the same VM, its exec still busy, was `SUSPENDED` within 150 seconds.
-`Session.keep_awake` held a second such VM `RUNNING` for 170 seconds at a
-15-second interval (12 polls). On that VM, launched with `autoResumeEnabled`, a
-`Sandbox.suspend()` issued while a keepalive ran ended the keepalive as
-`not-running`, and the VM was still `SUSPENDED` 20 seconds later: the keepalive
-did not wake it. The JavaScript binding's `session.keepAwake` held a third busy VM
-`RUNNING` for 170 seconds at a 15-second interval (12 polls); after `stop()` the
-same VM, still busy, was `SUSPENDED` within 150 seconds.
-
-## The 4096-byte `runHookPayload` ceiling applies to the complete string, env map included
-
-Measured 2026-08-15 using a payload containing both `agent_token` and an
-`env` map. Exactly 4096 serialized bytes passed length validation; 4097 failed
-before image resolution, matching the token-only measurement. Validate the
-whole serialized string after combining fields.
+The 2026-09-24 runs went through `conformance/run_rs.py` (`drive_keepalive_helper`)
+and a Python binding run. On the `Session.keep_awake` VM, launched with
+`autoResumeEnabled`, a `Sandbox.suspend()` issued while the keepalive ran ended
+the keepalive as `not-running`, and the VM was still `SUSPENDED` 20 seconds
+later: the keepalive did not wake it.
 
 ## The shell endpoint is a real PTY over a WebSocket, and it is programmatically drivable
 
@@ -477,20 +499,18 @@ Ordinary HTTPS with the shell token returned 502.
 
 The session was a root PTY with job control; Ctrl-C produced status 130.
 Unknown control messages became literal shell input rather than errors.
-The build-log channel provides no structured per-command exit status. This corrects the
-original claim that the shell could not be driven programmatically; the
-package now exposes it through `microvm shell`.
+The shell channel provides no structured per-command exit status. The package
+exposes the shell through `microvm shell`.
 
 ## Tagging works on images and not on MicroVMs, and `RunMicrovm` takes no tags
 
-Measured 2026-08-15. Image tags could be created, accumulated, listed,
-and removed. `GetMicrovmImage` echoed them. Attempts to tag a running
-MicroVM by ARN or bare ID failed. `RunMicrovm` has no tags field in the
-2025-09-09 model, still true in the 2026-09-16 SDK refresh. Do not assume
-image tags provide per-instance compute attribution.
+Measured 2026-08-15 (images) and 2026-09-24 (a RUNNING MicroVM), us-east-1, API
+2025-09-09, live requests. Image tags could be created, accumulated, listed, and
+removed, and `GetMicrovmImage` echoed them. `RunMicrovm` has no tags field in
+the 2025-09-09 model (botocore 1.43.106, read 2026-10-12). Do not assume image
+tags provide per-instance compute attribution.
 
-Re-measured 2026-09-24, us-east-1, API 2025-09-09, live request against a
-RUNNING MicroVM. `TagResource` and `ListTags` both refused
+`TagResource` and `ListTags` both refused
 `arn:aws:lambda:<region>:<account>:microvm:<id>` and the bare id with
 `ValidationException` before any authorization: the `resource` pattern the
 service enforces admits `function`, `layer`, `code-signing-config`,
@@ -501,12 +521,25 @@ is that record, shared by the CLI and both bindings.
 
 ## Build introspection returns snapshot sizes and a chipset generation, not logs
 
-Measured 2026-08-15. `ListMicrovmImageBuilds` requires an image identifier
-and version and returned two builds, for Graviton generations 3 and 4.
-`GetMicrovmImageBuild` added `snapshotBuild` sizes: 579080192 memory bytes,
-2357084160 code-install bytes, and 24297472 disk-snapshot bytes for the tested
-image. It did not return logs or `stateReason`; use build summaries and
-CloudWatch for failure details.
+Measured 2026-08-15, with failed builds 2026-08-16. `ListMicrovmImageBuilds`
+requires an image identifier and version and returned two builds, for Graviton
+generations 3 and 4. `GetMicrovmImageBuild` added `snapshotBuild` sizes:
+579080192 memory bytes, 2357084160 code-install bytes, and 24297472
+disk-snapshot bytes for the tested image. It did not return logs or
+`stateReason`; use build summaries and CloudWatch for failure details.
+
+`snapshotBuild` and each of its fields are optional. Preserve them as the
+service returns them:
+
+| Outcome | `snapshotBuild` |
+|---|---|
+| Successful | Memory, code-install, and disk-snapshot sizes present |
+| Ready-hook timeout | Only `codeInstallSizeInBytes` present |
+| Container build failure | Entire member absent |
+
+Filling missing values with zero erases the distinction between an unbuilt
+image and installed code whose daemon never became ready. Both tested
+failures appeared in builds for Graviton 3 and 4.
 
 `GetMicrovmImageVersion` echoes build configuration, including resources,
 hooks, connectors, and base version. `state` (build outcome) and `status`
@@ -515,23 +548,31 @@ preserve absent dimensions as unknown rather than zero.
 
 ## The managed base image has two versions, and its versions are bare integers
 
-Measured 2026-08-15. The managed-image listing returned `al2023-1`, with
-versions `"0"` and `"1"`. The version readback of a derived image normalized
-its base version to `"1.0"`. This listing records the versions available on that date; availability can change. Discover current versions and
-retain their service-provided strings rather than treating every version as
-an integer or a common semantic-version format.
+Measured 2026-08-15 and 2026-08-16. The managed-image listing returned
+`al2023-1`, with versions `"0"` and `"1"`; availability can change. A build
+pinned to `"1"` read back as `"1.0"`, and `baseImageVersion: "999"` for
+`al2023-1` failed with HTTP 400 before creating an image. Discover valid request
+versions through the managed-version listing, retain their service-provided
+strings rather than treating every version as an integer or a common
+semantic-version format, and do not compare echoed strings literally with
+listing strings.
 
-## Every field `GetMicrovm` returns for a running VM
+An unpinned build also reports a base version, so readback alone does not
+prove the caller pinned one. Retain the original request for reproducibility.
 
-Measured 2026-08-15. A healthy response contained `microvmId`, `state`,
-`endpoint`, `imageArn`, `imageVersion`, `executionRoleArn`, `idlePolicy`,
-`maximumDurationInSeconds`, `startedAt`, `ingressNetworkConnectors`, and
-`egressNetworkConnectors`.
+## What `GetMicrovm` returns in each state, and `ListMicrovms` filters by image
 
-`runHookPayload` was not echoed. `stateReason` was absent on the healthy VM.
-Read memory sizing from the image version. The
+Measured 2026-08-15 and 2026-09-24, us-east-1, API 2025-09-09, live. A healthy
+`RUNNING` response contained `microvmId`, `state`, `endpoint`, `imageArn`,
+`imageVersion`, `executionRoleArn`, `idlePolicy`, `maximumDurationInSeconds`,
+`startedAt`, `ingressNetworkConnectors`, and `egressNetworkConnectors`, with no
+`stateReason`. The same VM carried `terminatedAt` once `TERMINATED`. After an
+explicit suspend, `stateReason` was null.
+
+`runHookPayload` was not echoed. Read memory sizing from the image version. The
 idle policy echoed `autoResumeEnabled`; the package exposes it through
-`--auto-resume`. See [AWS GetMicrovm](https://docs.aws.amazon.com/lambda/latest/microvm-api/API_GetMicrovm.html) for
+`--auto-resume`. `ListMicrovms` with `imageIdentifier` set to the image ARN
+listed the VM. See [AWS GetMicrovm](https://docs.aws.amazon.com/lambda/latest/microvm-api/API_GetMicrovm.html) for
 the complete current response shape, including optional fields.
 
 ## A detached exec survives the 60-minute proxy-token ceiling
@@ -562,38 +603,13 @@ is not a safe dry run. Invalid image identifiers can bracket earlier
 validation, but every probe must account for the possibility of creating a
 billable resource.
 
-## `GetMicrovmImageBuild`'s `snapshotBuild` is absent on a container-build failure and partial on a hook timeout
-
-Measured 2026-08-16 across successful and deliberately failed images.
-Preserve this optional structure and its optional fields:
-
-| Outcome | `snapshotBuild` |
-|---|---|
-| Successful | Memory, code-install, and disk-snapshot sizes present |
-| Ready-hook timeout | Only `codeInstallSizeInBytes` present |
-| Container build failure | Entire member absent |
-
-Filling missing values with zero erases the distinction between an unbuilt
-image and installed code whose daemon never became ready. Both tested
-failures appeared in builds for Graviton 3 and 4.
-
-## `baseImageVersion` is accepted, validated, and normalized on the way back
-
-Measured 2026-08-16. `baseImageVersion: "999"` for `al2023-1` failed with
-HTTP 400 before creating an image. A build pinned to `"1"` read back as
-`"1.0"`. Discover valid request versions through the managed-version listing;
-do not compare echoed strings literally with listing strings.
-
-An unpinned build also reports a base version, so readback alone does not
-prove the caller pinned one. Retain the original request for reproducibility.
-
 ## A guest listening on the wrong port fails the build with a clean build log
 
 Measured 2026-08-16, `al2023-1`, 8192 MiB baseline. A mismatch between
 `AGENTD_PORT` and `hooks.port` produced `CREATE_FAILED` despite successful
 Docker layers and clean startup logs: AWS called hooks on the wrong port.
 The same happens when the daemon defaults to 9000 but the client selects
-another port. Compare version readback with the Dockerfile; the client now
+another port. Compare version readback with the Dockerfile; the client
 rejects known mismatches before building.
 
 ## A baked environment layer removes the guest's env init, measured with `build --project`
@@ -611,13 +627,14 @@ one `attrs` dependency:
 
 The lockfile edit changed the image hash and installed dependency version.
 This small sample saved roughly 20 seconds per launch; it is not a general
-benchmark. The earlier description of a launch without `--egress` as having
-no network was incorrect: the measurement showed dependency reuse, not
-network isolation.
+benchmark. It measures dependency reuse, not network isolation: the VMs had
+the default network, described in the next section.
 
-Exec starts with a minimal environment. In this run no `PATH` or `HOME` was
-present; uv downloaded another interpreter despite one being installed. Use
-the baked venv's absolute executable path or supply the required environment.
+The exec in this run had no `PATH` or `HOME`, the default for an exec without a
+`user` that does not inherit the image environment ([Protocol](PROTOCOL.md)
+lists what adds them). uv downloaded another interpreter despite one being
+installed. Use the baked venv's absolute executable path or supply the required
+environment.
 
 ## A VM launched without the egress connector still has outbound network
 
@@ -636,14 +653,13 @@ Measured 2026-09-11, 2026-09-12, and 2026-09-13, us-east-1, API
 The proxy-variable result is the basis for `--deny-egress`; it changes client
 behavior without removing the network path.
 
-**Correction, 2026-09-16:** the earlier model review incorrectly concluded
-that no VPC control existed because it inspected only `lambda-microvms`.
-Boto3/botocore 1.43.95 also exposes `lambda-core` API `2026-04-30`, whose
+The VPC control is in the separate `lambda-core` API, not in `lambda-microvms`.
+Boto3/botocore 1.43.95 exposes `lambda-core` API `2026-04-30`, whose
 `CreateNetworkConnector` accepts VPC subnets and security groups. AWS documents
 attaching the active connector ARN through `RunMicrovm.egressNetworkConnectors`.
 No internet egress requires a VPC without an IGW or NAT gateway, with no
-alternative internet path. These are SDK/documentation findings; a VPC-isolated
-launch was not live-measured in this refresh. See [Networking](NETWORKING.md).
+alternative internet path. These are SDK and documentation findings, reviewed
+2026-09-16; no VPC-isolated launch has been live-measured. See [Networking](NETWORKING.md).
 
 ## The guest reaches the execution role's credentials through MMDS, and only root with identity repair can block it
 
@@ -690,32 +706,6 @@ Use least privilege on the execution role. VPC internet isolation does not
 remove metadata credentials. The conformance role permits CloudWatch logging
 and its policy is checked by `drive_platform_posture`.
 
-## Suspend/resume across a two-minute hold: clocks, sockets, and auto-resume
-
-Measured 2026-09-23, us-east-1, API `2025-09-09`, `al2023-1`, two VMs from one
-image, one sample per observation. Live requests; the summary is in
-[Suspend and resume](SUSPEND-RESUME.md).
-
-| Observation | Result |
-|---|---|
-| Explicit suspend to `SUSPENDED` | about 1 to 2 s; `stateReason` null |
-| Resume call to `RUNNING` / first health | about 1.5 s / 1.9 s |
-| Process, PID, in-memory nonce, `boot_id` | unchanged; ticker sequence had no gap |
-| `/tmp`, `/dev/shm`, `/workspace` files; endpoint; original agent token | unchanged and accepted |
-| `time.time()`, `CLOCK_MONOTONIC`, `CLOCK_BOOTTIME` across a 124 s hold | each jumped +124 s, equal within microseconds |
-| Four held outbound TLS sockets | all aborted on resume (`ECONNABORTED`); three of the same peers kept an idle socket 210 s without a suspend |
-| New outbound request after resume | succeeded |
-| CPU-busy exec, no inbound traffic, 60 s idle window | `SUSPENDED` between 60 and 70 s after the last request |
-| First request to a suspended VM with auto-resume | succeeded in about 1.2 s; `GetMicrovm` showed `PENDING`, then `RUNNING` |
-| Held-open exec output stream with steady output, no other requests | stayed `RUNNING` for 150 s |
-| Two VMs from one image | identical `boot_id` and `machine-id`; kernel random UUID differed |
-
-**Correction candidate, 2026-09-23:** with `suspendedDurationSeconds=60`, a VM
-explicitly suspended was still `SUSPENDED` 240 s later, and `ResumeMicrovm`
-was accepted. The service model documents termination after the window. One
-sample does not overturn that; repeat with a longer hold before relying on
-either behavior.
-
 ## A client-token retry after a suspend returns the same VM, and it resumes
 
 Measured 2026-09-24, us-east-1, API 2025-09-09, live (`crates/microvms-core/tests/
@@ -724,14 +714,6 @@ same `clientToken` and identical parameters after the VM had been suspended answ
 the original VM, and the client's retry reached RUNNING on it. A client that reads
 SUSPENDED before RUNNING as a startup death reports that healthy VM as dead. Two `run
 --client-token` calls with the same key from the CLI returned one VM.
-
-## `GetMicrovm` reports `terminatedAt`, and `ListMicrovms` filters by image
-
-Measured 2026-09-24, us-east-1, API 2025-09-09, live. A RUNNING VM carried `startedAt`
-and `maximumDurationInSeconds`; the same VM carried `terminatedAt` once TERMINATED.
-`ListMicrovms` with `imageIdentifier` set to the image ARN listed the VM. An explicit
-suspend reached SUSPENDED in about 1.2 s and a resume reached RUNNING in about 1.2 to
-1.3 s (two samples each, one-second polling).
 
 ## A paginated `ListMicrovms` can return one VM on two of its pages
 

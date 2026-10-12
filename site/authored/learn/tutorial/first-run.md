@@ -90,7 +90,7 @@ to be installed inside the VM.
 
 `agent-up` keeps the VM until you terminate it or its lifetime policy
 expires. The default is a one-hour maximum, suspension after ten minutes
-of inbound inactivity, and termination after ten minutes suspended.
+of inbound inactivity, and termination ten minutes after that suspension.
 Its image remains for reuse on the next launch.
 
 The VM has outbound access to reach Bedrock. Omitting `--egress` on a

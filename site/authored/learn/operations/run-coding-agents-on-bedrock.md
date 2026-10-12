@@ -128,7 +128,7 @@ runner must own health checks, artifact collection, cancellation and cleanup.
 | --- | --- | --- |
 | `--memory` | `1024` | 1 GiB billing baseline, 4 GiB guest ceiling |
 | `--max-idle-sec` | `600` | Suspend after this many seconds without inbound traffic |
-| `--suspended-sec` | `600` | Terminate after this many seconds suspended |
+| `--suspended-sec` | `600` | Terminate an idle-suspended VM after this many seconds suspended |
 | `--max-duration-sec` | `3600` | Maximum VM lifetime; upper limit is 28800 seconds (8 hours) |
 | `--auto-resume` | off | Let an inbound request wake a suspended VM |
 | `--token-ttl-hours` | `12` | Maximum Bedrock token lifetime; signing credentials may expire sooner |
@@ -136,8 +136,8 @@ runner must own health checks, artifact collection, cancellation and cleanup.
 Choose lifetime settings on the initial `agent-up`. For multi-hour work,
 raise `--max-duration-sec` and keep inbound traffic active by polling
 `microvm health --name review` at intervals below `--max-idle-sec`.
-An idle suspended VM terminates after `--suspended-sec` even with
-`--auto-resume`. A busy process inside the guest does not count as inbound
+A VM the idle policy suspended is terminated `--suspended-sec` after it
+suspends, and `--auto-resume` cannot bring a terminated VM back. A busy process inside the guest does not count as inbound
 traffic. [Suspend and resume](/learn/tutorial/long-lived-vm/) explains the
 lifecycle in more detail.
 

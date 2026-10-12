@@ -65,8 +65,8 @@ none. -->
 
 - [ ] Not applicable: this changes no claim about AWS behavior.
 - [ ] **A `docs/PLATFORM.md` entry changed, and it carries a date, a region, and
-      an API version.** If it contradicts an existing entry, the old one is left
-      in place with its date so the drift is visible.
+      an API version.** A new measurement replaces any entry it contradicts,
+      in this file and in other docs. Git history keeps the old one.
 
 ## Scope
 

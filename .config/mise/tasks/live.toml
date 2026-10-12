@@ -28,7 +28,7 @@ run = "terraform -chdir=conformance/infra init -input=false && terraform -chdir=
 #
 # `live:probe` went the same way: `conformance/probe_suspend_resume.py` measured what a
 # real suspend/resume cycle preserves, and its measurements live on in
-# `docs/PLATFORM.md`, "Suspend and resume preserve everything". The suspend/resume
+# `docs/PLATFORM.md`, "Suspend and resume preserve execution state". The suspend/resume
 # *assertions* it fed are still run, by `live:conformance-rs`'s own suspend/resume
 # section — the ticker gap, the surviving token, the surviving filesystem, the
 # backgrounded process still counting. What is gone is the standalone probe that

@@ -1,0 +1,27 @@
+extends: existence
+message: "'%s' keeps a replaced answer beside the current one. State only the current fact with its date; git history holds the old entry."
+level: error
+ignorecase: true
+nonword: true
+# Each token allows any whitespace between its words, because a soft line break inside a
+# paragraph reaches Vale as a newline. Tokens name the trail itself (a dated correction, a
+# replaced claim, a kept-alongside measurement), so ordinary uses of "correction",
+# "retained", "refresh", or "original" pass.
+tokens:
+  - '\*\*\s*(?:correction|update|erratum)(?:\s+candidate)?\b'
+  - '\b(?:correction|update)(?:\s+candidate)?,\s*\d{4}-\d{2}'
+  - '\berrat(?:um|a)\b'
+  - '\blater\s+evidence\b'
+  - '\bcorrect(?:s|ed)\s+the\s+(?:earlier|original|old|previous)\b'
+  - '\b(?:re-?measured|measured\s+again)\b[^.]{0,40}\d{4}-\d{2}-\d{2}'
+  - '\bwas\s+disproved\b'
+  - '\b(?:in|by|during|for)\s+this\s+(?:documentation\s+)?refresh\b'
+  - '\bthis\s+(?:documentation\s+)?refresh\s+(?:did|didn''t|checked|measured|found)\b'
+  - '\b(?:measurements?|observations?|entr(?:y|ies)|claims?)\s+(?:are\s+|is\s+)?(?:both\s+)?retained\b'
+  - '\b(?:earlier|older|previous|prior)\s+(?:claim|inference|measurement|entry)s?\b'
+  - '\bold\s+(?:claim|inference)s?\b'
+  - '\bold\s+(?:measurement|entry)\s+(?:said|says|showed|found|no\s+longer)\b'
+  - '\bsupersedes?\s+the\s+(?:\d{4}-\d{2}-\d{2}\s+)?(?:earlier\s+|previous\s+|old\s+)?(?:entry|claim|measurement|note)\b'
+  - '\bpreviously,?\s+this\s+(?:page|section|file|entry|document)\b'
+  - '\b(?:page|section|file|entry|document)\s+(?:previously|used\s+to)\s+(?:said|say|claimed|claim|stated|state)\b'
+  - '\bremains?\s+for\s+existing\s+links\b'

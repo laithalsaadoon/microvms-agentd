@@ -55,10 +55,9 @@ in the later snapshot phase. For a private bucket, the AWS CLI uses its
 credential chain, and the build role needs the intended read permission if
 its credentials are supplied there. Do not bake credentials into the image.
 
-[Platform](/internals/platform/) records an observed readiness timeout of
-five minutes, despite the larger hook limit present in the service model.
-Measure your transfer within the real build budget. The snapshot pass can
-run for multiple chipset variants, so do not assume one download per image.
+Measure your transfer within the build budget, including the ready hook's
+timeout. The snapshot pass can run for multiple chipset variants, so do not
+assume one download per image.
 
 A container `RUN` step is another place to prepare data when its build-time
 access is established. Its files also enter the image. Choose that placement
@@ -89,5 +88,5 @@ needs.
 
 Inspect the script's cleanup result and check remaining resources. Images are
 retained for reuse and can be deleted when retired; their snapshot storage has
-a one-week minimum retention charge. This refresh was checked locally;
-AWS execution remains unverified.
+a one-week minimum retention charge. Local checks cover the example; it has
+not run against AWS.

@@ -162,14 +162,17 @@ create call (`--port`, default 9000). See [Platform](/internals/platform/).
 
 What the daemon does at the first run hook to the files that are supposed to be unique per machine.
 One image is snapshotted once and restored many times, so every VM shares the snapshot's machine-id,
-hostname, boot_id, and random seed; the daemon replaces them unless `AGENTD_REPAIR_IDENTITY` opts out,
-and `microvm health` reports each step. It runs at the run hook rather than at daemon start because
-the daemon starts in the image-build VM, whose state the snapshot captures. See [Trust](/internals/trust/).
+hostname, boot_id, and random seed. The daemon replaces them at the first successful run hook unless
+`AGENTD_REPAIR_IDENTITY=0` opts out. Repair is on by default. The hostname and boot_id steps need the
+capabilities of an image built with `--repair-identity`, and without them only those steps fail.
+`microvm health` reports each step. It runs at the run hook rather than at daemon start because the
+daemon starts in the image-build VM, whose state the snapshot captures. See [Trust](/internals/trust/).
 
 ### `idlePolicy`
 
-The launch-time policy under which the platform suspends an idle VM and then terminates a suspended
-one after its window. Idleness is measured by inbound traffic through the endpoint proxy, so a
+The launch-time policy under which the platform suspends an idle VM and terminates it once it has
+been suspended for its window. A VM suspended by an explicit call was still resumable past that
+window. Idleness is measured by inbound traffic through the endpoint proxy, so a
 computing workload with no inbound requests reads as idle, and a request from inside the guest cannot
 reset the timer. The keepalive is yours and it runs outside the VM. See [Platform](/internals/platform/).
 
