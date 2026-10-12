@@ -473,8 +473,12 @@ mise run release:prepare X.Y.Z  # writes changelog.d/ into CHANGELOG.md as X.Y.Z
 mise run release:tag vX.Y.Z     # creates/pushes a release tag; builds and drafts the release
 ```
 
-A release starts with a pull request that synchronizes the Cargo, Python, and
-Node versions, regenerates the Python stub, and runs
+A release starts with a pull request that sets the release number in each
+published crate's `Cargo.toml`, in `crates/agentd/Cargo.toml`, in
+`bindings/microvms-py/pyproject.toml` and in `bindings/microvms-js/package.json`.
+The daemon isn't on a registry, and it still takes the number, because it reports
+its version in health and `/v1/schema` (#592). The pull request regenerates the
+Python stub, `docs/schema.json` and `crates/agentd/fuzz/Cargo.lock`, and runs
 `mise run release:prepare X.Y.Z`. That task runs
 `towncrier build --version X.Y.Z --yes`, which writes the fragments into
 CHANGELOG.md as that version, below `## Unreleased`, removes them, and stages
