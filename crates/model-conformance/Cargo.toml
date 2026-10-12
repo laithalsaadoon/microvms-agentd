@@ -37,7 +37,7 @@ tokio = { version = "1.53", features = ["rt", "macros", "test-util", "net", "io-
 # The daemon's real `/v1/tcp` route and the client's real relay, for
 # `tests/tunnel_end_of_stream.rs`: the verified tunnel's end of stream is a contract between the
 # two, and a stand-in for either half would test the contract against itself.
-agentd = { path = "../agentd", version = "0.1.0" }
+agentd = { path = "../agentd", version = "1.0.0" }
 microvms-edges = { path = "../microvms-edges", version = "1.0.0" }
 protocol = { package = "microvms-protocol", path = "../protocol", version = "1.0.0" }
 # The on-path party the tunnel test puts between them, which terminates the WebSocket as the

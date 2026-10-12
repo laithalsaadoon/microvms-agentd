@@ -63,6 +63,16 @@ PUBLISHED = {
     "microvms-cli",
 }
 
+#: The crates whose version a release tag has to match: the published ones, and the daemon.
+#:
+#: `agentd` isn't on a registry, and it still reaches consumers: it ships as the release's `agentd`
+#: asset, which `provision_agentd` downloads, and it reports its crate version over the wire, in
+#: health's `version`, the `microvms-agentd-version` header and `/v1/schema`'s `daemon_version`.
+#: docs/STABILITY.md gives the daemon the release number, and v1.0.0's daemon reported `0.1.0`
+#: because this set left it out (#592). `agentd-model` is a proof harness that no consumer links,
+#: so its version is free to differ.
+RELEASED = PUBLISHED | {"agentd"}
+
 #: Fields crates.io rejects an upload for, or renders an empty page without.
 #:
 #: `repository` is not required by the registry and is required here: it is what
@@ -295,15 +305,14 @@ def tag_version_skew(tag: str, packages: list[dict]) -> list[str]:
     version to the third registry under a tag that claims otherwise, and every registry version
     is immutable — so the wrong number cannot be withdrawn, only superseded.
 
-    Only the published crates are compared. `agentd` and `agentd-model` never reach a consumer,
-    so their versions are free to diverge and a gate that forced them to match would be
-    asserting tidiness rather than a contract.
+    The crates compared are `RELEASED`: the published ones and the daemon, whose version a
+    client reads from health. `agentd-model` reaches no consumer, so it's left out.
     """
     expected = tag.removeprefix("v")
     failures: list[str] = []
 
     for package in sorted(packages, key=lambda p: p["name"]):
-        if package["name"] in PUBLISHED and package["version"] != expected:
+        if package["name"] in RELEASED and package["version"] != expected:
             failures.append(
                 f"{package['name']} is version {package['version']} and the tag says "
                 f"{expected} ({package['manifest_path']})"
@@ -483,7 +492,9 @@ def main() -> int:
         f"({', '.join(sorted(PUBLISHED))})"
     )
     if tag:
-        print(f"publishable: every published manifest agrees with tag {tag}")
+        print(
+            f"publishable: every published manifest and the daemon's agree with tag {tag}"
+        )
 
     if "--dry-run" in sys.argv:
         missing = unregistered(PUBLISHED)

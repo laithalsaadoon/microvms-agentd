@@ -28,7 +28,14 @@ description = "The publish set is the intended one and every manifest can upload
 # It also asserts the publish set by equality, so a crate that quietly becomes publishable
 # fails here. `agentd` and `agentd-model` are `publish = false` on purpose and a diff that
 # flips either one has to say so.
-run = "./tools/check-publishable.py"
+#
+# The unit tests run first, for `trace:check`'s reason. They hold the `--tag` comparison that
+# `release:tag` and release.yml run, which this offline run doesn't reach, to the published
+# crates, the daemon and both bindings, and this tree to its own release number.
+run = [
+  "uv run --locked pytest -n auto -q -p no:cacheprovider tools/test_check_publishable.py",
+  "./tools/check-publishable.py",
+]
 
 ["release:check"]
 description = "Release builds use pinned inputs, and publishers wait on the live gate and release environment. Offline"

@@ -14,8 +14,9 @@ that release's assets, each checked against the release's `SHA256SUMS`. That's i
 provenance: both come from the same release, and core's provisioning is where a Sigstore bundle
 is verified (BIND-18).
 
-Health's `version` is the daemon's own crate version (`agentd`'s `CARGO_PKG_VERSION`), which
-moves independently of the release tag: v0.10.0's daemon reports 0.1.0. So each pairing expects
+Health's `version` is the daemon's own crate version (`agentd`'s `CARGO_PKG_VERSION`). Through
+v1.0.0 it stayed at 0.1.0 while the tag moved, so v0.10.0's and v1.0.0's daemons report 0.1.0;
+since #592 the release pull request sets it to the release number. So each pairing expects
 the version in `agentd`'s `Cargo.toml` at the tree its daemon was built from, read with git for
 the release (the manifest moved from `agentd/` to `crates/agentd/` in #374, so both paths are
 tried). While the two trees carry the same crate version, that check can't tell the daemons apart;

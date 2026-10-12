@@ -70,6 +70,18 @@ id = "publishable-reach-floor"
 message = "SELECTOR_SURFACES doesn't reach"
 transform = { file = "tools/check-publishable.py", replace = "SELECTOR_SURFACES = (\".github/workflows/*.yml\",)", with = "SELECTOR_SURFACES = ()" }
 
+# The `--tag` comparison `release:tag` runs, which the offline run above doesn't reach: the daemon
+# left out of the crates compared with the tag, which is how v1.0.0 shipped a daemon that
+# reported 0.1.0 (#592).
+[[fault]]
+id = "publishable-tag-skips-daemon"
+guard = "test_check_publishable.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_publishable.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_daemon_at_another_version_fails ("
+transform = { file = "tools/check-publishable.py", replace = "RELEASED = PUBLISHED | {\"agentd\"}", with = "RELEASED = PUBLISHED" }
+
 # targets:check: a build `check` runs with an environment of its own names a target of its own.
 # The stub generator back in the shared target, the rustdoc walk back in cargo's target, a
 # `check` the scan can't find (the floor), and a scan that stopped seeing tools (the sentinel).
