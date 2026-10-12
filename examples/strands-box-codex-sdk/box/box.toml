@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: Apache-2.0
+# The Strands Box that contains Codex inside the MicroVM. run.sh copies this directory to
+# /home/agent/box, and driver.py starts `box run --config /home/agent/box/box.toml -- app-server
+# --listen stdio://` through the Codex SDK, so the SDK speaks to a Codex app-server that runs
+# inside the box. Every path below is a path in the guest.
+#
+# Box's own reference for each key: https://github.com/strands-agents/box/blob/main/docs/user/config.md
+
+# The box's name, and where it keeps its own state. The agent can't reach box_dir.
+name = "codex-sdk"
+box_dir = "/home/agent/box/state"
+policy = "policy.dw"
+
+[agent]
+# The Codex binary the openai-codex-cli-bin wheel installed. driver.py appends the app-server
+# arguments after `--`, so the box starts `codex app-server --listen stdio://`.
+command = ["/opt/guest/.venv/lib/python3.12/site-packages/codex_cli_bin/bin/codex"]
+# The project Codex works on. The box enters it; the policy decides every file its shell opens.
+workspace = "/home/agent/project"
+# The agent gets these variables, plus the proxy, CA, and placeholder-credential variables the box
+# adds. AWS_REGION picks the bedrock-runtime region; CODEX_HOME holds config.toml.
+env = { AWS_REGION = "us-east-1", CODEX_HOME = "/home/agent/codex-home", HOME = "/home/agent/codex-home", TMPDIR = "/home/agent/codex-tmp", PATH = "/usr/bin:/bin" }
+
+# What Codex's own process can touch without asking the policy.
+[agent.filesystem]
+# Codex reads its install tree and its config.
+read = ["/opt/guest/.venv/lib/python3.12/site-packages/codex_cli_bin", "/home/agent/codex-home"]
+# Codex writes its sessions, logs, and history, and its temporary files.
+write = ["/home/agent/codex-home", "/home/agent/codex-tmp"]
+# No list holds the project. The box enters it as Codex's working directory and grants nothing
+# else, so Codex reaches every project file through its shell, where the policy decides each one.
+# (Box's macOS examples grant `list` here; its Linux backend has no lowering for `list` and
+# refuses it, so a direct grant on Linux would have to be `read`, which bypasses the policy.)
+
+# The egress gateway adds the real Bedrock API key to each request to bedrock-runtime in
+# us-east-1. Codex, and anything else in the box, gets a placeholder in AWS_BEARER_TOKEN_BEDROCK,
+# which Codex's built-in amazon-bedrock-runtime provider sends as its bearer token.
+[egress.model]
+destinations = ["bedrock-runtime.us-east-1.amazonaws.com"]
+secret.ref = "env://AWS_BEARER_TOKEN_BEDROCK"

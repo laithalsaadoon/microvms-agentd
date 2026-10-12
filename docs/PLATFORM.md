@@ -118,6 +118,21 @@ requested. Do not treat the earlier success or `["ALL"]` as a portable
 privilege guarantee. Inspect `identity_degraded` on health and the current
 capability mask. The metadata section below records the later measurements.
 
+**Later evidence, 2026-10-12,** us-east-1, API `2025-09-09`, `al2023-1`, kernel
+6.1.166 aarch64, live request (one VM per image, the two images of
+`examples/strands-box-codex-sdk` with and without `--repair-identity`):
+
+| Image | Capability bounding set | Mounts over `/proc` |
+|---|---|---|
+| Without identity repair | `00000000a80425fb`, no `CAP_SYS_ADMIN` | `/proc/kcore`, `/proc/keys`, `/proc/timer_list` and `/proc/scsi` masked; `/proc/bus`, `/proc/fs`, `/proc/irq`, `/proc/sys` and `/proc/sysrq-trigger` read-only |
+| With identity repair | `000001ffffffffff` | agentd's `boot_id` bind only |
+
+On both, uid 1000 could create a user namespace. A fresh procfs inside one
+returned `EPERM` on both, because the kernel refuses that mount while every
+procfs the namespace can see has a mount over part of it. With identity repair,
+root could mount a fresh procfs at `/proc` in a private mount namespace, and a
+user namespace below that one could mount its own.
+
 ## Identity repair at daemon start is captured by the image snapshot
 
 Measured 2026-09-23, us-east-1, API `2025-09-09`, live request (one sample, an
