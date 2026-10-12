@@ -138,7 +138,8 @@ in its own file.
 ## The metadata service
 
 `docs/TRUST.md` records that any guest process can read the execution role's credentials from
-MMDS at `169.254.169.254`. It also records that no in-guest block worked. `run.sh` probes MMDS
+MMDS at `169.254.169.254`, unless root on an identity-repair image replaces the metadata
+service's route with a blackhole. This example doesn't install that route. `run.sh` probes MMDS
 twice with `vm/probe_mmds.py`, which prints status lines and never a token. Outside the box the
 probe only reports. Inside the box it's a check, and `run.sh` fails when it fails:
 
@@ -158,8 +159,8 @@ removed the metadata rules.
 The `curl` in Box's shell refuses link-local IP addresses itself, before the gateway sees the
 request. The `instance-metadata` scenario checks for that refusal, and the decision log has no
 entry for it. The box guards only what runs inside it. The driver and every other process
-outside the box can still connect to MMDS. Keep the execution role least-privilege, as
-`docs/TRUST.md` says.
+outside the box can still connect to MMDS, because the example leaves the guest's route in
+place. Keep the execution role least-privilege, as `docs/TRUST.md` says.
 
 ## Identity repair and a fresh /proc
 

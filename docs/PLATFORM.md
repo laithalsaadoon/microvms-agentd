@@ -107,51 +107,50 @@ groups separately after VM/image cleanup.
 
 ## Root in the guest is not enough: `sethostname` and bind mounts need `additionalOsCapabilities`
 
-Measured 2026-08-06 with `al2023-1`. Without `additionalOsCapabilities`,
-writing `/etc/machine-id` succeeded while `sethostname` and the bind mount over
-`/proc/sys/kernel/random/boot_id` returned `EPERM`. Requesting `["ALL"]` made
-all three succeed in that run; `ALL` is the model's only capability value.
-
-**Later evidence, 2026-09-12:** the daemon and child capability bounding sets
-lacked `CAP_SYS_ADMIN` and `CAP_NET_ADMIN`, including with identity repair
-requested. Do not treat the earlier success or `["ALL"]` as a portable
-privilege guarantee. Inspect `identity_degraded` on health and the current
-capability mask. The metadata section below records the later measurements.
-
-**Later evidence, 2026-10-12,** us-east-1, API `2025-09-09`, `al2023-1`, kernel
-6.1.166 aarch64, live request (one VM per image, the two images of
-`examples/strands-box-codex-sdk` with and without `--repair-identity`):
+Measured 2026-10-12, us-east-1, API `2025-09-09`, `al2023-1`, kernel 6.1.166
+aarch64, live request (one VM per image, the two images of
+`examples/strands-box-codex-sdk`, built with and without `--repair-identity`).
+`--repair-identity` is what requests `additionalOsCapabilities: ["ALL"]`, the
+model's only capability value:
 
 | Image | Capability bounding set | Mounts over `/proc` |
 |---|---|---|
-| Without identity repair | `00000000a80425fb`, no `CAP_SYS_ADMIN` | `/proc/kcore`, `/proc/keys`, `/proc/timer_list` and `/proc/scsi` masked; `/proc/bus`, `/proc/fs`, `/proc/irq`, `/proc/sys` and `/proc/sysrq-trigger` read-only |
-| With identity repair | `000001ffffffffff` | agentd's `boot_id` bind only |
+| Without identity repair | `00000000a80425fb`: the 14 capabilities Docker grants a root container, with no `CAP_SYS_ADMIN` and no `CAP_NET_ADMIN` | `/proc/kcore`, `/proc/keys`, `/proc/timer_list` and `/proc/scsi` masked; `/proc/bus`, `/proc/fs`, `/proc/irq`, `/proc/sys` and `/proc/sysrq-trigger` read-only |
+| With identity repair | `000001ffffffffff`: every capability | agentd's `boot_id` bind only |
 
-On both, uid 1000 could create a user namespace. A fresh procfs inside one
-returned `EPERM` on both, because the kernel refuses that mount while every
+Without the capabilities, root can still rewrite `/etc/machine-id`. The
+`sethostname` call and the bind mount over `/proc/sys/kernel/random/boot_id`
+return `EPERM` (measured 2026-08-06). Both need `CAP_SYS_ADMIN`, which the
+2026-10-12 set lacks. With them, all three identity-repair steps succeed (measured 2026-08-06
+and 2026-09-24, the next section). agentd reports each step in
+`identity_steps` and sets `identity_degraded` when one fails, so a caller that
+needs repaired identity checks those fields.
+
+On both images, uid 1000 could create a user namespace. A fresh procfs inside
+one returned `EPERM` on both, because the kernel refuses that mount while every
 procfs the namespace can see has a mount over part of it. With identity repair,
 root could mount a fresh procfs at `/proc` in a private mount namespace, and a
 user namespace below that one could mount its own.
 
-## Identity repair at daemon start is captured by the image snapshot
+## Identity repair runs at the first run hook, because the image snapshot captures daemon start
 
-Measured 2026-09-23, us-east-1, API `2025-09-09`, live request (one sample, an
-image whose daemon repaired identity at startup). Two VMs launched from one
-image had the same `/proc/sys/kernel/random/boot_id`, `/etc/machine-id`, and
-hostname (`localhost`), while `/proc/sys/kernel/random/uuid` and a fresh
-`random.random()` differed. Both reported `identity_repaired: true` and
-`identity_degraded: true`. The daemon starts in the image-build VM, so what it
-wrote at startup was in the snapshot every VM restores.
+The daemon starts in the image-build VM, and every VM launched from the image
+restores that VM's snapshot. Anything the daemon writes when it starts is in the
+snapshot, and each VM gets the same copy. Measured 2026-09-23, us-east-1, API
+`2025-09-09`, live request (one sample): with a daemon that repaired identity at
+startup, two VMs from one image had the same `/proc/sys/kernel/random/boot_id`,
+`/etc/machine-id`, and hostname (`localhost`), while
+`/proc/sys/kernel/random/uuid` and a fresh `random.random()` differed.
 
-**Correction, 2026-09-24,** us-east-1, API `2025-09-09`, live request (the
-conformance suite's `--repair-identity` build): with repair moved to the first
-successful run hook, two VMs from one image had distinct machine-ids, and
-`identity_steps` reported `machine-id`, `hostname`, and `boot-id` repaired on
-both. The same run installed `suspend` and `resume` handlers under
-`/etc/agentd/hooks.d`; across a 40-second suspend both ran in order, exited 0,
-and were reported on their hook entries (2 ms and 111 ms). Without
-`--repair-identity`, expect the hostname and `boot-id` steps to fail with
-`EPERM` as recorded above.
+agentd repairs identity at the first successful run hook instead, the first
+moment that belongs to one VM. Measured 2026-09-24, us-east-1, API `2025-09-09`,
+live request (the conformance suite's `--repair-identity` build): two VMs from
+one image had distinct machine-ids, and `identity_steps` reported `machine-id`,
+`hostname`, and `boot-id` repaired on both. The same run installed `suspend` and
+`resume` handlers under `/etc/agentd/hooks.d`; across a 40-second suspend both
+ran in order, exited 0, and were reported on their hook entries (2 ms and
+111 ms). Without `--repair-identity`, the hostname and `boot-id` steps fail with
+`EPERM`, as the previous section says.
 
 ## `minimumMemoryInMiB` selects a *baseline*, and the guest reports the *peak*
 
@@ -641,7 +640,7 @@ No internet egress requires a VPC without an IGW or NAT gateway, with no
 alternative internet path. These are SDK/documentation findings; a VPC-isolated
 launch was not live-measured in this refresh. See [Networking](NETWORKING.md).
 
-## The guest reaches the execution role's credentials through MMDS, and no in-guest block works
+## The guest reaches the execution role's credentials through MMDS, and only root with identity repair can block it
 
 Measured 2026-09-11 and 2026-09-12, `al2023-1`, 512 MiB baseline.
 `169.254.169.254` served the execution role through Firecracker MMDS:
@@ -654,13 +653,33 @@ Measured 2026-09-11 and 2026-09-12, `al2023-1`, 512 MiB baseline.
 | Token PUT as uid 1000 | 200 |
 
 Both managed-egress and connector-less VMs behaved alike. Credential values
-were neither printed nor retained.
+were neither printed nor retained. On 2026-10-12 the token PUT as uid 1000 still
+returned 200.
 
-The daemon and child reported `CapBnd 00000000a80425fb`, lacking
-`CAP_NET_ADMIN` and `CAP_SYS_ADMIN`, including with identity repair requested.
-After installing `iproute`, route/rule/link changes still returned `EPERM`;
-relevant `/proc/sys` writes were read-only. No tested in-guest metadata block
-worked. This limits the earlier August capability observation.
+Blocking it takes `CAP_NET_ADMIN`, which only an image built with
+`--repair-identity` has (the bounding sets above). Without it, route, rule, and
+link changes returned `EPERM` after installing `iproute`, and the relevant
+`/proc/sys` writes were read-only (measured 2026-09-12).
+
+With it, root can block MMDS for every other process. Measured 2026-10-12,
+us-east-1, API `2025-09-09`, Amazon Linux `2023.12.20260817`, kernel 6.1.166
+aarch64, live request (one VM). The guest's main table holds a host route,
+`169.254.169.254/32 dev eth0`, so adding a second route for that address fails
+with `EEXIST`. Replacing it with a blackhole route over rtnetlink succeeded as
+root. The minimal image has no `ip` command, so the measurement used a Python
+rtnetlink call. After the replacement:
+
+| Process | Action | Result |
+|---|---|---|
+| uid 1000 | TCP connect and IMDSv2 token PUT | `EINVAL`, no token |
+| uid 1000 | Replace or delete the route | `EPERM` |
+| Root | TCP connect | `EINVAL`, until root deletes the route |
+| agentd | Serve an exec | served |
+| uid 1000 | TCP connect to `bedrock-runtime.us-east-1.amazonaws.com:443` | connected |
+
+`fd00:ec2::254` was unreachable before and after, because the guest has no IPv6
+route to it. Any root process can delete the blackhole. The block protects only
+against processes that don't run as root.
 
 Use least privilege on the execution role. VPC internet isolation does not
 remove metadata credentials. The conformance role permits CloudWatch logging
