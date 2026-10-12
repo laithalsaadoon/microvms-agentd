@@ -438,7 +438,10 @@ class ValeIntegrationTests(unittest.TestCase):
     def test_correction_trail_phrasing_is_an_error(self):
         # The repository's own rule, run by real Vale: platform docs give one current answer,
         # so phrasing that keeps a replaced answer beside it fails the gate.
-        rule = Path(__file__).resolve().parents[1] / ".vale/styles/Microvms/CorrectionTrail.yml"
+        rule = (
+            Path(__file__).resolve().parents[1]
+            / ".vale/styles/Microvms/CorrectionTrail.yml"
+        )
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             subprocess.run(["git", "init", "-q", str(root)], check=True)
@@ -446,7 +449,9 @@ class ValeIntegrationTests(unittest.TestCase):
             (root / ".vale.ini").write_text(
                 "StylesPath = .vale/styles\n[*.md]\nBasedOnStyles = Microvms\n"
             )
-            (root / ".vale/styles/Microvms/CorrectionTrail.yml").write_text(rule.read_text())
+            (root / ".vale/styles/Microvms/CorrectionTrail.yml").write_text(
+                rule.read_text()
+            )
             (root / ".vale/warnings.json").write_text('{"version":1,"warnings":{}}')
             for content, expected in [
                 ("Measured 2026-08-15. The limit is 4096 bytes.", 0),
@@ -470,7 +475,10 @@ class ValeIntegrationTests(unittest.TestCase):
                     with patch.dict(
                         PROSE_GLOBALS, ROOT=root, baseline_growth=lambda *_: []
                     ):
-                        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                        with (
+                            redirect_stdout(io.StringIO()),
+                            redirect_stderr(io.StringIO()),
+                        ):
                             self.assertEqual(P["main"]([]), expected)
 
 
