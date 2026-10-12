@@ -699,6 +699,33 @@ mod tests {
         );
     }
 
+    /// A launch that died and a VM that ended while suspended each carry the remedy that
+    /// says what to run next, which is all that separates them from an exit with no hint.
+    #[test]
+    fn a_died_launch_and_a_closed_window_each_carry_their_remedy() {
+        let died = classify(&Error::new(
+            ErrorKind::LaunchDied,
+            "the VM died during startup",
+        ));
+        assert_eq!(died.exit, Exit::LaunchDied);
+        assert!(
+            died.suggestions.iter().any(|s| s.contains("microvm logs")),
+            "{died:?}"
+        );
+        let closed = classify(&Error::new(
+            ErrorKind::WindowClosed,
+            "the VM terminated while suspended",
+        ));
+        assert_eq!(closed.exit, Exit::WindowClosed);
+        assert!(
+            closed
+                .suggestions
+                .iter()
+                .any(|s| s.contains("launch a new one")),
+            "{closed:?}"
+        );
+    }
+
     /// A parse failure is an argument error carrying clap's own message.
     #[test]
     fn a_parse_failure_is_an_argument_error_carrying_claps_message() {
