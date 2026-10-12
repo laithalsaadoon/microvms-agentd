@@ -3,8 +3,8 @@
 //! model describes made true of the code.
 //!
 //! Composes [`crate::control`] and [`crate::session`] into the surface the CLI and the
-//! bindings use: build, run, suspend, resume, terminate, a resume of a VM the service
-//! ended while suspended (STATE-12), and teardown in the order that does not leak.
+//! bindings use: build, run, suspend, resume, terminate, a resume of a VM that ended
+//! before it (STATE-12), and teardown in the order that does not leak.
 //!
 //! # The lifecycle is a field, and every transition is guarded
 //!
@@ -38,9 +38,14 @@
 //! `suspendedDurationSeconds` passes, and the service doesn't hold an explicit
 //! `SuspendMicrovm` to that window: measured 2026-10-12 in us-east-1, a VM this client
 //! suspended resumed 1283 s into a 60 s window (#597). So a resume is never refused here for
-//! the time it has spent suspended. It goes to the service, and a refusal for a VM that
-//! terminated while suspended comes back from [`ControlPlane::resume`] as
+//! the time it has spent suspended. It goes to the service, and the service's refusal for a
+//! VM that ended, whatever ended it, comes back from [`ControlPlane::resume`] as
 //! [`ErrorKind::WindowClosed`], which this sandbox records as a termination (STATE-11).
+//!
+//! A suspend the idle policy makes isn't seen here: the sandbox still holds the VM as
+//! RUNNING, and its resume is refused before any call (STATE-7). That suspend reaches a
+//! caller only through [`Sandbox::adopt`], which reads the state from the service, or
+//! [`ControlPlane::resume`], which holds no lifecycle to refuse from.
 //!
 //! # Teardown never raises, and the log group is last
 //!
@@ -1649,9 +1654,11 @@ impl Sandbox {
     /// No resume is refused here for the time the VM has spent suspended. The service ends a
     /// VM the idle policy suspended once `suspendedDurationSeconds` passes, and it kept a VM
     /// this client suspended resumable 1283 s into a 60 s window (measured 2026-10-12,
-    /// us-east-1, #597). A resume the service refuses because the VM terminated while
-    /// suspended is [`ErrorKind::WindowClosed`] ([`ControlPlane::resume`]), and this records
-    /// the VM as terminated, so a second resume is refused here with no call (STATE-11).
+    /// us-east-1, #597). A resume the service refuses because the VM ended, whatever ended
+    /// it, is [`ErrorKind::WindowClosed`] ([`ControlPlane::resume`]), and this records the VM
+    /// as terminated, so a second resume is refused here with no call (STATE-11). A VM the
+    /// idle policy suspended is still RUNNING here, so its resume is refused before any call
+    /// (STATE-7); see the module docs.
     ///
     /// # The proxy token is dropped (STATE-8)
     ///
@@ -1679,7 +1686,7 @@ impl Sandbox {
             )));
         }
 
-        // STATE-12: a `WindowClosed` refusal is a VM that terminated while suspended. It's
+        // STATE-12: a `WindowClosed` refusal is a VM that ended before this resume. It's
         // recorded as TERMINATED whichever of TERMINATING or TERMINATED `GetMicrovm` read,
         // because the service has said the VM's state can't change, and as a termination, so
         // the next resume is refused before any call (STATE-11). Any other refusal leaves the
@@ -1867,11 +1874,14 @@ impl Sandbox {
         let vm = self.microvm.as_ref()?;
         self.lifecycle.is_live().then(|| {
             format!(
-                "warning: the Sandbox for microvm {} was dropped in {} without terminate() or \
-                 detach(). Nothing was torn down — Drop cannot await, so a teardown here would \
-                 deadlock inside a runtime. The VM bills until its maximumDurationInSeconds \
-                 ceiling: terminate it with `microvm terminate {}`.",
-                vm.id, self.lifecycle, vm.id,
+                "warning: the Sandbox for microvm {id} was dropped in {state} without \
+                 terminate() or detach(). Nothing was torn down — Drop cannot await, so a \
+                 teardown here would deadlock inside a runtime. {state} is the state this \
+                 sandbox last saw, and the platform may have suspended or ended the VM since. A \
+                 VM that's still live bills until it ends, at its maximumDurationInSeconds \
+                 ceiling at the latest: terminate it with `microvm terminate {id}`.",
+                id = vm.id,
+                state = self.lifecycle,
             )
         })
     }
@@ -2436,7 +2446,9 @@ mod tests {
     }
 
     /// **A dropped live sandbox warns through the plane's adapters**, not a stream of its
-    /// own, so the driving adapter decides where the warning goes (ARCH-7).
+    /// own, so the driving adapter decides where the warning goes (ARCH-7). The warning names
+    /// the state as the one the sandbox last saw, since the platform can suspend or end the VM
+    /// without telling it, and says only that a VM still live bills.
     ///
     /// **Falsification**: write the warning straight to stderr in `Drop` and the recorded
     /// list comes back empty (and the crate's `clippy.toml` refuses `std::io::stderr`).
@@ -2464,6 +2476,11 @@ mod tests {
         let warnings = adapters.warnings();
         assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(warnings[0].contains(&id), "{warnings:?}");
+        assert!(
+            warnings[0].contains("RUNNING is the state this sandbox last saw")
+                && warnings[0].contains("A VM that's still live bills"),
+            "{warnings:?}"
+        );
     }
 
     /// **Detach hands off, and nothing warns or moves afterwards.** A launched sandbox

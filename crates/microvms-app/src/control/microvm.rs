@@ -1804,7 +1804,11 @@ mod tests {
     /// **STATE-12 at the control plane.** A resume the service refuses for a VM `GetMicrovm`
     /// reports in either dead state is `WindowClosed`, naming the state and its `stateReason`.
     /// The CLI's `resume`, both bindings' `ControlPlane.resume` and `Sandbox::resume` call
-    /// this, so every surface reports a VM that terminated while suspended the same way.
+    /// this, so every resume that reaches the service reports an ended VM the same way. A
+    /// `Sandbox` whose VM the idle policy suspended still holds it as RUNNING, and its resume
+    /// is refused from RUNNING before any call: that suspend reaches a caller only through
+    /// `Sandbox::adopt`, which reads the state from the service, or `ControlPlane::resume`,
+    /// which holds no lifecycle to refuse from.
     #[tokio::test]
     async fn a_resume_refused_for_a_vm_that_terminated_while_suspended_is_window_closed() {
         for state in crate::constants::DEAD_STATES {

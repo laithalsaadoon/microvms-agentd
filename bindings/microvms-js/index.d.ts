@@ -1006,9 +1006,14 @@ export declare class Sandbox {
    *
    * How long the VM has been suspended. The `idlePolicy` terminates a VM the idle policy
    * suspended once `suspendedSec` passes, and a VM this sandbox suspended stayed resumable
-   * 1283 s into a 60 s window (measured 2026-10-12, us-east-1). A resume of a VM that
-   * terminated while suspended rejects with `ERR_WINDOW_CLOSED`, and the sandbox is
-   * TERMINATED after it.
+   * 1283 s into a 60 s window (measured 2026-10-12, us-east-1). `ERR_WINDOW_CLOSED` is the
+   * service's answer once a resume reaches it: the service refused the resume, and the VM
+   * is TERMINATING or TERMINATED, whatever ended it. The sandbox is TERMINATED after it.
+   *
+   * A sandbox doesn't see a suspend the idle policy makes. It still holds the VM as
+   * RUNNING, so `resume` rejects with `ERR_INVALID_ARG` before any call (STATE-7). That
+   * suspend reaches a caller only through `Sandbox.adopt`, which reads the state from the
+   * service, or `ControlPlane.resume`, which holds no lifecycle to refuse from.
    *
    * Nothing is re-delivered: no run-hook payload, no token, no bootstrap. The in-memory
    * token survived the freeze, and re-delivering it would hit the daemon's one-shot

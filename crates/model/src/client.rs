@@ -43,14 +43,17 @@
 //!
 //! # The end of a suspended VM is the platform's action, not a clock
 //!
-//! [`Action::SuspendedVmEnded`] is the platform terminating a SUSPENDED VM: the idle
-//! policy's `suspendedDurationSeconds` passing, or the VM's maximum duration. It sets
-//! [`State::platform_ended`], which the client can't read: it learns of the end only from
-//! the service's refusal of its next resume (STATE-12). Time is not in the state space, and
-//! it should not be. The client doesn't decide on the window, because the service doesn't
-//! hold an explicit suspend to it (measured 2026-10-12, us-east-1, #597), so the model
-//! settles two things that need no clock: a resume from SUSPENDED always reaches the
-//! service, and the service's refusal leaves the client TERMINATED.
+//! [`Action::SuspendedVmEnded`] is the platform ending a VM the client suspended, whatever
+//! ends it: its maximum duration, say, or a terminate from another client. It sets
+//! [`State::platform_ended`], which the client can't read: `WindowClosed` comes only from the
+//! service's answer once the client's next resume reaches it (STATE-12). A suspend the idle
+//! policy makes isn't an action here, because the client doesn't see it: a `Sandbox` learns
+//! of one only through `Sandbox::adopt` or `ControlPlane::resume`, and until then holds the
+//! VM as RUNNING. Time is not in the state space, and it should not be. The client doesn't
+//! decide on the window, because the service doesn't hold an explicit suspend to it
+//! (measured 2026-10-12, us-east-1, #597), so the model settles two things that need no
+//! clock: a resume from SUSPENDED always reaches the service, and the service's refusal
+//! leaves the client TERMINATED.
 
 use stateright::{Model, Property};
 
