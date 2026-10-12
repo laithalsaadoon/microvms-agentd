@@ -23,9 +23,9 @@ A start request that omits `user` runs as root unless the image sets
 `AGENTD_DEFAULT_USER`. With it set, that start runs as the image's user, with
 its passwd row's uid and primary gid, whether the image gives the user's name
 or its uid. A value with no passwd row, digits included, refuses the start
-instead of running it as root or in root's group. What an upload creates
-belongs to that user too, so the workload can rewrite it. An authorized caller
-can still execute as root by asking for `root` or `0`, and workload hook
+instead of running it as root or in root's group. Uploads are still written as
+root, so that user can read an uploaded tree but can't write into it. An authorized
+caller can still execute as root by asking for `root` or `0`, and workload hook
 handlers still run as root.
 
 ## Platform isolation guarantees

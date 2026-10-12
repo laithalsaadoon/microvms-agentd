@@ -100,10 +100,10 @@ index c6bd7f9..e9684f0 100644
          },
      )?;
 diff --git a/crates/agentd/src/exec_start.rs b/crates/agentd/src/exec_start.rs
-index 453b4f5..4e0d7b3 100644
+index 3ddcca0..4e0d7b3 100644
 --- a/crates/agentd/src/exec_start.rs
 +++ b/crates/agentd/src/exec_start.rs
-@@ -19,18 +19,6 @@
+@@ -19,17 +19,6 @@
  //! fuzz harness can drive. Supplementary groups are not set: `Command::groups` is still
  //! unstable, and std clears them anyway when a root daemon demotes (`setgroups(0)`).
  //!
@@ -116,13 +116,12 @@ index 453b4f5..4e0d7b3 100644
 -//! default doesn't keep the daemon's gid 0. A default with no row, digits included, is
 -//! refused as `unknown_user` with a detail that names the variable (AGENTD-24). A request's
 -//! own `user` always wins over the default, `root` and `0` included (AGENTD-23): the default
--//! decides what a caller gets by not saying, not what a caller may ask for. The same row
--//! owns what an upload creates (`fs.rs`).
+-//! decides what a caller gets by not saying, not what a caller may ask for.
 -//!
  //! # The environment is five layers, lowest first
  //!
  //! 1. The image environment, only when the request sets `inherit_image_env`: what the
-@@ -64,8 +52,6 @@ use protocol::exec::{
+@@ -63,8 +52,6 @@ use protocol::exec::{
      NameOrId, Shell, StartRequest,
  };
  
@@ -131,7 +130,7 @@ index 453b4f5..4e0d7b3 100644
  /// A child's environment, or one layer of it.
  pub type Env = HashMap<String, String>;
  
-@@ -173,8 +159,6 @@ pub struct Guest<'a> {
+@@ -172,8 +159,6 @@ pub struct Guest<'a> {
      pub passwd: &'a str,
      /// The group file's text. Empty when the file is absent.
      pub group: &'a str,
@@ -140,7 +139,7 @@ index 453b4f5..4e0d7b3 100644
      /// Whether a path is an executable regular file. The real check is
      /// [`is_executable_file`]; tests and the fuzz harness hand in a fake filesystem.
      pub is_executable: &'a dyn Fn(&Path) -> bool,
-@@ -217,10 +201,8 @@ impl Plan {
+@@ -216,10 +201,8 @@ impl Plan {
  struct User<'a> {
      uid: u32,
      row: Option<&'a PasswdRow>,
@@ -153,7 +152,7 @@ index 453b4f5..4e0d7b3 100644
  }
  
  /// All ASCII digits that fit a `u32`: a string read as an id when it names no row.
-@@ -239,21 +221,21 @@ fn resolve_user<'a>(spec: &NameOrId, rows: &'a [PasswdRow]) -> Result<User<'a>,
+@@ -238,21 +221,21 @@ fn resolve_user<'a>(spec: &NameOrId, rows: &'a [PasswdRow]) -> Result<User<'a>,
          NameOrId::Id(uid) => Ok(User {
              uid: *uid,
              row: by_uid(*uid),
@@ -178,7 +177,7 @@ index 453b4f5..4e0d7b3 100644
                  }),
                  None => Err(Rejection::new(
                      ERROR_UNKNOWN_USER,
-@@ -264,56 +246,6 @@ fn resolve_user<'a>(spec: &NameOrId, rows: &'a [PasswdRow]) -> Result<User<'a>,
+@@ -263,56 +246,6 @@ fn resolve_user<'a>(spec: &NameOrId, rows: &'a [PasswdRow]) -> Result<User<'a>,
      }
  }
  
@@ -186,12 +185,12 @@ index 453b4f5..4e0d7b3 100644
 -/// row of the uid its digits spell.
 -///
 -/// Stricter than a request's `user`, where digits with no row run as a bare uid. The default
--/// runs every start that names no user and owns every entry an upload creates, and a uid
--/// with no row has no primary gid to give either, so the child would keep the daemon's gid
--/// 0. A default with no row is refused instead (AGENTD-24). The error is the clause a
--/// refusal's detail ends with, naming the value and the variable that set it, because the
--/// caller sent no name to look for and the fix is in the image.
--pub fn default_user_row<'a>(name: &str, rows: &'a [PasswdRow]) -> Result<&'a PasswdRow, String> {
+-/// runs every start that names no user, and a uid with no row has no primary gid to give it,
+-/// so the child would keep the daemon's gid 0. A default with no row is refused instead
+-/// (AGENTD-24). The error is the clause a refusal's detail ends with, naming the value and
+-/// the variable that set it, because the caller sent no name to look for and the fix is in
+-/// the image.
+-fn default_user_row<'a>(name: &str, rows: &'a [PasswdRow]) -> Result<&'a PasswdRow, String> {
 -    match resolve_user(&NameOrId::Name(name.to_string()), rows) {
 -        Ok(User { row: Some(row), .. }) => Ok(row),
 -        Ok(User { row: None, .. }) => Err(format!(
@@ -235,7 +234,7 @@ index 453b4f5..4e0d7b3 100644
  /// A group by gid or name (AGENTD-7); an unmatched name is `unknown_group` (AGENTD-8).
  fn resolve_group(spec: &NameOrId, rows: &[GroupRow]) -> Result<u32, Rejection> {
      match spec {
-@@ -389,12 +321,16 @@ pub fn resolve_shell(
+@@ -388,12 +321,16 @@ pub fn resolve_shell(
  /// environment's `PATH`), so the first field that cannot be resolved names the error. The
  /// empty-argv check comes last, as it did in `build_command` before this module existed.
  pub fn plan(request: &StartRequest, guest: &Guest<'_>) -> Result<Plan, Rejection> {
@@ -254,7 +253,7 @@ index 453b4f5..4e0d7b3 100644
  
      let groups = match &request.group {
          Some(NameOrId::Name(_)) => parse_group(guest.group),
-@@ -402,12 +338,11 @@ pub fn plan(request: &StartRequest, guest: &Guest<'_>) -> Result<Plan, Rejection
+@@ -401,12 +338,11 @@ pub fn plan(request: &StartRequest, guest: &Guest<'_>) -> Result<Plan, Rejection
      };
      let gid = match &request.group {
          Some(spec) => Some(resolve_group(spec, &groups)?),
@@ -270,544 +269,6 @@ index 453b4f5..4e0d7b3 100644
              .and_then(|user| user.row)
              .map(|row| row.gid),
      };
-diff --git a/crates/agentd/src/fs.rs b/crates/agentd/src/fs.rs
-index 6844bcb..f6221ee 100644
---- a/crates/agentd/src/fs.rs
-+++ b/crates/agentd/src/fs.rs
-@@ -65,25 +65,7 @@
- //! resolution that would leave the root stops with `EXDEV`. Both become a 400 that
- //! names the member. The daemon no longer has to reason about whether a redirect is
- //! safe, because a redirected write cannot happen.
--//!
--//! # Who owns what an upload creates
--//!
--//! The daemon writes as root, so without `AGENTD_DEFAULT_USER` every entry an upload creates
--//! is root's, as it always was. With it set, each entry `PUT /v1/fs/tar` or
--//! `PUT /v1/fs/file` creates, parent directories included, is owned by the default user's
--//! uid and primary gid, resolved by the rule a start that names no user uses
--//! (`exec_start::default_user_row`), so the user a nameless exec runs as can write the tree
--//! an upload made for it. An entry that was already there keeps its owner: an existing
--//! directory, a file `PUT /v1/fs/file` truncates, and a name the archive replaces, whose new
--//! entry takes the old one's owner. A hard link is a name for an inode that already exists,
--//! so it changes no owner. A default with no passwd row refuses the upload with
--//! `400 unknown_user` before anything is written.
--//!
--//! Each chown goes through a descriptor of the entry itself, never a path: the open file,
--//! or a directory or symlink opened in its confined parent without following a symlink. A
--//! name swapped between the create and the chown can't move the chown onto another file.
- 
--use std::borrow::Cow;
- use std::collections::HashMap;
- use std::ffi::{OsStr, OsString};
- use std::io::{self, Read, Seek, SeekFrom, Write};
-@@ -93,22 +75,19 @@ use std::path::{Component, Path, PathBuf};
- 
- use nix::errno::Errno;
- use nix::fcntl::{AT_FDCWD, AtFlags, OFlag, OpenHow, ResolveFlag, openat2};
--use nix::sys::stat::{FchmodatFlags, Mode, SFlag, fchmodat, fstat, fstatat, mkdirat};
--use nix::unistd::{Gid, Uid, UnlinkatFlags, fchownat, linkat, symlinkat, unlinkat};
-+use nix::sys::stat::{FchmodatFlags, Mode, fchmodat, mkdirat};
-+use nix::unistd::{UnlinkatFlags, linkat, symlinkat, unlinkat};
- 
--use axum::Json;
- use axum::body::Body;
- use axum::extract::{Request, State};
- use axum::http::{StatusCode, header};
- use axum::response::{IntoResponse, Response};
- use bytes::Bytes;
- use futures_util::TryStreamExt;
--use protocol::exec::{ERROR_UNKNOWN_USER, ErrorBody};
- use tar::EntryType;
- use tokio_util::io::{ReaderStream, StreamReader};
- 
- use crate::disk::{self, CopyError};
--use crate::exec_start::{default_user_row, parse_passwd, read_database};
- use crate::state::AppState;
- 
- /// The two typed shapes in this module, re-exported from their original paths. The
-@@ -144,116 +123,6 @@ fn insufficient_storage(path: &Path, reading: disk::Reading) -> Response {
-         .into_response()
- }
- 
--/// The owner of an entry an upload creates: the image's default user's uid and primary gid.
--/// `None` in place of one, throughout this module, leaves an entry the daemon's, which is
--/// root.
--#[derive(Clone, Copy, Debug, Eq, PartialEq)]
--struct Owner {
--    uid: u32,
--    gid: u32,
--}
--
--impl Owner {
--    /// Gives the entry `fd` refers to this owner. `fd` may be `O_PATH`: with an empty path
--    /// and `AT_EMPTY_PATH`, `fchownat` changes the descriptor's own inode, a symlink's
--    /// included.
--    fn apply(self, fd: BorrowedFd<'_>) -> Result<(), Errno> {
--        fchownat(
--            fd,
--            "",
--            Some(Uid::from_raw(self.uid)),
--            Some(Gid::from_raw(self.gid)),
--            AtFlags::AT_EMPTY_PATH,
--        )
--    }
--}
--
--/// The owner of what this upload creates, or the detail of the `400 unknown_user` that
--/// refuses it.
--///
--/// Resolved at each upload from the guest's `/etc/passwd`, the way a start resolves the
--/// default, so a user an earlier exec created owns the next upload. A default with no row
--/// is refused here, before the body is read, because extracting it as root would leave
--/// the default user a tree it can't write. The `Err` is the detail rather than a
--/// `Response` so the variant stays small (clippy's `result_large_err`);
--/// [`unknown_default_user`] builds the answer.
--fn upload_owner(state: &AppState) -> Result<Option<Owner>, String> {
--    let config = state.config();
--    let Some(name) = config.default_user.as_deref() else {
--        return Ok(None);
--    };
--    let rows = parse_passwd(&read_database(&config.passwd_path));
--    match default_user_row(name, &rows) {
--        Ok(row) => Ok(Some(Owner {
--            uid: row.uid,
--            gid: row.gid,
--        })),
--        Err(why) => {
--            let detail = format!("an upload's new entries belong to the default user, and {why}");
--            Err(detail)
--        }
--    }
--}
--
--/// The `400 unknown_user` that refuses an upload under a default with no passwd row. The
--/// body is the exec routes' JSON `ErrorBody`, since the slug is theirs, where this module's
--/// other refusals are plain text.
--fn unknown_default_user(detail: String) -> Response {
--    tracing::warn!(detail, "upload refused");
--    (
--        StatusCode::BAD_REQUEST,
--        Json(ErrorBody {
--            error: Cow::Borrowed(ERROR_UNKNOWN_USER),
--            detail,
--        }),
--    )
--        .into_response()
--}
--
--/// Opens the directory `path`, creating each missing component as `create_dir_all` would,
--/// and gives each component it creates to `owner`.
--///
--/// Walked a component at a time from `/`, or from the working directory for a relative
--/// path, each step relative to the descriptor of the last. A component that already exists
--/// is followed wherever it leads, symlinks included, as `create_dir_all` follows them,
--/// because the path is the caller's. A component this walk creates is opened with
--/// [`Confined::RESOLVE`] and chowned through that descriptor, so a symlink put in its
--/// place after the `mkdirat` stops the walk instead of taking the chown.
--fn open_dirs_owned(path: &Path, owner: Owner) -> io::Result<OwnedFd> {
--    let open = |dir: BorrowedFd<'_>, name: &OsStr, resolve: ResolveFlag| {
--        let how = OpenHow::new().flags(Confined::DIRECTORY).resolve(resolve);
--        openat2(dir, name, how)
--    };
--    let start = if path.is_absolute() { "/" } else { "." };
--    let mut current = open(
--        AT_FDCWD,
--        OsStr::new(start),
--        ResolveFlag::RESOLVE_NO_MAGICLINKS,
--    )?;
--    for component in path.components() {
--        let name = match component {
--            Component::Normal(name) => name,
--            Component::ParentDir => OsStr::new(".."),
--            Component::RootDir | Component::CurDir | Component::Prefix(_) => continue,
--        };
--        let created = match mkdirat(&current, name, Mode::from_bits_truncate(0o777)) {
--            Ok(()) => true,
--            Err(Errno::EEXIST) => false,
--            Err(errno) => return Err(errno.into()),
--        };
--        let resolve = if created {
--            Confined::RESOLVE
--        } else {
--            ResolveFlag::RESOLVE_NO_MAGICLINKS
--        };
--        current = open(current.as_fd(), name, resolve)?;
--        if created {
--            owner.apply(current.as_fd())?;
--        }
--    }
--    Ok(current)
--}
--
- /// Why an archive or member was refused.
- ///
- /// The refused member's name travels with the refusal so the 400 can name it. A
-@@ -427,9 +296,6 @@ fn resolve_member(root: &Path, path: &Path) -> Landing {
- /// read from or written to even if the descriptor leaks somewhere it should not.
- struct Confined {
-     root: OwnedFd,
--    /// Who owns each entry the extraction creates (see the module comment). `None` leaves
--    /// them the daemon's.
--    owner: Option<Owner>,
- }
- 
- impl Confined {
-@@ -463,19 +329,7 @@ impl Confined {
-         .union(ResolveFlag::RESOLVE_NO_SYMLINKS)
-         .union(ResolveFlag::RESOLVE_NO_MAGICLINKS);
- 
--    /// The open flags of every directory on a walk: a path for `*at` calls only, which
--    /// fails unless the name is a directory.
--    const DIRECTORY: OFlag = OFlag::O_CLOEXEC
--        .union(OFlag::O_PATH)
--        .union(OFlag::O_DIRECTORY);
--
--    /// The open flags of a symlink opened as itself, for its chown ([`Confined::open_link`]).
--    const LINK: OFlag = OFlag::O_CLOEXEC
--        .union(OFlag::O_PATH)
--        .union(OFlag::O_NOFOLLOW);
--
--    /// Opens `root`, creating it if it is absent, and holds it. With an `owner`, each
--    /// directory created on the way to `root` is that owner's ([`open_dirs_owned`]).
-+    /// Opens `root`, creating it if it is absent, and holds it.
-     ///
-     /// The root itself is opened by absolute path with only
-     /// `RESOLVE_NO_MAGICLINKS`, not with [`Self::RESOLVE`]. `RESOLVE_BENEATH`
-@@ -493,18 +347,13 @@ impl Confined {
-     /// and `File::create` this replaced: falling back would mean the confinement a
-     /// caller cannot see silently became the weaker one, and issue #15 is what the
-     /// weaker one allows.
--    fn open(root: &Path, owner: Option<Owner>) -> io::Result<Self> {
--        let root = match owner {
--            Some(owner) => open_dirs_owned(root, owner)?,
--            None => {
--                std::fs::create_dir_all(root)?;
--                let how = OpenHow::new()
--                    .flags(Self::DIRECTORY)
--                    .resolve(ResolveFlag::RESOLVE_NO_MAGICLINKS);
--                openat2(AT_FDCWD, root, how).map_err(io::Error::from)?
--            }
--        };
--        Ok(Self { root, owner })
-+    fn open(root: &Path) -> io::Result<Self> {
-+        std::fs::create_dir_all(root)?;
-+        let how = OpenHow::new()
-+            .flags(OFlag::O_PATH | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC)
-+            .resolve(ResolveFlag::RESOLVE_NO_MAGICLINKS);
-+        let root = openat2(AT_FDCWD, root, how).map_err(io::Error::from)?;
-+        Ok(Self { root })
-     }
- 
-     /// Opens the single component `name` under `dir` as a directory.
-@@ -514,7 +363,9 @@ impl Confined {
-     /// the error name which component failed, and a 400 that names the component
-     /// is the difference between an operator fixing their tree and re-reading it.
-     fn open_dir(&self, dir: BorrowedFd<'_>, name: &OsStr) -> Result<OwnedFd, Errno> {
--        let how = OpenHow::new().flags(Self::DIRECTORY).resolve(Self::RESOLVE);
-+        let how = OpenHow::new()
-+            .flags(OFlag::O_PATH | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC)
-+            .resolve(Self::RESOLVE);
-         openat2(dir, name, how)
-     }
- 
-@@ -524,8 +375,7 @@ impl Confined {
-     /// not an error: an archive may name the same directory twice, and a partial
-     /// extraction that is retried has to converge. The open that follows decides
-     /// whether the existing name is usable, and a symlink there fails with
--    /// `ELOOP` rather than being traversed. A directory this walk creates is given the
--    /// extraction's owner through that descriptor; one that existed keeps its own.
-+    /// `ELOOP` rather than being traversed.
-     fn make_dirs(&self, parts: &[OsString]) -> Result<OwnedFd, WalkError> {
-         let mut current = self.root.try_clone().map_err(|err| WalkError {
-             component: None,
-@@ -536,33 +386,17 @@ impl Confined {
-             // replayed by `apply_deferred_modes` after every member has landed.
-             // Applying it here is the defect that pass exists to avoid: a 0o500
-             // directory blocks the writes of its own children.
--            let created = match mkdirat(&current, part.as_os_str(), Mode::from_bits_truncate(0o777))
--            {
--                Ok(()) => true,
--                Err(Errno::EEXIST) => false,
-+            match mkdirat(&current, part.as_os_str(), Mode::from_bits_truncate(0o777)) {
-+                Ok(()) | Err(Errno::EEXIST) => {}
-                 Err(errno) => return Err(WalkError::at(parts, index, errno)),
--            };
-+            }
-             current = self
-                 .open_dir(current.as_fd(), part)
-                 .map_err(|errno| WalkError::at(parts, index, errno))?;
--            if created {
--                self.own(current.as_fd(), None)
--                    .map_err(|errno| WalkError::at(parts, index, errno))?;
--            }
-         }
-         Ok(current)
-     }
- 
--    /// Gives an entry this extraction created its owner: `previous`, the owner of the entry
--    /// it replaced, when there was one, and the extraction's otherwise. Nothing without an
--    /// extraction owner, so an unset default leaves every entry the daemon's.
--    fn own(&self, fd: BorrowedFd<'_>, previous: Option<Owner>) -> Result<(), Errno> {
--        match self.owner {
--            Some(owner) => previous.unwrap_or(owner).apply(fd),
--            None => Ok(()),
--        }
--    }
--
-     /// Splits `parts` into the parent directory descriptor and the final name.
-     ///
-     /// Every leaf creation needs exactly this: a `dirfd` the kernel has already
-@@ -594,13 +428,9 @@ impl Confined {
-     fn create_file(&self, parts: &[OsString]) -> Result<std::fs::File, WalkError> {
-         let (parent, name) = self.parent_of(parts)?;
-         let last = parts.len() - 1;
--        let previous = self.replace(parent.as_fd(), &name);
-+        self.replace(parent.as_fd(), &name);
-         let fd = Self::open_new_file(parent.as_fd(), name.as_os_str())
-             .map_err(|errno| WalkError::at(parts, last, errno))?;
--        // Through the descriptor `O_EXCL` created, which is this file whatever the name
--        // holds by now.
--        self.own(fd.as_fd(), previous)
--            .map_err(|errno| WalkError::at(parts, last, errno))?;
-         Ok(std::fs::File::from(fd))
-     }
- 
-@@ -628,34 +458,9 @@ impl Confined {
-     fn create_symlink(&self, parts: &[OsString], target: &Path) -> Result<(), WalkError> {
-         let (parent, name) = self.parent_of(parts)?;
-         let last = parts.len() - 1;
--        let previous = self.replace(parent.as_fd(), &name);
-+        self.replace(parent.as_fd(), &name);
-         symlinkat(target, parent.as_fd(), name.as_os_str())
--            .map_err(|errno| WalkError::at(parts, last, errno))?;
--        if self.owner.is_some() {
--            let link = Self::open_link(parent.as_fd(), &name)
--                .map_err(|errno| WalkError::at(parts, last, errno))?;
--            self.own(link.as_fd(), previous)
--                .map_err(|errno| WalkError::at(parts, last, errno))?;
--        }
--        Ok(())
--    }
--
--    /// Opens the symlink `name` under `dir` itself, `O_PATH` and without following it, for
--    /// its chown.
--    ///
--    /// The name is opened rather than chowned in place, and the result has to be a
--    /// symlink, because a process that can write `dir` can swap the link for a hard link
--    /// to another file between the `symlinkat` and the chown, and a chown by name would then
--    /// hand that file to the default user. `EEXIST` says the name no longer holds the link.
--    fn open_link(dir: BorrowedFd<'_>, name: &OsStr) -> Result<OwnedFd, Errno> {
--        let how = OpenHow::new().flags(Self::LINK).resolve(Self::RESOLVE);
--        let link = openat2(dir, name, how)?;
--        let kind = SFlag::from_bits_truncate(fstat(&link)?.st_mode) & SFlag::S_IFMT;
--        if kind == SFlag::S_IFLNK {
--            Ok(link)
--        } else {
--            Err(Errno::EEXIST)
--        }
-+            .map_err(|errno| WalkError::at(parts, last, errno))
-     }
- 
-     /// Creates a hard link at `parts` pointing at `source`, an archive-root-relative
-@@ -674,7 +479,6 @@ impl Confined {
-     ) -> Result<(), HardLinkError> {
-         let (parent, name) = self.parent_of(parts).map_err(HardLinkError::Dest)?;
-         let last = parts.len() - 1;
--        // No chown: the link names an inode that already exists, whose owner it keeps.
-         self.replace(parent.as_fd(), &name);
- 
-         // An empty source is the archive naming the root as a hard-link target.
-@@ -720,25 +524,14 @@ impl Confined {
-         Ok(current)
-     }
- 
--    /// Unlinks `name` under `dir`, ignoring every failure, and returns the owner of what
--    /// was there when the extraction gives its entries an owner, so the new entry can keep
--    /// it.
-+    /// Unlinks `name` under `dir`, ignoring every failure.
-     ///
-     /// A file or link member replaces the directory entry before creation, so
-     /// other names for an existing inode keep their contents and permissions. Every error is ignored on purpose: the common one is
-     /// `ENOENT`, which means there was nothing to replace, and any other means the
--    /// create below fails and reports the real reason. The owner is read without following
--    /// a symlink, so a replaced link reports its own.
--    fn replace(&self, dir: BorrowedFd<'_>, name: &OsStr) -> Option<Owner> {
--        let previous = self
--            .owner
--            .and_then(|_| fstatat(dir, name, AtFlags::AT_SYMLINK_NOFOLLOW).ok())
--            .map(|stat| Owner {
--                uid: stat.st_uid,
--                gid: stat.st_gid,
--            });
-+    /// create below fails and reports the real reason.
-+    fn replace(&self, dir: BorrowedFd<'_>, name: &OsStr) {
-         let _ = unlinkat(dir, name, UnlinkatFlags::NoRemoveDir);
--        previous
-     }
- 
-     /// Applies `mode` to `parts`, without following a symlink at the last component.
-@@ -853,11 +646,10 @@ pub fn fuzz_extract(
-         probe: disk::available_bytes,
-         reserve: 0,
-     };
--    extract_into(root, archive, caps, &guard, None).map_err(|refusal| format!("{refusal:?}"))
-+    extract_into(root, archive, caps, &guard).map_err(|refusal| format!("{refusal:?}"))
- }
- 
--/// Extracts `archive` into `root`, enforcing the data-filter contract, with each entry it
--/// creates given to `owner` when there is one (see the module comment).
-+/// Extracts `archive` into `root`, enforcing the data-filter contract.
- ///
- /// Synchronous on purpose: `tar`'s reader is blocking, so callers hand this to
- /// `spawn_blocking` rather than pretending it is async.
-@@ -866,18 +658,17 @@ fn extract_into(
-     archive: impl Read,
-     caps: Caps,
-     guard: &disk::Guard,
--    owner: Option<Owner>,
- ) -> Result<u64, Refusal> {
-     // The kernel's half of the confinement, held for the whole extraction. Every
-     // member below is created through this rather than by absolute path, so a
-     // component that turns out to be a symlink stops the write instead of
-     // redirecting it. See the module comment.
--    let confined = Confined::open(root, owner)?;
-+    let confined = Confined::open(root)?;
- 
-     let mut ar = tar::Archive::new(archive);
--    // The archive's ownership is dropped for the same reason CPython's `data` filter
--    // drops it: its uid/gid are the packing host's, meaningless here, and honoring them
--    // would need privilege we should not spend. Who owns an entry is `owner`'s to say.
-+    // Ownership is dropped for the same reason CPython's `data` filter drops it:
-+    // the archive's uid/gid are the packing host's, meaningless here, and honoring
-+    // them would need privilege we should not spend.
-     ar.set_preserve_permissions(false);
-     ar.set_preserve_ownerships(false);
-     ar.set_unpack_xattrs(false);
-@@ -1404,8 +1195,7 @@ fn sliced_stream(
-     })
- }
- 
--/// Writes one file. Not confined to a root; see the module comment, which also says who
--/// owns the file and the parents this creates.
-+/// Writes one file. Not confined to a root; see the module comment.
- pub async fn write_file(State(state): State<AppState>, request: Request) -> Response {
-     let query = match fs_query(&request) {
-         Ok(query) => query,
-@@ -1432,13 +1222,6 @@ pub async fn write_file(State(state): State<AppState>, request: Request) -> Resp
-         },
-     };
- 
--    // Like the mode, before anything lands: a default user with no passwd row refuses the
--    // write rather than leaving it a root-owned file.
--    let owner = match upload_owner(&state) {
--        Ok(owner) => owner,
--        Err(detail) => return unknown_default_user(detail),
--    };
--
-     // Checked before the parent directory is created and before the file is
-     // opened, so a refused write leaves nothing behind — not even an empty file
-     // where the caller's data was supposed to go. An empty file at the target path
-@@ -1447,61 +1230,24 @@ pub async fn write_file(State(state): State<AppState>, request: Request) -> Resp
-         return insufficient_storage(&path, reading);
-     }
- 
--    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
--        let created = match owner {
--            None => tokio::fs::create_dir_all(parent).await,
--            Some(owner) => {
--                let parent = parent.to_path_buf();
--                tokio::task::spawn_blocking(move || open_dirs_owned(&parent, owner).map(drop))
--                    .await
--                    .unwrap_or_else(|err| Err(io::Error::other(err)))
--            }
--        };
--        if let Err(err) = created {
--            tracing::warn!(path = %path.display(), %err, "cannot create parent directory");
--            return (StatusCode::INTERNAL_SERVER_ERROR, "cannot create parent").into_response();
--        }
-+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty())
-+        && let Err(err) = tokio::fs::create_dir_all(parent).await
-+    {
-+        tracing::warn!(path = %path.display(), %err, "cannot create parent directory");
-+        return (StatusCode::INTERNAL_SERVER_ERROR, "cannot create parent").into_response();
-     }
- 
--    let options = |create_new: bool| {
--        let mut options = tokio::fs::OpenOptions::new();
--        options.write(true).truncate(true);
--        if create_new {
--            options.create_new(true);
--        } else {
--            options.create(true);
--        }
--        if let Some(mode) = mode {
--            // Set at open, so the file never exists with a wider mode than asked for
--            // even briefly. A separate chmod after writing leaves that window open,
--            // which matters when the file is a credential.
--            options.mode(mode);
--        }
--        options
--    };
--    // With an owner to give, `O_EXCL` first, so the daemon knows whether this write
--    // created the file: one it only truncates keeps its owner.
--    let opened = match owner {
--        None => options(false).open(&path).await.map(|file| (file, false)),
--        // The usual failure is that the file exists, which the plain open truncates; any
--        // other, the plain open meets again and reports.
--        Some(_) => match options(true).open(&path).await {
--            Ok(file) => Ok((file, true)),
--            Err(_) => options(false).open(&path).await.map(|file| (file, false)),
--        },
--    };
--    let mut file = match opened {
--        Ok((file, created)) => {
--            if let (true, Some(owner)) = (created, owner)
--                && let Err(errno) = owner.apply(file.as_fd())
--            {
--                // The file is new and empty, and nobody was told it exists.
--                let _ = tokio::fs::remove_file(&path).await;
--                tracing::warn!(path = %path.display(), %errno, "cannot give the file its owner");
--                return (StatusCode::INTERNAL_SERVER_ERROR, "cannot set owner").into_response();
--            }
--            file
--        }
-+    let mut options = tokio::fs::OpenOptions::new();
-+    options.write(true).create(true).truncate(true);
-+    if let Some(mode) = mode {
-+        // Set at open, so the file never exists with a wider mode than asked for
-+        // even briefly. A separate chmod after writing leaves that window open,
-+        // which matters when the file is a credential.
-+        options.mode(mode);
-+    }
-+
-+    let mut file = match options.open(&path).await {
-+        Ok(file) => file,
-         Err(err) => {
-             tracing::warn!(path = %path.display(), %err, "cannot open file for write");
-             return (StatusCode::INTERNAL_SERVER_ERROR, "cannot write file").into_response();
-@@ -1718,13 +1464,6 @@ pub async fn write_tar(State(state): State<AppState>, request: Request) -> Respo
-             .into_response();
-     }
- 
--    // Before the body is spooled, so a default user with no passwd row refuses the upload
--    // without receiving it and before any member lands.
--    let owner = match upload_owner(&state) {
--        Ok(owner) => owner,
--        Err(detail) => return unknown_default_user(detail),
--    };
--
-     let caps = Caps {
-         max_members: state.config().max_tar_members,
-         max_bytes: state.config().max_tar_bytes,
-@@ -1755,7 +1494,7 @@ pub async fn write_tar(State(state): State<AppState>, request: Request) -> Respo
-     };
- 
-     let extracted = tokio::task::spawn_blocking(move || {
--        extract_into(&root, spool, caps, &guard, owner).map(|n| (root, n))
-+        extract_into(&root, spool, caps, &guard).map(|n| (root, n))
-     })
-     .await;
- 
 diff --git a/crates/agentd/src/hook_handlers.rs b/crates/agentd/src/hook_handlers.rs
 index 1549ac9..b30f398 100644
 --- a/crates/agentd/src/hook_handlers.rs
@@ -823,104 +284,22 @@ index 1549ac9..b30f398 100644
  //! over loopback from inside the guest, so any process in the VM can make a handler
  //! run: handlers must be safe to run spuriously. The hook log's cap bounds how many
  //! times that can happen.
-diff --git a/crates/agentd/src/schema.rs b/crates/agentd/src/schema.rs
-index 79f5411..eccaf3c 100644
---- a/crates/agentd/src/schema.rs
-+++ b/crates/agentd/src/schema.rs
-@@ -602,12 +602,7 @@ pub const FS_READ_FILE: &[Status] = &[
- ];
- 
- pub const FS_WRITE_FILE: &[Status] = &[
--    Status::new(
--        StatusCode::NO_CONTENT,
--        "",
--        "written, with the mode applied. With AGENTD_DEFAULT_USER set, a file or \
--         parent directory the write creates belongs to the default user.",
--    ),
-+    Status::new(StatusCode::NO_CONTENT, "", "written, with the mode applied"),
-     Status::new(
-         StatusCode::BAD_REQUEST,
-         "",
-@@ -615,7 +610,6 @@ pub const FS_WRITE_FILE: &[Status] = &[
-          mode. Checked before a byte lands, so a rejected mode leaves nothing \
-          behind.",
-     ),
--    UPLOAD_UNKNOWN_USER,
-     UNAUTHORIZED,
-     NOT_BOOTSTRAPPED,
-     BODY_TOO_LARGE,
-@@ -623,8 +617,7 @@ pub const FS_WRITE_FILE: &[Status] = &[
-     Status::new(
-         StatusCode::INTERNAL_SERVER_ERROR,
-         "",
--        "the parent could not be created, the write or chmod failed, or a file the \
--         write created could not be given the default user, in which case it is removed",
-+        "the parent could not be created, or the write or chmod failed",
-     ),
- ];
- 
-@@ -661,24 +654,8 @@ pub const FS_READ_TAR: &[Status] = &[
-     ),
- ];
- 
--/// The refusal both upload routes share when the image's default user has no passwd row.
--/// Unlike the routes' other refusals, its body is the JSON `ErrorBody`, since the slug is
--/// the one a start answers.
--const UPLOAD_UNKNOWN_USER: Status = Status::new(
--    StatusCode::BAD_REQUEST,
--    "unknown_user",
--    "AGENTD_DEFAULT_USER names no row of the guest's /etc/passwd, by name or by uid, so \
--     nothing the upload creates could belong to it. Checked before the body is read; \
--     nothing was written, and detail names the value and the variable.",
--);
--
- pub const FS_WRITE_TAR: &[Status] = &[
--    Status::new(
--        StatusCode::NO_CONTENT,
--        "",
--        "extracted under ?path=. With AGENTD_DEFAULT_USER set, each entry the extraction \
--         creates belongs to the default user.",
--    ),
-+    Status::new(StatusCode::NO_CONTENT, "", "extracted under ?path="),
-     Status::new(
-         StatusCode::BAD_REQUEST,
-         "",
-@@ -687,7 +664,6 @@ pub const FS_WRITE_TAR: &[Status] = &[
-          path, an absolute or out-of-tree link target, or a device or fifo member. \
-          The refused member's name is in the body.",
-     ),
--    UPLOAD_UNKNOWN_USER,
-     UNAUTHORIZED,
-     NOT_BOOTSTRAPPED,
-     Status::new(
 diff --git a/crates/microvms-app/src/agents/mod.rs b/crates/microvms-app/src/agents/mod.rs
-index f7ca208..6ca3bcc 100644
+index 333dfae..6ca3bcc 100644
 --- a/crates/microvms-app/src/agents/mod.rs
 +++ b/crates/microvms-app/src/agents/mod.rs
-@@ -16,8 +16,7 @@
- //! 2. **The daemon's execs start from an empty environment**, so the agent's subshells
- //!    find no `PATH` and every command exits 127. The environment file sets it.
- //! 3. **The daemon writes uploaded files as root, mode 0600**, which a demoted agent
--//!    cannot read, unless the image sets `AGENTD_DEFAULT_USER`. One root `chown` follows the
--//!    uploads either way.
-+//!    cannot read. One root `chown` follows the uploads.
- //! 4. **Codex reaches Bedrock through `bedrock-runtime`'s `/openai/v1`** on the Responses
- //!    wire API, with an inference-profile model id and hosted web search disabled. Its
- //!    config file names that host for the launch region, and its credential comes from
-@@ -492,10 +491,8 @@ pub fn provisioning_files(
- 
+@@ -492,9 +492,7 @@ pub fn provisioning_files(
  /// Places the provisioning files and hands `/workspace` to the agent uid (AGENT-5).
  ///
--/// The daemon writes an upload as root unless the image sets `AGENTD_DEFAULT_USER`, so the
--/// `chown` is not optional and it runs as root, after the uploads, in one exec. Root is asked for as uid 0 rather than by naming
+ /// The daemon writes every upload as root, so the `chown` is not optional and it runs
+-/// as root, after the uploads, in one exec. Root is asked for as uid 0 rather than by naming
 -/// no user, because an image that sets `AGENTD_DEFAULT_USER` runs a start that names no user
 -/// as that user, and the `chown` would fail as anyone else. Re-runnable: a second call
-+/// The daemon writes every upload as root, so the `chown` is not optional and it runs
 +/// as the daemon's own user, after the uploads, in one exec. Re-runnable: a second call
  /// with a fresh token overwrites the same files, which is how a 12-hour token is
  /// refreshed on a long-lived VM (AGENT-8).
  pub async fn install_access(
-@@ -513,7 +510,6 @@ pub async fn install_access(
+@@ -512,7 +510,6 @@ pub async fn install_access(
          vec![format!("chown -R {AGENT_UID}:{AGENT_GID} {WORKDIR}")],
      )
      .with_shell(true)
@@ -947,15 +326,15 @@ index e83657c..16a4ab8 100644
  ///
  /// Separate from [`Session`] because [`ExecHandle`] needs it and holding a whole session
 diff --git a/crates/microvms-app/src/workspace.rs b/crates/microvms-app/src/workspace.rs
-index f6c4505..f3d4bd5 100644
+index 11db62c..f3d4bd5 100644
 --- a/crates/microvms-app/src/workspace.rs
 +++ b/crates/microvms-app/src/workspace.rs
 @@ -367,11 +367,8 @@ impl Session {
                  .map(String::from)
                  .chain(doomed)
                  .collect();
--            // As root, by uid: a deleted path can sit in a directory root owns, `/workspace`
--            // itself among them, and an image's default user would be refused deleting it.
+-            // As root, by uid: the daemon wrote the tree as root, and an image's default user
+-            // would be refused deleting it.
              let request = protocol::exec::StartRequest::new(self.mint_exec_id(), command)
                  .with_cwd(Some(REMOTE_WORKDIR.into()))
 -                .with_user(Some(crate::session::ROOT_UID.into()))

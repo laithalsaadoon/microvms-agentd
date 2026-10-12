@@ -60,10 +60,9 @@ index 32a57e4..28a5a8e 100644
  
  #[cfg(test)]
 diff --git a/crates/agentd/src/fs.rs b/crates/agentd/src/fs.rs
-index 1dd6a70..aa34449 100644
 --- a/crates/agentd/src/fs.rs
 +++ b/crates/agentd/src/fs.rs
-@@ -569,21 +569,26 @@ impl Confined {
+@@ -419,17 +419,22 @@
  
      /// Creates and opens the file a data member's bytes go into.
      ///
@@ -79,7 +78,7 @@ index 1dd6a70..aa34449 100644
      fn create_file(&self, parts: &[OsString]) -> Result<std::fs::File, WalkError> {
          let (parent, name) = self.parent_of(parts)?;
          let last = parts.len() - 1;
--        let previous = self.replace(parent.as_fd(), &name);
+-        self.replace(parent.as_fd(), &name);
 -        let fd = Self::open_new_file(parent.as_fd(), name.as_os_str())
 +        let how = OpenHow::new()
 +            .flags(OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_TRUNC | OFlag::O_CLOEXEC)
@@ -89,16 +88,11 @@ index 1dd6a70..aa34449 100644
 +            .resolve(Self::RESOLVE);
 +        let fd = openat2(parent.as_fd(), name.as_os_str(), how)
              .map_err(|errno| WalkError::at(parts, last, errno))?;
-         // Through the descriptor `O_EXCL` created, which is this file whatever the name
-         // holds by now.
--        self.own(fd.as_fd(), previous)
-+        self.own(fd.as_fd(), None)
-             .map_err(|errno| WalkError::at(parts, last, errno))?;
          Ok(std::fs::File::from(fd))
      }
-@@ -710,8 +715,9 @@ impl Confined {
-     /// was there when the extraction gives its entries an owner, so the new entry can keep
-     /// it.
+@@ -526,8 +531,9 @@
+ 
+     /// Unlinks `name` under `dir`, ignoring every failure.
      ///
 -    /// A file or link member replaces the directory entry before creation, so
 -    /// other names for an existing inode keep their contents and permissions. Every error is ignored on purpose: the common one is
@@ -106,9 +100,9 @@ index 1dd6a70..aa34449 100644
 +    /// `symlinkat`/`linkat` have no truncating equivalent of `O_TRUNC`, so the old
 +    /// name has to go first. Every error is ignored on purpose: the common one is
      /// `ENOENT`, which means there was nothing to replace, and any other means the
-     /// create below fails and reports the real reason. The owner is read without following
-     /// a symlink, so a replaced link reports its own.
-@@ -997,9 +1003,6 @@ fn extract_into(
+     /// create below fails and reports the real reason.
+     fn replace(&self, dir: BorrowedFd<'_>, name: &OsStr) {
+@@ -802,9 +808,6 @@
                              ),
                          })?;
                  }
@@ -119,10 +113,10 @@ index 1dd6a70..aa34449 100644
  
              // Regular, contiguous, and anything else carrying data.
 diff --git a/crates/agentd/src/hook_handlers.rs b/crates/agentd/src/hook_handlers.rs
-index 1549ac9..f8b276f 100644
+index 1e4b63c..b7dcc5a 100644
 --- a/crates/agentd/src/hook_handlers.rs
 +++ b/crates/agentd/src/hook_handlers.rs
-@@ -126,37 +126,28 @@ pub async fn execute(
+@@ -124,37 +124,28 @@ pub async fn execute(
          Err(error) => return failed(format!("spawn failed: {error}")),
      };
      let pid = child.id();
@@ -180,7 +174,7 @@ index 1549ac9..f8b276f 100644
      if !stdout.is_empty() || !stderr.is_empty() {
          tracing::info!(hook, stdout = %stdout, stderr = %stderr, "hook handler output");
      }
-@@ -184,15 +175,17 @@ fn check_executable(path: &Path) -> Result<(), String> {
+@@ -182,15 +173,17 @@ fn check_executable(path: &Path) -> Result<(), String> {
  
  /// Reads a stream to its end, keeping the first [`LOGGED_OUTPUT_BYTES`]. The rest
  /// is drained so a chatty handler never blocks on a full pipe.
@@ -202,7 +196,7 @@ index 1549ac9..f8b276f 100644
  
  /// The handler path for `hook` under `dir`, for documentation and tests.
 diff --git a/crates/agentd/src/routes.rs b/crates/agentd/src/routes.rs
-index 6ea13ec..0af9290 100644
+index 6e50bf2..126fbb5 100644
 --- a/crates/agentd/src/routes.rs
 +++ b/crates/agentd/src/routes.rs
 @@ -46,15 +46,15 @@ pub fn app(state: AppState) -> Router {
@@ -321,10 +315,10 @@ index 6ea13ec..0af9290 100644
  
  /// Maps a documented endpoint onto the handler that serves it.
 diff --git a/crates/agentd/src/schema.rs b/crates/agentd/src/schema.rs
-index 79f5411..6c4aef4 100644
+index d06a170..3cab117 100644
 --- a/crates/agentd/src/schema.rs
 +++ b/crates/agentd/src/schema.rs
-@@ -750,26 +750,14 @@ pub const SCHEMA: &[Status] = &[Status::new(
+@@ -716,26 +716,14 @@ pub const SCHEMA: &[Status] = &[Status::new(
       it has a token, and none of it is secret.",
  )];
  
@@ -357,7 +351,6 @@ index 79f5411..6c4aef4 100644
          StatusCode::OK,
          "",
 diff --git a/crates/agentd/src/serve.rs b/crates/agentd/src/serve.rs
-index cb46a54..18bfa48 100644
 --- a/crates/agentd/src/serve.rs
 +++ b/crates/agentd/src/serve.rs
 @@ -1,74 +1,34 @@

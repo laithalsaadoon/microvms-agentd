@@ -1392,17 +1392,12 @@
         {
           "code": 204,
           "error": "",
-          "meaning": "written, with the mode applied. With AGENTD_DEFAULT_USER set, a file or parent directory the write creates belongs to the default user."
+          "meaning": "written, with the mode applied"
         },
         {
           "code": 400,
           "error": "",
           "meaning": "the path query parameter is missing, or mode is not a valid octal file mode. Checked before a byte lands, so a rejected mode leaves nothing behind."
-        },
-        {
-          "code": 400,
-          "error": "unknown_user",
-          "meaning": "AGENTD_DEFAULT_USER names no row of the guest's /etc/passwd, by name or by uid, so nothing the upload creates could belong to it. Checked before the body is read; nothing was written, and detail names the value and the variable."
         },
         {
           "code": 401,
@@ -1427,7 +1422,7 @@
         {
           "code": 500,
           "error": "",
-          "meaning": "the parent could not be created, the write or chmod failed, or a file the write created could not be given the default user, in which case it is removed"
+          "meaning": "the parent could not be created, or the write or chmod failed"
         }
       ],
       "summary": "write one file. Deliberately not confined to a root: the same token authorizes exec, so a root prefix would add no security while breaking harnesses that write to home directories and /etc."
@@ -1505,17 +1500,12 @@
         {
           "code": 204,
           "error": "",
-          "meaning": "extracted under ?path=. With AGENTD_DEFAULT_USER set, each entry the extraction creates belongs to the default user."
+          "meaning": "extracted under ?path="
         },
         {
           "code": 400,
           "error": "",
           "meaning": "the path query parameter is missing or not absolute, the body was truncated, or a member violated the extraction contract — an escaping path, an absolute or out-of-tree link target, or a device or fifo member. The refused member's name is in the body."
-        },
-        {
-          "code": 400,
-          "error": "unknown_user",
-          "meaning": "AGENTD_DEFAULT_USER names no row of the guest's /etc/passwd, by name or by uid, so nothing the upload creates could belong to it. Checked before the body is read; nothing was written, and detail names the value and the variable."
         },
         {
           "code": 401,

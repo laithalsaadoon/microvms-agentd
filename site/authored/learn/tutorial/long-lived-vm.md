@@ -59,7 +59,7 @@ microvm cp --tar ./project.tar vm:/workspace --name dev
 microvm cp --tar vm:/workspace ./workspace-backup.tar --name dev
 ```
 
-`vm:/path` names the VM side; anything else is a local path. `--tar` moves a whole directory tree as an uncompressed tar archive, and extraction in the guest is confined so a hostile archive cannot write outside its target. `--mode` sets the permissions of an uploaded file, octal as a string (`644`, `0755`). The daemon writes as root, so what an upload creates is root's unless the image sets `AGENTD_DEFAULT_USER`, which then owns it. Choose a mode that permits the intended reader;
+`vm:/path` names the VM side; anything else is a local path. `--tar` moves a whole directory tree as an uncompressed tar archive, and extraction in the guest is confined so a hostile archive cannot write outside its target. `--mode` sets the permissions of an uploaded file, octal as a string (`644`, `0755`). The daemon writes as root. Choose a mode that permits the intended reader;
 change ownership when a demoted workload needs to write the file or read an
 owner-only file.
 

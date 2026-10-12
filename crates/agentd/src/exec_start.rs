@@ -28,8 +28,7 @@
 //! default doesn't keep the daemon's gid 0. A default with no row, digits included, is
 //! refused as `unknown_user` with a detail that names the variable (AGENTD-24). A request's
 //! own `user` always wins over the default, `root` and `0` included (AGENTD-23): the default
-//! decides what a caller gets by not saying, not what a caller may ask for. The same row
-//! owns what an upload creates (`fs.rs`).
+//! decides what a caller gets by not saying, not what a caller may ask for.
 //!
 //! # The environment is five layers, lowest first
 //!
@@ -268,12 +267,12 @@ fn resolve_user<'a>(spec: &NameOrId, rows: &'a [PasswdRow]) -> Result<User<'a>, 
 /// row of the uid its digits spell.
 ///
 /// Stricter than a request's `user`, where digits with no row run as a bare uid. The default
-/// runs every start that names no user and owns every entry an upload creates, and a uid
-/// with no row has no primary gid to give either, so the child would keep the daemon's gid
-/// 0. A default with no row is refused instead (AGENTD-24). The error is the clause a
-/// refusal's detail ends with, naming the value and the variable that set it, because the
-/// caller sent no name to look for and the fix is in the image.
-pub fn default_user_row<'a>(name: &str, rows: &'a [PasswdRow]) -> Result<&'a PasswdRow, String> {
+/// runs every start that names no user, and a uid with no row has no primary gid to give it,
+/// so the child would keep the daemon's gid 0. A default with no row is refused instead
+/// (AGENTD-24). The error is the clause a refusal's detail ends with, naming the value and
+/// the variable that set it, because the caller sent no name to look for and the fix is in
+/// the image.
+fn default_user_row<'a>(name: &str, rows: &'a [PasswdRow]) -> Result<&'a PasswdRow, String> {
     match resolve_user(&NameOrId::Name(name.to_string()), rows) {
         Ok(User { row: Some(row), .. }) => Ok(row),
         Ok(User { row: None, .. }) => Err(format!(

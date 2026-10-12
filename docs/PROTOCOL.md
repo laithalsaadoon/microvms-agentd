@@ -212,8 +212,8 @@ semantics rather than `realpath`. Symlinks resolve relative to their own
 directory, while hard links resolve against the archive root. Member count and
 total size are capped. Modes are applied after content lands. A regular-file
 member replaces the old entry before creation, so other hard links keep their
-bytes and modes. Extraction drops the archive's owners, as
-[Upload ownership](#upload-ownership) describes.
+bytes and modes. Extraction drops the archive's owners, so everything it
+creates is root's, as [Upload ownership](#upload-ownership) describes.
 
 **A symlink an archive wrote cannot redirect a later member, and the kernel is
 what enforces that.** The `normpath` rule above judges a member at the depth its
@@ -355,7 +355,7 @@ each start that omits `user` with `400 unknown_user`, and the `detail` mentions
 passwd row for that uid. The daemon refuses an empty value the same way. It still
 boots, and a request that sets `user` still runs. With the variable unset, a
 start that omits `user` runs as the daemon's own user, root, as it always has.
-What an upload creates belongs to the same row, as
+Uploads don't follow the variable: what they create stays root's, as
 [Upload ownership](#upload-ownership) describes.
 Workload hook handlers ignore the variable, and the image snapshot drops it with
 every other `AGENTD_*` variable. `/v1/health` doesn't report it, because a new
@@ -412,22 +412,20 @@ configuration reaches one.
 
 ## Upload ownership
 
-**With `AGENTD_DEFAULT_USER` set, what an upload creates belongs to the image's
-default user.** `PUT /v1/fs/tar` and `PUT /v1/fs/file` give each entry they
-create the uid and primary gid of the row a start without `user` resolves to.
-That covers files, directories, symlinks, and the parent directories the daemon
-makes for them, so a nameless exec can write the tree an upload made for it. An
-entry that was already there keeps its owner: an existing directory, the
-extraction root among them, and a file `PUT /v1/fs/file` truncates. When an
-archive member replaces an existing file or symlink, the new entry takes the old
-one's owner, and a hard link doesn't change an owner. The daemon
-changes each owner through a descriptor of the entry itself, opened without
-following a symlink, never by path, so a name swapped mid-upload can't redirect
-it. A failed change of owner answers 500. With the variable unset, every entry
-an upload creates is root's, as it always was. If the default has no passwd
-row, the daemon refuses the upload before writing anything, with the start's
-`400 unknown_user`. That body is the JSON `{error, detail}` of the exec routes,
-where the other fs refusals are plain text.
+**Uploads are root's, whatever `AGENTD_DEFAULT_USER` holds.** `PUT /v1/fs/tar`
+and `PUT /v1/fs/file` write as the daemon's user, root, so each entry they
+create belongs to root: files, directories, symlinks, and the parent
+directories made for them. Tar extraction masks each member's mode to `0755` at
+most, so it doesn't set a group or other write bit on a file or directory.
+`PUT /v1/fs/file` gives the file the `mode` the request sets, or `0644` without
+one, and the parent directories it creates are `0755`. The image's default user
+can read an uploaded tree, then, but can't write into the directories an upload
+created, or change a file unless its requested `mode` lets other users write.
+An exec that must write there runs with
+`user: 0`, or the image or an exec started with `user: 0` hands the tree to the
+default user first with `chown`. The agent recipe's `chown` of `/workspace`
+does that. A default with no passwd row doesn't refuse an upload, because an
+upload doesn't read the variable.
 
 ## Line-ranged text reads
 

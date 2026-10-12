@@ -56,11 +56,10 @@ tar = "0.4.46"
 subtle = "2.6"
 # Features, each earning its place: `signal` for the exec kill path, `fs` for
 # `statvfs` (the disk-pressure guard), `mount` for the `MS_BIND` that shadows the
-# read-only procfs `boot_id`, `hostname` for `sethostname`, and `user` for the
-# `fchownat` that gives an upload's new entries the image's default user. Pinned to
-# the 0.31 line, which is what is already locked; nix is pre-1.0 and every minor is a
+# read-only procfs `boot_id`, and `hostname` for `sethostname`. Pinned to the 0.31
+# line, which is what is already locked; nix is pre-1.0 and every minor is a
 # breaking change, so a caret on 0.31 is the widest safe range.
-nix = { version = "0.31", features = ["signal", "fs", "mount", "hostname", "user"] }
+nix = { version = "0.31", features = ["signal", "fs", "mount", "hostname"] }
 tempfile = "3"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }

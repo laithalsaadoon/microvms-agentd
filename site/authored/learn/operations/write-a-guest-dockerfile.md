@@ -71,7 +71,7 @@ WORKDIR /workspace
 
 The daemon itself stays root; demotion is per command, with `exec --user 1000 --group 1000`. [Run coding agents on Bedrock](/learn/operations/run-coding-agents-on-bedrock/) shows why that uid is not decoration.
 
-To make that user the default for every `exec` and `run --exec` without `--user`, set it in the image:
+An exec without `--user` runs as root unless the image sets a default user:
 
 ```dockerfile
 ENV AGENTD_DEFAULT_USER=agent
@@ -79,7 +79,7 @@ ENV AGENTD_DEFAULT_USER=agent
 
 The daemon resolves the value at each exec to its `/etc/passwd` row, so the row can come from an earlier exec. A name and its uid are the same: `AGENTD_DEFAULT_USER=1000` runs as `agent` with group 1000 and `HOME=/workspace`, and a uid with no row fails the exec rather than run it in root's group. An exec with `--user` runs as that user instead, `--user root` included, and hook handlers still run as root.
 
-The default user also owns what `microvm cp` and `run . --exec` upload. The files and directories an upload creates are that user's, so the default user can edit the synced tree. Anything already in the guest keeps its owner. That includes `/workspace` itself, which the image's `chown 1000:1000 /workspace` hands to the agent. The daemon refuses an upload as `unknown_user` when the default has no row.
+Uploads don't follow the variable. `microvm cp` and `run . --exec` write through the daemon as root, so what they create is root's, with no group or other write bit on a synced tree. The default user can read the synced files but can't change them or write into the directories the sync made, even under a `/workspace` the image handed to it. An exec that must write there runs with `--user 0`. Otherwise, a `chown` run with `--user 0` gives the tree to the default user first, as this section's Dockerfile does for `/workspace`.
 
 ## 5. No secret goes in the image
 

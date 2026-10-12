@@ -100,72 +100,6 @@ expect = "test-failed"
 suite = "rust"
 transform = { file = "crates/agentd/src/exec_start.rs", replace = "        (None, Some(name)) => match default_user_row(name, rows) {\n", with = "        (None, Some(name)) if digits(name).is_some() => {\n            resolve_user(&NameOrId::Name(name.to_string()), rows).map(Some)\n        }\n        (None, Some(name)) => match default_user_row(name, rows) {\n" }
 
-# Uploads under the default user (the second review finding on #600): each entry an upload
-# creates belongs to the default user's row, what existed keeps its owner, and a default with
-# no row refuses the upload. The fs tests run unprivileged, so a chown to root is the EPERM
-# that shows a chown happened.
-[[fault]]
-id = "upload-owner-dropped-at-the-tar-route"
-guard = "fs::tests::the_routes_give_new_entries_the_default_users_row"
-run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "fs::tests::the_routes_give_new_entries_the_default_users_row"]
-expect = "test-failed"
-suite = "rust"
-transform = { file = "crates/agentd/src/fs.rs", replace = "        extract_into(&root, spool, caps, &guard, owner).map(|n| (root, n))\n", with = "        extract_into(&root, spool, caps, &guard, owner.and(None)).map(|n| (root, n))\n" }
-
-[[fault]]
-id = "upload-under-a-default-with-no-row-proceeds"
-guard = "fs::tests::an_upload_under_a_default_with_no_row_is_refused_before_anything_lands"
-run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "fs::tests::an_upload_under_a_default_with_no_row_is_refused_before_anything_lands"]
-expect = "test-failed"
-suite = "rust"
-transform = { file = "crates/agentd/src/fs.rs", replace = "        Err(why) => {\n            let detail = format!(", with = "        Err(_) if name.is_empty() || !name.is_empty() => Ok(None),\n        Err(why) => {\n            let detail = format!(" }
-
-[[family]]
-guard = "fs::tests::an_upload_gives_each_entry_it_creates_the_owner"
-run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "fs::tests::an_upload_gives_each_entry_it_creates_the_owner"]
-expect = "test-failed"
-suite = "rust"
-
-[[family.fault]]
-id = "upload-new-directories-keep-roots-owner"
-transform = { file = "crates/agentd/src/fs.rs", replace = "            if created {\n                self.own(current.as_fd(), None)\n", with = "            if created && self.owner.is_none() {\n                self.own(current.as_fd(), None)\n" }
-
-[[family.fault]]
-id = "upload-new-files-keep-roots-owner"
-transform = { file = "crates/agentd/src/fs.rs", replace = "        self.own(fd.as_fd(), previous)\n", with = "        self.own(fd.as_fd(), previous.or(Some(Owner { uid: u32::MAX, gid: u32::MAX })))\n" }
-
-[[family.fault]]
-id = "upload-new-symlinks-keep-roots-owner"
-transform = { file = "crates/agentd/src/fs.rs", replace = "        if self.owner.is_some() {\n            let link = Self::open_link(", with = "        if self.owner.is_none() {\n            let link = Self::open_link(" }
-
-[[family.fault]]
-id = "upload-new-root-parents-keep-roots-owner"
-transform = { file = "crates/agentd/src/fs.rs", replace = "        if created {\n            owner.apply(current.as_fd())?;\n", with = "        if created && owner.uid == u32::MAX {\n            owner.apply(current.as_fd())?;\n" }
-
-[[fault]]
-id = "upload-replaced-entry-takes-the-default"
-guard = "fs::tests::an_upload_leaves_what_already_existed_its_owner"
-run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "fs::tests::an_upload_leaves_what_already_existed_its_owner"]
-expect = "test-failed"
-suite = "rust"
-transform = { file = "crates/agentd/src/fs.rs", replace = "            Some(owner) => previous.unwrap_or(owner).apply(fd),\n", with = "            Some(owner) => previous.and(Some(owner)).unwrap_or(owner).apply(fd),\n" }
-
-[[fault]]
-id = "upload-symlink-chown-takes-whatever-the-name-holds"
-guard = "fs::tests::a_symlinks_chown_opens_the_link_itself"
-run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "fs::tests::a_symlinks_chown_opens_the_link_itself"]
-expect = "test-failed"
-suite = "rust"
-transform = { file = "crates/agentd/src/fs.rs", replace = "        if kind == SFlag::S_IFLNK {\n", with = "        if kind == SFlag::S_IFLNK || kind != SFlag::S_IFLNK {\n" }
-
-[[fault]]
-id = "file-write-gives-a-new-file-no-owner"
-guard = "fs::tests::a_file_write_gives_the_owner_only_a_file_it_creates"
-run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "fs::tests::a_file_write_gives_the_owner_only_a_file_it_creates"]
-expect = "test-failed"
-suite = "rust"
-transform = { file = "crates/agentd/src/fs.rs", replace = "            if let (true, Some(owner)) = (created, owner)\n", with = "            if let (true, Some(owner)) = (created && owner.is_none(), owner)\n" }
-
 # The model's AGENTD-22 property: an all-digit default with a row resolved as a request's digits
 # are, a bare uid in the daemon's group.
 [[fault]]
@@ -214,7 +148,7 @@ expect = "test-failed"
 suite = "rust"
 transform = { file = "crates/model/src/exec_start.rs", replace = "        (UserReq::Absent, Some(default), _) => (Account::Default, default),\n", with = "        (UserReq::Absent, Some(_), _) => (Account::Daemon, UserReq::Absent),\n" }
 
-# FAIL_TO_PASS: fails on 78e5f1d22d56 with the fix taken out (tools/fail-to-pass.py).
+# FAIL_TO_PASS: fails on f410ec2f4c80 with the fix taken out (tools/fail-to-pass.py).
 [[fault]]
 id = "f2p-install-access-uploads-then-chowns-as-root"
 guard = "agents::tests::install_access_uploads_then_chowns_as_root"
@@ -223,7 +157,7 @@ expect = "test-failed"
 suite = "rust"
 patch = "verify/guards/faults/f2p-install-access-uploads-then-chowns-as-root.patch"
 
-# FAIL_TO_PASS: fails on 78e5f1d22d56 with the fix taken out (tools/fail-to-pass.py).
+# FAIL_TO_PASS: fails on f410ec2f4c80 with the fix taken out (tools/fail-to-pass.py).
 [[fault]]
 id = "f2p-a-hostile-deletion-path-is-refused-not-executed"
 guard = "workspace::tests::a_hostile_deletion_path_is_refused_not_executed"

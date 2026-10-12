@@ -367,8 +367,8 @@ impl Session {
                 .map(String::from)
                 .chain(doomed)
                 .collect();
-            // As root, by uid: a deleted path can sit in a directory root owns, `/workspace`
-            // itself among them, and an image's default user would be refused deleting it.
+            // As root, by uid: the daemon wrote the tree as root, and an image's default user
+            // would be refused deleting it.
             let request = protocol::exec::StartRequest::new(self.mint_exec_id(), command)
                 .with_cwd(Some(REMOTE_WORKDIR.into()))
                 .with_user(Some(crate::session::ROOT_UID.into()))
