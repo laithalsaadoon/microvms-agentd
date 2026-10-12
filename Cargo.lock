@@ -20,7 +20,7 @@ dependencies = [
 
 [[package]]
 name = "agentd"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "agentd-model",
  "axum",
@@ -2800,7 +2800,7 @@ dependencies = [
 
 [[package]]
 name = "microvms-app"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "backon",
  "base64 0.23.1",
@@ -2821,7 +2821,7 @@ dependencies = [
 
 [[package]]
 name = "microvms-cli"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "bolero",
  "cargo_metadata",
@@ -2842,7 +2842,7 @@ dependencies = [
 
 [[package]]
 name = "microvms-core"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "base64 0.23.1",
  "bolero",
@@ -2871,7 +2871,7 @@ dependencies = [
 
 [[package]]
 name = "microvms-domain"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "base64 0.23.1",
  "bolero",
@@ -2889,7 +2889,7 @@ dependencies = [
 
 [[package]]
 name = "microvms-edges"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "aws-config",
  "aws-credential-types",
@@ -2937,7 +2937,7 @@ dependencies = [
 
 [[package]]
 name = "microvms-protocol"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "schemars",
  "serde",
