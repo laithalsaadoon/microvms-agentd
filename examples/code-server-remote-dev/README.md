@@ -89,5 +89,5 @@ The reusable image remains after VM termination; delete it separately when
 retiring the environment. Snapshot storage is charged for at least one week. Check `microvm ls --remote` and cleanup reports for resources that
 remain.
 
-This documentation refresh checked the script and launch defaults locally.
-It did not repeat a live AWS or browser session.
+Local checks cover the script and launch defaults, without a live AWS or
+browser session.

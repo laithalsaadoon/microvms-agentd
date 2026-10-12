@@ -13,7 +13,8 @@ can be built once and reused across launches.
 
 The platform changes independently of this package. SDK models describe
 request shapes; only runtime measurements establish service behavior.
-[Platform](PLATFORM.md) records those observations, with dates and corrections.
+[Platform](PLATFORM.md) records those observations, each with its date and one
+current answer.
 
 ## Guiding policy
 
@@ -33,7 +34,7 @@ a correctly configured VPC connector.
 3. Maintain published CLI and language packages from one implementation.
    Refresh API references with boto3 and check serializer/SDK parity.
 4. Keep documentation short: tutorials explain tasks, generated references
-   describe contracts, and platform notes retain dated evidence.
+   describe contracts, and platform notes keep one dated answer per question.
 
 The agent helpers are a deliberate convenience layer over core primitives;
 [Agent VMs](AGENT-VMS.md) defines their bounded scope.

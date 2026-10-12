@@ -298,8 +298,8 @@ terminate the VM before forwarding any traffic, so a newer client sending a fiel
 this daemon has never heard of must still be able to bootstrap it. Forward
 compatibility here is the difference between an ignored field and a dead launch.
 
-**The token and the env share one 4096-byte budget, measured in UTF-8 bytes and
-inclusive** (`PLATFORM.md`). The daemon cannot enforce what the platform already
+**The token, the env, and the tunnel identity, when a launch has one, share one
+4096-byte budget, measured in UTF-8 bytes and inclusive** (`PLATFORM.md`). The daemon cannot enforce what the platform already
 rejected, an over-ceiling payload never reaches the guest, so the check is on
 the *client* side, in `microvms-core`'s `RunHookPayload::for_launch`, and it fires
 before any control-plane call. botocore does not enforce the ceiling either, so
@@ -364,6 +364,14 @@ image's root `HOME`, and below the launch and the request so a caller who sets
 one of the three wins. Without the flag the first layer is empty and the
 child's environment is exactly what it was: the launch map, the request map, and
 the identity of a user with a row.
+
+**Whether a child has `PATH` and `HOME` depends on the request.** An exec that
+names no `user` and leaves `inherit_image_env` off gets only the launch and
+request maps, so by default it has neither (measured 2026-09-02,
+[Platform](PLATFORM.md)). A `user` with a passwd row adds that row's `HOME`.
+`inherit_image_env: true` adds the daemon's startup environment, which on the
+conformance image holds both `PATH` and `HOME` (measured 2026-09-24). A launch
+or request `env` that sets either one takes precedence over both.
 
 **The token is never in the snapshot.** It arrives in the run-hook payload,
 after the snapshot is taken, into a slot that is not an environment. The daemon
@@ -527,7 +535,7 @@ for the agent port answers 403 `Access to port denied` for any other port and cl
 1006 with no reason on a WebSocket. An implementation that reused the session's cached
 token would therefore return a *correct-looking* port value behind a credential that does
 not authorize it, which is what this client did until the live run of 2026-08-15 caught
-it. See `PLATFORM.md`, "`allowedPorts` is a union of three forms".
+it. See `PLATFORM.md`, "Endpoint authentication".
 
 The scope is extended rather than replaced: a mint for a new port asks for every port
 already covered plus that one, so warming the cache for a workload port does not cost the

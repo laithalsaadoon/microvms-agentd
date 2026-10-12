@@ -84,7 +84,7 @@ Verify teardown independently, and do not trust a success message. The scripts d
 
 ## 7. Platform claims need a date, a region, and an API version
 
-A live run that shows the platform behaving differently from [Platform](/internals/platform/) is a finding, and findings are appended rather than corrected. Every entry there carries when it was measured, in which region, under which API version, and whether it is this project's measurement or AWS documentation. If you contradict an existing entry, add your measurement with its date so the drift is visible.
+A live run that shows the platform behaving differently from [Platform](/internals/platform/) is a finding, and a finding replaces the entry it contradicts. Every entry there carries when it was measured, in which region, under which API version, and whether it is this project's measurement or AWS documentation. Coding agents read these pages, and two answers to one question is a hazard. Write only the current answer, update every page that restates the fact, and let git history hold the old measurement. `mise run prose:check` rejects the phrasing a kept-alongside correction leaves behind.
 
 ## 8. The docs site
 

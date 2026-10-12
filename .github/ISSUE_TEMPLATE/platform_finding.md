@@ -8,8 +8,8 @@ labels: platform
 `docs/PLATFORM.md` records observations of someone else's system, so it drifts:
 AWS changes behavior, and a claim measured once in one region was never a
 guarantee. A contradicting measurement is one of the most useful things you can
-file here — but only if it carries enough context to be re-checked, since the
-existing entry has a date and yours has to be comparable to it.
+file here — but only if it carries enough context to be re-checked. A
+confirmed one replaces the entry, and git history keeps the old one.
 
 This form is also the right place for behavior `docs/PLATFORM.md` says nothing
 about, if you measured it.
@@ -25,8 +25,8 @@ about, if you measured it.
 - **API version:** <!-- e.g. 2025-09-09 -->
 - **Base image and baseline memory:** <!-- e.g. al2023-1 aarch64, 1024 MiB -->
 
-Without a date and region this cannot be reconciled with the existing entry, and
-we will ask for them before acting.
+Without a date and region this cannot replace the existing entry, and we will
+ask for them before acting.
 
 ## Reproduction
 

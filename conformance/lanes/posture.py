@@ -179,9 +179,9 @@ def drive_platform_posture(
     **Four of these checks are meant to go red when the platform improves.** A VM that stops
     reaching `example.com` or the registry without a connector, an MMDS that stops answering,
     or a posture label that no longer matches the reach, is the platform starting to honour
-    the omission; the response is to re-measure, append to `docs/PLATFORM.md`, and flip
-    `PLATFORM_HONOURS_OMITTED_EGRESS` in `microvms-core` — never to loosen a pin into
-    "either".
+    the omission; the response is to re-measure, replace the entry in `docs/PLATFORM.md`,
+    and flip `PLATFORM_HONOURS_OMITTED_EGRESS` in `microvms-core` — never to loosen a pin
+    into "either".
     """
     print(
         "\n-- platform posture (egress without a connector, MMDS, the execution role) --"

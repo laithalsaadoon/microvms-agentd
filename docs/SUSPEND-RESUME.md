@@ -45,25 +45,30 @@ credentials keep expiring in wall-clock time while the VM is suspended.
 
 - **Idle means no inbound requests through the endpoint.** AWS (the service
   model's `IdlePolicy`). Work inside the guest does not count, and neither do
-  loopback requests from the guest. Measured 2026-08-15 and 2026-09-23: a
-  CPU-busy exec was suspended 60 to 70 seconds after the last request with
-  `maxIdleDurationSeconds=60`. External `/v1/health` polls kept a VM running,
-  and so did a held-open exec output stream with steady output (150 seconds,
-  2026-09-23). Whether the open connection or the data flowing through it is
-  what counts is unknown.
+  loopback requests from the guest. With `maxIdleDurationSeconds=60`, an idle
+  `sleep` exec was suspended 66 seconds in (measured 2026-08-15), and a CPU-busy
+  exec 60 to 70 seconds after the last request (measured 2026-09-23). External
+  `/v1/health` polls kept a VM running (measured 2026-08-15 and 2026-09-24,
+  through `microvm keepalive` and both bindings' keep-awake helpers), and so did a
+  held-open exec output stream with steady output (150 seconds, 2026-09-23).
+  Whether the open connection or the data flowing through it is what counts is
+  unknown.
 - **Explicit suspend is a control-plane call** (`SuspendMicrovm`), not a
-  daemon route. Measured 2026-09-23: `SUSPENDED` about 1 to 2 seconds after the call, and
-  `RUNNING` about 1.5 seconds after a resume call.
+  daemon route. Measured 2026-09-23 and 2026-09-24, three samples each:
+  `SUSPENDED` about 1 to 2 seconds after the call, and `RUNNING` about 1.2 to
+  1.5 seconds after `ResumeMicrovm`.
 - **Auto-resume holds the request.** AWS: with `autoResumeEnabled`, Lambda holds
   an inbound request while the VM resumes, including the `/resume` hook.
   Measured 2026-09-23: the first request succeeded in about 1.2 seconds, and
   `GetMicrovm` briefly reported `PENDING` before `RUNNING`.
-- **The suspended window ends in termination.** AWS: `suspendedDurationSeconds`
-  is the maximum time a VM stays suspended before it is automatically
-  terminated. Measured 2026-09-23, one sample: with a 60-second window, the VM
-  was still `SUSPENDED` 240 seconds after an explicit suspend, and
-  `ResumeMicrovm` was accepted. This needs a repeated, longer run before either
-  behavior is relied on.
+- **The suspended window ends a VM that idleness suspended.** AWS documents
+  `suspendedDurationSeconds` as the maximum time a VM stays suspended before it is
+  terminated. Measured 2026-10-12 with a 60-second window: a VM the idle policy
+  suspended was `TERMINATED` about 60 seconds later, with `stateReason`
+  `MicroVM exceeded maximum lifetime.`, and `ResumeMicrovm` was then refused. A
+  VM suspended by an explicit `SuspendMicrovm` was still `SUSPENDED` 1283 seconds
+  later and resumed within 20 seconds. The 2026-09-23 sample agrees: an explicit
+  suspend, still `SUSPENDED` at 240 seconds, and resumed.
 - **The lifetime cap includes suspended time.** AWS: `maximumDurationInSeconds`
   (at most 28,800) covers running and suspended time.
 
@@ -96,11 +101,15 @@ error even when a handler is installed.
 AWS's [image snapshot guidance](https://docs.aws.amazon.com/lambda/latest/dg/microvms-images-snapshots.html)
 says to generate unique IDs, secrets, and random values after a VM starts, in
 the `/run` hook, because every VM from an image starts from one memory
-snapshot. Measured 2026-09-23: two VMs from one image had an identical
-`boot_id` and `machine-id`, while the kernel random UUID differed. [#205](https://github.com/laithalsaadoon/microvms-agentd/issues/205)
-records the identity-repair work. The daemon now performs repair on the
-winning run hook; [Protocol](PROTOCOL.md#identity-repair-per-vm) describes the
-current health fields. The measurements above describe the earlier behavior.
+snapshot. The kernel random UUID differs between them. Files, and anything the
+daemon wrote when it started, come from the snapshot (measured 2026-09-23). For
+that reason agentd repairs identity at the first successful run hook, the first moment that
+belongs to one VM. With it, two VMs from one image had distinct machine-ids
+(measured 2026-09-24). The hostname and `boot_id` steps need the capabilities of
+an image built with `--repair-identity`. Without them those two steps fail, and
+health reports `identity_degraded`. [Protocol](PROTOCOL.md#identity-repair-per-vm)
+describes the health fields, and [#205](https://github.com/laithalsaadoon/microvms-agentd/issues/205)
+records the identity-repair work.
 
 ## Unknowns
 

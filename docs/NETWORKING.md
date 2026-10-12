@@ -96,6 +96,6 @@ that role even when the VPC has no internet route; see [Trust](TRUST.md).
 Reviewed 2026-09-16 against boto3/botocore 1.43.95, Lambda core API version
 `2026-04-30`, and MicroVM API version `2025-09-09`. Connector configuration and
 state transitions above come from AWS documentation and SDK models. The
-example passed boto3 parameter validation with stubbed responses; it was not
-live-executed during this documentation refresh.
-Earlier default-network measurements are retained in [Platform](PLATFORM.md).
+example passes boto3 parameter validation with stubbed responses; it has not
+been live-executed. [Platform](PLATFORM.md) records the default-network
+measurements.

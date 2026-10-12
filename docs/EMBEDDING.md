@@ -175,5 +175,4 @@ CLI's `microvm manifest` and the daemon's `/v1/schema` with the versions your
 application uses. Do not infer an AWS guarantee from a serializer or mock.
 
 The repository's local checks exercise client policies and daemon behavior.
-AWS behavior requires a separate live conformance run. This documentation
-refresh was verified offline only; it introduces no new AWS measurement.
+AWS behavior requires a separate live conformance run.

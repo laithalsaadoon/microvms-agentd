@@ -338,10 +338,14 @@ mise run docs:gate      # also accessibility and browser performance checks
 ```
 
 For platform observations, record the date, region, API version, and whether
-the evidence comes from AWS documentation, a model, or a live request. Keep
-previous measurements when behavior changes and append a correction. Model
-fields do not establish runtime enforcement: an omitted internet connector,
-for example, does not prove no egress. Internet isolation requires a VPC
+the evidence comes from AWS documentation, a model, or a live request. When
+behavior changes, the new measurement replaces the entry it contradicts in
+`docs/PLATFORM.md`, and the docs that restate the entry change with it. Agents
+read these docs, and two answers to one question is a hazard. Git history holds
+the old entry. `mise run prose:check` rejects the phrasing a kept-alongside
+correction leaves behind, which `.vale/styles/Microvms/CorrectionTrail.yml`
+lists. Model fields do not establish runtime enforcement: an omitted internet
+connector, for example, does not prove no egress. Internet isolation requires a VPC
 without an IGW or NAT gateway and with no alternative internet route.
 
 ## Live verification

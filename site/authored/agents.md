@@ -58,7 +58,8 @@ Edit `site/authored/` for user guides and top-level `docs/*.md` for contracts.
 `site/src/content/docs/` is generated. References generated from source contain
 commit-pinned citations that may be stale in the current checkout; check the
 source instead of treating prose as proof. Record new AWS measurements with
-date, region, and API version, retaining earlier observations.
+date, region, and API version. A measurement that contradicts an entry replaces
+it. Each page gives one current answer, and git history holds the old one.
 
 ## 4. Read next
 

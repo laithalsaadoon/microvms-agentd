@@ -10,7 +10,7 @@ observations.
 
 | Document | Purpose |
 |---|---|
-| [Platform](/internals/platform/) | Dated AWS measurements and corrections |
+| [Platform](/internals/platform/) | Dated AWS measurements, one current answer each |
 | [Networking](/internals/networking/) | VPC connectors and internet isolation |
 | [Protocol](/internals/protocol/) | Authentication, execution, files, and streaming |
 | [Trust](/internals/trust/) | Bootstrap, workload boundaries, credentials, and egress |
@@ -28,4 +28,5 @@ Generated source analyses cover [architecture](/internals/architecture/system-ov
 Source citations link to a commit, but the cited line may describe older code.
 Prefer the current executable contract and implementation when a page
 conflicts with them. AWS runtime observations have a date, region, and API
-version; later corrections retain the original measurement.
+version. A newer measurement replaces the one it contradicts, and git history
+holds the original.

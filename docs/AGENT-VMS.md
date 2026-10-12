@@ -122,8 +122,8 @@ Core wires the implementations together, and the CLI and bindings adapt them.
 Local tests cover image derivation, profile validation, request construction,
 credential-file generation, and client behavior through test ports. The live
 suite separately exercises agent launches and tasks against Bedrock. Profile
-verification dates remain in the source table; this refresh did not repeat
-those AWS measurements.
+verification dates are in the source table, and each records when that
+profile was last verified against AWS.
 
 See [Trust](TRUST.md), [Networking](NETWORKING.md), and
 [Suspend and resume](SUSPEND-RESUME.md) before choosing credentials, idle

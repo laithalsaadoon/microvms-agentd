@@ -41,3 +41,9 @@ transform = { file = "tools/prose.py", replace = "        if count > old.get(rul
 id = "prose-authored-scope"
 message = "FAIL: test_all_maintained_areas"
 transform = { file = "tools/prose.py", replace = "    if name.startswith((\"docs/\", \"site/authored/\")):\n", with = "    if name.startswith(\"docs/\"):\n" }
+
+# Correction-trail phrasing in maintained docs fails the gate; a suggestion would pass unseen.
+[[family.fault]]
+id = "prose-correction-trail"
+message = "FAIL: test_correction_trail_phrasing_is_an_error"
+transform = { file = ".vale/styles/Microvms/CorrectionTrail.yml", replace = "level: error\n", with = "level: suggestion\n" }

@@ -1,0 +1,16 @@
+extends: existence
+message: "'%s' keeps a replaced answer beside the current one. State only the current fact with its date; git history holds the old entry."
+level: error
+ignorecase: true
+nonword: true
+tokens:
+  - '\bcorrection(?: candidate)?\b[,:]'
+  - '\blater evidence\b'
+  - '\bcorrect(?:s|ed) the (?:earlier|original|old)\b'
+  - '\bmeasured again\b'
+  - '\bre-?measured\b'
+  - '\bwas disproved\b'
+  - '\bthis (?:documentation )?refresh\b'
+  - '\b(?:are|is|both) retained in\b'
+  - '\b(?:earlier|older|old|original) (?:claim|description|inference)s?\b'
+  - '\bremains? for existing links\b'

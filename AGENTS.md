@@ -190,8 +190,11 @@ capabilities, or `verify/parity/capabilities.toml` says why one doesn't.
 - Edit `site/authored/` and top-level `docs/*.md`; generated content under
   `site/src/content/docs/` is overwritten. Generated source analyses contain
   line-number citations that can become stale.
-- Append dated corrections to platform measurements. Include region, API
-  version, and evidence source; never infer runtime guarantees from SDK shapes.
+- A platform measurement that contradicts an entry replaces it: one current
+  answer per question, with its date, region, API version, and evidence source.
+  The docs that restate the entry change with `docs/PLATFORM.md`. Git history
+  holds the old entry, and `mise run prose:check` rejects correction-trail
+  phrasing. Never infer runtime guarantees from SDK shapes.
 - No internet egress requires a VPC without an IGW or NAT gateway. Omitting
   `--egress` and setting `--deny-egress` do not enforce network isolation.
 - Keep secrets out of shared images. The guest can access its execution role
