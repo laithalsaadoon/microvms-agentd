@@ -43,7 +43,8 @@ misconfigurations:
       (docs/TRUST.md), and the MicroVM, one tenant per Firecracker VM with its
       own kernel, is the isolation boundary for the host. DS-0002's goal, an
       unprivileged workload process, applies to agentd's execs: an exec runs
-      as the user its caller names, and as root when it names none. Revisit
+      as the user its caller names, as the image's AGENTD_DEFAULT_USER when
+      it names none and the image sets one, and as root otherwise. Revisit
       this exception if agentd stops needing to demote execs. The
       strands-box-codex-sdk example also needs root at start to give its
       sandbox a private mount namespace with a fresh /proc before

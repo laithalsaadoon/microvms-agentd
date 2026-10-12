@@ -273,12 +273,14 @@ instead of broadening the shared VM role.
 
 Blocking MMDS inside the guest takes `CAP_NET_ADMIN`. A guest from an image
 built without `--repair-identity` lacks it, and route, rule, and link changes
-return `EPERM`. On a guest from an image built with it, root can replace the guest's host route for `169.254.169.254`
-with a blackhole. Afterward, a process that isn't root can neither reach MMDS
-nor remove the route ([Platform](PLATFORM.md), measured 2026-10-12). Any root
-process can remove it, including an exec that doesn't ask for another user. The
-block protects only workloads that run as another user. VPC internet isolation
-does not remove metadata access or make an overprivileged role safe.
+return `EPERM`. On a guest from an image built with it, root can replace the
+guest's host route for `169.254.169.254` with a blackhole. Afterward, a process
+that isn't root can neither reach MMDS nor remove the route
+([Platform](PLATFORM.md), measured 2026-10-12). Any root process can remove it,
+including an exec started with `user: 0`, and one started without `user` on an
+image without `AGENTD_DEFAULT_USER`. The block protects only workloads that run as
+another user. VPC internet isolation does not remove metadata access or make an
+overprivileged role safe.
 
 ## Outside this contract
 
