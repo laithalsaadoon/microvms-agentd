@@ -340,19 +340,23 @@ Measured 2026-08-15: `GetMicrovm` echoed all three policy fields unchanged in
 `RUNNING` and `SUSPENDED`. External health polls kept a VM running; guest
 loopback requests do not traverse the endpoint's idle accounting.
 
-`suspendedDurationSeconds` ends a VM that the idle policy suspended. A VM
-suspended by an explicit `SuspendMicrovm` call was still `SUSPENDED` long past the
-same window, and `ResumeMicrovm` still worked. Measured 2026-10-12, us-east-1,
-API `2025-09-09`, one VM per case from one image, `autoResumeEnabled` false,
+`suspendedDurationSeconds` ends a VM that the idle policy suspended. VMs
+suspended by an explicit `SuspendMicrovm` call, under the same idle policy,
+stayed `SUSPENDED` long past the window, and `ResumeMicrovm` still worked.
+AWS describes the field as the longest a MicroVM can remain suspended before it
+ends, and the description doesn't exempt an explicit suspend. Treat the
+explicit case as measured behavior that AWS doesn't promise. Measured 2026-10-12,
+us-east-1, API `2025-09-09`, from one image, `autoResumeEnabled` false,
 `maximumDurationInSeconds` 3600, with `GetMicrovm` echoing each policy as set:
 
 | Case | Result |
 |---|---|
-| Idle suspend: `maxIdleDurationSeconds` 60, `suspendedDurationSeconds` 60, no inbound traffic | `SUSPENDED` about 60 s after launch, then `TERMINATED` about 60 s later with `stateReason` `MicroVM exceeded maximum lifetime.`; a later `ResumeMicrovm` returned `ValidationException`, naming the VM as terminated |
-| Explicit `SuspendMicrovm`: `maxIdleDurationSeconds` 3600, `suspendedDurationSeconds` 60 | still `SUSPENDED` 1283 s later, polled every 15 s with `stateReason` null; `ResumeMicrovm` was accepted, and the VM was `RUNNING` within 20 s |
+| Idle suspend, one VM: `maxIdleDurationSeconds` 60, `suspendedDurationSeconds` 60, no inbound traffic | `SUSPENDED` about 60 s after launch, then `TERMINATED` about 60 s later with `stateReason` `MicroVM exceeded maximum lifetime.`; a later `ResumeMicrovm` returned `ValidationException`, naming the VM as terminated |
+| Explicit `SuspendMicrovm` within 10 s of `RUNNING`, two VMs: `maxIdleDurationSeconds` 60, `suspendedDurationSeconds` 60 | still `SUSPENDED` 906 s and 917 s later, polled every 15 s with `stateReason` null; `ResumeMicrovm` was accepted, and both were `RUNNING` within 20 s |
+| Explicit `SuspendMicrovm`, one VM: `maxIdleDurationSeconds` 3600, `suspendedDurationSeconds` 60 | still `SUSPENDED` 1283 s later; `ResumeMicrovm` was accepted, and the VM was `RUNNING` within 20 s |
 
-The explicit case matches the 2026-09-23 sample, where a VM with a 60-second
-window was still `SUSPENDED` at 240 s and resumed: two samples.
+On 2026-09-23 a VM with a 60-second window was still `SUSPENDED` 240 s after
+an explicit suspend, and it resumed.
 
 ## Pagination cursors are URL-safe base64, and the padding still has to be encoded
 

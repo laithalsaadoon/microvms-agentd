@@ -65,10 +65,12 @@ credentials keep expiring in wall-clock time while the VM is suspended.
   `suspendedDurationSeconds` as the maximum time a VM stays suspended before it is
   terminated. Measured 2026-10-12 with a 60-second window: a VM the idle policy
   suspended was `TERMINATED` about 60 seconds later, with `stateReason`
-  `MicroVM exceeded maximum lifetime.`, and `ResumeMicrovm` was then refused. A
-  VM suspended by an explicit `SuspendMicrovm` was still `SUSPENDED` 1283 seconds
-  later and resumed within 20 seconds. The 2026-09-23 sample agrees: an explicit
-  suspend, still `SUSPENDED` at 240 seconds, and resumed.
+  `MicroVM exceeded maximum lifetime.`, and `ResumeMicrovm` was then refused. Two
+  VMs with the same idle policy, suspended by an explicit `SuspendMicrovm`, were
+  still `SUSPENDED` about 910 seconds later and resumed within 20 seconds, and a
+  third with a 3600-second idle limit resumed after 1283 seconds. The 2026-09-23
+  sample agrees. AWS's description has no exception for an explicit suspend, so
+  that case is measured behavior that AWS doesn't promise.
 - **The lifetime cap includes suspended time.** AWS: `maximumDurationInSeconds`
   (at most 28,800) covers running and suspended time.
 
