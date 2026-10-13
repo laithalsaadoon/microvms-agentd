@@ -205,8 +205,10 @@ Entry point: `crates/agentd/src/fs.rs:1450`
 
 ## See also
 
-- [contract map](../insights/contract-map.md): 25 shared source citations
-- [module map](../architecture/module-map.md): 20 shared source citations
-- [impact analysis](../insights/impact-analysis.md): 19 shared source citations
-- [business logic](../insights/business-logic.md): 11 shared source citations
-- [debugging guide](../insights/debugging-guide.md): 11 shared source citations
+These pages cite many of the same source files as this one.
+
+- [contract map](../insights/contract-map.md)
+- [module map](../architecture/module-map.md)
+- [impact analysis](../insights/impact-analysis.md)
+- [business logic](../insights/business-logic.md)
+- [debugging guide](../insights/debugging-guide.md)

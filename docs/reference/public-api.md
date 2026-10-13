@@ -355,8 +355,10 @@ Uploads tar bytes for extraction under the requested remote directory.
 
 ## See also
 
-- [contract map](../insights/contract-map.md): 11 shared source citations
-- [module map](../architecture/module-map.md): 8 shared source citations
-- [processes](../behavior/processes.md): 7 shared source citations
-- [impact analysis](../insights/impact-analysis.md): 7 shared source citations
-- [system overview](../architecture/system-overview.md): 5 shared source citations
+These pages cite many of the same source files as this one.
+
+- [contract map](../insights/contract-map.md)
+- [module map](../architecture/module-map.md)
+- [processes](../behavior/processes.md)
+- [impact analysis](../insights/impact-analysis.md)
+- [system overview](../architecture/system-overview.md)

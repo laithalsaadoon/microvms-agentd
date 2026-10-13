@@ -331,8 +331,10 @@ Defined at: `crates/model/src/wrap.rs:256-263`
 
 ## See also
 
-- [module map](../architecture/module-map.md): 9 shared source citations
-- [data flow](../architecture/data-flow.md): 2 shared source citations
-- [system overview](../architecture/system-overview.md): 2 shared source citations
-- [processes](processes.md): 2 shared source citations
-- [components](../diagrams/architecture/components.md): 2 shared source citations
+These pages cite many of the same source files as this one.
+
+- [module map](../architecture/module-map.md)
+- [data flow](../architecture/data-flow.md)
+- [system overview](../architecture/system-overview.md)
+- [processes](processes.md)
+- [components](../diagrams/architecture/components.md)

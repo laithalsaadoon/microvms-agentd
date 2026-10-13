@@ -118,8 +118,10 @@ The report charges snapshot reads on launch, compute for a recorded running phas
 
 ## See also
 
-- [module map](../architecture/module-map.md): 18 shared source citations
-- [contract map](contract-map.md): 17 shared source citations
-- [impact analysis](impact-analysis.md): 14 shared source citations
-- [processes](../behavior/processes.md): 11 shared source citations
-- [components](../diagrams/architecture/components.md): 7 shared source citations
+These pages cite many of the same source files as this one.
+
+- [module map](../architecture/module-map.md)
+- [contract map](contract-map.md)
+- [impact analysis](impact-analysis.md)
+- [processes](../behavior/processes.md)
+- [components](../diagrams/architecture/components.md)

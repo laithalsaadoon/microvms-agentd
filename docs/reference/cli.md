@@ -1060,8 +1060,10 @@ Flags:
 
 ## See also
 
-- [processes](../behavior/processes.md): 7 shared source citations
-- [contract map](../insights/contract-map.md): 6 shared source citations
-- [module map](../architecture/module-map.md): 5 shared source citations
-- [impact analysis](../insights/impact-analysis.md): 5 shared source citations
-- [risk hotspots](../analysis/risk-hotspots.md): 3 shared source citations
+These pages cite many of the same source files as this one.
+
+- [processes](../behavior/processes.md)
+- [contract map](../insights/contract-map.md)
+- [module map](../architecture/module-map.md)
+- [impact analysis](../insights/impact-analysis.md)
+- [risk hotspots](../analysis/risk-hotspots.md)

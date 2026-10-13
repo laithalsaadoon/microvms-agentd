@@ -73,8 +73,10 @@ No current per-file diagnostic dataset supports warning or error totals, so this
 
 ## See also
 
-- [module map](../architecture/module-map.md): 12 shared source citations
-- [contract map](../insights/contract-map.md): 8 shared source citations
-- [impact analysis](../insights/impact-analysis.md): 6 shared source citations
-- [dead code](dead-code.md): 4 shared source citations
-- [data flow](../architecture/data-flow.md): 3 shared source citations
+These pages cite many of the same source files as this one.
+
+- [module map](../architecture/module-map.md)
+- [contract map](../insights/contract-map.md)
+- [impact analysis](../insights/impact-analysis.md)
+- [dead code](dead-code.md)
+- [data flow](../architecture/data-flow.md)
