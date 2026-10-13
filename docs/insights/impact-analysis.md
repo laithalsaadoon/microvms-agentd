@@ -280,8 +280,10 @@ Defined at: `crates/microvms-cli/src/manifest.rs:51-117`.
 
 ## See also
 
-- [contract map](contract-map.md): 41 shared source citations
-- [module map](../architecture/module-map.md): 31 shared source citations
-- [processes](../behavior/processes.md): 19 shared source citations
-- [business logic](business-logic.md): 14 shared source citations
-- [debugging guide](debugging-guide.md): 13 shared source citations
+These pages cite many of the same source files as this one.
+
+- [contract map](contract-map.md)
+- [module map](../architecture/module-map.md)
+- [processes](../behavior/processes.md)
+- [business logic](business-logic.md)
+- [debugging guide](debugging-guide.md)

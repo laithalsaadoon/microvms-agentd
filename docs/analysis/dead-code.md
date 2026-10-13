@@ -64,8 +64,10 @@ these uses.
 
 ## See also
 
-- [module map](../architecture/module-map.md): 8 shared source citations
-- [contract map](../insights/contract-map.md): 6 shared source citations
-- [impact analysis](../insights/impact-analysis.md): 5 shared source citations
-- [risk hotspots](risk-hotspots.md): 4 shared source citations
-- [system overview](../architecture/system-overview.md): 4 shared source citations
+These pages cite many of the same source files as this one.
+
+- [module map](../architecture/module-map.md)
+- [contract map](../insights/contract-map.md)
+- [impact analysis](../insights/impact-analysis.md)
+- [risk hotspots](risk-hotspots.md)
+- [system overview](../architecture/system-overview.md)

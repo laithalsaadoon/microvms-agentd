@@ -616,8 +616,10 @@ Mitigation: retain separate collected-response and streaming implementations wit
 
 ## See also
 
-- [module map](../architecture/module-map.md): 41 shared source citations
-- [impact analysis](impact-analysis.md): 41 shared source citations
-- [processes](../behavior/processes.md): 25 shared source citations
-- [business logic](business-logic.md): 17 shared source citations
-- [dependency graph](../diagrams/structural/dependency-graph.md): 13 shared source citations
+These pages cite many of the same source files as this one.
+
+- [module map](../architecture/module-map.md)
+- [impact analysis](impact-analysis.md)
+- [processes](../behavior/processes.md)
+- [business logic](business-logic.md)
+- [dependency graph](../diagrams/structural/dependency-graph.md)

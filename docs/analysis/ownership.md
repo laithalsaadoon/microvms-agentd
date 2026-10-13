@@ -112,8 +112,10 @@ implementation boundary and evidence. Apply these mitigations during review:
 
 ## See also
 
-- [module map](../architecture/module-map.md): 11 shared source citations
-- [system overview](../architecture/system-overview.md): 9 shared source citations
-- [dependency graph](../diagrams/structural/dependency-graph.md): 7 shared source citations
-- [dead code](dead-code.md): 3 shared source citations
-- [impact analysis](../insights/impact-analysis.md): 3 shared source citations
+These pages cite many of the same source files as this one.
+
+- [module map](../architecture/module-map.md)
+- [system overview](../architecture/system-overview.md)
+- [dependency graph](../diagrams/structural/dependency-graph.md)
+- [dead code](dead-code.md)
+- [impact analysis](../insights/impact-analysis.md)

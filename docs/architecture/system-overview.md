@@ -71,8 +71,10 @@ flowchart LR
 
 ## See also
 
-- [dependency graph](../diagrams/structural/dependency-graph.md): 19 shared source citations
-- [module map](module-map.md): 12 shared source citations
-- [ownership](../analysis/ownership.md): 9 shared source citations
-- [impact analysis](../insights/impact-analysis.md): 8 shared source citations
-- [contract map](../insights/contract-map.md): 7 shared source citations
+These pages cite many of the same source files as this one.
+
+- [dependency graph](../diagrams/structural/dependency-graph.md)
+- [module map](module-map.md)
+- [ownership](../analysis/ownership.md)
+- [impact analysis](../insights/impact-analysis.md)
+- [contract map](../insights/contract-map.md)

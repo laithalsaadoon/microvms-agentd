@@ -167,8 +167,10 @@ fields, and getter receivers. The supported Node versions provide this API level
 
 ## See also
 
-- [system overview](../../architecture/system-overview.md): 19 shared source citations
-- [contract map](../../insights/contract-map.md): 13 shared source citations
-- [module map](../../architecture/module-map.md): 12 shared source citations
-- [impact analysis](../../insights/impact-analysis.md): 9 shared source citations
-- [ownership](../../analysis/ownership.md): 7 shared source citations
+These pages cite many of the same source files as this one.
+
+- [system overview](../../architecture/system-overview.md)
+- [contract map](../../insights/contract-map.md)
+- [module map](../../architecture/module-map.md)
+- [impact analysis](../../insights/impact-analysis.md)
+- [ownership](../../analysis/ownership.md)
