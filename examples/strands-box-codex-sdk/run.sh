@@ -15,7 +15,7 @@
 # It exits 0 only when both metadata probes and every scenario pass.
 #
 # Prerequisites:
-#   - `microvm` 1.0.0 on PATH, with MICROVM_BUCKET, MICROVM_BUILD_ROLE_ARN, and
+#   - `microvm` 1.1.0 or later on PATH, with MICROVM_BUCKET, MICROVM_BUILD_ROLE_ARN, and
 #     MICROVM_EXECUTION_ROLE_ARN set (the repo README's Getting started),
 #   - AWS credentials that can call lambda-microvms and bedrock:InvokeModel on GPT-6.1 Sol,
 #   - uv on PATH (mints the Bedrock API key),

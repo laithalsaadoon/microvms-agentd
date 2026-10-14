@@ -5,7 +5,8 @@ This example runs Codex inside Box, the agent sandbox from
 Python SDK drives Codex. The model is GPT-6.1 Sol on the Amazon Bedrock `bedrock-runtime`
 endpoint. A [Dogwood](https://github.com/dogwood-policy/dogwood) policy decides each shell
 command, file operation, and outbound connection that Codex makes. Box enforces each decision from
-outside the Codex process and records it. The commands below create billable AWS resources.
+outside the Codex process and records it. The commands below create billable AWS resources. Use `microvm` 1.1.0 or later,
+whose daemon supports the image's default user.
 
 ```bash
 # from the repo root, with the Getting-started prerequisites in place:
