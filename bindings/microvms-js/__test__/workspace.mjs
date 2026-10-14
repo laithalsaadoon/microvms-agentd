@@ -83,7 +83,9 @@ async function startFilesDaemon(archive = Buffer.alloc(0)) {
         });
         response.end(payload);
       };
-      if (url.pathname === '/v1/fs/tar' && request.method === 'GET') {
+      if (url.pathname === '/v1/health' && request.method === 'GET') {
+        reply(200, Buffer.alloc(0));
+      } else if (url.pathname === '/v1/fs/tar' && request.method === 'GET') {
         reply(200, archive);
       } else if (url.pathname === '/v1/fs/tar') {
         state.uploads.push(body);

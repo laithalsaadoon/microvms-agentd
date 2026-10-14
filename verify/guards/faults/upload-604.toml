@@ -166,3 +166,27 @@ run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "workspa
 expect = "test-failed"
 suite = "rust"
 transform = { file = "crates/microvms-app/src/workspace.rs", replace = ".with_cwd(Some(REMOTE_WORKDIR.into()))\n                .with_timeout_sec(Some(delete_timeout.as_secs_f64()));", with = ".with_cwd(Some(REMOTE_WORKDIR.into()))\n                .with_user(Some(crate::session::ROOT_UID.into()))\n                .with_timeout_sec(Some(delete_timeout.as_secs_f64()));" }
+
+[[fault]]
+id = "upload-604-py-incremental-sync"
+guard = "bindings/microvms-py/tests/test_workspace.py::test_a_second_sync_after_one_edit_uploads_that_member_and_deletes_nothing"
+run = [["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_workspace.py::test_a_second_sync_after_one_edit_uploads_that_member_and_deletes_nothing"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "None => return Ok((ROOT_UID, ROOT_UID)),", with = "None => return Err(Error::invalid_arg(\"missing ownership marker\"))," }
+
+[[fault]]
+id = "upload-604-py-full-sync"
+guard = "bindings/microvms-py/tests/test_workspace.py::test_sync_dir_full_ignores_the_manifest"
+run = [["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_workspace.py::test_sync_dir_full_ignores_the_manifest"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "None => return Ok((ROOT_UID, ROOT_UID)),", with = "None => return Err(Error::invalid_arg(\"missing ownership marker\"))," }
+
+[[fault]]
+id = "upload-604-js-incremental-sync"
+guard = "a second syncDir after one edit uploads that member and deletes nothing"
+run = [["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"], ["node", "--test", "--test-reporter=tap", "--test-name-pattern", "a second syncDir after one edit uploads that member and deletes nothing", "bindings/microvms-js/__test__/workspace.mjs"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "None => return Ok((ROOT_UID, ROOT_UID)),", with = "None => return Err(Error::invalid_arg(\"missing ownership marker\"))," }

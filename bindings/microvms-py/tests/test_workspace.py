@@ -64,7 +64,9 @@ class FilesDaemon:
                 daemon.requested.append(f"{self.command} {self.path}")
                 url = urlparse(self.path)
                 path = parse_qs(url.query).get("path", [""])[0]
-                if url.path == "/v1/fs/tar" and self.command == "GET":
+                if url.path == "/v1/health" and self.command == "GET":
+                    self.reply(200, b"")
+                elif url.path == "/v1/fs/tar" and self.command == "GET":
                     self.reply(200, daemon.archive)
                 elif url.path == "/v1/fs/tar":
                     daemon.uploads.append(body)
@@ -207,9 +209,10 @@ def test_sync_dir_full_ignores_the_manifest(
     session = microvms.Session.direct(daemon.endpoint, "agent-token")
     session.sync_dir(tmp_path)
 
+    before_full = len(daemon.requested)
     again = session.sync_dir(tmp_path, full=True)
     assert again.full and again.uploaded_members == 1
-    assert not any("GET /v1/fs/file" in line for line in daemon.requested[3:])
+    assert not any("GET /v1/fs/file" in line for line in daemon.requested[before_full:])
 
 
 def test_a_local_tree_that_cannot_be_read_is_an_invalid_arg(
