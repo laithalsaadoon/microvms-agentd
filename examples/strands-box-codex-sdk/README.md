@@ -159,7 +159,7 @@ entry for it. The guest route covers the unprivileged driver outside the box; Bo
 network and policy checks continue to cover code inside it.
 
 The route setup and failure ordering have offline regression coverage in `mise run box:check`.
-Tests cover this example change offline; a live guest check remains pending.
+Tests cover this example change offline. A live guest check remains pending.
 
 ## Identity repair and a fresh /proc
 
