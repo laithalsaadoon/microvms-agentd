@@ -1,0 +1,57 @@
+diff --git a/crates/agentd/src/exec.rs b/crates/agentd/src/exec.rs
+index a6c5c04..caa2947 100644
+--- a/crates/agentd/src/exec.rs
++++ b/crates/agentd/src/exec.rs
+@@ -1143,33 +1143,23 @@ fn pids_in_groups(groups: &[u32]) -> std::collections::HashMap<u32, Vec<u32>> {
+     by_group
+ }
+
+-/// The process group in one `/proc/<pid>/stat` line, or `None` after all threads exit.
++/// The process group in one `/proc/<pid>/stat` line, or `None` for a zombie.
+ ///
+ /// The `comm` field is in parentheses and may itself contain spaces and
+ /// parentheses — `(sh)` is tame, `(my (odd) name)` is legal — so the fields after
+ /// it are located from the *last* `)` rather than by splitting the whole line. After
+-/// it: state, ppid, pgrp, so pgrp is index 2. A leader can become a zombie after
+-/// `pthread_exit` while its workers keep running. `/proc` lists only leaders, and
+-/// the leader's task directory can disappear in that state, so use `num_threads`
+-/// (field 20, index 17 here) before excluding it. The count includes the retained
+-/// leader; only a dead leader with one thread has no live workers left.
+-pub(crate) fn live_pgrp(stat: &str) -> Option<u32> {
++/// it: state, ppid, pgrp, so pgrp is index 2. A `Z` state is a process that has
++/// exited and not yet been reaped; it holds no pipe and runs nothing, so listing it
++/// as live would make a killed group look like a survivor.
++fn live_pgrp(stat: &str) -> Option<u32> {
+     let after_comm = &stat[stat.rfind(')')? + 1..];
+-    let fields: Vec<_> = after_comm.split_whitespace().collect();
+-    let state = *fields.first()?;
+-    if !matches!(
+-        state,
+-        "R" | "S" | "D" | "Z" | "T" | "t" | "X" | "x" | "K" | "W" | "P" | "I"
+-    ) {
++    let mut fields = after_comm.split_whitespace();
++    let state = fields.next()?;
++    if state == "Z" || state == "X" {
+         return None;
+     }
+-    let group = fields.get(2)?.parse().ok()?;
+-    let threads: u32 = fields.get(17)?.parse().ok()?;
+-    if threads == 0 || (matches!(state, "Z" | "X") && threads == 1) {
+-        None
+-    } else {
+-        Some(group)
+-    }
++    let _ppid = fields.next()?;
++    fields.next()?.parse().ok()
+ }
+
+ /// Rejects a timeout that cannot describe a real budget.
+@@ -1661,7 +1651,7 @@ async fn escalate_blind(pgid: u32, grace: Duration) -> bool {
+ /// zombie still answers the signal-0 probe, so a check built on it never saw the
+ /// group empty and every escalation ran its full grace. `ESRCH` is kept as the fast
+ /// path — a group that is gone is gone — and anything else is settled by the same
+-/// `/proc` read `/v1/procs` reports from, which excludes only fully exited zombies.
++/// `/proc` read `/v1/procs` reports from, which does not count a `Z`.
+ fn group_has_live_members(pgid: u32) -> bool {
+     let pid = nix::unistd::Pid::from_raw(pgid as i32);
+     if matches!(

@@ -1143,23 +1143,33 @@ fn pids_in_groups(groups: &[u32]) -> std::collections::HashMap<u32, Vec<u32>> {
     by_group
 }
 
-/// The process group in one `/proc/<pid>/stat` line, or `None` for a zombie.
+/// The process group in one `/proc/<pid>/stat` line, or `None` after all threads exit.
 ///
 /// The `comm` field is in parentheses and may itself contain spaces and
 /// parentheses — `(sh)` is tame, `(my (odd) name)` is legal — so the fields after
 /// it are located from the *last* `)` rather than by splitting the whole line. After
-/// it: state, ppid, pgrp, so pgrp is index 2. A `Z` state is a process that has
-/// exited and not yet been reaped; it holds no pipe and runs nothing, so listing it
-/// as live would make a killed group look like a survivor.
-fn live_pgrp(stat: &str) -> Option<u32> {
+/// it: state, ppid, pgrp, so pgrp is index 2. A leader can become a zombie after
+/// `pthread_exit` while its workers keep running. `/proc` lists only leaders, and
+/// the leader's task directory can disappear in that state, so use `num_threads`
+/// (field 20, index 17 here) before excluding it. The count includes the retained
+/// leader; only a dead leader with one thread has no live workers left.
+pub(crate) fn live_pgrp(stat: &str) -> Option<u32> {
     let after_comm = &stat[stat.rfind(')')? + 1..];
-    let mut fields = after_comm.split_whitespace();
-    let state = fields.next()?;
-    if state == "Z" || state == "X" {
+    let fields: Vec<_> = after_comm.split_whitespace().collect();
+    let state = *fields.first()?;
+    if !matches!(
+        state,
+        "R" | "S" | "D" | "Z" | "T" | "t" | "X" | "x" | "K" | "W" | "P" | "I"
+    ) {
         return None;
     }
-    let _ppid = fields.next()?;
-    fields.next()?.parse().ok()
+    let group = fields.get(2)?.parse().ok()?;
+    let threads: u32 = fields.get(17)?.parse().ok()?;
+    if threads == 0 || (matches!(state, "Z" | "X") && threads == 1) {
+        None
+    } else {
+        Some(group)
+    }
 }
 
 /// Rejects a timeout that cannot describe a real budget.
@@ -1651,7 +1661,7 @@ async fn escalate_blind(pgid: u32, grace: Duration) -> bool {
 /// zombie still answers the signal-0 probe, so a check built on it never saw the
 /// group empty and every escalation ran its full grace. `ESRCH` is kept as the fast
 /// path — a group that is gone is gone — and anything else is settled by the same
-/// `/proc` read `/v1/procs` reports from, which does not count a `Z`.
+/// `/proc` read `/v1/procs` reports from, which excludes only fully exited zombies.
 fn group_has_live_members(pgid: u32) -> bool {
     let pid = nix::unistd::Pid::from_raw(pgid as i32);
     if matches!(
@@ -4297,5 +4307,186 @@ mod tests {
         assert_eq!(outcome.stdout.trim(), "ready");
         assert!(!outcome.writers_may_be_alive);
         await_group_empty(&state, "detached-deadline").await;
+    }
+
+    #[test]
+    fn zombie_leaders_remain_live_until_their_workers_exit() {
+        let record = |state: &str, group: &str, threads: &str| {
+            let mut fields = ["0"; 18];
+            fields[0] = state;
+            fields[2] = group;
+            fields[17] = threads;
+            format!("7 (odd ) name) {}", fields.join(" "))
+        };
+        for state in ["Z", "X"] {
+            assert_eq!(live_pgrp(&record(state, "7", "2")), Some(7));
+            assert_eq!(live_pgrp(&record(state, "7", "1")), None);
+            assert_eq!(live_pgrp(&record(state, "bad", "2")), None);
+        }
+        for state in ["R", "S", "D", "T", "t", "x", "K", "W", "P", "I"] {
+            assert_eq!(live_pgrp(&record(state, "7", "1")), Some(7));
+        }
+        for threads in ["0", "bad", "-1"] {
+            assert_eq!(live_pgrp(&record("S", "7", threads)), None);
+        }
+        assert_eq!(live_pgrp(&record("?", "7", "2")), None);
+        assert_eq!(live_pgrp("7 (incomplete) S 1 7"), None);
+    }
+
+    #[derive(Clone, Copy)]
+    enum WorkerCleanup {
+        Kill,
+        Reap,
+        Timeout,
+    }
+
+    /// Own the worker so even a failing assertion kills its isolated group and
+    /// reaps the multithreaded process instead of leaving it to the host's init.
+    struct ThreadWorker {
+        child: std::process::Child,
+        pgid: u32,
+        reaped: bool,
+    }
+
+    impl Drop for ThreadWorker {
+        fn drop(&mut self) {
+            if self.reaped {
+                return;
+            }
+            assert!(self.pgid > 1);
+            assert_ne!(self.pgid as i32, nix::unistd::getpgrp().as_raw());
+            signal_group(self.pgid, nix::sys::signal::Signal::SIGKILL);
+            self.child.wait().expect("reap fixture worker");
+        }
+    }
+
+    async fn cleanup_with_a_zombie_worker_leader(mode: WorkerCleanup) {
+        use std::os::unix::process::CommandExt as _;
+        let state = state_with(|cfg| {
+            cfg.kill_grace = Duration::from_millis(50);
+            cfg.output_linger = Duration::from_millis(50);
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let release = dir.path().join("release-shell");
+        let ready = dir.path().join("worker-ready");
+        // The shell keeps the exec's group alive until the worker has joined it.
+        // Its own bound also prevents a setup failure from leaving work behind.
+        let mut request = req(
+            "thread-worker",
+            &[
+                "/bin/sh",
+                "-c",
+                "i=0; while [ ! -e \"$1\" ] && [ \"$i\" -lt 1000 ]; do sleep .01; i=$((i+1)); done",
+                "sh",
+                release.to_str().unwrap(),
+            ],
+        );
+        request.reap_group_on_exit = matches!(mode, WorkerCleanup::Reap);
+        if matches!(mode, WorkerCleanup::Timeout) {
+            request.timeout_sec = Some(5.0);
+        }
+        launch(&state, request);
+        let pgid = state.with_execs(|execs| execs["thread-worker"].pgid.unwrap());
+        assert!(pgid > 1);
+        assert_ne!(pgid as i32, nix::unistd::getpgrp().as_raw());
+        // This direct child joins the exec's group but remains ours to reap.
+        // The main thread exits while its TERM-ignoring worker keeps running.
+        let script = concat!(
+            "import ctypes, os, pathlib, signal, sys, threading, time\n",
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n",
+            "def worker():\n",
+            "    pathlib.Path(sys.argv[1]).write_text(str(threading.get_native_id()))\n",
+            "    time.sleep(10)\n",
+            "    os._exit(0)\n",
+            "threading.Thread(target=worker).start()\n",
+            "ctypes.CDLL(None).pthread_exit(None)\n",
+        );
+        let child = std::process::Command::new("python3")
+            .args(["-c", script, ready.to_str().unwrap()])
+            .process_group(pgid as i32)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn bounded worker in the exec group");
+        let mut worker = ThreadWorker {
+            child,
+            pgid,
+            reaped: false,
+        };
+        let pid = worker.child.id();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+                let fields: Vec<_> = stat
+                    .rsplit_once(')')
+                    .unwrap()
+                    .1
+                    .split_whitespace()
+                    .collect();
+                if ready.exists() && fields[0] == "Z" && fields[17].parse::<u32>().unwrap() > 1 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("zombie main thread with a live worker");
+        let group = group_of(&state, "thread-worker").await;
+        let visible = group.pids.contains(&pid);
+        match mode {
+            WorkerCleanup::Kill => {
+                let response = kill(State(state.clone()), Path("thread-worker".into())).await;
+                assert_eq!(body_json(response).await["killed"], true);
+            }
+            WorkerCleanup::Reap => std::fs::write(release, "exit").unwrap(),
+            WorkerCleanup::Timeout => {}
+        }
+        let shared = state.with_execs(|execs| execs["thread-worker"].shared.clone());
+        // The general test helper has a shorter retry budget than this fixture's
+        // five-second daemon timeout; bound this wait directly instead.
+        let outcome = tokio::time::timeout(Duration::from_secs(7), async {
+            loop {
+                if let Some(outcome) = shared.result.lock().await.clone() {
+                    break outcome;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("cleanup publishes the exec result");
+        assert_eq!(outcome.timed_out, matches!(mode, WorkerCleanup::Timeout));
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Some(status) = worker.child.try_wait().unwrap() {
+                    worker.reaped = true;
+                    assert_eq!(
+                        unix_signal(&status),
+                        Some(9),
+                        "TERM-ignoring worker needs KILL"
+                    );
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("cleanup kills the live worker after its main thread exits");
+        assert!(visible, "a live worker must stay visible: {group:?}");
+    }
+
+    #[tokio::test]
+    async fn kill_escalates_for_workers_whose_main_thread_has_exited() {
+        cleanup_with_a_zombie_worker_leader(WorkerCleanup::Kill).await;
+    }
+
+    #[tokio::test]
+    async fn reap_escalates_for_workers_whose_main_thread_has_exited() {
+        cleanup_with_a_zombie_worker_leader(WorkerCleanup::Reap).await;
+    }
+
+    #[tokio::test]
+    async fn timeout_escalates_for_workers_whose_main_thread_has_exited() {
+        cleanup_with_a_zombie_worker_leader(WorkerCleanup::Timeout).await;
     }
 }

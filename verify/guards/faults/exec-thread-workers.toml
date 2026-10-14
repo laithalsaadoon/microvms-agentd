@@ -1,0 +1,37 @@
+# ── exec-thread-workers: FAIL_TO_PASS entries tools/fail-to-pass.py emitted ──
+
+# FAIL_TO_PASS: fails on cc7912526425 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-zombie-leaders-remain-live-until-their-workers-exit"
+guard = "exec::tests::zombie_leaders_remain_live_until_their_workers_exit"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec::tests::zombie_leaders_remain_live_until_their_workers_exit"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-zombie-leaders-remain-live-until-their-workers-exit.patch"
+
+# FAIL_TO_PASS: fails on cc7912526425 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-kill-escalates-for-workers-whose-main-thread-has-exited"
+guard = "exec::tests::kill_escalates_for_workers_whose_main_thread_has_exited"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec::tests::kill_escalates_for_workers_whose_main_thread_has_exited"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-kill-escalates-for-workers-whose-main-thread-has-exited.patch"
+
+# FAIL_TO_PASS: fails on cc7912526425 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-reap-escalates-for-workers-whose-main-thread-has-exited"
+guard = "exec::tests::reap_escalates_for_workers_whose_main_thread_has_exited"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec::tests::reap_escalates_for_workers_whose_main_thread_has_exited"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-reap-escalates-for-workers-whose-main-thread-has-exited.patch"
+
+# FAIL_TO_PASS: fails on cc7912526425 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-timeout-escalates-for-workers-whose-main-thread-has"
+guard = "exec::tests::timeout_escalates_for_workers_whose_main_thread_has_exited"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec::tests::timeout_escalates_for_workers_whose_main_thread_has_exited"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-timeout-escalates-for-workers-whose-main-thread-has.patch"
