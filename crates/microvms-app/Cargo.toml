@@ -38,7 +38,7 @@ backon = { version = "1.6", features = ["tokio-sleep"] }
 # The image build takes a zip of the daemon binary plus a Dockerfile, built in memory. Pinned
 # to the 8.x line: 9.0 exists only as `9.0.0-pre2`. Only `deflate`, since the artifact is one
 # binary and one text file.
-zip = { version = "8.6", default-features = false, features = ["deflate"] }
+zip = { version = "9.0", default-features = false, features = ["deflate"] }
 # `build --reuse` keys an image name to a content hash of the artifact bytes.
 sha2 = "0.11"
 # Exec output and stdin are arbitrary bytes, so both sides of the wire carry base64. 0.23 to
