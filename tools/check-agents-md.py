@@ -876,6 +876,7 @@ DECISION_SENTINEL = "D35"
 CENSUS_NOT_PATHS = {
     "p/rust": "a Semgrep registry ruleset, `semgrep --config p/rust` (the `security` task)",
     "p/secrets": "a Semgrep registry ruleset, `semgrep --config p/secrets` (the `security` task)",
+    "public.ecr.aws/lambda/": "the Lambda container image registry namespace used by npm:lambda, not a repository directory",
     "cli-dist/": "where release.yml's `draft` job downloads the CLI archives",
     "staging/": "where release.yml's `draft` job gathers the release assets",
     "release-sums/": "where release.yml's `live-gate` and `github-release` jobs download the draft's SHA256SUMS",
