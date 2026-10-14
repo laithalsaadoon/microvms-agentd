@@ -26,9 +26,12 @@ client and daemon versions. The `/v1/` path alone does not prove they work toget
 The promise covers these Rust crates: `microvms-protocol`, `microvms-domain`, `microvms-app`,
 `microvms-edges`, `microvms-core`, and `microvms-cli`.
 
-We state the oldest Rust, Python, and Node.js versions we support. Raising that
-floor needs a major release. Changes to the packages we use must preserve these
-runtime needs and public contracts.
+We state the oldest Rust, Python, and Node.js versions we support. Raising the
+Rust or Node.js floor needs a major release. The Python floor follows
+[CPython's support lifecycle](https://devguide.python.org/versions/): a minor
+release may drop a Python version after CPython ends support for it. The changelog
+lists that drop under Removed. Other changes to the packages we use must preserve
+these runtime needs and public contracts.
 
 This promise does not cover private code, the layout of API docs, or
 test support. It does not cover features we mark experimental before their first release.
@@ -69,7 +72,8 @@ still needs the same version change and review.
 
 ## Before removal
 
-Announce the deprecation of a stable feature before removing it. State what to
+For Python versions, the CPython support lifecycle above governs removal.
+Announce the deprecation of any other stable feature before removing it. State what to
 use in its place and how to move to it in the docs and release notes.
 Use tags or warnings to mark the feature when the language has them.
 

@@ -84,7 +84,7 @@ depends = ["parity:fixtures"]
 # made fresh each run.
 shell = "bash -e -c"
 run = '''
-uv venv --clear -q .venv-bindings
+uv venv --python 3.11 --clear -q .venv-bindings
 . .venv-bindings/bin/activate
 uvx maturin@1.14.1 develop -m bindings/microvms-py/Cargo.toml
 uv pip install pytest
@@ -102,7 +102,7 @@ shell = "bash -e -c"
 run = '''
 rm -rf dist-wheel
 uvx maturin@1.14.1 build -m bindings/microvms-py/Cargo.toml -o dist-wheel
-uv venv --clear -q .venv-typed
+uv venv --python 3.11 --clear -q .venv-typed
 uv pip install --python .venv-typed/bin/python dist-wheel/*.whl
 uvx ty@0.0.72 check --python .venv-typed bindings/microvms-py/examples/typed_usage.py
 '''

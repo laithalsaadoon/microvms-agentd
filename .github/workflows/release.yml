@@ -170,9 +170,9 @@ jobs:
   # ── PyPI ────────────────────────────────────────────────────────────────
   #
   # Built on five runners and published from one, because a wheel is per-platform and a
-  # trusted publisher is per-project. `abi3-py39` is what keeps this to five artifacts
+  # trusted publisher is per-project. `abi3-py311` is what keeps this to five artifacts
   # instead of five times the number of supported interpreters: one wheel per platform loads
-  # on CPython 3.9 and every version after it.
+  # on CPython 3.11 and every version after it.
   wheels:
     name: build the wheel (${{ matrix.runner }} ${{ matrix.triple }})
     needs: guard

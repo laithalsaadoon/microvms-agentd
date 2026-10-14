@@ -1,6 +1,6 @@
 version = 1
 revision = 3
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 
 [manifest]
 requirements = [{ name = "griffelib", specifier = "==2.3.0" }]
