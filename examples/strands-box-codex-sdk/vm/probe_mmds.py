@@ -43,11 +43,12 @@ def raw_socket() -> tuple[bool, str]:
         return False, f"refused: {type(error).__name__}: {error.strerror or error}"
 
 
-def token_put(proxy: str | None) -> tuple[bool, str, str]:
+def token_put(proxy: str | None) -> tuple[bool, bool, str, str]:
     """PUT /latest/api/token, directly or through an HTTP proxy.
 
-    Returns whether a token was issued, the policy rule that refused it ("" when none did),
-    and a status line.
+    Returns whether the socket connected, whether a token was issued, the policy rule
+    that refused it ("" when none did), and a status line. A later I/O error does not
+    erase a successful connection: outside the box that alone breaks the route invariant.
     """
     if proxy:
         parts = urlsplit(proxy)
@@ -55,8 +56,10 @@ def token_put(proxy: str | None) -> tuple[bool, str, str]:
         target = f"http://{MMDS}/latest/api/token"
     else:
         address, target = (MMDS, 80), "/latest/api/token"
+    connected = False
     try:
         with socket.create_connection(address, timeout=5) as conn:
+            connected = True
             conn.sendall(TOKEN_PUT.format(target=target).encode())
             reply = b""
             while b"\r\n\r\n" not in reply and (chunk := conn.recv(4096)):
@@ -75,10 +78,15 @@ def token_put(proxy: str | None) -> tuple[bool, str, str]:
             while len(body) < length and (chunk := conn.recv(4096)):
                 body += chunk
     except OSError as error:
-        return False, "", f"refused: {type(error).__name__}: {error.strerror or error}"
+        return (
+            connected,
+            False,
+            "",
+            f"refused: {type(error).__name__}: {error.strerror or error}",
+        )
     status = lines[0]
     if status.split()[1:2] == ["200"]:
-        return True, "", f"{status} (token issued, not printed)"
+        return connected, True, "", f"{status} (token issued, not printed)"
     marker = next(
         (h for h in lines[1:] if h.lower().startswith("x-strands-box-egress")), ""
     )
@@ -87,7 +95,7 @@ def token_put(proxy: str | None) -> tuple[bool, str, str]:
     rule = ""
     if "refused" in marker:
         rule = next((r for r in RULES if f"[policy: {r}]" in first), "")
-    return False, rule, f"{status} {marker}: {first}"
+    return connected, False, rule, f"{status} {marker}: {first}"
 
 
 def main() -> int:
@@ -99,12 +107,14 @@ def main() -> int:
     via = "the egress gateway" if proxy else "a direct connection"
     connected, line = raw_socket()
     print(f"[{where}] raw TCP connect to {MMDS}:80 -> {line}")
-    issued, rule, line = token_put(proxy)
+    token_connected, issued, rule, line = token_put(proxy)
     print(f"[{where}] IMDSv2 token PUT via {via} -> {line}")
 
     problems = []
     if connected:
         problems.append("the raw connect reached MMDS")
+    if token_connected and not inside:
+        problems.append("the direct token PUT connected to MMDS")
     if issued:
         problems.append("MMDS issued a token")
     if inside:

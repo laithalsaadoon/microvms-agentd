@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "examples/strands-box-codex-sdk"
@@ -131,7 +131,14 @@ class RunOrderingTests(unittest.TestCase):
 
 class ProbeTests(unittest.TestCase):
     def verdict(
-        self, *, inside=False, connected=False, issued=False, rule="", proxy=None
+        self,
+        *,
+        inside=False,
+        connected=False,
+        token_connected=False,
+        issued=False,
+        rule="",
+        proxy=None,
     ):
         env = {"PROBE_WHERE": "inside"} if inside else {}
         if proxy:
@@ -140,7 +147,9 @@ class ProbeTests(unittest.TestCase):
             patch.dict(os.environ, env, clear=True),
             patch.object(probe, "raw_socket", return_value=(connected, "status")),
             patch.object(
-                probe, "token_put", return_value=(issued, rule, "status")
+                probe,
+                "token_put",
+                return_value=(token_connected, issued, rule, "status"),
             ) as token,
             contextlib.redirect_stdout(io.StringIO()),
         ):
@@ -151,11 +160,53 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(self.verdict(proxy="http://proxy.invalid"), (0, None))
         self.assertEqual(self.verdict(connected=True)[0], 1)
         self.assertEqual(self.verdict(issued=True)[0], 1)
+        self.assertEqual(self.verdict(token_connected=True)[0], 1)
+
+    def test_outside_rejects_token_connections_even_without_a_token(self):
+        for outcome in (
+            "403 Forbidden",
+            "500 Internal Server Error",
+            "send",
+            "receive",
+        ):
+            with self.subTest(outcome=outcome):
+                conn = MagicMock()
+                if outcome == "send":
+                    conn.sendall.side_effect = OSError("send failed")
+                elif outcome == "receive":
+                    conn.recv.side_effect = OSError("receive failed")
+                else:
+                    conn.recv.return_value = (
+                        f"HTTP/1.1 {outcome}\r\nContent-Length: 0\r\n\r\n".encode()
+                    )
+                with (
+                    patch.dict(os.environ, {}, clear=True),
+                    patch.object(probe, "raw_socket", return_value=(False, "refused")),
+                    patch.object(probe.socket, "create_connection") as connect,
+                    contextlib.redirect_stdout(io.StringIO()),
+                ):
+                    connect.return_value.__enter__.return_value = conn
+                    self.assertEqual(probe.main(), 1)
+                    connect.assert_called_once_with((probe.MMDS, 80), timeout=5)
+
+    def test_outside_accepts_token_connection_refusal(self):
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(probe, "raw_socket", return_value=(False, "refused")),
+            patch.object(
+                probe.socket, "create_connection", side_effect=OSError("refused")
+            ),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(probe.main(), 0)
 
     def test_inside_still_requires_a_metadata_rule_from_the_gateway(self):
         self.assertEqual(
             self.verdict(
-                inside=True, proxy="http://proxy.invalid", rule="metadata_hosts"
+                inside=True,
+                token_connected=True,
+                proxy="http://proxy.invalid",
+                rule="metadata_hosts",
             )[0],
             0,
         )

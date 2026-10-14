@@ -43,3 +43,13 @@ transform = { file = "examples/strands-box-codex-sdk/vm/probe_mmds.py", replace 
 id = "box-metadata-inside-fails-before-driver"
 message = "test_route_or_either_probe_failure_prevents_the_driver"
 transform = { file = "examples/strands-box-codex-sdk/run.sh", replace = '  exit "$PROBE_STATUS"', with = '  :' }
+
+[[family.fault]]
+id = "box-metadata-outside-token-contact-refused"
+message = "test_outside_rejects_token_connections_even_without_a_token"
+transform = { file = "examples/strands-box-codex-sdk/vm/probe_mmds.py", replace = '    if token_connected and not inside:', with = '    if False:' }
+
+[[family.fault]]
+id = "box-metadata-token-contact-survives-io-error"
+message = "test_outside_rejects_token_connections_even_without_a_token"
+transform = { file = "examples/strands-box-codex-sdk/vm/probe_mmds.py", replace = "        return (\n            connected,", with = "        return (\n            False," }
