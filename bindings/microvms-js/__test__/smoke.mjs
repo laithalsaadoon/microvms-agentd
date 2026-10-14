@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Smoke tests for the napi-rs binding, run with `node --test __test__`.
 //
-// Every test here is a guard proof for BIND-2 or BIND-5, not a coverage exercise. The rule
+// The value and validation tests guard BIND-2 or BIND-5, not coverage counts. The rule
 // each one checks is "the mistake is not expressible, or the core refuses it" — so a test
-// that merely called a method and got a value back would prove nothing this file exists to
-// prove.
+// that merely called a method and got a value back would prove nothing about those rules.
 //
 // JS needs *more* of these than Python does, not fewer, because it coerces far more eagerly:
 // `usd * 2`, `+usd`, `usd > 1`, and `JSON.stringify(usd)` are four separate doors a `valueOf`
@@ -25,6 +24,7 @@ import {
   compareResidency,
   costConstants,
   coreVersion,
+  ControlPlane,
   Duration,
   errorCodes,
   estimateRun,
@@ -486,4 +486,21 @@ test('the residency comparison carries its own counter-argument', () => {
   assert.ok(Number.isNaN(Number(perCycle)), 'per-cycle cost coerced to a number');
   assert.match(comparison.render(), /break-even hold/);
   assert.match(comparison.render(), /avoid churn/);
+});
+
+// Run in the Lambda image by npm:lambda, with only the matching addon copied.
+test('Lambda runtime loads the minimal package and reaches credential resolution', {
+  skip: process.env.MICROVMS_LAMBDA_SMOKE !== '1',
+  timeout: 15000,
+}, async () => {
+  assert.equal(process.platform, 'linux');
+  assert.equal(process.arch, process.env.MICROVMS_LAMBDA_ARCH);
+  assert.match(process.versions.node, /^24\./);
+  await assert.rejects(async () => {
+    const plane = await ControlPlane.create(Region.usEast1());
+    await plane.list();
+  }, (error) => {
+    assert.equal(codeOf(error), 'ERR_CREDENTIALS');
+    return true;
+  });
 });
