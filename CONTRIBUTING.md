@@ -33,6 +33,9 @@ consult their tasks in `.config/mise/tasks/` and the CI workflows.
 The Linux daemon capability tests require util-linux `unshare` and enabled user
 and network namespaces. They confine irreversible capability changes and seeded
 startup failures to child processes. Unavailable namespaces fail the test.
+The Linux Rust, mutation, and seeded-fault CI jobs opt into allowing these
+namespaces when Ubuntu's AppArmor restriction blocks them; other jobs keep
+the runner's default restriction.
 
 Useful checks while iterating:
 
