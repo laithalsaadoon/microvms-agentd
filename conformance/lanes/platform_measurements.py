@@ -5,8 +5,8 @@ This section records observations rather than presuming whether AWS permits an
 operation. It runs only with --only platform_measurements, before either feature
 is selected.
 The snapshot wrapper drops before execing agentd to measure inheritance; that
-exec removes effective/permitted capabilities too. Its repair outcome cannot
-rule out an in-process drop that preserves the daemon's effective capabilities.
+exec removes effective/permitted capabilities too. This snapshot cannot rule
+out an in-process drop that preserves the daemon's effective capabilities.
 """
 
 from __future__ import annotations
