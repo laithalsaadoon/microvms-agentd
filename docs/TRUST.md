@@ -52,6 +52,12 @@ authentication enabled; the proxy credential authenticates the upstream hop,
 not the user of that app. The code-server example uploads a protected
 password configuration before starting the IDE.
 
+The Host check runs before reading a request body or minting a credential.
+Local HTTP requests support keep-alive and chunked bodies, with a 16 MiB body
+cap. Headers and unfinished bodies have a five-second deadline, including
+headers on an idle keep-alive connection. An HTTP upgrade keeps the connection
+open until its byte relay ends.
+
 ## Why source-address filtering is wrong, not merely weak
 
 Measured 2026-08-04, us-east-1, API `2025-09-09`: platform hooks and proxied
