@@ -1,0 +1,16 @@
+# ── the build artifact records Unix as every entry's host (#621, IMAGE-7) ─────
+#
+# zip records the host that runs the build unless told otherwise, MS-DOS on Windows. On a Linux
+# runner, taking `.system(zip::System::Unix)` out changes nothing, so FAIL_TO_PASS can't prove
+# the guard there; this fault writes the Windows default in its place, and the test reads the
+# host byte back out of the central directory.
+
+[[fault]]
+id = "app-artifact-records-dos-as-its-host"
+guard = "control::artifact::tests::every_artifact_entry_records_unix_as_its_host_system"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::artifact::tests::every_artifact_entry_records_unix_as_its_host_system"]
+expect = "test-failed"
+suite = "rust"
+message = "IMAGE-7: every entry's host system is Unix"
+note = "crates/microvms-app/src/control/artifact.rs::every_artifact_entry_records_unix_as_its_host_system"
+transform = { file = "crates/microvms-app/src/control/artifact.rs", replace = "            .system(zip::System::Unix)\n", with = "            .system(zip::System::Dos)\n" }
