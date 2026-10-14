@@ -1,0 +1,37 @@
+# ── sandbox603: FAIL_TO_PASS entries tools/fail-to-pass.py emitted ──
+
+# FAIL_TO_PASS: fails on 0b40f9fc4e4c with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-resume-observes-platform-idle-suspension-and-resumes"
+guard = "sandbox::tests::resume_observes_platform_idle_suspension_and_resumes"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "sandbox::tests::resume_observes_platform_idle_suspension_and_resumes"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-resume-observes-platform-idle-suspension-and-resumes.patch"
+
+# FAIL_TO_PASS: fails on 0b40f9fc4e4c with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-resume-observes-platform-termination-and-records-window"
+guard = "sandbox::tests::resume_observes_platform_termination_and_records_window_closed"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "sandbox::tests::resume_observes_platform_termination_and_records_window_closed"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-resume-observes-platform-termination-and-records-window.patch"
+
+# FAIL_TO_PASS: fails on 0b40f9fc4e4c with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-resume-observes-running-and-propagates-observation"
+guard = "sandbox::tests::resume_observes_running_and_propagates_observation_failures"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "sandbox::tests::resume_observes_running_and_propagates_observation_failures"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-resume-observes-running-and-propagates-observation.patch"
+
+# FAIL_TO_PASS: fails on 0b40f9fc4e4c with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-resume-retries-observation-after-transient-service"
+guard = "sandbox::tests::resume_retries_observation_after_transient_service_states"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "sandbox::tests::resume_retries_observation_after_transient_service_states"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-resume-retries-observation-after-transient-service.patch"

@@ -42,10 +42,9 @@
 //! VM that ended, whatever ended it, comes back from [`ControlPlane::resume`] as
 //! [`ErrorKind::WindowClosed`], which this sandbox records as a termination (STATE-11).
 //!
-//! A suspend the idle policy makes isn't seen here: the sandbox still holds the VM as
-//! RUNNING, and its resume is refused before any call (STATE-7). That suspend reaches a
-//! caller only through [`Sandbox::adopt`], which reads the state from the service, or
-//! [`ControlPlane::resume`], which holds no lifecycle to refuse from.
+//! A sandbox held as RUNNING reads `GetMicrovm` before deciding whether it can resume.
+//! This observes a suspend or termination made by the platform idle policy. A service
+//! state of SUSPENDED follows the normal resume path; an ended VM is `WindowClosed`.
 //!
 //! # Teardown never raises, and the log group is last
 //!
@@ -1656,8 +1655,8 @@ impl Sandbox {
     /// us-east-1, #597). A resume the service refuses because the VM ended, whatever ended
     /// it, is [`ErrorKind::WindowClosed`] ([`ControlPlane::resume`]), and this records the VM
     /// as terminated, so a second resume is refused here with no call (STATE-11). A VM the
-    /// idle policy suspended is still RUNNING here, so its resume is refused before any call
-    /// (STATE-7); see the module docs.
+    /// idle policy suspended may still be RUNNING here, so resume first reads its service
+    /// state. It resumes from SUSPENDED and reports `WindowClosed` for an ended VM.
     ///
     /// # The proxy token is dropped (STATE-8)
     ///
@@ -1678,10 +1677,45 @@ impl Sandbox {
                  call the service accepted would hand back a different machine."
             )));
         }
-        if self.lifecycle != Lifecycle::Suspended {
+        let mut resume_state = self.lifecycle;
+        // Idle suspension happens without a client call. Refresh a RUNNING handle before
+        // applying STATE-7, but keep STATE-11 above entirely local once termination is known.
+        if self.lifecycle == Lifecycle::Running {
+            let observed = self.control.get_microvm(&id).await?;
+            resume_state = Lifecycle::from_service(&observed.state).ok_or_else(|| {
+                Error::new(
+                    ErrorKind::Platform,
+                    format!("microvm {id} reports unknown state {}", observed.state),
+                )
+            })?;
+            let ended = crate::constants::DEAD_STATES.contains(&observed.state.as_str());
+            let error = ended.then(|| {
+                Error::new(
+                    ErrorKind::WindowClosed,
+                    format!(
+                        "microvm {id} can't be resumed: GetMicrovm reports the VM {} ({}). \
+                         A VM that has ended doesn't come back; launch a new one.",
+                        observed.state,
+                        observed.reason(),
+                    ),
+                )
+            });
+            self.microvm = Some(observed);
+            // A transient state must not strand the handle: only RUNNING handles refresh
+            // here, so leave it eligible to observe the service again on the next call.
+            if resume_state == Lifecycle::Suspended {
+                self.set_lifecycle(resume_state);
+            }
+            if let Some(error) = error {
+                self.was_terminated = true;
+                self.set_lifecycle(Lifecycle::Terminated);
+                return Err(error);
+            }
+        }
+        if resume_state != Lifecycle::Suspended {
             return Err(Error::invalid_arg(format!(
                 "microvm {id} is {} and a resume is only issued from SUSPENDED (STATE-7).",
-                self.lifecycle,
+                resume_state,
             )));
         }
 
@@ -3919,6 +3953,214 @@ mod tests {
             body: r#"{"message": "The MicroVM mvm-abc123 has been terminated and its state cannot be changed."}"#
                 .to_string(),
             error_type: Some("ValidationException".to_string()),
+        }
+    }
+
+    /// STATE-7 and STATE-8: idle suspension is learned from the service, then resumed
+    /// without a second bootstrap. The cached proxy token is dropped as for an explicit
+    /// suspend, and both the held VM and the lifecycle watch reflect the new state.
+    #[tokio::test]
+    async fn resume_observes_platform_idle_suspension_and_resumes() {
+        let (mut sandbox, recorder, _) = planted();
+        recorder
+            .answer(
+                "RunMicrovm",
+                Answer::ok(fake::microvm_response("PENDING", None)),
+            )
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("RUNNING", None)),
+            )
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("SUSPENDED", None)),
+            )
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("RUNNING", None)),
+            )
+            .answer(
+                "CreateMicrovmAuthToken",
+                Answer::ok(fake::auth_token_response("proxy-token")),
+            )
+            .answer("ResumeMicrovm", Answer::ok(fake::empty_response()));
+        sandbox
+            .run(RunRequest::new().with_image("arn:image"))
+            .await
+            .expect("launch");
+        let token = sandbox
+            .session()
+            .expect("session")
+            .agent_token()
+            .to_string();
+        let watch = sandbox.watch_lifecycle();
+        let calls = recorder.calls().len();
+        sandbox.resume().await.expect("idle-suspended VM resumes");
+        assert_eq!(
+            &recorder.operations()[calls..],
+            &["GetMicrovm", "ResumeMicrovm", "GetMicrovm"]
+        );
+        assert_eq!(sandbox.lifecycle(), Lifecycle::Running);
+        assert_eq!(*watch.borrow(), Lifecycle::Running);
+        assert_eq!(sandbox.microvm().expect("VM").state, "RUNNING");
+        assert_eq!(sandbox.bootstrap_count(), 1);
+        assert_eq!(recorder.call_count("RunMicrovm"), 1);
+        assert_eq!(recorder.call_count("SuspendMicrovm"), 0);
+        assert_eq!(sandbox.session().expect("session").agent_token(), token);
+        assert!(
+            !sandbox
+                .session()
+                .expect("session")
+                .proxy_auth()
+                .expect("auth")
+                .is_cached()
+        );
+    }
+
+    /// STATE-12 and STATE-11: an idle-suspended VM may already have ended before resume.
+    /// The observation names its state and reason, records termination, and avoids a
+    /// pointless resume call or a drop warning about a live VM.
+    #[tokio::test]
+    async fn resume_observes_platform_termination_and_records_window_closed() {
+        for state in ["TERMINATING", "TERMINATED"] {
+            let (mut sandbox, recorder, _) = planted();
+            recorder
+                .answer(
+                    "RunMicrovm",
+                    Answer::ok(fake::microvm_response("PENDING", None)),
+                )
+                .answer(
+                    "GetMicrovm",
+                    Answer::ok(fake::microvm_response("RUNNING", None)),
+                )
+                .answer(
+                    "GetMicrovm",
+                    Answer::ok(fake::microvm_response(state, Some("idle window elapsed"))),
+                )
+                .answer(
+                    "CreateMicrovmAuthToken",
+                    Answer::ok(fake::auth_token_response("proxy-token")),
+                );
+            sandbox
+                .run(RunRequest::new().with_image("arn:image"))
+                .await
+                .expect("launch");
+            let watch = sandbox.watch_lifecycle();
+            let error = sandbox.resume().await.expect_err("the VM ended");
+            assert_eq!(error.kind(), ErrorKind::WindowClosed, "{error}");
+            assert!(error.to_string().contains(state), "{error}");
+            assert!(error.to_string().contains("idle window elapsed"), "{error}");
+            assert_eq!(sandbox.lifecycle(), Lifecycle::Terminated);
+            assert_eq!(*watch.borrow(), Lifecycle::Terminated);
+            assert_eq!(sandbox.microvm().expect("VM").state, state);
+            assert!(sandbox.was_terminated());
+            assert_eq!(sandbox.drop_warning(), None);
+            let calls = recorder.calls().len();
+            assert_eq!(
+                sandbox.resume().await.expect_err("STATE-11").kind(),
+                ErrorKind::InvalidArg
+            );
+            assert_eq!(
+                recorder.calls().len(),
+                calls,
+                "known termination stays local"
+            );
+            assert_eq!(recorder.call_count("ResumeMicrovm"), 0);
+        }
+    }
+
+    /// STATE-7: a service that still reports RUNNING must not receive ResumeMicrovm.
+    /// A failed observation also leaves the handle available for a later retry.
+    #[tokio::test]
+    async fn resume_observes_running_and_propagates_observation_failures() {
+        for (response, expected) in [
+            (
+                Answer::ok(fake::microvm_response("RUNNING", None)),
+                ErrorKind::InvalidArg,
+            ),
+            (
+                Answer::ok(fake::microvm_response("UNKNOWN", None)),
+                ErrorKind::Platform,
+            ),
+            (
+                Answer::failure(403, "access denied"),
+                ErrorKind::Credentials,
+            ),
+        ] {
+            let (mut sandbox, recorder, _) = planted();
+            recorder
+                .answer(
+                    "RunMicrovm",
+                    Answer::ok(fake::microvm_response("PENDING", None)),
+                )
+                .answer(
+                    "GetMicrovm",
+                    Answer::ok(fake::microvm_response("RUNNING", None)),
+                )
+                .answer("GetMicrovm", response)
+                .answer(
+                    "CreateMicrovmAuthToken",
+                    Answer::ok(fake::auth_token_response("proxy-token")),
+                );
+            sandbox
+                .run(RunRequest::new().with_image("arn:image"))
+                .await
+                .expect("launch");
+            let calls = recorder.calls().len();
+            let error = sandbox.resume().await.expect_err("cannot resume");
+            assert_eq!(error.kind(), expected, "{error}");
+            assert_eq!(&recorder.operations()[calls..], &["GetMicrovm"]);
+            assert_eq!(sandbox.lifecycle(), Lifecycle::Running);
+            assert!(!sandbox.was_terminated());
+        }
+    }
+
+    /// A transient service state must not strand a locally RUNNING handle: the next
+    /// resume still observes the service and can resume once suspension completes.
+    #[tokio::test]
+    async fn resume_retries_observation_after_transient_service_states() {
+        for state in ["SUSPENDING", "PENDING", "RESUMING"] {
+            let (mut sandbox, recorder, _) = planted();
+            recorder
+                .answer(
+                    "RunMicrovm",
+                    Answer::ok(fake::microvm_response("PENDING", None)),
+                )
+                .answer(
+                    "GetMicrovm",
+                    Answer::ok(fake::microvm_response("RUNNING", None)),
+                )
+                .answer(
+                    "GetMicrovm",
+                    Answer::ok(fake::microvm_response(state, None)),
+                )
+                .answer(
+                    "GetMicrovm",
+                    Answer::ok(fake::microvm_response("SUSPENDED", None)),
+                )
+                .answer(
+                    "GetMicrovm",
+                    Answer::ok(fake::microvm_response("RUNNING", None)),
+                )
+                .answer(
+                    "CreateMicrovmAuthToken",
+                    Answer::ok(fake::auth_token_response("proxy-token")),
+                )
+                .answer("ResumeMicrovm", Answer::ok(fake::empty_response()));
+            sandbox
+                .run(RunRequest::new().with_image("arn:image"))
+                .await
+                .expect("launch");
+            let error = sandbox.resume().await.expect_err("still changing state");
+            assert!(error.to_string().contains(state), "{error}");
+            assert_eq!(sandbox.lifecycle(), Lifecycle::Running);
+            assert_eq!(recorder.call_count("ResumeMicrovm"), 0);
+            sandbox
+                .resume()
+                .await
+                .expect("the next observation can resume");
+            assert_eq!(sandbox.lifecycle(), Lifecycle::Running);
+            assert_eq!(recorder.call_count("ResumeMicrovm"), 1);
         }
     }
 

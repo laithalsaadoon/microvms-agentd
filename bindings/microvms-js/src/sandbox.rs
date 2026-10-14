@@ -1144,21 +1144,21 @@ impl Sandbox {
     /// # What the core refuses, before any wire call
     ///
     /// A resume after `terminate` (STATE-11) — a terminated VM never returns to RUNNING, and
-    /// even a call the service accepted would hand back a different machine. And a resume
-    /// from anything but SUSPENDED (STATE-7).
+    /// even a call the service accepted would hand back a different machine. A handle in
+    /// neither RUNNING nor SUSPENDED also refuses locally (STATE-7).
     ///
     /// # What the service decides (STATE-12)
     ///
     /// How long the VM has been suspended. The `idlePolicy` terminates a VM the idle policy
     /// suspended once `suspendedSec` passes, and a VM this sandbox suspended stayed resumable
-    /// 1283 s into a 60 s window (measured 2026-10-12, us-east-1). `ERR_WINDOW_CLOSED` is the
-    /// service's answer once a resume reaches it: the service refused the resume, and the VM
-    /// is TERMINATING or TERMINATED, whatever ended it. The sandbox is TERMINATED after it.
+    /// 1283 s into a 60 s window (measured 2026-10-12, us-east-1). `ERR_WINDOW_CLOSED` reports
+    /// a VM the service says is TERMINATING or TERMINATED, whatever ended it. The sandbox
+    /// records it as TERMINATED.
     ///
-    /// A sandbox doesn't see a suspend the idle policy makes. It still holds the VM as
-    /// RUNNING, so `resume` rejects with `ERR_INVALID_ARG` before any call (STATE-7). That
-    /// suspend reaches a caller only through `Sandbox.adopt`, which reads the state from the
-    /// service, or `ControlPlane.resume`, which holds no lifecycle to refuse from.
+    /// With a locally RUNNING handle, `resume` reads `GetMicrovm` first. It resumes an
+    /// observed SUSPENDED VM and reports `ERR_WINDOW_CLOSED` for a VM that has ended.
+    /// Other known service states refuse the request; a later call can read the service
+    /// again.
     ///
     /// Nothing is re-delivered: no run-hook payload, no token, no bootstrap. The in-memory
     /// token survived the freeze, and re-delivering it would hit the daemon's one-shot

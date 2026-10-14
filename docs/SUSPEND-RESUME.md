@@ -74,7 +74,12 @@ credentials keep expiring in wall-clock time while the VM is suspended.
 - **The lifetime cap includes suspended time.** AWS: `maximumDurationInSeconds`
   (at most 28,800) covers running and suspended time.
 
-The idle policy is set at `RunMicrovm` and cannot be changed afterward.
+Choose the idle policy at `RunMicrovm`. The policy then applies for the VM's full life.
+
+`Sandbox.resume` reads `GetMicrovm` when the handle still holds RUNNING. It
+resumes the VM if the service reports SUSPENDED. For an ended VM, it records the
+end and returns `ERR_WINDOW_CLOSED` with the service state and reason. It refuses
+to resume a VM that still reports RUNNING.
 
 ## Lifecycle hooks: the only control point
 

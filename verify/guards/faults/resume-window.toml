@@ -1,3 +1,5 @@
+# The #597 proofs below use focused mutations after #603 changed the surrounding code.
+# The window cases restore a local time refusal; the ended-VM cases drop error mapping.
 # ── resume-window: FAIL_TO_PASS entries tools/fail-to-pass.py emitted ──
 
 # FAIL_TO_PASS: fails on f410ec2f4c80 with the fix taken out (tools/fail-to-pass.py).
