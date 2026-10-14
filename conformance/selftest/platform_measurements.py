@@ -20,8 +20,8 @@ from lanes.platform_measurements import (
     STATUS_FIELDS,
     check_measurement,
     check_poweroff,
-    measure_poweroff,
     drive_platform_measurements,
+    measure_poweroff,
     measurement_dockerfile,
 )
 
