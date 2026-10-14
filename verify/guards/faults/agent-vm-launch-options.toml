@@ -18,7 +18,7 @@ transform = { file = "bindings/microvms-py/src/agents.rs", replace = "    if let
 id = "js-agent-vm-launch-drops-launch-env"
 guard = "an agent VM launch takes the launch env and the ready timeout"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/control.mjs"],
 ]
 expect = "test-failed"

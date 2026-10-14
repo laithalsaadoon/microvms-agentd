@@ -107,7 +107,7 @@ PY_BUILD = [
     "bindings/microvms-py/Cargo.toml",
 ]
 JS_BUILD = [
-    "npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml",
+    "npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml",
     "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd",
     "bindings/microvms-js",
 ]  # fmt: skip

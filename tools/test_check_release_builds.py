@@ -240,7 +240,7 @@ class ReleaseBuildTests(unittest.TestCase):
                 (root / path).parent.mkdir(parents=True, exist_ok=True)
                 (root / path).write_text((ROOT / path).read_text())
             package = copy.deepcopy(self.package)
-            package["devDependencies"]["@napi-rs/cli"] = "^3.8.2"
+            package["devDependencies"]["@napi-rs/cli"] = "^3.10.8"
             (root / policy.PACKAGE).write_text(json.dumps(package))
             with (
                 patch("sys.argv", ["check-release-builds.py", "--root", directory]),
@@ -451,7 +451,7 @@ class ReleaseBuildTests(unittest.TestCase):
         )
         self.assert_refused("exact version and --locked")
         self.step("addons", "napi build")["run"] = (
-            "npx -y -p @napi-rs/cli@3.8.2 napi build"
+            "npx -y -p @napi-rs/cli@3.10.8 napi build"
         )
         self.assert_refused("locked local Node tools")
         self.lock["packages"]["node_modules/@napi-rs/cli"].pop("integrity")
@@ -468,7 +468,7 @@ class ReleaseBuildTests(unittest.TestCase):
         step = self.step("wheels", "build the wheel")
         step["run"] = step["run"].replace("maturin@1.14.1", "maturin")
         self.assert_refused("maturin needs an exact version")
-        self.package["devDependencies"]["@napi-rs/cli"] = "^3.8.2"
+        self.package["devDependencies"]["@napi-rs/cli"] = "^3.10.8"
         self.assert_refused("generator must have an exact version")
         self.assert_refused("lock must match")
         self.workflow["jobs"]["addons"]["steps"].remove(

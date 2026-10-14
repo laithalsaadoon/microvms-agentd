@@ -8,7 +8,7 @@
 [[family]]
 guard = "tools/check-npm-package.py"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["./tools/check-npm-package.py"],
 ]
 expect = "exit-nonzero"

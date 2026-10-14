@@ -7,7 +7,7 @@
 id = "dts-consumer-exec-stream-attribute"
 guard = "tools/check-dts-consumer.py"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["./tools/check-dts-consumer.py"],
 ]
 expect = "exit-nonzero"
@@ -15,7 +15,7 @@ suite = "bindings"
 message = "TS2504"
 transform = { file = "bindings/microvms-js/src/exec.rs", replace = "#[napi]\nimpl AsyncGenerator for ExecStream {\n", with = "impl AsyncGenerator for ExecStream {\n" }
 
-# The index.d.ts anchors below are @napi-rs/cli 3.10.5's text. A CLI release that writes the member
+# The index.d.ts anchors below are @napi-rs/cli 3.10.8's text. A CLI release that writes the member
 # differently fails the stale diff first, and the regenerate it forces fails `guards:list` on these
 # anchors in the same change, so they're refreshed together rather than going stale unseen.
 [[family]]
@@ -135,7 +135,7 @@ transform = { file = "bindings/microvms-js/index.d.ts", replace = "  get amount(
 id = "dts-consumer-hook-timeout-attribute"
 guard = "tools/check-dts-consumer.py"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["./tools/check-dts-consumer.py"],
 ]
 expect = "exit-nonzero"
