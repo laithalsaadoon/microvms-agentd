@@ -1,8 +1,17 @@
-# A cached custom deadline must not be reused for a different spec.
+# Each active stream must use its own spec deadline.
 [[fault]]
 id = "forward-stream-custom-timeouts"
-guard = "replacing_a_custom_timeout_keeps_active_clients_independent"
-run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_streams", "--", "--exact", "replacing_a_custom_timeout_keeps_active_clients_independent"]
+guard = "concurrent_streams_keep_their_own_body_deadlines"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_streams", "--", "--exact", "concurrent_streams_keep_their_own_body_deadlines"]
 expect = "test-failed"
 suite = "rust"
-transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "&& *duration == timeout", with = "&& *duration != timeout" }
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "tokio::time::timeout(timeout, stream.next())", with = "tokio::time::timeout(DEFAULT_EXCHANGE_TIMEOUT, stream.next())" }
+
+# A client-level timer must not charge downstream backpressure to upstream reads.
+[[fault]]
+id = "forward-stream-local-backpressure"
+guard = "a_slow_local_reader_does_not_expire_ready_upstream_bytes"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_streams", "--", "--exact", "a_slow_local_reader_does_not_expire_ready_upstream_bytes"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = ".redirect(reqwest::redirect::Policy::none())", with = ".redirect(reqwest::redirect::Policy::none()).read_timeout(std::time::Duration::from_millis(500))" }

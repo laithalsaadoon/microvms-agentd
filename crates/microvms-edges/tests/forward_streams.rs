@@ -158,6 +158,38 @@ async fn successful_reads_keep_a_stream_open_past_the_exchange_timeout() {
 }
 
 #[tokio::test]
+async fn a_slow_local_reader_does_not_expire_ready_upstream_bytes() {
+    let (endpoint, listener) = listener().await;
+    let size = 1024 * 1024;
+    let upstream = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        through(&mut stream, b"\r\n\r\n").await;
+        stream
+            .write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {size}\r\n\r\n").as_bytes())
+            .await
+            .unwrap();
+        stream.write_all(&vec![b'x'; size]).await.unwrap();
+    });
+    let timeout = Duration::from_millis(500);
+    let (mut browser, task) = relay(endpoint, timeout, Arc::new(ForwardClient::new().unwrap()));
+    request(&mut browser).await;
+    tokio::time::timeout(BOUND, through(&mut browser, b"\r\n\r\n"))
+        .await
+        .unwrap();
+    // The duplex holds far less than the body, so hyper must stop polling the
+    // upstream while this client deliberately leaves its response unread.
+    tokio::time::sleep(timeout * 3).await;
+    let mut body = Vec::new();
+    tokio::time::timeout(BOUND, browser.read_to_end(&mut body))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(body, vec![b'x'; size]);
+    task.await.unwrap().unwrap();
+    upstream.await.unwrap();
+}
+
+#[tokio::test]
 async fn response_head_and_body_gaps_each_have_a_deadline() {
     for send_head in [false, true] {
         let (endpoint, listener) = listener().await;
@@ -194,7 +226,7 @@ async fn response_head_and_body_gaps_each_have_a_deadline() {
 }
 
 #[tokio::test]
-async fn replacing_a_custom_timeout_keeps_active_clients_independent() {
+async fn concurrent_streams_keep_their_own_body_deadlines() {
     let (endpoint, listener) = listener().await;
     let upstream = tokio::spawn(async move {
         let mut exchanges = tokio::task::JoinSet::new();

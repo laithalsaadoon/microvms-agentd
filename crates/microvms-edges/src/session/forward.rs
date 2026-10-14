@@ -92,7 +92,8 @@ use microvms_app::session::proxy::{PROXY_AUTH_HEADER, PROXY_PORT_HEADER, ProxyAu
 ///
 /// Generous rather than tight: the thing on the other end is a developer's dev server, and a
 /// long-polling request or a slow first compile is normal traffic rather than a fault.
-/// Successful reads reset the body deadline, so a stream can outlive this duration. The
+/// Successful reads reset the body deadline, so a stream can outlive this duration. Time
+/// blocked by a slow local reader is excluded. The
 /// upgrade path is exempt — a WebSocket is idle by design, so once a connection is upgraded
 /// this timeout no longer applies to it.
 pub const DEFAULT_EXCHANGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
@@ -181,7 +182,8 @@ pub struct ForwardSpec {
     /// The VM's endpoint host, as `run` reported it.
     pub endpoint: String,
     /// The response-head deadline and the maximum gap between response-body reads.
-    /// Successful body reads reset the deadline; upgrades have no read deadline.
+    /// Successful body reads reset the deadline; local backpressure is excluded.
+    /// Upgrades have no read deadline.
     pub exchange_timeout: std::time::Duration,
 }
 
@@ -303,47 +305,22 @@ pub fn forwards_request_header(name: &str) -> bool {
 /// whole tunnel: a page-load of thirty assets should not pay thirty TLS handshakes.
 pub struct ForwardClient {
     inner: reqwest::Client,
-    custom: Mutex<Option<(std::time::Duration, reqwest::Client)>>,
 }
 
 impl ForwardClient {
     /// A pooled client for one tunnel.
     pub fn new() -> Result<Self, Error> {
-        Self::build(DEFAULT_EXCHANGE_TIMEOUT).map(|inner| Self {
-            inner,
-            custom: Mutex::new(None),
-        })
-    }
-
-    fn build(read_timeout: std::time::Duration) -> Result<reqwest::Client, Error> {
         reqwest::Client::builder()
             // Relay redirects to the local client without requesting their destination.
             .redirect(reqwest::redirect::Policy::none())
-            .read_timeout(read_timeout)
             .build()
+            .map(|inner| Self { inner })
             .map_err(|err| {
                 Error::new(
                     ErrorKind::Unexpected,
                     format!("could not build the forwarder's HTTP client: {err}"),
                 )
             })
-    }
-
-    fn for_timeout(&self, timeout: std::time::Duration) -> Result<reqwest::Client, Error> {
-        if timeout == DEFAULT_EXCHANGE_TIMEOUT {
-            return Ok(self.inner.clone());
-        }
-        // Keep a pool for the current custom spec, without growing a cache for every
-        // duration a caller ever used. Active connections retain their own client clone.
-        let mut custom = self.custom.lock().expect("client lock poisoned");
-        if let Some((duration, client)) = custom.as_ref()
-            && *duration == timeout
-        {
-            return Ok(client.clone());
-        }
-        let client = Self::build(timeout)?;
-        *custom = Some((timeout, client.clone()));
-        Ok(client)
     }
 }
 
@@ -461,11 +438,10 @@ where
     F: FnMut(ForwardEvent),
 {
     let (events, mut pending_events) = mpsc::unbounded_channel();
-    let client = client.for_timeout(spec.exchange_timeout)?;
     let upgraded = Mutex::new(None);
     let answered = AtomicBool::new(false);
     let service = service_fn(|request| {
-        let result = forward_request(request, spec, auth, &client, &events, &upgraded);
+        let result = forward_request(request, spec, auth, client, &events, &upgraded);
         let answered = &answered;
         Box::pin(async move {
             let response = result.await;
@@ -589,7 +565,7 @@ async fn forward_request(
     request: http::Request<Incoming>,
     spec: &ForwardSpec,
     auth: Option<&Arc<ProxyAuth>>,
-    client: &reqwest::Client,
+    client: &ForwardClient,
     events: &mpsc::UnboundedSender<ForwardEvent>,
     upgraded: &Mutex<Option<reqwest::Upgraded>>,
 ) -> Result<http::Response<ForwardBody>, Error> {
@@ -664,7 +640,7 @@ async fn forward_request(
     let offered_upgrade = head.headers.contains_key(http::header::UPGRADE);
     strip_hop_headers(&mut head.headers, offered_upgrade);
     let head_only = head.method == http::Method::HEAD;
-    let mut request = client.request(head.method, &url);
+    let mut request = client.inner.request(head.method, &url);
     for (name, value) in &head.headers {
         // Hyper decoded the local transfer framing; reqwest frames the collected bytes.
         if forwards_request_header(name.as_str())
@@ -677,8 +653,8 @@ async fn forward_request(
     for (name, value) in &minted {
         request = request.header(name, value);
     }
-    // reqwest's read deadline also covers the body, but a head needs an absolute
-    // deadline so an upstream cannot keep it alive by trickling header bytes.
+    // A head needs an absolute deadline so an upstream cannot keep it alive by
+    // trickling header bytes. Body reads have their own deadline below.
     let response = tokio::time::timeout(spec.exchange_timeout, request.body(body).send())
         .await
         .map_err(|_| Error::new(ErrorKind::Unexpected, "the guest's response head timed out"))?
@@ -721,7 +697,7 @@ async fn forward_request(
         let _ = events.send(event);
         full_body(Bytes::new())
     } else {
-        streaming_body(response, events.clone(), event)
+        streaming_body(response, events.clone(), event, spec.exchange_timeout)
     };
     let mut response = http::Response::new(body);
     *response.status_mut() = status;
@@ -735,15 +711,19 @@ fn streaming_body(
     response: reqwest::Response,
     events: mpsc::UnboundedSender<ForwardEvent>,
     event: ForwardEvent,
+    timeout: std::time::Duration,
 ) -> ForwardBody {
     let remaining = response.content_length();
     let stream = response.bytes_stream().boxed();
-    let state = (stream, remaining, Some(event), events);
+    let state = (stream, remaining, Some(event), events, timeout);
     let frames = futures_util::stream::unfold(
         state,
-        |(mut stream, mut remaining, mut event, events)| async move {
-            match stream.next().await {
-                Some(Ok(chunk)) => {
+        |(mut stream, mut remaining, mut event, events, timeout)| async move {
+            // Start the deadline only when hyper asks for another chunk. A reqwest
+            // client read_timeout stays armed while a slow local reader applies
+            // backpressure, which can expire before already-ready data is polled.
+            match tokio::time::timeout(timeout, stream.next()).await {
+                Ok(Some(Ok(chunk))) => {
                     if let Some(left) = remaining.as_mut() {
                         *left = left.saturating_sub(chunk.len() as u64);
                         if *left == 0 {
@@ -752,16 +732,26 @@ fn streaming_body(
                             }
                         }
                     }
-                    Some((Ok(Frame::data(chunk)), (stream, remaining, event, events)))
+                    Some((
+                        Ok(Frame::data(chunk)),
+                        (stream, remaining, event, events, timeout),
+                    ))
                 }
-                Some(Err(error)) => Some((
+                Ok(Some(Err(error))) => Some((
                     Err(Error::new(
                         ErrorKind::Unexpected,
                         format!("reading the guest's response body failed: {error}"),
                     )),
-                    (stream, remaining, None, events),
+                    (stream, remaining, None, events, timeout),
                 )),
-                None => {
+                Err(_) => Some((
+                    Err(Error::new(
+                        ErrorKind::Unexpected,
+                        "reading the guest's response body timed out",
+                    )),
+                    (stream, remaining, None, events, timeout),
+                )),
+                Ok(None) => {
                     if let Some(event) = event {
                         let _ = events.send(event);
                     }

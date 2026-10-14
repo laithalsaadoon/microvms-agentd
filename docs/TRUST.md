@@ -58,7 +58,8 @@ cap. Headers and unfinished bodies have a five-second deadline, including
 headers on an idle keep-alive connection. An HTTP upgrade keeps the connection
 open until its byte relay ends. Response bodies stream with backpressure; the
 exchange timeout bounds the response head and each gap between body reads,
-so successful reads keep an active response open.
+so successful reads keep an active response open. Time blocked by a slow local
+reader does not consume that deadline.
 
 ## Why source-address filtering is wrong, not merely weak
 

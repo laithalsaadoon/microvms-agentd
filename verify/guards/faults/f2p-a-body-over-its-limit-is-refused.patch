@@ -707,15 +707,18 @@ index 5c8abb9..9d9a2c5 100644
          }
      }
 diff --git a/crates/microvms-edges/src/session/forward.rs b/crates/microvms-edges/src/session/forward.rs
+index 181ec6c..36289e0 100644
 --- a/crates/microvms-edges/src/session/forward.rs
 +++ b/crates/microvms-edges/src/session/forward.rs
-@@ -316,6 +316,4 @@
-     fn build(read_timeout: std::time::Duration) -> Result<reqwest::Client, Error> {
+@@ -298,8 +298,6 @@ impl ForwardClient {
+     /// A pooled client for one tunnel.
+     pub fn new() -> Result<Self, Error> {
          reqwest::Client::builder()
 -            // Relay redirects to the local client without requesting their destination.
 -            .redirect(reqwest::redirect::Policy::none())
-             .read_timeout(read_timeout)
              .build()
+             .map(|inner| Self { inner })
+             .map_err(|err| {
 diff --git a/crates/microvms-edges/src/session/http.rs b/crates/microvms-edges/src/session/http.rs
 index 9f83e07..c413a4c 100644
 --- a/crates/microvms-edges/src/session/http.rs
