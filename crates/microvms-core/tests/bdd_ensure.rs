@@ -433,7 +433,10 @@ impl Ensure {
         let puts = self.services.puts.lock().expect("not poisoned");
         let (_, _, bytes) = puts.last().expect("an upload");
         let archive = zip::ZipArchive::new(std::io::Cursor::new(bytes.clone())).expect("a zip");
-        archive.file_names().map(str::to_string).collect()
+        archive
+            .file_names()
+            .map(|name| name.expect("a name").into_owned())
+            .collect()
     }
 
     fn platform(&self) -> std::sync::MutexGuard<'_, PlatformState> {
