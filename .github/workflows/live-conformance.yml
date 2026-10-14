@@ -84,7 +84,7 @@ jobs:
           set -euo pipefail
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "draft-release/$TAG"
           (cd "draft-release/$TAG" && sha256sum -c SHA256SUMS)
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: draft-release
           path: draft-release
@@ -122,7 +122,7 @@ jobs:
       # Every `uses:` here is on a Node 24 major, for the reason `ci.yml`'s header
       # paragraph gives — including `configure-aws-credentials@v6`, whose rolling
       # v6 tag landed on node24 (checked against the tag's action.yml, 2026-08-09).
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           # See `ci.yml`'s `security` job: `conformance/run_rs.py` and
           # `tools/check-live-rates.py` are PEP 723 scripts carrying their own
@@ -134,7 +134,7 @@ jobs:
       # (maturin through uvx, napi through npx) and drives their handles on the suite's VM.
       # 22 for the reason `mise.toml` pins it: the floor of microvms-js's `engines`. The same
       # setup-node commit `release.yml` and `addons.yml` pin.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: '22'
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
@@ -171,7 +171,7 @@ jobs:
             echo "MICROVM=target/release/microvm"
           } >> "$GITHUB_ENV"
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: github.ref_type == 'tag'
         with:
           name: draft-release
@@ -260,7 +260,7 @@ jobs:
           jq -n --arg tag "$TAG" --arg commit "$GITHUB_SHA" --rawfile sums "draft-release/$TAG/SHA256SUMS" \
             '{tag: $tag, commit: $commit, sha256sums: $sums}' > live-verified.json
           cat live-verified.json
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: github.ref_type == 'tag'
         with:
           name: live-verified
