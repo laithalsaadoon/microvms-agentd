@@ -22,7 +22,7 @@ COPY pyproject.toml uv.lock ./
 ENV UV_PROJECT_ENVIRONMENT=/opt/guest/.venv \
     UV_PYTHON=python3.12 \
     UV_PYTHON_DOWNLOADS=never
-RUN dnf -y --setopt=install_weak_deps=0 install python3.12 python3.12-pip tar gzip findutils procps-ng \
+RUN dnf -y --setopt=install_weak_deps=0 install python3.12 python3.12-pip tar gzip findutils procps-ng iproute \
     && dnf clean all \
     && pip3.12 install --no-cache-dir uv==0.13.0 \
     && uv sync --locked \
@@ -38,6 +38,7 @@ RUN echo "agent:x:1000:1000::/home/agent:/sbin/nologin" >> /etc/passwd \
     && chown 1000:1000 /home/agent
 WORKDIR /home/agent
 
+ENV AGENTD_DEFAULT_USER=agent
 ENV AGENTD_PORT=9000
 ENV AGENTD_LOG=info
 EXPOSE 9000
