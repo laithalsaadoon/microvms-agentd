@@ -302,6 +302,41 @@ mod tests {
                 "a failed discovery must not cache root"
             );
         }
+        for path in ["relative/file", "/", "/workspace/"] {
+            let recorder =
+                Recorder::with(std::iter::once(configured()).chain(exec("1000\n1000\n", 0)));
+            let session = unprobed(&recorder);
+            let error = session.upload_file(path, b"file", None).await.unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::InvalidArg);
+            assert_eq!(
+                recorder.requests().len(),
+                4,
+                "invalid destinations never prepare a stage"
+            );
+        }
+        for staging in [
+            "",
+            "/root/stage",
+            "/tmp/.microvms-upload-",
+            "/tmp/.microvms-upload-bad/path",
+        ] {
+            let recorder = Recorder::with(
+                std::iter::once(configured())
+                    .chain(exec("1000\n1000\n", 0))
+                    .chain(exec(staging, 0)),
+            );
+            let session = unprobed(&recorder);
+            let error = session
+                .upload_file("/workspace/file", b"file", None)
+                .await
+                .unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::ExecFailed);
+            assert_eq!(
+                recorder.requests().len(),
+                7,
+                "an invalid stage never receives bytes"
+            );
+        }
         for output in ["", "1000\n", "1000\nno-group\n", "1000\n1000\nextra\n"] {
             let recorder = Recorder::with(std::iter::once(configured()).chain(exec(output, 0)));
             let session = unprobed(&recorder);

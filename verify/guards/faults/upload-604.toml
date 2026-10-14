@@ -148,3 +148,12 @@ run = [["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Ca
 expect = "test-failed"
 suite = "bindings"
 transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "None => return Ok((ROOT_UID, ROOT_UID)),", with = "None => return Err(Error::invalid_arg(\"missing ownership marker\"))," }
+
+# The destination alternatives must each refuse independently (mutation shard 3).
+[[fault]]
+id = "upload-604-invalid-destination"
+guard = "session::upload::tests::refused_uploads_do_not_install_and_failed_writes_clean_the_stage"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::upload::tests::refused_uploads_do_not_install_and_failed_writes_clean_the_stage"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "if !path.starts_with('/') || path == \"/\" || path.ends_with('/') {", with = "if !path.starts_with('/') && path == \"/\" || path.ends_with('/') {" }
