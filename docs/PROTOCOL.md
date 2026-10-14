@@ -418,31 +418,31 @@ create belongs to root: files, directories, symlinks, and the parent
 directories made for them. Tar extraction masks each member's mode to `0755` at
 most, so it doesn't set a group or other write bit on a file or directory.
 `PUT /v1/fs/file` gives the file the `mode` the request sets, or `0644` without
-one, and the parent directories it creates are `0755`. The image's default user
-can read a tree written directly through these routes, but cannot write into
-its directories unless another operation transfers their ownership.
+one, and the parent directories it creates are `0755`. Direct uploads need a
+separate ownership transfer before a non-root default user can write into
+those directories.
 
-Health sends `microvms-default-user-configured: 1` when the image sets a default
-user; the header reveals no account name. Its absence keeps the direct upload
-path, including older, shell-free images. With that marker the shared client
-probes the default uid and gid once per session with a nameless `id -u; id -g`
-exec. For a non-root default it uploads into a private,
-root-owned staging directory, runs `chown` as `user: 0` there, then installs the
-contents as the default user. The staging directory stays inaccessible to that
-user until the ownership handoff finishes. Destination symlinks are refused;
-the install's remaining path races have only the default user's privileges.
-The client hands `/workspace` itself to the default user, so `run`, `cp`, sync,
-and both bindings can write the synced project. Other destinations must be
-writable by that user. Sync deletions use that same default identity, so a
-workload-controlled parent symlink cannot elevate the deletion's privileges.
-Root-default sessions retain the direct upload path.
-An unknown default refuses the probe before an upload. These client operations
+Health returns `microvms-default-user-configured: 1` when the image sets a default
+user. Clients use direct uploads when this header is absent, so older images
+work without a shell. With the header, the shared client runs `id -u; id -g` once per
+session to read the default user's UID and GID.
+
+For a non-root default, the client uploads into a private directory owned by
+root and runs `chown` there as `user: 0`. Only root can access the stage until
+the ownership transfer ends. The client then installs the contents as the
+default user. It refuses destination symlinks. Path traversal during install
+and sync deletion runs with the default user's permissions, even through a
+parent symlink. The client changes the owner of `/workspace` to the default
+user so the command-line tool and both bindings can write the project. Other destinations
+need write permission for that user. Root sessions use direct uploads.
+
+An invalid default stops the identity probe before upload. These operations
 need `/bin/sh` and the guest's `id`, `mktemp`, `chown`, `find`, `cp`, `mv`, `stat`,
 and `rm` in the system command directories. The helpers use a fixed system
-`PATH`, with shell startup-file variables cleared. The staging parent `/tmp`
-must be root-owned and sticky or writable only by root. If a handoff response
-is lost, cleanup runs only with the default user's privileges; a stage that
-the user cannot remove may remain for an authorized root caller to inspect.
+`PATH` and clear shell startup-file variables. The staging parent `/tmp` must
+belong to root. It must be sticky or writable only by root. After a lost handoff
+response, the client cleans up as the default user. An authorized root caller
+can inspect any remaining stage.
 
 ## Line-ranged text reads
 
