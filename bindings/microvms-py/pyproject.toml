@@ -12,14 +12,14 @@ build-backend = "maturin"
 name = "microvms"
 version = "1.0.1"
 description = "Python client for AWS Lambda MicroVMs"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 readme = "README.md"
 # PEP 639: an SPDX expression, which is why there is no
 # `License :: OSI Approved :: ...` entry in `classifiers` below. The two forms are
 # mutually exclusive — a wheel carrying both is rejected at build time.
 license = "Apache-2.0"
 keywords = ["microvms", "lambda", "aws", "sandbox", "microvm"]
-# `abi3-py39` in Cargo.toml is what makes one wheel load on every version listed
+# `abi3-py311` in Cargo.toml is what makes one wheel load on every version listed
 # here, so this list is a claim about the interpreters the extension supports
 # rather than a matrix the build has to enumerate.
 classifiers = [
@@ -27,11 +27,11 @@ classifiers = [
     "Intended Audience :: Developers",
     "Programming Language :: Rust",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Programming Language :: Python :: Implementation :: CPython",
     "Topic :: System :: Distributed Computing",
     "Topic :: System :: Emulators",
@@ -49,7 +49,7 @@ Issues = "https://github.com/laithalsaadoon/microvms-agentd/issues"
 # from the workspace root resolves it relative to the manifest, and being explicit
 # is how the two invocations stay the same build.
 manifest-path = "Cargo.toml"
-# `abi3-py39` in Cargo.toml is what makes one wheel load on 3.9 and newer; nothing
+# `abi3-py311` in Cargo.toml is what makes one wheel load on 3.11 and newer; nothing
 # here needs to restate it.
 
 # No `include` for `microvms.pyi` or `py.typed`, and no raised floor for either.

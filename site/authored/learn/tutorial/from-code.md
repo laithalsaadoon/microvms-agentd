@@ -39,7 +39,7 @@ with `$env:NAME='value'`.
 
 ## Python
 
-Requires CPython 3.9+. Install in a virtual environment:
+Requires CPython 3.11+. Install in a virtual environment:
 
 ```sh
 python3 -m venv .venv

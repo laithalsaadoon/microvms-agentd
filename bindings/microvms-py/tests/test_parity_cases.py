@@ -12,8 +12,8 @@ without a network call), and the error cases talk to `SseServer` on loopback. HT
 proxy on a loopback port nothing listens on, so a refusal that regresses fails on a connection
 error instead of sending a signed request to AWS.
 
-The table is read with `tomllib`, so this file needs Python 3.11, the floor the repository's
-scripts already declare; the wheel's own 3.9 floor is for consumers, not for this suite.
+The table is read with `tomllib`, which is available on the Python 3.11 floor shared by
+the wheel and this suite.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import tomllib
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -32,7 +33,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import tomllib
 
 import microvms
 from conftest import SseServer

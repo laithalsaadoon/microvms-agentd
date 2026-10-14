@@ -13,7 +13,7 @@ python3 -m venv .venv
 python -m pip install microvms
 ```
 
-Requires **CPython 3.9+**. On Windows, activate with
+Requires **CPython 3.11+**. On Windows, activate with
 `.venv\Scripts\Activate.ps1` in PowerShell. Wheels ship for Linux x64/ARM64
 (glibc), macOS Intel/Apple Silicon, and Windows x64. Type declarations are included.
 

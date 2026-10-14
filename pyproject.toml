@@ -70,10 +70,7 @@ package = false
 # rename is enforced rather than merely conventional.
 #
 # The scripts keep their shebangs and their executable bit, so `./tools/check-model-drift.py`
-# is still a direct invocation. `per-file-target-version` below matches `tools/*`, which
-# `tools/*.py` satisfies (measured: UP045 fires on `Optional[int]` in a file there and not in
-# `bindings/microvms-py/`), so the 3.11 floor those scripts declare in their own PEP 723 blocks is
-# unaffected by the rename.
+# is still a direct invocation.
 
 [tool.ruff]
 # So the excludes below also apply to a path named on the command line. Without it an
@@ -81,18 +78,13 @@ package = false
 # name, which makes the exclusion advisory rather than a decision.
 force-exclude = true
 
-# The floor `bindings/microvms-py/pyproject.toml` declares (`requires-python = ">=3.9"`), because the
-# abi3-py39 wheel means a consumer really can be on 3.9 and a rule that assumes newer syntax
-# would approve a file that will not import there.
-target-version = "py39"
+# The Python binding and repository scripts both require Python 3.11. A rule that assumes
+# newer syntax would approve a file that cannot import on the supported floor.
+target-version = "py311"
 
-# The tooling is not the wheel. Every PEP 723 script and `conformance/run_rs.py` carries
-# `requires-python = ">=3.11"` in its own inline metadata block, and `uv run --script`
-# enforces it, so holding them to the wheel's 3.9 floor would be a constraint nothing
-# imposes. ruff does not read the PEP 723 block itself (measured: a `py39` config still
-# passes `Optional[int]` in a script whose block says 3.11), so this restates it. Keep the two
-# in step if a script's block ever moves.
-per-file-target-version = { "tools/*" = "py311", "conformance/*" = "py311", "examples/background-coding-agent/**" = "py313" }
+# This example declares a newer interpreter in its own PEP 723 metadata. Ruff does not read
+# that block, so keep its target in step with the example's declared runtime.
+per-file-target-version = { "examples/background-coding-agent/**" = "py313" }
 
 [tool.ruff.format]
 # `bindings/microvms-py/microvms.pyi` is generated: `./tools/generate-py-stubs.py` renders it from

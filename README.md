@@ -34,7 +34,7 @@ The bundled `agentd` daemon handles commands inside each VM.
 | Interface | Install | First example |
 |---|---|---|
 | CLI | `cargo binstall microvms-cli --no-confirm` | [Run an agent below](#run-a-coding-agent-in-a-sandbox) |
-| Python 3.9+ | `pip install microvms` | [Python quickstart](bindings/microvms-py/README.md) |
+| Python 3.11+ | `pip install microvms` | [Python quickstart](bindings/microvms-py/README.md) |
 | Node 22.13+ | `npm install microvms` | [JavaScript / TypeScript quickstart](bindings/microvms-js/README.md) |
 | Rust | `cargo add microvms-core` | [Rust quickstart](crates/microvms-core/README.md) |
 
