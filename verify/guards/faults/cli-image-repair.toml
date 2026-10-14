@@ -1,0 +1,10 @@
+# ── cli-image-repair: FAIL_TO_PASS entries tools/fail-to-pass.py emitted ──
+
+# FAIL_TO_PASS: fails on 0b40f9fc4e4c with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-repair-identity-on-an-existing-image-warns-and-keeps-the"
+guard = "guards::run::repair_identity_on_an_existing_image_warns_and_keeps_the_run_working"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::run::repair_identity_on_an_existing_image_warns_and_keeps_the_run_working"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-repair-identity-on-an-existing-image-warns-and-keeps-the.patch"

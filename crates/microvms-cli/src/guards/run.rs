@@ -110,6 +110,100 @@ async fn an_arn_image_identifier_launches_with_no_listing_call() {
     );
 }
 
+/// An ineffective build option is visible even with quiet JSON output, without changing
+/// the success or image of an existing-image run. Configured images take the same path.
+#[tokio::test]
+async fn repair_identity_on_an_existing_image_warns_and_keeps_the_run_working() {
+    use clap::Parser;
+
+    use crate::commands::Ctx;
+    use crate::envelope::{Format, Output};
+
+    const IMAGE: &str = "arn:aws:lambda:us-east-1:123456789012:microvm-image:img";
+    const HEALTH: &str = r#"{"version": "0.1.0", "bootstrapped": true, "disk": null,
+                             "identity_degraded": false, "identity_repaired": true}"#;
+    crate::cli::Cli::try_parse_from(["microvm", "run", "--image", IMAGE, "--repair-identity"])
+        .expect("the existing flag combination stays accepted within 1.x");
+
+    for configured_image in [false, true] {
+        for repair_identity in [false, true] {
+            for quiet in [false, true] {
+                let dir = TempDir::new("existing-image-repair");
+                let config = super::support::ConfigFile::new(
+                    "existing-image-repair",
+                    &format!("image = {IMAGE:?}\n"),
+                );
+                let daemon = DaemonScript::new();
+                for _ in 0..4 {
+                    daemon.reply(200, HEALTH);
+                }
+                let seam = SyncSeam {
+                    transport: sync_launch_script(),
+                    clock: Arc::new(YieldingClock::default()),
+                    daemon,
+                };
+                let mut args = run_args_for_image(IMAGE, dir.0.clone());
+                args.repair_identity = repair_identity;
+                if configured_image {
+                    args.image = None;
+                    args.config = crate::cli::ConfigFlags {
+                        config: Some(config.0.clone()),
+                        no_config: false,
+                    };
+                }
+                let mut out = Output::new(Format::Json, quiet, Vec::new(), Vec::new());
+                let env = |_: &str| None;
+                let rendered = {
+                    let mut ctx = Ctx {
+                        seam: &seam,
+                        out: &mut out,
+                        infra: full_infra(),
+                        env: &env,
+                        fetch: &crate::provision::PanickingFetch,
+                    };
+                    crate::handle(
+                        &mut ctx,
+                        &Command::Run(Box::new(args)),
+                        crate::commands::lifecycle::never(),
+                    )
+                    .await
+                    .expect("the warning preserves a successful existing-image run")
+                };
+                assert!(rendered.already_reported.is_none());
+                assert_eq!(seam.transport.called("RunMicrovm"), 1);
+                assert_eq!(seam.transport.called("CreateMicrovmImage"), 0);
+                assert_eq!(
+                    seam.transport.first_body("RunMicrovm")["imageIdentifier"],
+                    IMAGE
+                );
+                assert_eq!(rendered.data["imageIdentifier"], IMAGE);
+                let (stdout, stderr) = out.into_streams();
+                assert!(
+                    stdout.is_empty(),
+                    "the handler reserves stdout for its envelope"
+                );
+                let stderr = String::from_utf8(stderr).expect("UTF-8 warning");
+                assert_eq!(
+                    stderr.contains("warning: --repair-identity"),
+                    repair_identity,
+                    "{stderr}"
+                );
+                if repair_identity {
+                    assert!(
+                        stderr.contains("applies only when run builds the image"),
+                        "{stderr}"
+                    );
+                    assert!(
+                        stderr.contains("microvm build --repair-identity"),
+                        "{stderr}"
+                    );
+                    assert!(stderr.contains("no earlier than 2.0.0"), "{stderr}");
+                }
+            }
+        }
+    }
+}
+
 /// **A launch from an existing image reports that image's name, not the invocation's
 /// default.**
 ///

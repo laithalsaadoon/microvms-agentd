@@ -1,0 +1,35 @@
+diff --git a/crates/microvms-cli/src/cli.rs b/crates/microvms-cli/src/cli.rs
+index aca668d..5bf6af8 100644
+--- a/crates/microvms-cli/src/cli.rs
++++ b/crates/microvms-cli/src/cli.rs
+@@ -922,9 +922,6 @@ pub struct RunArgs {
+     /// Widen the guest so `sethostname` and the boot_id bind mount work.
+     ///
+     /// Root in the guest is not enough for either — the MicroVM drops CAP_SYS_ADMIN.
+-    /// Applies only when run builds the image. With --image, rebuild first with
+-    /// `microvm build --repair-identity`; run warns and uses the existing image unchanged.
+-    /// This combination is deprecated and will be refused no earlier than 2.0.0.
+     #[arg(long)]
+     pub repair_identity: bool,
+
+diff --git a/crates/microvms-cli/src/commands/lifecycle.rs b/crates/microvms-cli/src/commands/lifecycle.rs
+index c84d3ed..314a0bf 100644
+--- a/crates/microvms-cli/src/commands/lifecycle.rs
++++ b/crates/microvms-cli/src/commands/lifecycle.rs
+@@ -449,16 +449,6 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
+         ctx.out
+             .progress(&format!("using project config {}", path.display()));
+     }
+-    // An existing image keeps the capabilities it was built with. Keep this accepted
+-    // invocation working within 1.x, but make its ineffective build option visible.
+-    if args.image.is_some() && args.repair_identity {
+-        ctx.out.warn(
+-            "--repair-identity applies only when run builds the image; it cannot change an \
+-             existing image. Rebuild with `microvm build --repair-identity`, then pass the \
+-             rebuilt image to --image. This combination is deprecated and will be refused \
+-             no earlier than 2.0.0.",
+-        );
+-    }
+
+     // `run <DIR>` (issue #72): a positional that names a directory is a project to sync,
+     // not a binary to bake. Decided on the *typed* positional, never a config `binary` —

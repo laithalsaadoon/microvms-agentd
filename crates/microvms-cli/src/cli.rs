@@ -922,6 +922,9 @@ pub struct RunArgs {
     /// Widen the guest so `sethostname` and the boot_id bind mount work.
     ///
     /// Root in the guest is not enough for either — the MicroVM drops CAP_SYS_ADMIN.
+    /// Applies only when run builds the image. With --image, rebuild first with
+    /// `microvm build --repair-identity`; run warns and uses the existing image unchanged.
+    /// This combination is deprecated and will be refused no earlier than 2.0.0.
     #[arg(long)]
     pub repair_identity: bool,
 
