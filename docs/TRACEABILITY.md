@@ -1280,7 +1280,7 @@ Where guest identity repair is requested, the microvms-core shall set the additi
 
 ## TRAP-4
 
-The microvms-core shall derive each platform network connector value as a fully-qualified connector ARN for the request region from an enumerated ingress or egress intent, and accept a caller-supplied connector ARN only as a customer-managed egress connector in the request region, never beside the platform egress intent.
+The microvms-core shall derive each platform network connector value as a fully-qualified connector ARN for the request region from an enumerated ingress or egress intent, and accept a caller-supplied connector ARN only as a customer-managed egress connector in the request region when the platform egress intent is absent.
 
 - **model:** waived: a derivation from a closed enum and a shape check on caller ARNs, not a state
 - **gherkin:** `crates/microvms-core/tests/features/egress_posture.feature`
