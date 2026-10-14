@@ -307,7 +307,7 @@ impl Microvm {
     /// A phrase rather than an empty string, because "the service said nothing" and "the
     /// service said nothing useful" are different diagnoses and a caller reading a message
     /// has to be able to tell them apart.
-    fn reason(&self) -> &str {
+    pub(crate) fn reason(&self) -> &str {
         self.state_reason.as_deref().unwrap_or("no stateReason")
     }
 }

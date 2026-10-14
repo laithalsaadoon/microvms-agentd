@@ -76,6 +76,11 @@ credentials keep expiring in wall-clock time while the VM is suspended.
 
 The idle policy is set at `RunMicrovm` and cannot be changed afterward.
 
+`Sandbox.resume` refreshes a locally RUNNING handle from `GetMicrovm` before
+deciding whether to resume. If the service reports SUSPENDED, it resumes the VM;
+if the VM has ended, it records the termination and returns `ERR_WINDOW_CLOSED`
+with the service state and reason. A VM that still reports RUNNING is refused.
+
 ## Lifecycle hooks: the only control point
 
 Images declare `suspend` and `resume` hooks, each with a 1 to 60 second timeout

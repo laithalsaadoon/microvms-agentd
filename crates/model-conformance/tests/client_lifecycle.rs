@@ -33,6 +33,8 @@
 //!   with `ResumeMicrovm` answering the `ValidationException` the service gave for a VM it had
 //!   terminated (2026-10-12, #597), which the sandbox has to report as `ERR_WINDOW_CLOSED` and
 //!   record as TERMINATED.
+//! - `PlatformIdleSuspended` leaves the sandbox RUNNING and makes `GetMicrovm` answer
+//!   SUSPENDED. Its next resume observes that state before sending `ResumeMicrovm`.
 //! - `SuspendedVmEnded` calls nothing: from then on the fake's `GetMicrovm` answers TERMINATED,
 //!   the platform's side of a VM the idle policy ended while it was suspended.
 //! - `TerminateRequested` is `terminate`, waiting for TERMINATED when `TerminateComplete` is the
@@ -85,6 +87,8 @@ enum Call {
     SuspendRefused,
     Resume { completes: bool },
     ResumeRefused,
+    ResumeRunning,
+    IdleSuspended,
     ResumeEnded,
     Ended,
     Terminate { completes: bool },
@@ -104,6 +108,8 @@ impl Call {
             Call::Resume { completes: true } => "resume completed",
             Call::Resume { completes: false } => "resume unanswered",
             Call::ResumeRefused => "resume refused",
+            Call::ResumeRunning => "resume observes RUNNING",
+            Call::IdleSuspended => "platform idle suspension",
             Call::ResumeEnded => "resume refused by the service",
             Call::Ended => "platform ends the suspended VM",
             Call::Terminate { completes: true } => "terminate completed",
@@ -123,7 +129,7 @@ impl Call {
 /// Every call the replay has to make. A walk that shrank to a corner of the model would pass
 /// every step it took; this is what it would miss. A planner that came to skip paths is held
 /// apart: every path the recorder kept has to plan, and [`SKIPPED`] pins the rest.
-const COVERED: [&str; 15] = [
+const COVERED: [&str; 17] = [
     "launch",
     "hook",
     "hook refused",
@@ -134,6 +140,8 @@ const COVERED: [&str; 15] = [
     "resume completed",
     "resume unanswered",
     "resume refused",
+    "resume observes RUNNING",
+    "platform idle suspension",
     "resume refused by the service",
     "platform ends the suspended VM",
     "terminate",
@@ -189,6 +197,8 @@ fn plan(path: &Path) -> Result<Vec<Step<'_>>, &'static str> {
                 (Call::Resume { completes }, 1 + usize::from(completes))
             }
             (Action::ResumeRequested, Verdict::RefusedLocally) => (Call::ResumeRefused, 1),
+            (Action::ResumeRequested, Verdict::RefusedAfterRead) => (Call::ResumeRunning, 1),
+            (Action::PlatformIdleSuspended, Verdict::Issued) => (Call::IdleSuspended, 1),
             (Action::ResumeRequested, Verdict::RefusedByService) => (Call::ResumeEnded, 1),
             (Action::SuspendedVmEnded, Verdict::Issued) => (Call::Ended, 1),
             (Action::ResumeComplete, Verdict::Ignored) => (Call::Nothing, 1),
@@ -335,7 +345,9 @@ impl Replay {
             .iter()
             .filter_map(|step| match step.call {
                 Call::Resume { .. } => Some(Answer::ok(empty_response())),
-                Call::ResumeEnded => Some(terminated_refusal()),
+                Call::ResumeEnded if step.before.vm_state == VmState::Suspended => {
+                    Some(terminated_refusal())
+                }
                 _ => None,
             })
             .collect();
@@ -375,6 +387,24 @@ impl Replay {
     fn reports(&self, state: &str) {
         self.plane
             .answer("GetMicrovm", Answer::ok(microvm_response(state, None)));
+    }
+
+    async fn platform_reports(&self, state: &str) -> Result<(), String> {
+        self.plane.answer(
+            "GetMicrovm",
+            Answer::ok(microvm_response(state, Some("platform lifecycle change"))),
+        );
+        // Consume the previous wait's repeated answer so the sandbox's next read sees
+        // the platform state, without changing the sandbox's locally held lifecycle.
+        control_plane(
+            Arc::clone(&self.plane) as Arc<dyn Transport>,
+            Region::UsEast1,
+            self.clock.clone(),
+        )
+        .get_microvm("mvm-abc123")
+        .await
+        .map_err(|error| format!("the platform's own read failed: {error}"))?;
+        Ok(())
     }
 
     fn count(&self, operation: &str) -> u32 {
@@ -440,6 +470,15 @@ impl Replay {
                 waited(self.sandbox.resume().await.map(|_| ()), completes, "resume")?;
             }
             Call::ResumeRefused => refusal(self.sandbox.resume().await.map(|_| ()), None)?,
+            Call::ResumeRunning => {
+                refusal(self.sandbox.resume().await.map(|_| ()), None)?;
+                if self.plane.calls().len() - calls != 1
+                    || self.plane.operations()[calls] != "GetMicrovm"
+                {
+                    return Err("a RUNNING resume must only observe GetMicrovm".into());
+                }
+            }
+            Call::IdleSuspended => self.platform_reports("SUSPENDED").await?,
             Call::ResumeEnded => match self.sandbox.resume().await {
                 Err(error) if error.kind() == ErrorKind::WindowClosed => {}
                 Err(error) => {
@@ -451,27 +490,7 @@ impl Replay {
                 }
                 Ok(_) => return Err("the sandbox resumed a VM the platform ended".into()),
             },
-            Call::Ended => {
-                // The fake serves the answer the last wait ended on once more before a newer
-                // one, so the platform's new state is read once here, by a plane of the
-                // replay's own, and the sandbox's next read is TERMINATED.
-                self.plane.answer(
-                    "GetMicrovm",
-                    Answer::ok(microvm_response(
-                        "TERMINATED",
-                        Some("MicroVM exceeded maximum lifetime."),
-                    )),
-                );
-                let platform = control_plane(
-                    Arc::clone(&self.plane) as Arc<dyn Transport>,
-                    Region::UsEast1,
-                    self.clock.clone(),
-                );
-                platform
-                    .get_microvm("mvm-abc123")
-                    .await
-                    .map_err(|error| format!("the platform's own read failed: {error}"))?;
-            }
+            Call::Ended => self.platform_reports("TERMINATED").await?,
             Call::Terminate { completes } => {
                 let opts = if completes {
                     self.reports("TERMINATED");

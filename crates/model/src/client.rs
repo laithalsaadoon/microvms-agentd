@@ -43,17 +43,11 @@
 //!
 //! # The end of a suspended VM is the platform's action, not a clock
 //!
-//! [`Action::SuspendedVmEnded`] is the platform ending a VM the client suspended, whatever
-//! ends it: its maximum duration, say, or a terminate from another client. It sets
-//! [`State::platform_ended`], which the client can't read: `WindowClosed` comes only from the
-//! service's answer once the client's next resume reaches it (STATE-12). A suspend the idle
-//! policy makes isn't an action here, because the client doesn't see it: a `Sandbox` learns
-//! of one only through `Sandbox::adopt` or `ControlPlane::resume`, and until then holds the
-//! VM as RUNNING. Time is not in the state space, and it should not be. The client doesn't
-//! decide on the window, because the service doesn't hold an explicit suspend to it
-//! (measured 2026-10-12, us-east-1, #597), so the model settles two things that need no
-//! clock: a resume from SUSPENDED always reaches the service, and the service's refusal
-//! leaves the client TERMINATED.
+//! [`Action::PlatformIdleSuspended`] suspends the service's VM while the client still
+//! holds RUNNING. [`Action::SuspendedVmEnded`] can then end either that VM or one the client
+//! suspended. A resume from RUNNING reads the service's state first, while one from
+//! SUSPENDED calls resume directly. Either path records an ended VM as TERMINATED.
+//! Time is not in the state space: the service decides when to suspend or end a VM.
 
 use stateright::{Model, Property};
 
@@ -103,10 +97,11 @@ pub struct Wire {
 pub enum Verdict {
     /// The client issued the call.
     Issued,
-    /// The client refused locally, before any call. Every STATE-5/7/11 refusal is this.
+    /// The client refused locally, before any call.
     RefusedLocally,
-    /// The client issued the call and the service refused it: a resume of a VM the platform
-    /// ended while it was suspended (STATE-12).
+    /// The service still reports RUNNING, so the client refuses after reading its state.
+    RefusedAfterRead,
+    /// The service reports that the VM ended, on a state read or resume refusal (STATE-12).
     RefusedByService,
     /// The action did not apply — the platform reporting something the client is not
     /// waiting for.
@@ -135,6 +130,8 @@ pub enum Action {
     SuspendRequested,
     /// The platform reporting suspension complete (STATE-6).
     SuspendComplete,
+    /// The idle policy suspends the service VM without notifying the client.
+    PlatformIdleSuspended,
     /// The caller asking for a resume (STATE-7, STATE-11, STATE-12).
     ResumeRequested,
     /// The platform ending a SUSPENDED VM, which the client doesn't see until its next resume
@@ -192,9 +189,12 @@ pub struct State {
     pub resume_in_flight: bool,
     /// Whether the platform ended the VM while it was SUSPENDED ([`Action::SuspendedVmEnded`]).
     ///
-    /// The platform's state, not the client's: no guard reads it, and the client learns it
-    /// only when the service refuses its next resume (STATE-12).
+    /// The service's state, learned on a state read or a resume refusal (STATE-12).
     pub platform_ended: bool,
+    /// The service is suspended while the client still holds RUNNING.
+    pub platform_idle_suspended: bool,
+    /// Idle suspensions, bounded like explicit suspend/resume cycles.
+    pub idle_suspends: u8,
 
     // ── audit counters, in the daemon model's idiom ───────────────────────────
     //
@@ -305,6 +305,8 @@ impl Model for ClientLifecycle {
             installed_token: None,
             resume_in_flight: false,
             platform_ended: false,
+            platform_idle_suspended: false,
+            idle_suspends: 0,
             suspends_outside_running: 0,
             resumes_after_terminate: 0,
             token_replacements: 0,
@@ -366,10 +368,16 @@ impl Model for ClientLifecycle {
         if state.vm_state == VmState::Suspending {
             actions.push(Action::SuspendComplete);
         }
+        if state.vm_state == VmState::Running
+            && !state.platform_idle_suspended
+            && state.idle_suspends < self.cfg.max_cycles
+        {
+            actions.push(Action::PlatformIdleSuspended);
+        }
         // The platform ending a SUSPENDED VM, once. Not while a resume is in flight: the
         // service accepted that resume, so the VM is no longer waiting out a suspension, and
         // the sandbox's wait leaves no gap for the end to land in.
-        if state.vm_state == VmState::Suspended
+        if (state.vm_state == VmState::Suspended || state.platform_idle_suspended)
             && !state.was_terminated
             && !state.resume_in_flight
             && !state.platform_ended
@@ -460,6 +468,7 @@ impl Model for ClientLifecycle {
                         next.suspends_outside_running += 1;
                     }
                     next.vm_state = VmState::Suspending;
+                    next.platform_idle_suspended = false;
                     Verdict::Issued
                 }
             }
@@ -477,13 +486,21 @@ impl Model for ClientLifecycle {
             // STATE-7, STATE-11, STATE-12.
             Action::ResumeRequested => {
                 let terminated = last.was_terminated || last.vm_state == VmState::Terminated;
-                let wrong_state = last.vm_state != VmState::Suspended;
-                if self.guarded() && (terminated || wrong_state) {
-                    // Both refusals are local and cost no call. Nothing else is: how long the
-                    // VM has spent suspended is the service's to judge (STATE-12).
+                let observes = last.vm_state == VmState::Running;
+                let suspended = last.vm_state == VmState::Suspended
+                    || (observes && last.platform_idle_suspended);
+                if self.guarded() && terminated {
+                    Verdict::RefusedLocally
+                } else if self.guarded() && observes && !suspended {
+                    Verdict::RefusedAfterRead
+                } else if self.guarded() && !suspended {
+                    // A non-RUNNING, non-SUSPENDED handle is refused before a call.
                     Verdict::RefusedLocally
                 } else {
-                    next.wire.resumes += 1;
+                    // A RUNNING handle learns an ended VM from GetMicrovm before a resume.
+                    if !(observes && last.platform_ended) {
+                        next.wire.resumes += 1;
+                    }
                     // Recorded at the decision, for the same reason the suspend is: the
                     // resulting state cannot say whether the call should have been made.
                     if terminated {
@@ -492,16 +509,24 @@ impl Model for ClientLifecycle {
                     // STATE-7's other half: no payload is added here. A resume that
                     // re-delivered would show up as `payloads > launches`.
                     if last.platform_ended {
-                        // STATE-12. The service's refusal is the first the client hears of the
-                        // end, and it records the VM the way a completed terminate does: gone,
+                        // STATE-12. The service reports the end, and the client records the
+                        // VM the way a completed terminate does: gone,
                         // and never offered a resume again (STATE-11).
                         (next.vm_state, next.was_terminated) = (VmState::Terminated, true);
                         Verdict::RefusedByService
                     } else {
+                        next.vm_state = VmState::Suspended;
+                        next.platform_idle_suspended = false;
                         next.resume_in_flight = true;
                         Verdict::Issued
                     }
                 }
+            }
+
+            Action::PlatformIdleSuspended => {
+                next.platform_idle_suspended = true;
+                next.idle_suspends += 1;
+                Verdict::Issued
             }
 
             // STATE-12's platform half. The client's state doesn't move: nothing it holds
@@ -768,6 +793,7 @@ impl Model for ClientLifecycle {
                 (state.wire.suspends == 0 || launched)
                     && (state.wire.resumes == 0
                         || state.wire.suspends > 0
+                        || state.idle_suspends > 0
                         || state.resumes_after_terminate > 0)
                     && state.mints <= state.wire.resumes
             }),
@@ -782,6 +808,16 @@ impl Model for ClientLifecycle {
                 state.cycles >= 1 && state.vm_state == VmState::Running
             }),
             Property::<Self>::sometimes("two cycles complete", |_, state| state.cycles >= 2),
+            Property::<Self>::sometimes("an idle-suspended VM resumes", |_, state| {
+                state.idle_suspends > 0 && state.cycles > 0 && state.vm_state == VmState::Running
+            }),
+            Property::<Self>::sometimes("an idle-suspended VM ends before resume", |_, state| {
+                state.platform_idle_suspended
+                    && matches!(
+                        state.last,
+                        Some((Action::ResumeRequested, Verdict::RefusedByService))
+                    )
+            }),
             Property::<Self>::sometimes("a VM reaches TERMINATED", |_, state| {
                 state.vm_state == VmState::Terminated && state.was_terminated
             }),
