@@ -123,6 +123,7 @@ fn seconds_sync_daemon(tree: &std::path::Path) -> Arc<DaemonScript> {
         .reply(200, STARTED_BODY)
         .reply(200, &poll_body("exited", "0", "", false))
         .reply(200, &poll_body("acked", "0", "", false))
+        .reply(200, "") // root-default discovery before the manifest upload
         .reply(200, "");
     script
 }

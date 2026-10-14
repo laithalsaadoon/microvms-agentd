@@ -299,12 +299,14 @@ def test_a_disk_pressure_507_is_a_platform_error_and_not_retryable(
         b"refusing to write /workspace: 4096 bytes available on the target filesystem, "
         b"below the 1048576 byte reserve"
     )
-    server = sse_server([[body]], 507)  # type: ignore[operator]
+    server = sse_server([[body]], 507, health_ok=True)  # type: ignore[operator]
     session = microvms.Session.direct(server.endpoint, "agent-token")
 
     with pytest.raises(microvms.PlatformError) as raised:
         session.upload_file("/workspace/big.bin", b"x")
 
+    assert server.requested_methods[-1] == "PUT"
+    assert server.requested_paths[-1].startswith("/v1/fs/file?")
     assert raised.value.code == "ERR_PLATFORM"
     assert raised.value.wire_kind == "InsufficientStorage"
     assert raised.value.retryable is False
@@ -313,11 +315,13 @@ def test_a_disk_pressure_507_is_a_platform_error_and_not_retryable(
 
 def test_every_other_five_hundred_is_still_retryable(sse_server: object) -> None:
     """A 500 stays `ServerError` and retryable: only the status the daemon chose on purpose moved."""
-    server = sse_server([[b"spawn failed"]], 500)  # type: ignore[operator]
+    server = sse_server([[b"spawn failed"]], 500, health_ok=True)  # type: ignore[operator]
     session = microvms.Session.direct(server.endpoint, "agent-token")
 
     with pytest.raises(microvms.RetryableError) as raised:
         session.upload_file("/workspace/f", b"x")
 
+    assert server.requested_methods[-1] == "PUT"
+    assert server.requested_paths[-1].startswith("/v1/fs/file?")
     assert raised.value.wire_kind == "ServerError"
     assert raised.value.retryable is True

@@ -42,6 +42,7 @@ async fn a_tar_upload_sends_the_archive_bytes_unexamined_including_a_hostile_one
     // The daemon refuses it, which is the outcome the live check asserts: a 400 arriving as
     // `ProtocolError`. What is under test here is that the CLI got far enough to be refused.
     let script = DaemonScript::new();
+    script.reply(200, ""); // root-default discovery
     script.reply(
         400,
         r#"{"error": "tar_member_refused", "detail": "member escapes the extraction root"}"#,
@@ -91,7 +92,7 @@ async fn a_tar_upload_sends_the_archive_bytes_unexamined_including_a_hostile_one
 async fn a_single_file_upload_uses_the_file_route_and_carries_its_octal_mode() {
     let payload = TempFile::new("cp-upload", b"written through the endpoint");
     let script = DaemonScript::new();
-    script.reply(200, "");
+    script.reply(200, "").reply(200, ""); // discovery, then upload
 
     let command = Command::Cp(CpArgs {
         src: payload.path().to_string_lossy().to_string(),
@@ -227,6 +228,7 @@ async fn a_first_sync_uploads_everything_and_writes_the_guest_manifest() {
     let script = DaemonScript::new();
     script
         .reply(404, "no such file") // the manifest read: nothing has synced before
+        .reply(200, "") // root-default discovery
         .reply(200, "") // the tar upload
         .reply(200, ""); // the manifest write
 
@@ -238,13 +240,14 @@ async fn a_first_sync_uploads_everything_and_writes_the_guest_manifest() {
     assert_eq!(rendered.data["uploadedMembers"], 1);
 
     let requests = script.requests();
-    assert_eq!(requests.len(), 3, "{:?}", script.paths());
+    assert_eq!(requests.len(), 4, "{:?}", script.paths());
+    assert_eq!(requests[1].path, "/v1/health");
     assert!(
-        requests[1].path.starts_with("/v1/fs/tar?path=%2Fworkspace"),
+        requests[2].path.starts_with("/v1/fs/tar?path=%2Fworkspace"),
         "the tree goes to the workspace tar route: {}",
-        requests[1].path
+        requests[2].path
     );
-    let members: Vec<String> = tar::Archive::new(requests[1].body.as_slice())
+    let members: Vec<String> = tar::Archive::new(requests[2].body.as_slice())
         .entries()
         .expect("parses")
         .map(|entry| {
@@ -258,14 +261,14 @@ async fn a_first_sync_uploads_everything_and_writes_the_guest_manifest() {
         .collect();
     assert_eq!(members, ["app.py"]);
     assert!(
-        requests[2]
+        requests[3]
             .path
             .contains("%2Fworkspace%2F.microvm-sync-manifest.json"),
         "the manifest lands beside the tree it describes: {}",
-        requests[2].path
+        requests[3].path
     );
     let written: microvms_core::workspace::Manifest =
-        serde_json::from_slice(&requests[2].body).expect("the written manifest parses");
+        serde_json::from_slice(&requests[3].body).expect("the written manifest parses");
     assert!(written.files.contains_key("app.py"), "{written:?}");
 }
 
@@ -296,6 +299,7 @@ async fn an_edit_uploads_only_the_change_and_deletes_what_vanished() {
     let script = DaemonScript::new();
     script
         .reply(200, &remote_body) // the manifest read
+        .reply(200, "") // root-default discovery
         .reply(200, "") // the tar upload
         .reply(200, r#"{"exec_id": "x-1", "phase": "running"}"#) // rm starts
         .reply(200, &poll_body("exited", "0", "", false)) // rm exits 0
@@ -314,7 +318,7 @@ async fn an_edit_uploads_only_the_change_and_deletes_what_vanished() {
     );
 
     let requests = script.requests();
-    let archive = &requests[1].body;
+    let archive = &requests[2].body;
     let members: Vec<String> = tar::Archive::new(archive.as_slice())
         .entries()
         .expect("parses")
@@ -333,7 +337,7 @@ async fn an_edit_uploads_only_the_change_and_deletes_what_vanished() {
         "the archive is proportional to the edit, not to the tree"
     );
     let start: serde_json::Value =
-        serde_json::from_slice(&requests[2].body).expect("the start request parses");
+        serde_json::from_slice(&requests[3].body).expect("the start request parses");
     assert_eq!(start["command"][0], "rm");
     assert_eq!(start["command"][2], "--");
     assert_eq!(start["command"][3], "removed.txt");
@@ -376,6 +380,7 @@ async fn a_hostile_guest_manifest_cannot_order_deletions_outside_the_workspace()
     let script = DaemonScript::new();
     script
         .reply(200, &remote_body) // the manifest read
+        .reply(200, "") // root-default discovery
         .reply(200, "") // the tar upload (kept.txt changed)
         .reply(200, ""); // the manifest write — and NO exec in between
 
@@ -386,7 +391,7 @@ async fn a_hostile_guest_manifest_cannot_order_deletions_outside_the_workspace()
     let paths = script.paths();
     assert_eq!(
         paths.len(),
-        3,
+        4,
         "no exec may start for a filtered path: {paths:?}"
     );
     assert!(
@@ -422,9 +427,11 @@ async fn a_disk_pressure_507_is_platform_with_the_remedy_not_retryable() {
     std::fs::write(dir.0.join("big.bin"), vec![0u8; 1024]).expect("writes");
 
     let sync = DaemonScript::new();
-    sync.reply(404, "no such file").reply(507, body);
+    sync.reply(404, "no such file")
+        .reply(200, "")
+        .reply(507, body);
     let cp = DaemonScript::new();
-    cp.reply(507, body);
+    cp.reply(200, "").reply(507, body);
     let cp_command = Command::Cp(CpArgs {
         src: dir.0.join("big.bin").to_string_lossy().to_string(),
         dst: "vm:/workspace/big.bin".into(),
@@ -441,6 +448,13 @@ async fn a_disk_pressure_507_is_platform_with_the_remedy_not_retryable() {
     ] {
         let (result, _, _) = against_daemon(script, &command).await;
         let failure = result.expect_err("a 507 refuses the write");
+        assert!(
+            script.requests().last().is_some_and(|request| {
+                request.method == "PUT" && request.path.starts_with("/v1/fs/")
+            }),
+            "{name}: the refusal must come from the upload, not discovery: {:?}",
+            script.paths()
+        );
 
         assert_eq!(
             failure.exit,
@@ -586,6 +600,7 @@ async fn watch_resyncs_on_a_filesystem_event_and_the_interrupt_reports_totals() 
     let script = DaemonScript::new();
     script
         .reply(404, "no such file") // pass 1: no manifest yet
+        .reply(200, "") // root-default discovery, cached for later passes
         .reply(200, "") // pass 1: tar upload
         .reply(200, "") // pass 1: manifest write
         .reply(200, "") // pass 2: tar upload (the watched change)
@@ -610,9 +625,9 @@ async fn watch_resyncs_on_a_filesystem_event_and_the_interrupt_reports_totals() 
     });
     let run = crate::handle(&mut ctx, &command, interrupt);
     let driver = async {
-        // Wait until the initial pass is fully applied (three requests), then edit.
+        // Wait until the initial pass is fully applied (including discovery), then edit.
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
-        while script.requests().len() < 3 {
+        while script.requests().len() < 4 {
             assert!(
                 tokio::time::Instant::now() < deadline,
                 "initial sync stalled"
@@ -621,7 +636,7 @@ async fn watch_resyncs_on_a_filesystem_event_and_the_interrupt_reports_totals() 
         }
         std::fs::write(dir.0.join("second.txt"), b"two").expect("writes");
         // The watcher, the debounce, and the second pass; done when its manifest lands.
-        while script.requests().len() < 5 {
+        while script.requests().len() < 6 {
             assert!(
                 tokio::time::Instant::now() < deadline,
                 "the watcher never delivered the edit: {:?}",
@@ -645,7 +660,7 @@ async fn watch_resyncs_on_a_filesystem_event_and_the_interrupt_reports_totals() 
         rendered.data["passes"]
     );
     assert_eq!(rendered.data["uploadedMembers"], 2, "one per pass, summed");
-    let members: Vec<String> = tar::Archive::new(script.requests()[3].body.as_slice())
+    let members: Vec<String> = tar::Archive::new(script.requests()[4].body.as_slice())
         .entries()
         .expect("parses")
         .map(|entry| {
