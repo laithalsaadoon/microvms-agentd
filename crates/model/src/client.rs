@@ -785,10 +785,9 @@ impl Model for ClientLifecycle {
                 //
                 // What it says instead: the counts are consistent with the transitions that
                 // could have produced them. A suspend reaches SUSPENDING, so a suspend count
-                // above zero means the VM left PENDING; a resume count above zero means a
-                // suspend happened first, because SUSPENDED is the only state a guarded
-                // resume is issued from. A model where a refusal incremented a counter
-                // anyway would break the second conjunct.
+                // above zero means the VM left PENDING; a resume count above zero means an
+                // explicit or idle suspension happened first. A model where a refusal
+                // incremented a counter anyway would break the second conjunct.
                 let launched = state.wire.launches > 0;
                 (state.wire.suspends == 0 || launched)
                     && (state.wire.resumes == 0
@@ -809,7 +808,10 @@ impl Model for ClientLifecycle {
             }),
             Property::<Self>::sometimes("two cycles complete", |_, state| state.cycles >= 2),
             Property::<Self>::sometimes("an idle-suspended VM resumes", |_, state| {
-                state.idle_suspends > 0 && state.cycles > 0 && state.vm_state == VmState::Running
+                state.idle_suspends > 0
+                    && state.wire.suspends == 0
+                    && state.cycles > 0
+                    && state.vm_state == VmState::Running
             }),
             Property::<Self>::sometimes("an idle-suspended VM ends before resume", |_, state| {
                 state.platform_idle_suspended

@@ -153,7 +153,7 @@ const COVERED: [&str; 17] = [
 /// gives. Every recorded path plans, so these are all paths that end in a step no recorded path
 /// takes. A change to the model or the planner that moves these counts is a change to what the
 /// replay drives, so it edits this table in the same diff.
-const SKIPPED: [(&str, usize); 1] = [("a completion arrives after another step", 121)];
+const SKIPPED: [(&str, usize); 1] = [("a completion arrives after another step", 768)];
 
 /// One sandbox call, and the model's state after the steps it stands for.
 struct Step<'a> {
@@ -486,17 +486,22 @@ impl Replay {
                 }
             }
             Call::IdleSuspended => self.platform_reports("SUSPENDED").await?,
-            Call::ResumeEnded => match self.sandbox.resume().await {
-                Err(error) if error.kind() == ErrorKind::WindowClosed => {}
-                Err(error) => {
-                    return Err(format!(
-                        "the service refused the resume of a VM the platform ended, and the \
-                         sandbox reported {:?} rather than WindowClosed: {error}",
-                        error.kind()
-                    ));
+            Call::ResumeEnded => {
+                // An intervening suspend wait can consume a stale SUSPENDED report. The
+                // model's terminal platform state still governs this resume's response.
+                self.platform_reports("TERMINATED").await?;
+                match self.sandbox.resume().await {
+                    Err(error) if error.kind() == ErrorKind::WindowClosed => {}
+                    Err(error) => {
+                        return Err(format!(
+                            "the service refused the resume of a VM the platform ended, and the \
+                             sandbox reported {:?} rather than WindowClosed: {error}",
+                            error.kind()
+                        ));
+                    }
+                    Ok(_) => return Err("the sandbox resumed a VM the platform ended".into()),
                 }
-                Ok(_) => return Err("the sandbox resumed a VM the platform ended".into()),
-            },
+            }
             Call::Ended => self.platform_reports("TERMINATED").await?,
             Call::Terminate { completes } => {
                 let opts = if completes {

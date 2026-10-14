@@ -106,7 +106,7 @@ transform = { file = "crates/model/src/client.rs", replace = "next.vm_state = Vm
 [[family.fault]]
 id = "model-client-state-6-suspension-stays-suspending"
 message = "\"STATE-6 a reported suspension leaves the VM SUSPENDED\" counterexample"
-transform = { file = "crates/model/src/client.rs", replace = "next.vm_state = VmState::Suspended;", with = "next.vm_state = VmState::Suspending;\n                    next.cycles += 0;" }
+transform = { file = "crates/model/src/client.rs", replace = "next.vm_state = VmState::Suspended;\n                    Verdict::Issued", with = "next.vm_state = VmState::Suspending;\n                    next.cycles += 0;\n                    Verdict::Issued" }
 
 # A completed resume leaves the VM SUSPENDED.
 [[family.fault]]
@@ -137,4 +137,4 @@ transform = { file = "crates/model/src/client.rs", replace = "(next.vm_state, ne
 [[family.fault]]
 id = "model-client-state-12-resume-refused-locally"
 message = "\"STATE-12 a resume from SUSPENDED reaches the service\" counterexample"
-transform = { file = "crates/model/src/client.rs", replace = "if self.guarded() && (terminated || wrong_state) {", with = "if self.guarded() && (terminated || wrong_state || last.platform_ended) {" }
+transform = { file = "crates/model/src/client.rs", replace = "if self.guarded() && terminated {", with = "if self.guarded() && (terminated || last.platform_ended) {" }
