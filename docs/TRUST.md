@@ -30,6 +30,20 @@ handlers still run as root.
 
 ## Platform isolation guarantees
 
+An image may enable `AGENTD_DROP_EXEC_CAPABILITIES=true` to remove selected
+privileges from ordinary execs and workload hooks. The daemon clears its
+inheritable and ambient sets and removes `SYS_MODULE`, `SYS_RAWIO`,
+`SYS_PTRACE`, `SYS_ADMIN`, `SYS_BOOT`, `PERFMON`, and `BPF` from its bounding
+set before it creates threads. It keeps its permitted and effective sets for
+privileged daemon operations, including identity repair, and leaves other
+bounding bits intact. It fails startup if it cannot verify the reduction.
+The setting is off by default. [Protocol](PROTOCOL.md) specifies accepted values.
+
+This setting does not isolate root workloads from the privileged daemon.
+Root workloads still share the daemon's UID and the guest's filesystem and
+kernel interfaces. An image needing a stronger boundary must provide one
+separately. The authenticated daemon API also keeps its privileged operations.
+
 AWS documents two relevant properties:
 
 - Endpoint requests require a proxy credential scoped to the VM and permitted
@@ -131,6 +145,7 @@ and it renders the table in [Traceability](TRACEABILITY.md). A guard is written
 | Threat | Requirement | Guard | Status |
 |---|---|---|---|
 | An in-VM process races the platform to the bootstrap hook | `AGENTD-1`, `AGENTD-3` | `crates/agentd/tests/model_conformance.rs::slice_0_of_the_walk_replays_against_the_daemon`, `crates/agentd/src/state.rs::identical_replay_succeeds_and_a_different_token_conflicts` | guarded; a process that starts before the daemon still wins, which is the unenforced invariant below |
+| An ordinary exec inherits image privileges its workload does not need | `AGENTD-26` | `crates/agentd/src/exec_capabilities.rs::reduction_clears_i_a_and_only_the_seven_bounding_bits` | guarded when the image enables `AGENTD_DROP_EXEC_CAPABILITIES`. It defaults off, and root workloads remain in the daemon's trust boundary |
 | A caller holding the agent token but not the host key opens a verified tunnel | `AGENTD-17` | `crates/agentd/src/tunnel_identity.rs::only_the_pinned_host_key_completes_a_handshake`, `crates/agentd/tests/tunnel_relay.rs::a_valid_token_with_the_wrong_host_key_is_refused`, `crates/model/src/tunnel.rs::agentd_17_a_token_holder_without_the_host_key_is_refused_before_any_dial` | guarded; under KK no one-sided change turns the pin off, so its seeded fault turns it off in the tunnel model |
 | A verified tunnel's handshake fails, or the VM has no key, and the guest service is reached anyway | `AGENTD-18` | `crates/agentd/tests/tunnel_relay.rs::a_refused_caller_never_causes_a_guest_connection`, `crates/agentd/tests/tunnel_relay.rs::identity_against_a_seedless_vm_is_refused_not_downgraded`, `crates/model-conformance/tests/tunnel_confirmation.rs::a_handshake_without_confirmation_leaves_the_guest_listener_idle`, `crates/model-conformance/tests/tunnel_end_of_stream.rs::a_verified_tunnel_requires_the_requested_guest_port` | guarded |
 | A guest answers a verified tunnel's handshake with a key other than the pinned VM key | `BIND-21` | `crates/microvms-core/tests/tunnel_end_to_end.rs::a_wrong_pin_fails_closed_with_a_diagnosis`, `crates/microvms-core/tests/tunnel_end_to_end.rs::a_reply_that_does_not_verify_against_the_pin_fails_the_tunnel` | guarded |

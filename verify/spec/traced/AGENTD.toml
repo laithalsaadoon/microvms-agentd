@@ -101,3 +101,9 @@ waive.live = "a live run can't cut the endpoint proxy's connection mid-stream or
 issue = "#297"
 waive.gherkin = "no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate"
 waive.live = "a live daemon and the endpoint proxy neither replay nor forge a frame, so a live run can't present one; the relay tests send both to the daemon's real route"
+
+[AGENTD-26]
+issue = "#599"
+waive.model = "the policy uses Linux thread capabilities; injected syscall failures and an isolated real capability subprocess test its state transitions"
+waive.gherkin = "the isolated subprocess exercises nonempty inheritable and ambient sets, thread creation, and exec directly; a textual scenario would repeat it"
+waive.fuzz = "strict boolean parsing and syscall postconditions are finite inputs exercised directly, and capability mutations belong only in isolated subprocesses"

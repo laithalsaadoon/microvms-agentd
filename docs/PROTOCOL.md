@@ -445,6 +445,32 @@ belong to root. It must be sticky or writable only by root. After a lost handoff
 response, the client cleans up as the default user. An authorized root caller
 can inspect any remaining stage.
 
+## Capabilities inherited by execs
+
+An image can set `AGENTD_DROP_EXEC_CAPABILITIES=true` before starting the
+daemon. The default is off. Set the value to `true`, `false`, `1`, or `0`.
+An empty, malformed, or non-UTF-8 value refuses startup. A run-hook environment
+cannot change this image-owned setting.
+
+Before tracing or the runtime starts any thread, the daemon clears its
+inheritable and ambient capability sets and removes `SYS_MODULE`, `SYS_RAWIO`,
+`SYS_PTRACE`, `SYS_ADMIN`, `SYS_BOOT`, `PERFMON`, and `BPF` from its bounding
+set. Each removal operates on one bit. The daemon verifies the result and
+refuses startup on a syscall failure, an unsupported required capability, or
+an unmet postcondition. It preserves its permitted and effective sets exactly
+and preserves every other bounding bit, including `NET_ADMIN`, `CHOWN`,
+`SETUID`, and `SETGID`.
+
+Later threads inherit the reduction. Workload hooks and commands inherit it
+across exec, even when they run as root. A command that mounts a filesystem or
+powers off the guest can fail. The daemon keeps its rights for tasks such as
+identity repair. NoNewPrivs, securebits, seccomp, and the public `Config` shape
+stay as they were.
+
+This is a restriction on privileges inherited by workload processes, not an
+isolation boundary between a root workload and the daemon. See
+[Trust](TRUST.md) for that boundary.
+
 ## Line-ranged text reads
 
 `GET /v1/fs/file` takes optional `start_line` and `end_line`. The semantics are

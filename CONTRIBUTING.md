@@ -30,6 +30,10 @@ rule loading, and advisory updates can require network access. Documentation,
 binding integration tests, and formal requirements have additional setup;
 consult their tasks in `.config/mise/tasks/` and the CI workflows.
 
+The Linux daemon capability tests require util-linux `unshare` and enabled user
+and network namespaces. They confine irreversible capability changes and seeded
+startup failures to child processes. Unavailable namespaces fail the test.
+
 Useful checks while iterating:
 
 ```bash

@@ -1,0 +1,54 @@
+[[family]]
+guard = "conformance/run_rs.py --self-test: conformance/selftest/capability_policy.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "capability-policy-live-empty"
+message = "FAIL  policy default rejects every verdict without evidence"
+transform = { file = "conformance/lanes/capability_policy.py", replace = '''f"AGENTD-26 {prefix} seeds nonempty inheritance without changing authority",
+        valid,''', with = '''f"AGENTD-26 {prefix} seeds nonempty inheritance without changing authority",
+        True,''' }
+
+[[family.fault]]
+id = "capability-policy-live-bounding"
+message = "FAIL  policy repair rejects mutation"
+transform = { file = "conformance/lanes/capability_policy.py", replace = 'int(value["CapBnd"], 16) == expected', with = 'True' }
+
+[[family.fault]]
+id = "capability-policy-live-permitted"
+message = "FAIL  policy default rejects mutation"
+transform = { file = "conformance/lanes/capability_policy.py", replace = 'int(value[name], 16) == (expected if child else int(before[name], 16))', with = 'True' }
+
+[[family.fault]]
+id = "capability-policy-live-threads"
+message = "FAIL  policy default rejects mutation"
+transform = { file = "conformance/lanes/capability_policy.py", replace = 'and len(threads) > 1', with = 'and len(threads) > 0' }
+
+[[family.fault]]
+id = "capability-policy-live-option"
+message = "FAIL  policy image enables the real startup environment and hook"
+transform = { file = "conformance/lanes/capability_policy.py", replace = '"ENV AGENTD_DROP_EXEC_CAPABILITIES=true",', with = '"ENV AGENTD_DROP_EXEC_CAPABILITIES=false",' }
+
+[[family.fault]]
+id = "capability-policy-live-seed-refusal"
+message = "FAIL  policy probe fails closed on set refusal"
+transform = { file = "conformance/drivers/capability_policy_probe.py", replace = 'if libc.capset(ctypes.byref(header), ctypes.byref(data)) != 0:', with = 'if False:' }
+
+[[family.fault]]
+id = "capability-policy-live-selector"
+message = "FAIL  policy selector dispatches the actual lane"
+transform = { file = "conformance/lanes/suite.py", replace = '"capability_policy": drive_capability_policy,', with = '"capability_policy": None,' }
+
+[[family.fault]]
+id = "capability-policy-live-full-suite"
+message = "FAIL  policy lane is included in the full live suite"
+transform = { file = "conformance/lanes/suite.py", replace = '''                "capability_policy",
+                drive_capability_policy,''', with = '''                "capability_policy",
+                drive_default_user,''' }
+
+[[family.fault]]
+id = "capability-policy-live-reader"
+message = "FAIL  policy reader stays connected through successful observation"
+transform = { file = "conformance/drivers/capability_policy_probe.py", replace = 'report["readerConnected"] = True', with = 'report["readerConnected"] = False' }

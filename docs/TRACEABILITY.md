@@ -31,6 +31,7 @@ traced requirement is missing a layer. Requirements are defined in
 | AGENTD-22 | 1 | 1 | 1 | 4 | 3 | 1 |
 | AGENTD-23 | 1 | 1 | 1 | 2 | 2 | 1 |
 | AGENTD-24 | 1 | 1 | 1 | 2 | 1 | 1 |
+| AGENTD-26 | waived | waived | waived | 1 | 1 | 1 |
 | ARCH-1 | waived | waived | waived | 1 | 2 | waived |
 | ARCH-2 | waived | waived | waived | 1 | 4 | waived |
 | ARCH-3 | waived | waived | waived | 1 | 1 | waived |
@@ -386,6 +387,17 @@ If a start request names no user and the guest's /etc/passwd does not contain th
 - **test:** `crates/agentd/src/exec.rs`, `crates/agentd/src/exec_start.rs`
 - **impl:** `crates/agentd/src/exec_start.rs`
 - **live:** `conformance/lanes/default_user.py`
+
+## AGENTD-26
+
+When the image enables AGENTD_DROP_EXEC_CAPABILITIES, the agentd shall verify that inheritable and ambient capabilities are empty and bounding capabilities SYS_MODULE, SYS_RAWIO, SYS_PTRACE, SYS_ADMIN, SYS_BOOT, PERFMON, and BPF are absent while its permitted and effective capabilities remain unchanged before creating threads or serving requests.
+
+- **model:** waived: the policy uses Linux thread capabilities; injected syscall failures and an isolated real capability subprocess test its state transitions
+- **gherkin:** waived: the isolated subprocess exercises nonempty inheritable and ambient sets, thread creation, and exec directly; a textual scenario would repeat it
+- **fuzz:** waived: strict boolean parsing and syscall postconditions are finite inputs exercised directly, and capability mutations belong only in isolated subprocesses
+- **test:** `crates/agentd/src/exec_capabilities.rs`
+- **impl:** `crates/agentd/src/exec_capabilities.rs`
+- **live:** `conformance/lanes/capability_policy.py`
 
 ## ARCH-1
 
@@ -1396,6 +1408,7 @@ trace it.
 | Threat | Requirement | Guard | Status |
 |---|---|---|---|
 | An in-VM process races the platform to the bootstrap hook | AGENTD-1, AGENTD-3 | `crates/agentd/tests/model_conformance.rs::slice_0_of_the_walk_replays_against_the_daemon`, `crates/agentd/src/state.rs::identical_replay_succeeds_and_a_different_token_conflicts` | guarded; a process that starts before the daemon still wins, which is the unenforced invariant below |
+| An ordinary exec inherits image privileges its workload does not need | AGENTD-26 | `crates/agentd/src/exec_capabilities.rs::reduction_clears_i_a_and_only_the_seven_bounding_bits` | guarded when the image enables `AGENTD_DROP_EXEC_CAPABILITIES`. It defaults off, and root workloads remain in the daemon's trust boundary |
 | A caller holding the agent token but not the host key opens a verified tunnel | AGENTD-17 | `crates/agentd/src/tunnel_identity.rs::only_the_pinned_host_key_completes_a_handshake`, `crates/agentd/tests/tunnel_relay.rs::a_valid_token_with_the_wrong_host_key_is_refused`, `crates/model/src/tunnel.rs::agentd_17_a_token_holder_without_the_host_key_is_refused_before_any_dial` | guarded; under KK no one-sided change turns the pin off, so its seeded fault turns it off in the tunnel model |
 | A verified tunnel's handshake fails, or the VM has no key, and the guest service is reached anyway | AGENTD-18 | `crates/agentd/tests/tunnel_relay.rs::a_refused_caller_never_causes_a_guest_connection`, `crates/agentd/tests/tunnel_relay.rs::identity_against_a_seedless_vm_is_refused_not_downgraded`, `crates/model-conformance/tests/tunnel_confirmation.rs::a_handshake_without_confirmation_leaves_the_guest_listener_idle`, `crates/model-conformance/tests/tunnel_end_of_stream.rs::a_verified_tunnel_requires_the_requested_guest_port` | guarded |
 | A guest answers a verified tunnel's handshake with a key other than the pinned VM key | BIND-21 | `crates/microvms-core/tests/tunnel_end_to_end.rs::a_wrong_pin_fails_closed_with_a_diagnosis`, `crates/microvms-core/tests/tunnel_end_to_end.rs::a_reply_that_does_not_verify_against_the_pin_fails_the_tunnel` | guarded |

@@ -117,7 +117,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--only",
-        choices=["ensure_image", "default_user", "platform_measurements"],
+        choices=[
+            "ensure_image",
+            "default_user",
+            "platform_measurements",
+            "capability_policy",
+        ],
         help="run one self-contained section instead of the suite: it builds its own image",
     )
     parser.add_argument(

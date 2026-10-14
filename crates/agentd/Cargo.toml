@@ -60,6 +60,8 @@ subtle = "2.6"
 # line, which is what is already locked; nix is pre-1.0 and every minor is a
 # breaking change, so a caret on 0.31 is the widest safe range.
 nix = { version = "0.31", features = ["signal", "fs", "mount", "hostname"] }
+# Safe thread-capability reads and writes for the image-owned exec policy.
+rustix = { version = "1.1", features = ["thread"] }
 tempfile = "3"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }

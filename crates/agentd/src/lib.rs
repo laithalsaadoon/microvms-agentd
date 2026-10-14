@@ -38,6 +38,7 @@ pub mod auth;
 pub mod config;
 pub mod disk;
 pub mod exec;
+pub mod exec_capabilities;
 pub mod exec_start;
 #[cfg(test)]
 mod exec_start_fuzz;
