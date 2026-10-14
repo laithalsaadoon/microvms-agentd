@@ -1,4 +1,6 @@
 # ── forward-http1: FAIL_TO_PASS entries tools/fail-to-pass.py emitted ──
+# Reverse patches include response streaming so these inherited HTTP proofs still
+# restore the original parser after the response body implementation changes.
 
 # FAIL_TO_PASS: fails on 0b40f9fc4e4c with the fix taken out (tools/fail-to-pass.py).
 [[fault]]
