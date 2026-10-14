@@ -184,13 +184,16 @@ mod tests {
     }
 
     fn configured() -> Reply {
-        Reply::WithHeaders(
-            200,
-            vec![(
+        Reply::Body(200, Vec::new())
+    }
+
+    fn configured_recorder(replies: impl IntoIterator<Item = Reply>) -> Arc<Recorder> {
+        Recorder::with_headers(
+            replies,
+            [(
                 protocol::health::DEFAULT_USER_CONFIGURED_HEADER.into(),
                 "1".into(),
             )],
-            Vec::new(),
         )
     }
 
@@ -240,7 +243,7 @@ mod tests {
                 .chain([Reply::Body(200, Vec::new())])
                 .chain(exec("", 0))
                 .chain(exec("", 0));
-            let recorder = Recorder::with(replies);
+            let recorder = configured_recorder(replies);
             let session = unprobed(&recorder);
             upload(&session, "/workspace/project", b"bytes", Some("0600"), tar)
                 .await
@@ -287,7 +290,7 @@ mod tests {
     #[tokio::test]
     async fn refused_uploads_do_not_install_and_failed_writes_clean_the_stage() {
         for status in [401, 503] {
-            let recorder = Recorder::with(
+            let recorder = configured_recorder(
                 std::iter::once(Reply::Body(status, b"unavailable".to_vec()))
                     .chain(std::iter::once(configured()))
                     .chain(exec("0\n0\n", 0))
@@ -304,7 +307,7 @@ mod tests {
         }
         for path in ["relative/file", "/", "/workspace/"] {
             let recorder =
-                Recorder::with(std::iter::once(configured()).chain(exec("1000\n1000\n", 0)));
+                configured_recorder(std::iter::once(configured()).chain(exec("1000\n1000\n", 0)));
             let session = unprobed(&recorder);
             let error = session.upload_file(path, b"file", None).await.unwrap_err();
             assert_eq!(error.kind(), ErrorKind::InvalidArg);
@@ -320,7 +323,7 @@ mod tests {
             "/tmp/.microvms-upload-",
             "/tmp/.microvms-upload-bad/path",
         ] {
-            let recorder = Recorder::with(
+            let recorder = configured_recorder(
                 std::iter::once(configured())
                     .chain(exec("1000\n1000\n", 0))
                     .chain(exec(staging, 0)),
@@ -338,12 +341,13 @@ mod tests {
             );
         }
         for output in ["", "1000\n", "1000\nno-group\n", "1000\n1000\nextra\n"] {
-            let recorder = Recorder::with(std::iter::once(configured()).chain(exec(output, 0)));
+            let recorder =
+                configured_recorder(std::iter::once(configured()).chain(exec(output, 0)));
             let session = unprobed(&recorder);
             assert!(session.upload_tar("/workspace", b"tar").await.is_err());
             assert_eq!(recorder.requests().len(), 4);
         }
-        let recorder = Recorder::with(
+        let recorder = configured_recorder(
             std::iter::once(configured())
                 .chain(exec("1000\n1000\n", 0))
                 .chain(exec("refused symlink", 1)),
@@ -357,7 +361,7 @@ mod tests {
         );
         assert_eq!(recorder.requests().len(), 7);
 
-        let recorder = Recorder::with(
+        let recorder = configured_recorder(
             std::iter::once(configured())
                 .chain(exec("1000\n1000\n", 0))
                 .chain(exec("/tmp/.microvms-upload-0123456789\n", 0))
@@ -376,7 +380,7 @@ mod tests {
         assert_eq!(cleanup["command"][4], "cleanup-private");
         assert_eq!(cleanup["user"], 0);
 
-        let recorder = Recorder::with(
+        let recorder = configured_recorder(
             std::iter::once(configured())
                 .chain(exec("1000\n1000\n", 0))
                 .chain(exec("/tmp/.microvms-upload-0123456789\n", 0))

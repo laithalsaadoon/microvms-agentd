@@ -728,8 +728,6 @@ pub(crate) mod testing {
     pub enum Reply {
         /// A status and a body.
         Body(u16, Vec<u8>),
-        /// A response with explicit headers, such as health's capability markers.
-        WithHeaders(u16, Vec<(String, String)>, Vec<u8>),
         /// A stream: the head status, then these chunks in order.
         Chunks(u16, Vec<Vec<u8>>),
         /// A transport failure, i.e. the request never produced a status.
@@ -753,13 +751,24 @@ pub(crate) mod testing {
     pub struct Recorder {
         seen: Mutex<Vec<HttpRequest>>,
         replies: Mutex<std::collections::VecDeque<Reply>>,
+        // Keep headers separate: downstream callers can exhaustively match Reply.
+        headers: HashMap<String, String>,
     }
 
     impl Recorder {
         pub fn with(replies: impl IntoIterator<Item = Reply>) -> Arc<Self> {
+            Self::with_headers(replies, [])
+        }
+
+        /// Answer every buffered or streaming response with these headers.
+        pub fn with_headers(
+            replies: impl IntoIterator<Item = Reply>,
+            headers: impl IntoIterator<Item = (String, String)>,
+        ) -> Arc<Self> {
             Arc::new(Self {
                 seen: Mutex::new(Vec::new()),
                 replies: Mutex::new(replies.into_iter().collect()),
+                headers: headers.into_iter().collect(),
             })
         }
 
@@ -822,24 +831,19 @@ pub(crate) mod testing {
             let reply = self.record(request);
             Box::pin(async move {
                 match reply {
-                    Reply::WithHeaders(status, headers, body) => Ok(HttpResponse {
-                        status,
-                        headers: headers.into_iter().collect(),
-                        body,
-                    }),
                     Reply::Body(status, body) => Ok(HttpResponse {
                         status,
-                        headers: HashMap::new(),
+                        headers: self.headers.clone(),
                         body,
                     }),
                     Reply::Chunks(status, chunks) => Ok(HttpResponse {
                         status,
-                        headers: HashMap::new(),
+                        headers: self.headers.clone(),
                         body: chunks.concat(),
                     }),
                     Reply::Stalled(chunks) => Ok(HttpResponse {
                         status: 200,
-                        headers: HashMap::new(),
+                        headers: self.headers.clone(),
                         body: chunks.concat(),
                     }),
                     Reply::Cut(why) => Err(Error::wire(WireKind::Transport, why)),
@@ -855,14 +859,13 @@ pub(crate) mod testing {
             let reply = self.record(request);
             Box::pin(async move {
                 let (status, chunks) = match reply {
-                    Reply::WithHeaders(_, _, _) => panic!("header fixture is a buffered response"),
                     Reply::Chunks(status, chunks) => (status, chunks),
                     Reply::Body(status, body) => (status, vec![body]),
                     Reply::Cut(why) => return Err(Error::wire(WireKind::Transport, why)),
                     Reply::Stalled(chunks) => {
                         let head = HttpResponse {
                             status: 200,
-                            headers: HashMap::new(),
+                            headers: self.headers.clone(),
                             body: Vec::new(),
                         };
                         let source: Box<dyn ChunkSource> =
@@ -872,7 +875,7 @@ pub(crate) mod testing {
                 };
                 let head = HttpResponse {
                     status,
-                    headers: HashMap::new(),
+                    headers: self.headers.clone(),
                     // A failing head carries its body, as the real backend does, so the
                     // typed error keeps the daemon's detail string.
                     body: if (200..300).contains(&status) {
