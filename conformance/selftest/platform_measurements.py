@@ -327,3 +327,26 @@ def check_poweroff_measurements(results: Results) -> None:
         and refused_poweroff["terminalSeconds"] is None
         and [row["state"] for row in refused_poweroff["states"]] == ["RUNNING"],
     )
+
+    refusal_result = Results(probe=True)
+    check_poweroff(refused_poweroff, refusal_result)
+    results.check(
+        "power-off accepts a validated syscall refusal", not refusal_result.failed
+    )
+    for guest in (
+        None,
+        {},
+        {"errorType": "RuntimeError"},
+        {"result": 0, "errno": 1},
+        {"result": -1, "errno": 0},
+        {"result": -1, "errno": True},
+        {"result": -1, "errno": -1},
+        {"result": -1, "errno": "1"},
+    ):
+        inconclusive = {**refused_poweroff, "guestResult": guest}
+        negative = Results(probe=True)
+        check_poweroff(inconclusive, negative)
+        results.check(
+            "power-off refuses a running guest without syscall outcome evidence",
+            bool(negative.failed),
+        )

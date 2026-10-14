@@ -226,6 +226,16 @@ def check_poweroff(report: dict[str, Any], results: Results) -> None:
             for row in states
         )
     )
+    guest = report.get("guestResult")
+    refused = (
+        isinstance(guest, dict)
+        and type(guest.get("result")) is int
+        and guest["result"] == -1
+        and type(guest.get("errno")) is int
+        and guest["errno"] > 0
+    )
+    # A running guest alone cannot distinguish a refused syscall from one that never ran.
+    observed = observed and (states[-1]["state"] == "TERMINATED" or refused)
     results.check(
         "platform power-off measurement observed a control-plane state", observed
     )
