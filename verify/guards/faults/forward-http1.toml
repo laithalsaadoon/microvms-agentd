@@ -1,0 +1,91 @@
+# ── forward-http1: FAIL_TO_PASS entries tools/fail-to-pass.py emitted ──
+
+# FAIL_TO_PASS: fails on 0b40f9fc4e4c with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-keep-alive-forwards-each-request-on-the-same-connection"
+guard = "keep_alive_forwards_each_request_on_the_same_connection"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_http1", "--", "--exact", "keep_alive_forwards_each_request_on_the_same_connection"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-keep-alive-forwards-each-request-on-the-same-connection.patch"
+
+# FAIL_TO_PASS: fails on 0b40f9fc4e4c with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-chunked-requests-are-decoded-and-forwarded-without"
+guard = "chunked_requests_are_decoded_and_forwarded_without_truncation"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_http1", "--", "--exact", "chunked_requests_are_decoded_and_forwarded_without_truncation"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-chunked-requests-are-decoded-and-forwarded-without.patch"
+
+# FAIL_TO_PASS: fails on 0b40f9fc4e4c with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-head-keeps-the-get-length-and-204-has-no-content-length"
+guard = "head_keeps_the_get_length_and_204_has_no_content_length"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_http1", "--", "--exact", "head_keeps_the_get_length_and_204_has_no_content_length"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-head-keeps-the-get-length-and-204-has-no-content-length.patch"
+
+# FAIL_TO_PASS: fails on 0b40f9fc4e4c with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-non-utf8-header-octets-survive-both-hops"
+guard = "non_utf8_header_octets_survive_both_hops"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_http1", "--", "--exact", "non_utf8_header_octets_survive_both_hops"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-non-utf8-header-octets-survive-both-hops.patch"
+
+# FAIL_TO_PASS: fails on 0b40f9fc4e4c with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-conflicting-content-lengths-answer-400-before-minting"
+guard = "conflicting_content_lengths_answer_400_before_minting"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_http1", "--", "--exact", "conflicting_content_lengths_answer_400_before_minting"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-conflicting-content-lengths-answer-400-before-minting.patch"
+
+# FAIL_TO_PASS: fails on 0b40f9fc4e4c with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-host-validation-precedes-body-collection-and-large"
+guard = "host_validation_precedes_body_collection_and_large_bodies_are_refused"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_http1", "--", "--exact", "host_validation_precedes_body_collection_and_large_bodies_are_refused"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-host-validation-precedes-body-collection-and-large.patch"
+
+# FAIL_TO_PASS: fails on 0b40f9fc4e4c with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-chunked-request-limit-is-enforced-while-reading"
+guard = "chunked_request_limit_is_enforced_while_reading"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_http1", "--", "--exact", "chunked_request_limit_is_enforced_while_reading"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-chunked-request-limit-is-enforced-while-reading.patch"
+
+# FAIL_TO_PASS: fails on 0b40f9fc4e4c with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-idle-connections-and-incomplete-bodies-have-deadlines"
+guard = "idle_connections_and_incomplete_bodies_have_deadlines"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_http1", "--", "--exact", "idle_connections_and_incomplete_bodies_have_deadlines"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-idle-connections-and-incomplete-bodies-have-deadlines.patch"
+
+# FAIL_TO_PASS: fails on 0b40f9fc4e4c with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-connection-nominated-headers-stay-on-their-own-hop"
+guard = "connection_nominated_headers_stay_on_their_own_hop"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_http1", "--", "--exact", "connection_nominated_headers_stay_on_their_own_hop"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-connection-nominated-headers-stay-on-their-own-hop.patch"
+
+# FAIL_TO_PASS: fails on 0b40f9fc4e4c with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-a-completed-forward-expires-idle-without-losing-its"
+guard = "a_completed_forward_expires_idle_without_losing_its_event"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "serve", "--", "--exact", "a_completed_forward_expires_idle_without_losing_its_event"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-a-completed-forward-expires-idle-without-losing-its.patch"

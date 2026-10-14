@@ -47,3 +47,12 @@ run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "sessi
 expect = "test-failed"
 suite = "rust"
 transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "        if !upgrade || (name != \"connection\" && name != \"upgrade\") {", with = "        if !upgrade || (name != \"connection\" && name == \"upgrade\") {" }
+
+# The public status classifier is unchanged, so its test also passes before this fix.
+[[fault]]
+id = "forward-http1-only-101-upgrades"
+guard = "session::forward::tests::only_a_101_counts_as_an_upgrade"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::forward::tests::only_a_101_counts_as_an_upgrade"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "    status == 101", with = "    status != 101" }
