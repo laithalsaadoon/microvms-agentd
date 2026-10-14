@@ -25,7 +25,7 @@ Defined at: `crates/protocol/src/lib.rs:29-34`.
 | Daemon route metadata and tunnel close codes | direct import | likely | `crates/agentd/src/routes.rs:18-20`, `crates/agentd/src/tunnel.rs:104` |
 | Client tunnel close-code interpretation | direct import | likely | `crates/microvms-edges/src/session/tunnel.rs:149-155` |
 | Daemon filesystem query handling | direct import | likely | `crates/agentd/src/fs.rs:95` |
-| Session request construction and response decoding | direct import | likely | `crates/microvms-app/src/session/mod.rs:448-457` |
+| Session request construction and response decoding | direct import | likely | `crates/microvms-app/src/session/mod.rs:455-464` |
 | File-read query encoding | direct import | likely | `crates/microvms-app/src/session/files.rs:46-53` |
 | Exec results and terminal-phase interpretation | direct import | likely | `crates/microvms-app/src/session/exec.rs:69-103` |
 | SSE event dispatch | runtime dispatch | likely | `crates/microvms-app/src/session/sse.rs:271-310` |
@@ -47,7 +47,7 @@ Defined at: `crates/protocol/src/lib.rs:29-34`.
   `crates/agentd/src/schema.rs:327-340`
 - Build exec requests through `StartRequest::new`. The type is non-exhaustive,
   and the constructor is the common source of request defaults.
-  `crates/protocol/src/exec.rs:218-219`, `crates/protocol/src/exec.rs:490-520`
+  `crates/protocol/src/exec.rs:218-219`, `crates/protocol/src/exec.rs:492-522`
 - Schema text is part of the checked artifact: the comparison is byte-for-byte,
   including whitespace. Regenerate it after a wire documentation change.
   `crates/agentd/tests/schema_artifact.rs:39-74`
@@ -56,49 +56,49 @@ Defined at: `crates/protocol/src/lib.rs:29-34`.
 
 Defined at: `crates/microvms-domain/src/error.rs:34`,
 `crates/microvms-domain/src/error.rs:118`, and
-`crates/microvms-domain/src/error.rs:219`.
+`crates/microvms-domain/src/error.rs:221`.
 
 | Downstream | Type | Touch on change | Citation |
 | --- | --- | --- | --- |
 | CLI kind-to-exit mapping | direct import | yes | `crates/microvms-cli/src/exit.rs:172-187` |
-| Python exception classes | direct import | yes | `bindings/microvms-py/src/errors.rs:129-144` |
+| Python exception classes | direct import | yes | `bindings/microvms-py/src/errors.rs:131-146` |
 | Node error codes, causes, and retry helper | direct import | likely | `bindings/microvms-js/src/errors.rs:78-91`, `bindings/microvms-js/src/errors.rs:149-180` |
-| Control-plane and sandbox error producers | direct import | likely | `crates/microvms-app/src/control/transport.rs:36`, `crates/microvms-app/src/sandbox.rs:69` |
+| Control-plane and sandbox error producers | direct import | likely | `crates/microvms-app/src/control/transport.rs:36`, `crates/microvms-app/src/sandbox.rs:73` |
 | Session HTTP status conversion | direct import | likely | `crates/microvms-app/src/session/http.rs:108-134` |
 | Failure envelope's detailed kind | indirect | likely | `crates/microvms-cli/src/envelope.rs:367-383` |
 | Conformance envelope interpretation | indirect | likely | `conformance/harness/envelope.py:35-44`, `conformance/harness/envelope.py:70-89` |
-| Mapping, retryability, and status round-trip tests | test | yes | `crates/microvms-domain/src/error.rs:499-549`, `crates/microvms-domain/src/error.rs:592-624` |
+| Mapping, retryability, and status round-trip tests | test | yes | `crates/microvms-domain/src/error.rs:501-551`, `crates/microvms-domain/src/error.rs:594-626` |
 | Cross-surface exception and code tests | test | yes | `bindings/microvms-py/tests/test_smoke.py:458-491`, `bindings/microvms-js/__test__/smoke.mjs:359-391` |
-| Exit-table agreement tests | test | yes | `crates/microvms-cli/src/exit.rs:576-615` |
+| Exit-table agreement tests | test | yes | `crates/microvms-cli/src/exit.rs:575-614` |
 
 ### Blast-radius notes
 
 - `Error::wire` derives the coarse kind from the detailed wire kind. Preserve that
   relationship when adding a status; callers should not choose conflicting
   classifications. `crates/microvms-domain/src/error.rs:68-74`,
-  `crates/microvms-domain/src/error.rs:377-406`
+  `crates/microvms-domain/src/error.rs:379-408`
 - Retryability is a property of `ErrorKind`, and the Node helper resolves a code
   back through that enum. Changing the retry policy affects callers without
-  changing an error's text. `crates/microvms-domain/src/error.rs:172-180`,
+  changing an error's text. `crates/microvms-domain/src/error.rs:174-182`,
   `bindings/microvms-js/src/errors.rs:169-180`
 - The CLI exit code groups some daemon failures together, while `data.kind`
   preserves their distinction. A change to either representation needs both
-  envelope and exception review. `crates/microvms-cli/src/exit.rs:629-644`,
+  envelope and exception review. `crates/microvms-cli/src/exit.rs:628-643`,
   `crates/microvms-cli/src/envelope.rs:367-383`
 
 ## CLI exit table
 
 Defined at: `crates/microvms-cli/src/exit.rs:79-134` and
-`crates/microvms-cli/src/exit.rs:205-310`.
+`crates/microvms-cli/src/exit.rs:205-311`.
 
 | Downstream | Type | Touch on change | Citation |
 | --- | --- | --- | --- |
 | Process completion and parse-failure reporting | direct import | likely | `crates/microvms-cli/src/main.rs:119-127`, `crates/microvms-cli/src/main.rs:236-244` |
-| Failure classification | direct import | likely | `crates/microvms-cli/src/exit.rs:372-402` |
+| Failure classification | direct import | likely | `crates/microvms-cli/src/exit.rs:373-403` |
 | JSON failure envelopes | direct import | likely | `crates/microvms-cli/src/envelope.rs:367-383` |
 | Published manifest exit rows | direct import | yes | `crates/microvms-cli/src/manifest.rs:112-117` |
 | Conformance subprocess status interpretation | indirect | likely | `conformance/harness/envelope.py:29-33`, `conformance/harness/envelope.py:57-66` |
-| Table-index and core-class agreement tests | test | yes | `crates/microvms-cli/src/exit.rs:539-554`, `crates/microvms-cli/src/exit.rs:576-615` |
+| Table-index and core-class agreement tests | test | yes | `crates/microvms-cli/src/exit.rs:538-553`, `crates/microvms-cli/src/exit.rs:575-614` |
 | CLI command-local failures | direct import | likely | `crates/microvms-cli/src/commands/attached.rs:167-184`, `crates/microvms-cli/src/commands/mod.rs:610-634` |
 | Induced failure-class guards | test | yes | `crates/microvms-cli/src/guards/exit_codes.rs:25-37` |
 | Spawned CLI exit-code tests | test | yes | `crates/microvms-cli/tests/exit_codes.rs:29-49` |
@@ -116,7 +116,7 @@ Defined at: `crates/microvms-cli/src/exit.rs:79-134` and
   `crates/microvms-cli/src/exit.rs:103-133`
 - The table deliberately spells out error codes separately from core. Preserve
   the agreement test instead of deriving both sides from the same table.
-  `crates/microvms-cli/src/exit.rs:197-205`, `crates/microvms-cli/src/exit.rs:569-595`
+  `crates/microvms-cli/src/exit.rs:197-205`, `crates/microvms-cli/src/exit.rs:568-594`
 
 ## Service constants and JSON emission
 
@@ -156,8 +156,8 @@ Defined at: `crates/microvms-domain/src/sizing.rs:74-125`.
 
 | Downstream | Type | Touch on change | Citation |
 | --- | --- | --- | --- |
-| CLI memory variants and conversions | direct import | yes | `crates/microvms-cli/src/cli.rs:440-490` |
-| CLI resource-request resolution | direct import | likely | `crates/microvms-cli/src/cli.rs:495-526` |
+| CLI memory variants and conversions | direct import | yes | `crates/microvms-cli/src/cli.rs:442-492` |
+| CLI resource-request resolution | direct import | likely | `crates/microvms-cli/src/cli.rs:497-528` |
 | Control-plane run and image data | direct import | likely | `crates/microvms-app/src/control/mod.rs:318`, `crates/microvms-app/src/control/image.rs:72` |
 | Python size factories | direct import | likely | `bindings/microvms-py/src/cost.rs:463-491` |
 | Node size factories | direct import | likely | `bindings/microvms-js/src/cost.rs:363-401` |
@@ -165,7 +165,7 @@ Defined at: `crates/microvms-domain/src/sizing.rs:74-125`.
 | Agent recipe sizes | direct import | likely | `crates/microvms-app/src/agents/mod.rs:44-52` |
 | CLI cost report | indirect | likely | `crates/microvms-cli/src/commands/cost.rs:33-34` |
 | Constants emission and independent size table | config | yes | `crates/microvms-domain/src/constants.rs:727-739`, `tools/check-model-drift.py:213-219` |
-| CLI domain and resource-request tests | test | yes | `crates/microvms-cli/src/cli.rs:2754-2771`, `crates/microvms-cli/src/cli.rs:3879-3897` |
+| CLI domain and resource-request tests | test | yes | `crates/microvms-cli/src/cli.rs:2758-2775`, `crates/microvms-cli/src/cli.rs:3883-3901` |
 | Binding sizing and billing tests | test | likely | `bindings/microvms-py/tests/test_smoke.py:406-430`, `bindings/microvms-js/__test__/smoke.mjs:315-340` |
 | Shared size and cost case runner | test | likely | `crates/microvms-core/tests/parity_cases.rs:34-58` |
 | Public capability mapping | config | likely | `verify/parity/capabilities.toml:748-779` |
@@ -182,7 +182,7 @@ Defined at: `crates/microvms-domain/src/sizing.rs:74-125`.
   class requires reviewing these together with the CLI's exhaustive conversion.
   `crates/microvms-domain/src/sizing.rs:138-145`,
   `crates/microvms-domain/src/sizing.rs:273-280`,
-  `crates/microvms-cli/src/cli.rs:455-473`
+  `crates/microvms-cli/src/cli.rs:457-475`
 
 ## Region values
 
@@ -190,7 +190,7 @@ Defined at: `crates/microvms-domain/src/region.rs:45-79`.
 
 | Downstream | Type | Touch on change | Citation |
 | --- | --- | --- | --- |
-| CLI region variants and conversion | direct import | yes | `crates/microvms-cli/src/cli.rs:537-575` |
+| CLI region variants and conversion | direct import | yes | `crates/microvms-cli/src/cli.rs:539-577` |
 | Python named factories and parser | direct import | yes | `bindings/microvms-py/src/region.rs:32-82` |
 | Node named factories and parser | direct import | yes | `bindings/microvms-js/src/region.rs:35-84` |
 | Signed transport configuration | direct import | likely | `crates/microvms-edges/src/control/transport.rs:49-79` |

@@ -15,7 +15,7 @@ No current per-file diagnostic dataset supports warning or error totals, so this
 | `crates/microvms-cli/src/commands/mod.rs` | ↑ rising | CLI output maintainers | `crates/microvms-cli/src/commands/mod.rs:47` |
 | `bindings/microvms-py/src/sandbox.rs` | ↑ rising | Python binding maintainers | `bindings/microvms-py/src/sandbox.rs:512` |
 | `conformance/lanes/suite.py` | ↑ rising | Conformance maintainers | `conformance/lanes/suite.py:82` |
-| `crates/microvms-app/src/sandbox.rs` | ↑ rising | Sandbox lifecycle maintainers | `crates/microvms-app/src/sandbox.rs:622` |
+| `crates/microvms-app/src/sandbox.rs` | ↑ rising | Sandbox lifecycle maintainers | `crates/microvms-app/src/sandbox.rs:629` |
 | `bindings/microvms-js/src/sandbox.rs` | ↑ rising | Node binding maintainers | `bindings/microvms-js/src/sandbox.rs:668` |
 | `bindings/microvms-py/src/agents.rs` | ↑ rising | Python binding maintainers | `bindings/microvms-py/src/agents.rs:464` |
 
@@ -39,7 +39,7 @@ No current per-file diagnostic dataset supports warning or error totals, so this
 
 **Review ownership.** CLI interface maintainers should coordinate with the handler's review area. Recorded contributions are concentrated: the leading author's share is 90%, with the remainder at 10%.
 
-**Review focus.** Treat changes to accepted arguments as interface changes. The parser's size-request test checks both valid combinations and conflicts with the older memory option (`crates/microvms-cli/src/cli.rs:3879-3904`); the duration test separately checks the accepted domain for seconds-valued flags (`crates/microvms-cli/src/cli.rs:3908-3923`). These source references identify useful tests; this measurement did not run them.
+**Review focus.** Treat changes to accepted arguments as interface changes. The parser's size-request test checks both valid combinations and conflicts with the older memory option (`crates/microvms-cli/src/cli.rs:3883-3908`); the duration test separately checks the accepted domain for seconds-valued flags (`crates/microvms-cli/src/cli.rs:3912-3927`). These source references identify useful tests; this measurement did not run them.
 
 ### 3. `crates/microvms-cli/src/commands/lifecycle.rs`
 
@@ -47,7 +47,7 @@ No current per-file diagnostic dataset supports warning or error totals, so this
 
 **Recent activity.** 15 commits; `↑ rising`, in the dated window above.
 
-**Review ownership.** CLI lifecycle maintainers should review changes alongside the sandbox lifecycle implementation (`crates/microvms-app/src/sandbox.rs:1108`, `crates/microvms-app/src/sandbox.rs:1775`). The recorded activity is concentrated in one author during this window.
+**Review ownership.** CLI lifecycle maintainers should review changes alongside the sandbox lifecycle implementation (`crates/microvms-app/src/sandbox.rs:1112`, `crates/microvms-app/src/sandbox.rs:1742`). The recorded activity is concentrated in one author during this window.
 
 **Review focus.** Preserve the sandbox's ownership outside the cancellable launch future so the following code can read its recorded identifiers (`crates/microvms-cli/src/commands/lifecycle.rs:630-691`). Review result reporting and ledger updates together with teardown, because this adapter reads all of them after the race (`crates/microvms-cli/src/commands/lifecycle.rs:691-746`).
 

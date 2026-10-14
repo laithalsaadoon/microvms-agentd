@@ -14,7 +14,7 @@ Reads an exec’s phase and buffered result without acknowledging it. `crates/ag
 
 **Input:** The `id` path segment; no request body. `crates/agentd/src/exec.rs:429`.
 
-**Output:** JSON `PollResponse`: `exec_id` and `phase`, with available `Outcome` fields flattened into the same object: `exit_code`, `signal`, `timed_out`, `stdout`, `stderr`, `truncated`, and `writers_may_be_alive`; absent output is omitted. The wire phases are `running`, `exited`, and `acked`. `crates/protocol/src/exec.rs:423-429`, `crates/protocol/src/exec.rs:58-78`, `crates/protocol/src/exec.rs:24-31`.
+**Output:** JSON `PollResponse`: `exec_id` and `phase`, with available `Outcome` fields flattened into the same object: `exit_code`, `signal`, `timed_out`, `stdout`, `stderr`, `truncated`, and `writers_may_be_alive`; absent output is omitted. The wire phases are `running`, `exited`, and `acked`. `crates/protocol/src/exec.rs:425-431`, `crates/protocol/src/exec.rs:58-78`, `crates/protocol/src/exec.rs:24-31`.
 
 `crates/agentd/src/exec.rs:429`
 
@@ -30,9 +30,9 @@ pub async fn stream(
 
 Replays available output from a byte offset and follows live output as Server-Sent Events. `crates/agentd/src/routes.rs:602-618`.
 
-**Input:** The `id` path segment and optional query `offset: u64`, defaulting to zero; no request body. `crates/protocol/src/exec.rs:324-329`, `crates/agentd/src/exec.rs:477-502`.
+**Input:** The `id` path segment and optional query `offset: u64`, defaulting to zero; no request body. `crates/protocol/src/exec.rs:326-331`, `crates/agentd/src/exec.rs:477-502`.
 
-**Output:** `text/event-stream`, with JSON event payloads: `output` has `offset`, `stream`, and base64 `output`; `gap` has `from` and `to`; `exit` has `exit_code`, `signal`, `timed_out`, `truncated`, `writers_may_be_alive`, and total `offset`. `crates/protocol/src/exec.rs:333-361`, `crates/agentd/src/exec.rs:505`.
+**Output:** `text/event-stream`, with JSON event payloads: `output` has `offset`, `stream`, and base64 `output`; `gap` has `from` and `to`; `exit` has `exit_code`, `signal`, `timed_out`, `truncated`, `writers_may_be_alive`, and total `offset`. `crates/protocol/src/exec.rs:335-363`, `crates/agentd/src/exec.rs:505`.
 
 `crates/agentd/src/exec.rs:477`
 
@@ -88,7 +88,7 @@ Lists registered execs with the live process IDs in each captured process group.
 
 **Input:** No path parameters, query, or request body. `crates/agentd/src/exec.rs:1056`.
 
-**Output:** JSON `ProcsResponse` with `procs: Vec<ProcGroup>`; each entry has `exec_id`, optional `pgid`, `started_at`, `child_exited`, `reap`, and `pids`. `crates/protocol/src/exec.rs:393-420`.
+**Output:** JSON `ProcsResponse` with `procs: Vec<ProcGroup>`; each entry has `exec_id`, optional `pgid`, `started_at`, `child_exited`, `reap`, and `pids`. `crates/protocol/src/exec.rs:395-422`.
 
 `crates/agentd/src/exec.rs:1056`
 
@@ -222,9 +222,9 @@ pub async fn start(
 
 Starts a command under a caller-supplied exec ID, with retries on the same ID reusing the existing exec. `crates/agentd/src/routes.rs:577-586`.
 
-**Input:** JSON `StartRequest`: required `exec_id: String` and `command: Vec<String>`; optional/defaulted `shell`, `cwd`, `env`, `user`, `group`, `timeout_sec`, `stdin`, `reap_group_on_exit`, and `inherit_image_env`. `shell` accepts a boolean or string; `user` and `group` accept unsigned IDs or names. `crates/protocol/src/exec.rs:219-290`, `crates/protocol/src/exec.rs:119-124`, `crates/protocol/src/exec.rs:176-182`.
+**Input:** JSON `StartRequest`: required `exec_id: String` and `command: Vec<String>`; optional/defaulted `shell`, `cwd`, `env`, `user`, `group`, `timeout_sec`, `stdin`, `reap_group_on_exit`, and `inherit_image_env`. `shell` accepts a boolean or string; `user` and `group` accept unsigned IDs or names. `crates/protocol/src/exec.rs:219-292`, `crates/protocol/src/exec.rs:119-124`, `crates/protocol/src/exec.rs:176-182`.
 
-**Output:** JSON `StartResponse` containing `exec_id` and `phase`. `crates/protocol/src/exec.rs:364-367`.
+**Output:** JSON `StartResponse` containing `exec_id` and `phase`. `crates/protocol/src/exec.rs:366-369`.
 
 `crates/agentd/src/exec.rs:341`
 
@@ -238,7 +238,7 @@ Releases an exited exec’s buffered output and starts its collection TTL. `crat
 
 **Input:** The `id` path segment; no request body. `crates/agentd/src/exec.rs:855`.
 
-**Output:** HTTP 200 with JSON `PollResponse`: `exec_id`, `phase: "acked"`, and the released `Outcome` flattened into the same object. HTTP 409 reports `still_running` or `already_acked` when no result can be released. `crates/agentd/src/exec.rs:855-884`, `crates/agentd/src/exec.rs:887-919`, `crates/protocol/src/exec.rs:423-429`.
+**Output:** HTTP 200 with JSON `PollResponse`: `exec_id`, `phase: "acked"`, and the released `Outcome` flattened into the same object. HTTP 409 reports `still_running` or `already_acked` when no result can be released. `crates/agentd/src/exec.rs:855-884`, `crates/agentd/src/exec.rs:887-919`, `crates/protocol/src/exec.rs:425-431`.
 
 `crates/agentd/src/exec.rs:855`
 
@@ -248,11 +248,11 @@ Releases an exited exec’s buffered output and starts its collection TTL. `crat
 pub async fn kill(State(state): State<AppState>, Path(id): Path<String>) -> Response {
 ```
 
-Sends SIGTERM to an exec’s process group and escalates to SIGKILL if the group remains alive after the grace period. `crates/agentd/src/exec.rs:1621-1639`.
+Sends SIGTERM to an exec’s process group and escalates to SIGKILL if the group remains alive after the grace period. `crates/agentd/src/exec.rs:1625-1643`.
 
 **Input:** The `id` path segment; no request body. `crates/agentd/src/exec.rs:929`.
 
-**Output:** JSON `KillResponse` with `exec_id: String` and `killed: bool`; false indicates that no signal was delivered because the group had already exited. `crates/protocol/src/exec.rs:377-382`.
+**Output:** JSON `KillResponse` with `exec_id: String` and `killed: bool`; false indicates that no signal was delivered because the group had already exited. `crates/protocol/src/exec.rs:379-384`.
 
 `crates/agentd/src/exec.rs:929`
 
@@ -268,9 +268,9 @@ pub async fn write_stdin(
 
 Writes bytes to an exec’s stdin and optionally closes the pipe with EOF. `crates/agentd/src/routes.rs:620-630`.
 
-**Input:** The `id` path segment and JSON `StdinRequest` with optional `data_b64: String` and `signal: String`; `"eof"` closes the pipe after any supplied bytes. `crates/protocol/src/exec.rs:299-308`.
+**Input:** The `id` path segment and JSON `StdinRequest` with optional `data_b64: String` and `signal: String`; `"eof"` closes the pipe after any supplied bytes. `crates/protocol/src/exec.rs:301-310`.
 
-**Output:** JSON `StdinResponse` with `exec_id: String`, `written: usize`, and `eof: bool`. `crates/protocol/src/exec.rs:316-320`.
+**Output:** JSON `StdinResponse` with `exec_id: String`, `written: usize`, and `eof: bool`. `crates/protocol/src/exec.rs:318-322`.
 
 `crates/agentd/src/exec.rs:706`
 

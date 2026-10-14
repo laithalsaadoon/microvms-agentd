@@ -1,6 +1,6 @@
 # microvms-agentd · Business logic
 
-This index covers domain validation and calculations in `microvms-domain`, orchestration policies in `microvms-app`, and request and execution rules in `agentd`. It documents the checks this repository implements; service-side behavior beyond those checks is outside its scope. The sources separate pure sizing rules, image preflight, lifecycle transitions, and daemon handlers. `crates/microvms-domain/src/sizing.rs:153`, `crates/microvms-app/src/control/image.rs:273`, `crates/microvms-app/src/sandbox.rs:1587`, `crates/agentd/src/exec.rs:341`.
+This index covers domain validation and calculations in `microvms-domain`, orchestration policies in `microvms-app`, and request and execution rules in `agentd`. It documents the checks this repository implements; service-side behavior beyond those checks is outside its scope. The sources separate pure sizing rules, image preflight, lifecycle transitions, and daemon handlers. `crates/microvms-domain/src/sizing.rs:153`, `crates/microvms-app/src/control/image.rs:273`, `crates/microvms-app/src/sandbox.rs:1585`, `crates/agentd/src/exec.rs:341`.
 
 ## Validations
 
@@ -40,7 +40,7 @@ This index covers domain validation and calculations in `microvms-domain`, orche
 | Rule | Domain | Citation | Failure mode |
 | --- | --- | --- | --- |
 | Exec start requires a valid request body and a nonempty exec ID. An explicit timeout must be positive, finite, and representable as a duration. | Execution | `crates/agentd/src/exec.rs:341`, `crates/agentd/src/exec.rs:1171` | HTTP 400 with a malformed-request error. |
-| Direct execution requires a nonempty argument vector; named users, groups, and shells must resolve under the guest lookup rules. | Execution | `crates/agentd/src/exec_start.rs:218`, `crates/agentd/src/exec_start.rs:250`, `crates/agentd/src/exec_start.rs:275`, `crates/agentd/src/exec_start.rs:370` | HTTP 400 with the corresponding request error. |
+| Direct execution requires a nonempty argument vector; named users, groups, and shells must resolve under the guest lookup rules. | Execution | `crates/agentd/src/exec_start.rs:235`, `crates/agentd/src/exec_start.rs:317`, `crates/agentd/src/exec_start.rs:342`, `crates/agentd/src/exec_start.rs:434` | HTTP 400 with the corresponding request error. |
 | A run-hook payload must be a JSON object with a nonempty string token; supplied environment values and identity fields must have their expected string shapes. | Bootstrap | `crates/protocol/src/hook.rs:175`, `crates/agentd/src/routes.rs:247` | HTTP 400 for an invalid payload. |
 | Archive extraction requires an absolute destination; escaping members, absolute or escaping links, device entries, and FIFOs are refused. | Files | `crates/agentd/src/fs.rs:1450`, `crates/agentd/src/fs.rs:714`, `crates/agentd/src/fs.rs:739`, `crates/agentd/src/fs.rs:755` | HTTP 400; configured archive-size and member limits return HTTP 413. `crates/agentd/src/fs.rs:158` |
 | Protected requests require the installed bearer token. | Authorization | `crates/agentd/src/auth.rs:61` | HTTP 503 before bootstrap; HTTP 401 for missing or mismatched credentials after bootstrap. |
@@ -61,9 +61,9 @@ This index covers domain validation and calculations in `microvms-domain`, orche
 | Invariant | Where enforced | Citation |
 | --- | --- | --- |
 | Image creation uses the same preflight method available to callers. | `ControlPlane::create_image` | `crates/microvms-app/src/control/image.rs:188` |
-| Suspend is accepted locally only from `Running`; its settled result records either `Suspended` or `Terminated`. | `Sandbox::suspend` | `crates/microvms-app/src/sandbox.rs:1587` |
-| Resume requires `Suspended`, refuses a previously terminated VM, and rebinds the session after reaching `Running`. | `Sandbox::resume` | `crates/microvms-app/src/sandbox.rs:1671` |
-| Teardown records termination intent before calling the service. Waiting for completion changes the recorded lifecycle to `Terminated` only after that state is observed. | `Sandbox::terminate` | `crates/microvms-app/src/sandbox.rs:1791` |
+| Suspend is accepted locally only from `Running`; its settled result records either `Suspended` or `Terminated`. | `Sandbox::suspend` | `crates/microvms-app/src/sandbox.rs:1585` |
+| Resume requires `Suspended`, refuses a previously terminated VM, and rebinds the session after reaching `Running`. | `Sandbox::resume` | `crates/microvms-app/src/sandbox.rs:1669` |
+| Teardown records termination intent before calling the service. Waiting for completion changes the recorded lifecycle to `Terminated` only after that state is observed. | `Sandbox::terminate` | `crates/microvms-app/src/sandbox.rs:1758` |
 
 ### agentd
 
@@ -108,12 +108,12 @@ The report charges snapshot reads on launch, compute for a recorded running phas
 - **Rate freshness:** Reports carry a warning when the rate-table age exceeds 90 days. `crates/microvms-domain/src/cost.rs:964`, `crates/microvms-domain/src/cost.rs:95`, `crates/microvms-domain/src/cost.rs:1890`.
 - **Image waits:** After the stall grace, the wait probes once; a readable, nonempty build listing containing only `PENDING` builds produces `BuildWedged`, while missing listing evidence leaves the ordinary wait running. `crates/microvms-app/src/control/image.rs:429`, `crates/microvms-app/src/control/image.rs:464`.
 - **Control-plane retries:** Requests use bounded exponential backoff with jitter only when the resulting error is retryable; throttling and server faults receive that classification. `crates/microvms-app/src/control/transport.rs:290`, `crates/microvms-app/src/control/transport.rs:374`.
-- **Session errors:** Transport, token-mint, not-bootstrapped, request-timeout, and server errors are retryable; authorization failures map to credential errors. `crates/microvms-domain/src/error.rs:377`.
+- **Session errors:** Transport, token-mint, not-bootstrapped, request-timeout, and server errors are retryable; authorization failures map to credential errors. `crates/microvms-domain/src/error.rs:379`.
 - **Proxy-token cache:** Minting is serialized and rechecks the cache under the lock; a refresh retains previously requested ports and adds the current port. Credential failures retain their classification. `crates/microvms-app/src/session/proxy.rs:502`.
 - **Keep-awake polling:** The loop stops on cancellation, a nonrunning probe, an enabled idle condition, or its duration limit; retryable errors consume the configured tolerance and other errors propagate. `crates/microvms-app/src/session/keepalive.rs:188`.
-- **Teardown:** `Sandbox::terminate` returns a report containing failures and undeleted resources, attempts VM termination before optional image deletion, and reports a requested log-group deletion for external cleanup. `crates/microvms-app/src/sandbox.rs:1775`.
+- **Teardown:** `Sandbox::terminate` returns a report containing failures and undeleted resources, attempts VM termination before optional image deletion, and reports a requested log-group deletion for external cleanup. `crates/microvms-app/src/sandbox.rs:1742`.
 - **Route authorization:** Route metadata places bearer-protected endpoints behind token middleware and keeps open endpoints and platform hooks on their declared path. `crates/agentd/src/routes.rs:52`.
-- **Child environment:** Execution composes the optional image environment, passwd-derived identity, launch environment, and request environment in that order, with later layers overriding earlier values. `crates/agentd/src/exec_start.rs:350`, `crates/agentd/src/exec_start.rs:191`.
+- **Child environment:** Execution composes the optional image environment, passwd-derived identity, launch environment, and request environment in that order, with later layers overriding earlier values. `crates/agentd/src/exec_start.rs:414`, `crates/agentd/src/exec_start.rs:206`.
 - **Response behavior:** The router installs the version-stamping middleware and panic-response layer around the combined routes. `crates/agentd/src/routes.rs:78`.
 
 ## See also
