@@ -150,8 +150,8 @@ raw TCP connection and a direct token request must fail. The direct request igno
 variables so it tests the guest route. Inside the box, the raw connection must fail and the
 egress gateway must refuse the token request under `metadata_hosts` or `metadata_addresses`.
 A default-deny response alone fails this check: removing Box's metadata rules must still be
-observable when the guest route is blocked. Either failed probe stops the run before the
-driver starts. The probe prints status lines without tokens or credentials.
+observable with the guest route blocked. Either failed probe stops the run before the
+driver starts. Output contains status and error names without tokens or credentials.
 
 The `curl` in Box's shell refuses link-local IP addresses before the gateway sees the
 request. The `instance-metadata` scenario checks for that refusal, and the decision log has no
@@ -159,7 +159,7 @@ entry for it. The guest route covers the unprivileged driver outside the box; Bo
 network and policy checks continue to cover code inside it.
 
 The route setup and failure ordering have offline regression coverage in `mise run box:check`.
-This example change is verified offline only until it is exercised on a live guest.
+Tests cover this example change offline; a live guest check remains pending.
 
 ## Identity repair and a fresh /proc
 
