@@ -383,7 +383,7 @@ pub struct PyBaseImage {
 
 #[pymethods]
 impl PyBaseImage {
-    /// The managed base every `docs/PLATFORM.md` measurement from 2026-08-06 onward used.
+    /// The managed Amazon Linux 2023 base used for measurements in `docs/PLATFORM.md`.
     #[staticmethod]
     fn al2023() -> PyBaseImage {
         PyBaseImage {

@@ -291,7 +291,7 @@ Defined at: `crates/microvms-app/src/session/exec.rs:874-887`
 
 ## VmState
 
-The client model mirrors the lifecycle vocabulary and starts at `Pending`. The diagram uses its guarded configuration: `LaunchAccepted` keeps the pending state; `HookSucceeded` starts the VM; suspend and resume actions progress through their corresponding phases. `ResumeRequested` keeps `Suspended` and records an in-flight resume. Once `SuspendedVmEnded` has recorded that the platform ended the suspended VM, the service refuses the request and the model writes `Terminated` (`crates/model/src/client.rs:60-78`, `crates/model/src/client.rs:295-313`, `crates/model/src/client.rs:390-532`).
+The client model mirrors the lifecycle vocabulary and starts at `Pending`. The diagram uses its guarded configuration: `LaunchAccepted` keeps the pending state; `HookSucceeded` starts the VM; suspend and resume actions progress through their corresponding phases. `ResumeRequested` keeps `Suspended` and records an in-flight resume while the platform still has the VM. `SuspendedVmEnded` sets the platform-ended flag without changing the client's `Suspended` state. Once `SuspendedVmEnded` has recorded that the platform ended the suspended VM, the service refuses the request and the model writes `Terminated` (`crates/model/src/client.rs:60-78`, `crates/model/src/client.rs:295-313`, `crates/model/src/client.rs:390-532`).
 
 `TerminateRequested` writes `Terminating` and clears an in-flight resume; `TerminateComplete` writes `Terminated`. The request is offered before the first termination, including during suspension. In the guarded model, the completed termination is absorbing. A late resume completion changes nothing once its preconditions no longer hold (`crates/model/src/client.rs:352-383`, `crates/model/src/client.rs:516-553`).
 
@@ -302,7 +302,9 @@ stateDiagram-v2
     Pending --> Running: HookSucceeded
     Running --> Suspending: SuspendRequested
     Suspending --> Suspended: SuspendComplete
-    Suspended --> Suspended: ResumeRequested
+    Suspended --> Suspended: SuspendedVmEnded
+    Suspended --> Suspended: ResumeRequested (platform still has VM)
+    Suspended --> Terminated: ResumeRequested (platform ended VM)
     Suspended --> Running: ResumeComplete
     Pending --> Terminating: TerminateRequested
     Running --> Terminating: TerminateRequested

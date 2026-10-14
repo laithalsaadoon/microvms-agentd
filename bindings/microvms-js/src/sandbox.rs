@@ -253,7 +253,7 @@ impl BaseImageInput {
     }
 }
 
-/// The managed base every `docs/PLATFORM.md` measurement from 2026-08-06 onward used.
+/// The managed Amazon Linux 2023 base used for measurements in `docs/PLATFORM.md`.
 #[napi]
 pub fn default_base_image() -> BaseImageInput {
     let base = CoreBaseImage::al2023();

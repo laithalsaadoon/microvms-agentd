@@ -307,7 +307,7 @@ class BaseImage:
     @staticmethod
     def al2023() -> BaseImage:
         """
-        The managed base every `docs/PLATFORM.md` measurement from 2026-08-06 onward used.
+        The managed Amazon Linux 2023 base used for measurements in `docs/PLATFORM.md`.
         """
     @property
     def docker_ref(self, /) -> str:

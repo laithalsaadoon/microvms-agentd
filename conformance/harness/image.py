@@ -33,9 +33,9 @@ DEFAULT_BASE_IMAGE = "al2023-1"
 #: `baseImageArn` (`control/artifact.rs:233`). Pairing them means selecting one thing
 #: and having both follow, which is the shape the deleted `sandbox.BASE_IMAGES` had.
 #:
-#: `al2023-1` is the managed base every measurement in `docs/PLATFORM.md` from
-#: 2026-08-06 onward used, paired with the `amazonlinux:2023-minimal` registry ref the
-#: same builds used as `FROM`. Literals here rather than a read of
+#: `al2023-1` is the managed Amazon Linux 2023 base used for measurements in
+#: `docs/PLATFORM.md`, paired with the `amazonlinux:2023-minimal` registry ref those
+#: builds used as `FROM`. Literals here rather than a read of
 #: `microvm constants --emit-json`, because that dump carries API constraints and not
 #: base images — see `resolve_base_ref` for what that costs.
 BASE_IMAGE_REFS = {

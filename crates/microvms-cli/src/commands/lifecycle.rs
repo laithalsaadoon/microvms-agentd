@@ -2006,10 +2006,9 @@ pub fn start_request(spec: StartSpec<'_>) -> microvms_core::protocol::exec::Star
 /// non-running id answers about the id rather than saying which of two things the caller got
 /// wrong, and a suspend issued from SUSPENDED is a caller who believes they resumed.
 ///
-/// This read is also what makes STATE-5's local half hold on the attached path at all, and
-/// the module docs' assessment of a `Sandbox::attach` constructor turns on it: the service's
-/// answer is a stronger source for "is this RUNNING" than a lifecycle a constructor would have
-/// to be handed.
+/// This read also makes STATE-5's local half hold on the attached path: the service's
+/// answer establishes whether the VM is RUNNING when this command has no lifecycle state
+/// from a launched sandbox.
 pub async fn suspend<O: std::io::Write, E: std::io::Write>(
     ctx: &mut Ctx<'_, O, E>,
     args: &SuspendArgs,

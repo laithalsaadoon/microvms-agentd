@@ -706,8 +706,8 @@ impl ControlPlane {
                 "microvm {} reached {} before {wanted:?}: {}. A VM that reaches a terminal state \
                  before RUNNING died during startup, and for a hook-serving daemon that almost \
                  always means a lifecycle hook failed — the stateReason above is the only evidence \
-                 left, because the VM is gone (docs/PLATFORM.md, 'A MicroVM that dies during \
-                 startup reports a connection error that hides the cause').",
+                 left, because the VM is gone (docs/PLATFORM.md, 'MicroVM states, and terminal \
+                 states reached before RUNNING').",
                 got.id,
                 got.state,
                 got.reason(),
