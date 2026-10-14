@@ -274,7 +274,7 @@ class RunLineRules(unittest.TestCase):
             [tasks.check]
             depends = ["a", "b", "c", "d"]
             [tasks.a]
-            run = "npx -y -p @napi-rs/cli@3.8.2 napi build --platform"
+            run = "npx -y -p @napi-rs/cli@3.10.8 napi build --platform"
             [tasks.b]
             env = { CARGO_TARGET_DIR = "{{config_root}}/target/b" }
             run = "uvx maturin@1.14.1 build"

@@ -4848,7 +4848,7 @@ class TraceReading(unittest.TestCase):
                     ["@napi-rs/cli@3"],
                 ),
                 (
-                    ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build"],
+                    ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build"],
                     [],
                 ),
                 (["npx", "--package", "typedoc@0.28.14", "--", "typedoc"], []),
@@ -5311,7 +5311,7 @@ class FireSharded(unittest.TestCase):
         # third. A count, an entry priced without its command's clean and restored runs, or a
         # CLI, script, bindings, napi or lint entry priced as another kind each gives other
         # slices.
-        napi = ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build"]
+        napi = ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build"]
         maturin = ["uvx", "maturin@1.14.1", "develop", "-q"]
         clippy = ["cargo", "clippy", "-p", "x", "--all-targets", "--", "-D", "warnings"]
         spec = [

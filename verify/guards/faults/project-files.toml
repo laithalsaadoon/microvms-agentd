@@ -58,7 +58,7 @@ transform = { file = "bindings/microvms-py/src/sandbox.rs", replace = "         
 id = "ts-build-image-version-dropped"
 guard = "a bad pin is refused before any call"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/build_project.mjs"],
 ]
 expect = "test-failed"
@@ -71,7 +71,7 @@ transform = { file = "bindings/microvms-js/src/sandbox.rs", replace = "        r
 id = "ts-project-dir-dropped"
 guard = "a directory without a pair is refused before any call"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/build_project.mjs"],
 ]
 expect = "test-failed"
@@ -84,7 +84,7 @@ transform = { file = "bindings/microvms-js/src/sandbox.rs", replace = "        i
 id = "ts-ensure-project-dir-dropped"
 guard = "ensureImage refuses the project before any call"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/build_project.mjs"],
 ]
 expect = "test-failed"

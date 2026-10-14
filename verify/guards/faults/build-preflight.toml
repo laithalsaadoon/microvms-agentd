@@ -18,7 +18,7 @@ transform = { file = "bindings/microvms-py/src/sandbox.rs", replace = "        O
 id = "js-sandbox-preflight-unchecked"
 guard = "preflight rejects what buildImage would: name"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/build_preflight.mjs"],
 ]
 expect = "test-failed"

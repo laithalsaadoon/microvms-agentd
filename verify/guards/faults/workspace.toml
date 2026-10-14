@@ -57,7 +57,7 @@ transform = { file = "crates/microvms-edges/src/workspace.rs", replace = ".any(|
 id = "js-download-dir-writes-under-git"
 guard = "downloadDir writes only the selected regular files of a hostile archive"
 run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3.8.2", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/workspace.mjs"],
 ]
 expect = "test-failed"

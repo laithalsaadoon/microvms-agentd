@@ -93,7 +93,7 @@ jobs:
       - name: napi build
         working-directory: bindings/microvms-js
         run: >
-          npx -y -p @napi-rs/cli@3.8.2 napi build
+          npx -y -p @napi-rs/cli@3.10.8 napi build
           --manifest-path ../../Cargo.toml --package microvms-js
           --platform --release --target ${{ matrix.target }} ${{ matrix.cross }} --output-dir .
 
