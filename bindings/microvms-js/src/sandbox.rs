@@ -1233,7 +1233,9 @@ mod ensure_tests {
                 tags: None,
                 wait_timeout_seconds: None,
             };
-            let request = options.into_request(None).unwrap();
+            let Ok(request) = options.into_request(None) else {
+                panic!("valid ensure options must convert to a core request");
+            };
             assert_eq!(
                 request.repair_guest_identity,
                 repair.unwrap_or(false),
