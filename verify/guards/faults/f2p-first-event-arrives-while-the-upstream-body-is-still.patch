@@ -1,5 +1,5 @@
 diff --git a/crates/microvms-edges/src/session/forward.rs b/crates/microvms-edges/src/session/forward.rs
-index cee6825..de231cb 100644
+index bb8c867..49f2552 100644
 --- a/crates/microvms-edges/src/session/forward.rs
 +++ b/crates/microvms-edges/src/session/forward.rs
 @@ -74,26 +74,21 @@ use std::net::SocketAddr;
@@ -44,7 +44,20 @@ index cee6825..de231cb 100644
      pub exchange_timeout: std::time::Duration,
  }
 
-@@ -431,13 +424,13 @@ pub(crate) async fn serve_connection_via<S, F>(
+@@ -313,12 +306,6 @@ impl ForwardClient {
+         reqwest::Client::builder()
+             // Relay redirects to the local client without requesting their destination.
+             .redirect(reqwest::redirect::Policy::none())
+-            // Preserve encoded bytes and headers even if a downstream crate enables
+-            // reqwest's decompression features through Cargo feature unification.
+-            .no_gzip()
+-            .no_brotli()
+-            .no_zstd()
+-            .no_deflate()
+             .build()
+             .map(|inner| Self { inner })
+             .map_err(|err| {
+@@ -437,13 +424,13 @@ pub(crate) async fn serve_connection_via<S, F>(
      spec: &ForwardSpec,
      auth: Option<&Arc<ProxyAuth>>,
      client: &ForwardClient,
@@ -60,7 +73,7 @@ index cee6825..de231cb 100644
      let upgraded = Mutex::new(None);
      let answered = AtomicBool::new(false);
      let service = service_fn(|request| {
-@@ -459,19 +452,7 @@ where
+@@ -465,19 +452,7 @@ where
      // The public primitive accepts borrowed streams. Hyper's automatic upgrade API
      // requires 'static I/O, so take its buffered bytes and socket back explicitly.
      let mut connection = builder.serve_connection(TokioIo::new(local), service);
@@ -81,7 +94,7 @@ index cee6825..de231cb 100644
      let parts = connection.into_parts();
      if let Err(error) = result {
          // The next request's timer also bounds idle keep-alive. Closing an empty
-@@ -502,16 +483,8 @@ where
+@@ -508,16 +483,8 @@ where
  const HEADER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
  const MAX_REQUEST_BODY_BYTES: usize = 16 * 1024 * 1024;
 
@@ -100,7 +113,7 @@ index cee6825..de231cb 100644
      *response.status_mut() =
          http::StatusCode::from_u16(status).unwrap_or(http::StatusCode::BAD_GATEWAY);
      response.headers_mut().insert(
-@@ -561,14 +534,14 @@ fn strip_hop_headers(headers: &mut http::HeaderMap, upgrade: bool) {
+@@ -567,14 +534,14 @@ fn strip_hop_headers(headers: &mut http::HeaderMap, upgrade: bool) {
      }
  }
 
@@ -118,7 +131,7 @@ index cee6825..de231cb 100644
      let headers = request
          .headers()
          .get_all(http::header::HOST)
-@@ -577,7 +550,7 @@ async fn forward_request(
+@@ -583,7 +550,7 @@ async fn forward_request(
          .collect::<Vec<_>>();
      if !local_host_matches(&headers, spec.bind) {
          let explanation = "the request Host must name the local forward and its port".to_string();
@@ -127,11 +140,10 @@ index cee6825..de231cb 100644
              status: 403,
              explanation: explanation.clone(),
          });
-@@ -639,8 +612,10 @@ async fn forward_request(
+@@ -645,7 +612,10 @@ async fn forward_request(
      };
      let offered_upgrade = head.headers.contains_key(http::header::UPGRADE);
      strip_hop_headers(&mut head.headers, offered_upgrade);
--    let head_only = head.method == http::Method::HEAD;
 -    let mut request = client.inner.request(head.method, &url);
 +    let mut request = client
 +        .inner
@@ -140,7 +152,7 @@ index cee6825..de231cb 100644
      for (name, value) in &head.headers {
          // Hyper decoded the local transfer framing; reqwest frames the collected bytes.
          if forwards_request_header(name.as_str())
-@@ -653,20 +628,15 @@ async fn forward_request(
+@@ -658,20 +628,15 @@ async fn forward_request(
      for (name, value) in &minted {
          request = request.header(name, value);
      }
@@ -168,7 +180,7 @@ index cee6825..de231cb 100644
              status: status.as_u16(),
              explanation: explanation.clone(),
          });
-@@ -675,10 +645,6 @@ async fn forward_request(
+@@ -680,10 +645,6 @@ async fn forward_request(
      let mut headers = response.headers().clone();
      let is_upgrade = is_upgrade(status.as_u16());
      strip_hop_headers(&mut headers, is_upgrade);
@@ -179,17 +191,15 @@ index cee6825..de231cb 100644
      let body = if is_upgrade {
          let stream = response.upgrade().await.map_err(|err| {
              Error::new(
-@@ -687,82 +653,25 @@ async fn forward_request(
+@@ -692,80 +653,25 @@ async fn forward_request(
              )
          })?;
          *upgraded.lock().expect("upgrade lock poisoned") = Some(stream);
 -        let _ = events.send(event);
 -        full_body(Bytes::new())
--    } else if head_only
--        || status == http::StatusCode::NO_CONTENT
--        || status == http::StatusCode::NOT_MODIFIED
--        || response.content_length() == Some(0)
--    {
+-    } else if response.content_length() == Some(0) {
+-        // Reqwest's decoded-body size hint is already zero for HEAD, 204 and
+-        // 304. Hyper need not poll these bodies, so report completion here.
 -        let _ = events.send(event);
 -        full_body(Bytes::new())
 +        Bytes::new()

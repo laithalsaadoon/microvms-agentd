@@ -7,6 +7,33 @@ expect = "test-failed"
 suite = "rust"
 transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "tokio::time::timeout(timeout, stream.next())", with = "tokio::time::timeout(DEFAULT_EXCHANGE_TIMEOUT, stream.next())" }
 
+# Empty decoded bodies complete even when Hyper never polls their body stream.
+[[fault]]
+id = "forward-stream-bodyless-completion"
+guard = "bodyless_responses_complete_without_polling_or_upstream_eof"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_streams", "--", "--exact", "bodyless_responses_complete_without_polling_or_upstream_eof"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "} else if response.content_length() == Some(0) {", with = "} else if false {" }
+
+# Cargo feature unification must not turn the relay into a gzip decoder.
+[[fault]]
+id = "forward-stream-encoded-wire"
+guard = "encoded_responses_keep_wire_bytes_headers_and_completion"
+run = ["cargo", "test", "-p", "microvms-edges", "--features", "reqwest/gzip", "--test", "forward_streams", "--", "--exact", "encoded_responses_keep_wire_bytes_headers_and_completion"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "            .no_gzip()\n", with = "" }
+
+# Encoded bodyless responses still complete when decompression is available.
+[[fault]]
+id = "forward-stream-encoded-bodyless"
+guard = "bodyless_responses_complete_without_polling_or_upstream_eof"
+run = ["cargo", "test", "-p", "microvms-edges", "--features", "reqwest/gzip", "--test", "forward_streams", "--", "--exact", "bodyless_responses_complete_without_polling_or_upstream_eof"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "            .no_gzip()\n", with = "" }
+
 # A client-level timer must not charge downstream backpressure to upstream reads.
 [[fault]]
 id = "forward-stream-local-backpressure"

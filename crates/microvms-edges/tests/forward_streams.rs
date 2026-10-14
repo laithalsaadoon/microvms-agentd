@@ -72,6 +72,139 @@ async fn request(browser: &mut DuplexStream) {
 }
 
 #[tokio::test]
+async fn bodyless_responses_complete_without_polling_or_upstream_eof() {
+    for (method, status, response, length) in [
+        (
+            "HEAD",
+            200,
+            "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nContent-Encoding: gzip\r\n\r\n",
+            Some("5"),
+        ),
+        ("DELETE", 204, "HTTP/1.1 204 No Content\r\n\r\n", None),
+        (
+            "GET",
+            304,
+            "HTTP/1.1 304 Not Modified\r\nContent-Length: 5\r\nContent-Encoding: gzip\r\n\r\n",
+            None,
+        ),
+        (
+            "GET",
+            200,
+            "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n",
+            Some("0"),
+        ),
+    ] {
+        let (endpoint, listener) = listener().await;
+        let (release, released) = tokio::sync::oneshot::channel();
+        let upstream = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            through(&mut stream, b"\r\n\r\n").await;
+            stream.write_all(response.as_bytes()).await.unwrap();
+            // Completion follows the decoded message, not the pooled socket's EOF.
+            released.await.unwrap();
+        });
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let (mut browser, task) = relay_observed(
+            endpoint,
+            BOUND,
+            Arc::new(ForwardClient::new().unwrap()),
+            events.clone(),
+        );
+        browser
+            .write_all(
+                format!("{method} / HTTP/1.1\r\nHost: localhost:8080\r\nConnection: close\r\n\r\n")
+                    .as_bytes(),
+            )
+            .await
+            .unwrap();
+        let mut bytes = Vec::new();
+        tokio::time::timeout(BOUND, browser.read_to_end(&mut bytes))
+            .await
+            .expect("bodyless response completes while upstream remains open")
+            .unwrap();
+        task.await.unwrap().unwrap();
+        assert!(
+            matches!(
+                events.lock().unwrap().as_slice(),
+                [ForwardEvent::Forwarded { status: actual, upgraded: false }] if *actual == status
+            ),
+            "{method} {status} reports exactly one completed exchange"
+        );
+        let wire = String::from_utf8(bytes).unwrap().to_ascii_lowercase();
+        let (head, body) = wire.split_once("\r\n\r\n").expect("complete response head");
+        assert!(head.starts_with(&format!("http/1.1 {status} ")));
+        assert!(body.is_empty(), "no response body: {wire}");
+        if method == "HEAD" || status == 304 {
+            assert!(head.contains("content-encoding: gzip"), "{wire}");
+        }
+        assert_eq!(
+            head.lines()
+                .find_map(|line| line.strip_prefix("content-length: ")),
+            length,
+            "{method} {status}: {head}",
+        );
+        release.send(()).unwrap();
+        upstream.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn encoded_responses_keep_wire_bytes_headers_and_completion() {
+    // A valid gzip member containing "encoded response\n". Run this test with
+    // reqwest/gzip enabled too: another dependency can enable it for the relay.
+    const GZIP: &[u8] = b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x02\xff\x4b\xcd\x4b\xce\x4f\x49\x4d\x51\x28\x4a\x2d\x2e\xc8\xcf\x2b\x4e\xe5\x02\x00\x4e\x2a\x09\xf1\x11\x00\x00\x00";
+    let (endpoint, listener) = listener().await;
+    let (release, released) = tokio::sync::oneshot::channel();
+    let upstream = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        through(&mut stream, b"\r\n\r\n").await;
+        stream
+            .write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n",
+                    GZIP.len()
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        stream.write_all(GZIP).await.unwrap();
+        released.await.unwrap();
+    });
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let (mut browser, task) = relay_observed(
+        endpoint,
+        BOUND,
+        Arc::new(ForwardClient::new().unwrap()),
+        events.clone(),
+    );
+    request(&mut browser).await;
+    let head = tokio::time::timeout(BOUND, through(&mut browser, b"\r\n\r\n"))
+        .await
+        .expect("encoded response head arrives");
+    let head = String::from_utf8(head).unwrap().to_ascii_lowercase();
+    assert!(head.starts_with("http/1.1 200 ok\r\n"));
+    assert!(head.contains("\r\ncontent-encoding: gzip\r\n"));
+    assert!(head.contains(&format!("\r\ncontent-length: {}\r\n", GZIP.len())));
+    let mut body = Vec::new();
+    tokio::time::timeout(BOUND, browser.read_to_end(&mut body))
+        .await
+        .expect("encoded body completes before upstream EOF")
+        .unwrap();
+    assert_eq!(body, GZIP);
+    task.await.unwrap().unwrap();
+    assert!(matches!(
+        events.lock().unwrap().as_slice(),
+        [ForwardEvent::Forwarded {
+            status: 200,
+            upgraded: false
+        }]
+    ));
+    release.send(()).unwrap();
+    upstream.await.unwrap();
+}
+
+#[tokio::test]
 async fn first_event_arrives_while_the_upstream_body_is_still_open() {
     let (endpoint, listener) = listener().await;
     let (release, released) = tokio::sync::oneshot::channel();

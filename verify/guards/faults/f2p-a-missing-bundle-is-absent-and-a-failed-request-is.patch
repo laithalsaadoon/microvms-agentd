@@ -8,13 +8,13 @@ index bc02eb4..2b94ba5 100644
  use crate::ledger::{Ledger, NameRecord, Names};
 -use crate::seam::{Attach, try_state_dir};
 +use crate::seam::{Attach, state_dir};
- 
+
  /// The specs the flags describe, in the order given, one row per agent.
  fn specs_from(args: &AgentUpArgs) -> Vec<AgentSpec> {
 @@ -259,7 +259,7 @@ pub async fn up<O: std::io::Write, E: std::io::Write>(
          None => None,
      };
- 
+
 -    let root = try_state_dir(args.state_dir.clone(), ctx.env)?;
 +    let root = state_dir(args.state_dir.clone(), ctx.env);
      let names = Names::new(&root);
@@ -55,7 +55,7 @@ index bc02eb4..2b94ba5 100644
 +        &state_dir(args.attach.state_dir.clone(), ctx.env),
 +        &microvm_id,
 +    );
- 
+
      let result = if args.detach {
          history.append(Event::Exec {
 diff --git a/crates/microvms-cli/src/commands/attached.rs b/crates/microvms-cli/src/commands/attached.rs
@@ -68,7 +68,7 @@ index 8b7fcba..1c5c404 100644
  use crate::history::{Event, History};
 -use crate::seam::{Attach, try_state_dir};
 +use crate::seam::{Attach, state_dir};
- 
+
  /// The prefix that means "this side of the copy is in the VM".
  ///
 @@ -194,7 +194,7 @@ pub(crate) fn resolve_attach<O: std::io::Write, E: std::io::Write>(
@@ -93,7 +93,7 @@ index 8b7fcba..1c5c404 100644
 -        let (session, _) = attach(ctx, &args.region, &args.attach).await?;
          return poll_existing(ctx, &session, exec_id).await;
      }
- 
+
 -    // Resolve local state before a start can create work in the guest.
 -    let root = try_state_dir(args.attach.state_dir.clone(), ctx.env)?;
 -    let (session, microvm_id) = attach(ctx, &args.region, &args.attach).await?;
@@ -110,7 +110,7 @@ index 8b7fcba..1c5c404 100644
 +        &state_dir(args.attach.state_dir.clone(), ctx.env),
 +        &microvm_id,
 +    );
- 
+
      if let Some(bytes) = feed {
          write_and_close(ctx, &handle, &bytes).await?;
 @@ -916,7 +916,6 @@ pub async fn health<O: std::io::Write, E: std::io::Write>(
@@ -131,7 +131,7 @@ index 8b7fcba..1c5c404 100644
 +        &microvm_id,
 +        &health.hooks,
 +    );
- 
+
      if health.identity_degraded {
          ctx.out.warn(
 @@ -1971,7 +1974,7 @@ pub async fn attach_vm<O: std::io::Write, E: std::io::Write>(
@@ -141,7 +141,7 @@ index 8b7fcba..1c5c404 100644
 -    let root = try_state_dir(args.state_dir.clone(), ctx.env)?;
 +    let root = state_dir(args.state_dir.clone(), ctx.env);
      let names = crate::ledger::Names::new(&root);
- 
+
      let (mut record, region) = match &args.from {
 @@ -2503,7 +2506,7 @@ pub async fn tunnel<O: std::io::Write, E: std::io::Write>(
          ) {
@@ -162,19 +162,19 @@ index 8b7fcba..1c5c404 100644
          let Some(record) = names.resolve(name, explicit_region(&args.region).as_ref())? else {
              return Err(CliError::new(
 diff --git a/crates/microvms-cli/src/commands/lifecycle.rs b/crates/microvms-cli/src/commands/lifecycle.rs
-index 2e7450f..69e087e 100644
+index 314a0bf..f2f7345 100644
 --- a/crates/microvms-cli/src/commands/lifecycle.rs
 +++ b/crates/microvms-cli/src/commands/lifecycle.rs
-@@ -80,7 +80,7 @@ use crate::exit::Exit;
+@@ -40,7 +40,7 @@ use crate::exit::Exit;
  use crate::history::{Event, History};
  use crate::ledger::Ledger;
  use crate::render::RunOutcome;
 -use crate::seam::try_state_dir;
 +use crate::seam::state_dir;
- 
+
  /// How long a best-effort health read may take on a path that doesn't need it: the hook log
  /// fetched before a teardown, and after a resume. A CLI choice rather than core's: it's short
-@@ -561,7 +561,7 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
+@@ -521,7 +521,7 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
              return Err(crate::exit::CliError::new(Exit::InvalidArg, reason)
                  .suggest("names take ASCII letters, digits, `-` and `_`, up to 128 bytes"));
          }
@@ -183,7 +183,7 @@ index 2e7450f..69e087e 100644
          if let Some(holder) = names.lookup(vm_name) {
              return Err(crate::exit::CliError::new(
                  Exit::NameTaken,
-@@ -641,7 +641,7 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
+@@ -601,7 +601,7 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
              // daemon as the image's (#249). `build_request_from` takes no binary here.
              None if args.artifact_uri.is_some() => None,
              None => {
@@ -192,16 +192,16 @@ index 2e7450f..69e087e 100644
                  let resolved = {
                      let out = &mut *ctx.out;
                      crate::provision::resolve(
-@@ -662,7 +662,7 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
+@@ -622,7 +622,7 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
          None
      };
- 
+
 -    let ledger_root = try_state_dir(args.state_dir.clone(), ctx.env)?;
 +    let ledger_root = state_dir(args.state_dir.clone(), ctx.env);
      let mut ledger = Ledger::new(region.as_str(), &ledger_root);
      // Kept as a string before the sandbox takes the `Region`: the history event below wants
      // the name, and the type is not `Copy`.
-@@ -923,7 +923,7 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
+@@ -883,7 +883,7 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
      if let Some(vm_name) = &args.vm_name
          && let Some(record) = name_record_for_kept(vm_name, &outcome, &region_name)
      {
@@ -210,7 +210,7 @@ index 2e7450f..69e087e 100644
          names.register(&record).map_err(|error| {
              crate::exit::CliError::new(
                  Exit::Precondition,
-@@ -1492,7 +1492,7 @@ pub async fn build<O: std::io::Write, E: std::io::Write>(
+@@ -1452,7 +1452,7 @@ pub async fn build<O: std::io::Write, E: std::io::Write>(
          // No fetch beside a caller's --artifact-uri, for the reason `run` gives (#249).
          None if args.artifact_uri.is_some() => None,
          None => {
@@ -219,7 +219,7 @@ index 2e7450f..69e087e 100644
              let resolved = {
                  let out = &mut *ctx.out;
                  crate::provision::resolve(
-@@ -2053,7 +2053,6 @@ pub async fn suspend<O: std::io::Write, E: std::io::Write>(
+@@ -2014,7 +2014,6 @@ pub async fn suspend<O: std::io::Write, E: std::io::Write>(
      ctx: &mut Ctx<'_, O, E>,
      args: &SuspendArgs,
  ) -> Result<Rendered, crate::exit::CliError> {
@@ -227,7 +227,7 @@ index 2e7450f..69e087e 100644
      // A name's record says where the VM is, whatever the environment says; an id has no
      // record, so the flags and the environment pick the region as before.
      let (microvm_id, recorded) = crate::commands::resolve_vm_identifier(
-@@ -2099,7 +2098,8 @@ pub async fn suspend<O: std::io::Write, E: std::io::Write>(
+@@ -2060,7 +2059,8 @@ pub async fn suspend<O: std::io::Write, E: std::io::Write>(
      // platform reported, and a freeze that settled TERMINATED is not a suspension however
      // the command exits.
      if settled.state == "SUSPENDED" {
@@ -235,9 +235,9 @@ index 2e7450f..69e087e 100644
 +        History::for_vm(&state_dir(args.state_dir.clone(), ctx.env), &microvm_id)
 +            .append(Event::Suspended);
      }
- 
+
      let mut data = Map::new();
-@@ -2132,7 +2132,6 @@ pub async fn resume<O: std::io::Write, E: std::io::Write>(
+@@ -2095,7 +2095,6 @@ pub async fn resume<O: std::io::Write, E: std::io::Write>(
      ctx: &mut Ctx<'_, O, E>,
      args: &ResumeArgs,
  ) -> Result<Rendered, crate::exit::CliError> {
@@ -245,24 +245,24 @@ index 2e7450f..69e087e 100644
      let (microvm_id, recorded) = crate::commands::resolve_vm_identifier(
          ctx,
          &args.microvm_id,
-@@ -2156,6 +2155,7 @@ pub async fn resume<O: std::io::Write, E: std::io::Write>(
+@@ -2119,6 +2118,7 @@ pub async fn resume<O: std::io::Write, E: std::io::Write>(
          .await?;
- 
+
      // The wait returned, so the service reported RUNNING — which is what `resumed` means.
 +    let root = state_dir(args.state_dir.clone(), ctx.env);
      History::for_vm(&root, &microvm_id).append(Event::Resumed);
- 
+
      // The daemon's hook log, best-effort, and this is the moment that makes suspend-hook
-@@ -2263,7 +2263,7 @@ pub async fn terminate<O: std::io::Write, E: std::io::Write>(
+@@ -2226,7 +2226,7 @@ pub async fn terminate<O: std::io::Write, E: std::io::Write>(
          Some(region) => region,
          None => args.region.resolve(ctx.env)?,
      };
 -    let ledger_root = try_state_dir(args.state_dir.clone(), ctx.env)?;
 +    let ledger_root = state_dir(args.state_dir.clone(), ctx.env);
- 
+
      // The kept run's own record, when this state directory launched the VM. It names the
      // image and the image's name, which is what lets `--delete-image` stand alone (issue
-@@ -2449,10 +2449,12 @@ pub async fn terminate<O: std::io::Write, E: std::io::Write>(
+@@ -2412,10 +2412,12 @@ pub async fn terminate<O: std::io::Write, E: std::io::Write>(
      // the calls above went — a terminate that failed is exactly the run a caller will want
      // the record of — and the append swallows its own failures, because this is the
      // teardown path and a history error must not displace the real outcome.
@@ -276,10 +276,10 @@ index 2e7450f..69e087e 100644
 +            undeleted: leaked.clone(),
 +        },
 +    );
- 
+
      // The name is released only when the terminate was accepted, and by the VM id rather
      // than by the spelling the caller used — `terminate mvm-…` on a VM that was named must
-@@ -2460,7 +2462,7 @@ pub async fn terminate<O: std::io::Write, E: std::io::Write>(
+@@ -2423,7 +2425,7 @@ pub async fn terminate<O: std::io::Write, E: std::io::Write>(
      // terminate that failed keeps the registration, because the VM is still billing and the
      // name still addresses it.
      if !leaked.contains(&microvm_id) {
@@ -299,7 +299,7 @@ index ec9aedf..a6a1966 100644
 -use crate::seam::try_state_dir;
 +use crate::seam::state_dir;
  use crate::{history, ledger};
- 
+
  /// What every `microvm.runs` envelope's `source` says, and the first line of its text.
 @@ -53,7 +53,7 @@ pub async fn ls<O: std::io::Write, E: std::io::Write>(
      ctx: &mut Ctx<'_, O, E>,
@@ -313,11 +313,11 @@ index ec9aedf..a6a1966 100644
 @@ -467,7 +467,7 @@ pub async fn watch<O: std::io::Write, E: std::io::Write>(
          .suggest("--max-refreshes takes 1 or more; omit it to watch until Ctrl-C"));
      }
- 
+
 -    let root = try_state_dir(args.state_dir.clone(), ctx.env)?;
 +    let root = state_dir(args.state_dir.clone(), ctx.env);
      ctx.out.progress(WATCH_LEDGER_ONLY);
- 
+
      let mut interrupt = interrupt;
 @@ -562,7 +562,7 @@ pub fn history<O: std::io::Write, E: std::io::Write>(
      )
@@ -326,7 +326,7 @@ index ec9aedf..a6a1966 100644
 -    let root = try_state_dir(args.state_dir.clone(), ctx.env)?;
 +    let root = state_dir(args.state_dir.clone(), ctx.env);
      let events = history::read_events(&root, &microvm_id);
- 
+
      let mut data = Map::new();
 @@ -634,7 +634,7 @@ pub fn names<O: std::io::Write, E: std::io::Write>(
      ctx: &mut Ctx<'_, O, E>,
@@ -357,7 +357,7 @@ index 4d04d65..1c608e6 100644
 @@ -321,18 +321,6 @@ fn env_var_for(name: &str) -> &'static str {
      }
  }
- 
+
 -/// Resolve a caller-selected root or the shared absolute default before any state I/O.
 -pub fn try_state_dir(
 -    flag: Option<PathBuf>,
@@ -374,17 +374,17 @@ index 4d04d65..1c608e6 100644
  pub fn state_dir(flag: Option<PathBuf>, env: &dyn Fn(&str) -> Option<String>) -> PathBuf {
      if let Some(path) = flag {
 diff --git a/crates/microvms-core/src/lib.rs b/crates/microvms-core/src/lib.rs
-index 5a12149..39e8b13 100644
+index 02ab325..a7d505c 100644
 --- a/crates/microvms-core/src/lib.rs
 +++ b/crates/microvms-core/src/lib.rs
-@@ -150,7 +150,7 @@ pub mod entropy {
+@@ -144,7 +144,7 @@ pub mod entropy {
  pub mod names {
      //! Named MicroVMs: the record, the store port, and the CLI's registry on disk.
      pub use microvms_app::names::*;
 -    pub use microvms_edges::names::{FileNameStore, state_root};
 +    pub use microvms_edges::names::FileNameStore;
  }
- 
+
  pub mod preflight {
 diff --git a/crates/microvms-domain/src/names.rs b/crates/microvms-domain/src/names.rs
 index 5adc83f..1e20923 100644
@@ -393,7 +393,7 @@ index 5adc83f..1e20923 100644
 @@ -268,11 +268,7 @@ pub fn resolve_record(
      Ok(record)
  }
- 
+
 -/// The legacy pure state-directory calculation retained for source compatibility.
 -///
 -/// This helper does not resolve the operating system's home directory and can return a
@@ -404,12 +404,12 @@ index 5adc83f..1e20923 100644
      if let Some(dir) = env("MICROVM_STATE_DIR") {
          return PathBuf::from(dir);
 diff --git a/crates/microvms-edges/src/names.rs b/crates/microvms-edges/src/names.rs
-index da8efe7..14d3327 100644
+index b96f024..3cd447e 100644
 --- a/crates/microvms-edges/src/names.rs
 +++ b/crates/microvms-edges/src/names.rs
 @@ -12,62 +12,18 @@
  use std::path::{Path, PathBuf};
- 
+
  use microvms_app::error::{Error, ErrorKind};
 -use microvms_app::names::{NameRecord, NameStore, validate_name};
 -
@@ -453,14 +453,14 @@ index da8efe7..14d3327 100644
 -    }
 -}
 +use microvms_app::names::{NameRecord, NameStore, default_state_root, validate_name};
- 
+
  /// The CLI's registry: one JSON file per name in a directory, owner-only on Unix.
  #[derive(Clone, Debug)]
  pub struct FileNameStore {
      dir: PathBuf,
 -    unavailable: Option<String>,
  }
- 
+
  impl FileNameStore {
      /// A store over the directory that holds the name files themselves.
      pub fn new(dir: impl Into<PathBuf>) -> Self {
@@ -470,11 +470,11 @@ index da8efe7..14d3327 100644
 -        }
 +        Self { dir: dir.into() }
      }
- 
+
      /// The registry under `state_root/names` — where the CLI keeps it.
 @@ -79,17 +35,8 @@ impl FileNameStore {
      }
- 
+
      /// The registry the CLI would use in this environment.
 -    ///
 -    /// If no absolute home can be resolved, the returned store refuses every storage
@@ -489,12 +489,12 @@ index da8efe7..14d3327 100644
 -        }
 +        Self::in_state_root(&default_state_root(env))
      }
- 
+
      /// The directory holding the name files.
 @@ -102,13 +49,6 @@ impl FileNameStore {
          self.dir.join(format!("{name}.json"))
      }
- 
+
 -    fn ready(&self) -> Result<(), Error> {
 -        match &self.unavailable {
 -            Some(message) => Err(Error::new(ErrorKind::Precondition, message.clone())),
@@ -515,7 +515,7 @@ index da8efe7..14d3327 100644
          let text = match std::fs::read_to_string(&path) {
 @@ -144,7 +83,6 @@ impl NameStore for FileNameStore {
      }
- 
+
      fn put(&self, record: &NameRecord) -> Result<(), Error> {
 -        self.ready()?;
          validate_name(&record.name).map_err(Error::invalid_arg)?;
@@ -523,7 +523,7 @@ index da8efe7..14d3327 100644
          let path = self.path_of(&record.name);
 @@ -154,7 +92,6 @@ impl NameStore for FileNameStore {
      }
- 
+
      fn delete(&self, name: &str) -> Result<bool, Error> {
 -        self.ready()?;
          validate_name(name).map_err(Error::invalid_arg)?;
@@ -570,7 +570,7 @@ index 29f0901..e536272 100644
  pub fn resolve(
      request: &Request<'_>,
 @@ -423,8 +422,7 @@ pub fn resolve(
- 
+
      let state_dir = match request.state_dir {
          Some(dir) => dir.to_path_buf(),
 -        None => crate::names::state_root(env)
@@ -622,7 +622,7 @@ index 5c8abb9..9d9a2c5 100644
              "the {BUNDLE_ASSET} asset: {}; the attestations API: {api_reason}",
 @@ -135,8 +133,8 @@ impl GitHubRelease {
      }
- 
+
      /// The bundles the attestations API lists inline for one digest. A list whose entries
 -    /// carry no inline bundle is rejected: the attestations exist, and this client cannot
 -    /// read them. The successful HTTP status still counts as an answer.
@@ -642,7 +642,7 @@ index 5c8abb9..9d9a2c5 100644
      }
 @@ -171,12 +169,7 @@ struct HttpFailure {
  }
- 
+
  impl HttpFailure {
 -    /// The server explicitly answered that the resource does not exist.
 -    fn success(&self) -> bool {
@@ -679,7 +679,7 @@ index 5c8abb9..9d9a2c5 100644
 -    status: u16,
      bytes: Vec<u8>,
  }
- 
+
 @@ -392,7 +384,6 @@ impl<'a> Body<'a> {
          let body = Self {
              url,
@@ -698,7 +698,7 @@ index 5c8abb9..9d9a2c5 100644
          }
          self.bytes.extend_from_slice(chunk);
 @@ -413,7 +404,7 @@ impl<'a> Body<'a> {
- 
+
      fn over_limit(&self) -> HttpFailure {
          HttpFailure {
 -            status: Some(self.status),
@@ -707,25 +707,54 @@ index 5c8abb9..9d9a2c5 100644
          }
      }
 diff --git a/crates/microvms-edges/src/session/forward.rs b/crates/microvms-edges/src/session/forward.rs
-index 181ec6c..36289e0 100644
+index bb8c867..5ae12a5 100644
 --- a/crates/microvms-edges/src/session/forward.rs
 +++ b/crates/microvms-edges/src/session/forward.rs
-@@ -298,8 +298,6 @@ impl ForwardClient {
+@@ -311,14 +311,6 @@ impl ForwardClient {
      /// A pooled client for one tunnel.
      pub fn new() -> Result<Self, Error> {
          reqwest::Client::builder()
 -            // Relay redirects to the local client without requesting their destination.
 -            .redirect(reqwest::redirect::Policy::none())
+-            // Preserve encoded bytes and headers even if a downstream crate enables
+-            // reqwest's decompression features through Cargo feature unification.
+-            .no_gzip()
+-            .no_brotli()
+-            .no_zstd()
+-            .no_deflate()
              .build()
              .map(|inner| Self { inner })
              .map_err(|err| {
+@@ -645,6 +637,7 @@ async fn forward_request(
+     };
+     let offered_upgrade = head.headers.contains_key(http::header::UPGRADE);
+     strip_hop_headers(&mut head.headers, offered_upgrade);
++    let head_only = head.method == http::Method::HEAD;
+     let mut request = client.inner.request(head.method, &url);
+     for (name, value) in &head.headers {
+         // Hyper decoded the local transfer framing; reqwest frames the collected bytes.
+@@ -694,9 +687,11 @@ async fn forward_request(
+         *upgraded.lock().expect("upgrade lock poisoned") = Some(stream);
+         let _ = events.send(event);
+         full_body(Bytes::new())
+-    } else if response.content_length() == Some(0) {
+-        // Reqwest's decoded-body size hint is already zero for HEAD, 204 and
+-        // 304. Hyper need not poll these bodies, so report completion here.
++    } else if head_only
++        || status == http::StatusCode::NO_CONTENT
++        || status == http::StatusCode::NOT_MODIFIED
++        || response.content_length() == Some(0)
++    {
+         let _ = events.send(event);
+         full_body(Bytes::new())
+     } else {
 diff --git a/crates/microvms-edges/src/session/http.rs b/crates/microvms-edges/src/session/http.rs
 index 9f83e07..c413a4c 100644
 --- a/crates/microvms-edges/src/session/http.rs
 +++ b/crates/microvms-edges/src/session/http.rs
 @@ -11,11 +11,6 @@ use std::time::Duration;
  use futures_util::future::BoxFuture;
- 
+
  use microvms_app::error::{Error, WireKind};
 -
 -// File downloads share this collector; keep their ceiling aligned with the daemon's
@@ -778,7 +807,7 @@ index 9f83e07..c413a4c 100644
 @@ -185,42 +181,6 @@ impl HttpBackend for ReqwestBackend {
      }
  }
- 
+
 -/// Collect only a bounded response, including when it omits Content-Length.
 -async fn collect_body(
 -    mut response: reqwest::Response,
@@ -819,7 +848,7 @@ index 9f83e07..c413a4c 100644
  ///
  /// Apart from `open_stream` so it has an offline test. Only a daemon on the other end reaches
 diff --git a/crates/microvms-edges/src/session/serve.rs b/crates/microvms-edges/src/session/serve.rs
-index 0a2b2f7..9d4c092 100644
+index 6061f9a..d9c3b5b 100644
 --- a/crates/microvms-edges/src/session/serve.rs
 +++ b/crates/microvms-edges/src/session/serve.rs
 @@ -185,35 +185,18 @@ where

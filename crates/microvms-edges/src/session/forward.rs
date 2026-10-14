@@ -313,6 +313,12 @@ impl ForwardClient {
         reqwest::Client::builder()
             // Relay redirects to the local client without requesting their destination.
             .redirect(reqwest::redirect::Policy::none())
+            // Preserve encoded bytes and headers even if a downstream crate enables
+            // reqwest's decompression features through Cargo feature unification.
+            .no_gzip()
+            .no_brotli()
+            .no_zstd()
+            .no_deflate()
             .build()
             .map(|inner| Self { inner })
             .map_err(|err| {
@@ -639,7 +645,6 @@ async fn forward_request(
     };
     let offered_upgrade = head.headers.contains_key(http::header::UPGRADE);
     strip_hop_headers(&mut head.headers, offered_upgrade);
-    let head_only = head.method == http::Method::HEAD;
     let mut request = client.inner.request(head.method, &url);
     for (name, value) in &head.headers {
         // Hyper decoded the local transfer framing; reqwest frames the collected bytes.
@@ -689,11 +694,9 @@ async fn forward_request(
         *upgraded.lock().expect("upgrade lock poisoned") = Some(stream);
         let _ = events.send(event);
         full_body(Bytes::new())
-    } else if head_only
-        || status == http::StatusCode::NO_CONTENT
-        || status == http::StatusCode::NOT_MODIFIED
-        || response.content_length() == Some(0)
-    {
+    } else if response.content_length() == Some(0) {
+        // Reqwest's decoded-body size hint is already zero for HEAD, 204 and
+        // 304. Hyper need not poll these bodies, so report completion here.
         let _ = events.send(event);
         full_body(Bytes::new())
     } else {
