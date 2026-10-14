@@ -1043,7 +1043,7 @@ py = ["Sandbox.build_artifact(inherit_workdir)", "Sandbox.build_image(inherit_wo
 [[default]]
 id = "image-repair-identity"
 core = "image.repairGuestIdentity"
-py = ["Sandbox.build_image(repair_guest_identity)", "Sandbox.preflight(repair_guest_identity)", "Sandbox.build_image_async(repair_guest_identity)"]
+py = ["Sandbox.build_image(repair_guest_identity)", "Sandbox.preflight(repair_guest_identity)", "Sandbox.build_image_async(repair_guest_identity)", "Sandbox.ensure_image(repair_guest_identity)", "Sandbox.ensure_image_async(repair_guest_identity)"]
 
 [[default]]
 id = "image-force"

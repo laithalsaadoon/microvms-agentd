@@ -72,9 +72,9 @@ run = "./tools/check-mutants.py"
 
 # ── the bindings, built and tested the way they ship ────────────────────────
 #
-# `cargo test --workspace` reports no tests for the binding crates: their suites run only under
-# the toolchains that ship them, which is where BIND-2 and BIND-5 live (nine planted bypasses,
-# each with a test that goes red if the door reopens). Out of `check`, because each builds a
+# The binding integration suites run under the toolchains that ship them, which is where
+# BIND-2 and BIND-5 live, with tests that go red if the planted bypasses reopen a door.
+# Out of `check`, because each builds a
 # binding; CI's `bindings` job runs them, and `mise run ci:bindings` runs that job here.
 
 ["bindings:py"]

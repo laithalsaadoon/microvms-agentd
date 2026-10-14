@@ -104,3 +104,27 @@ def test_an_agent_vm_ensures_its_image_through_cores_local_refusals(
     arguments.update(overrides)
     with pytest.raises(microvms.InvalidArgError, match=cause):
         vm.ensure_image(**arguments)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("repair", [False, True])
+def test_ensure_image_accepts_identity_repair(repair: bool) -> None:
+    with pytest.raises(microvms.InvalidArgError, match="prefix"):
+        ensure(name_prefix="///", repair_guest_identity=repair)
+
+
+@pytest.mark.parametrize("repair", [False, True])
+def test_ensure_image_async_accepts_identity_repair(repair: bool) -> None:
+    import asyncio
+
+    async def run() -> None:
+        with pytest.raises(microvms.InvalidArgError, match="prefix"):
+            await sandbox().ensure_image_async(
+                name_prefix="///",
+                binary=b"\x7fELF\x02\x01" + bytes(12) + b"\xb7\x00",
+                dockerfile=microvms.wrap_dockerfile("FROM python:3.12-slim\n"),
+                s3_bucket=BUCKET,
+                build_role_arn=ROLE,
+                repair_guest_identity=repair,
+            )
+
+    asyncio.run(run())

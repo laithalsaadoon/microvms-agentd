@@ -80,3 +80,9 @@ for (const [overrides, cause] of [
     });
   });
 }
+
+for (const repairGuestIdentity of [undefined, false, true]) {
+  test(`ensureImage accepts identity repair ${repairGuestIdentity}`, async () => {
+    await refused({ namePrefix: '///', repairGuestIdentity }, /prefix/);
+  });
+}
