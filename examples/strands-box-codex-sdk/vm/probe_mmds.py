@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Try to reach the MicroVM's instance metadata service (MMDS) and print what happened.
 
-run.sh runs this twice: once directly as uid 1000, where docs/TRUST.md says the execution
-role's credentials are reachable, and once as the agent of box/probe-box.toml, inside the box.
+run.sh runs this twice: once directly as uid 1000, after root blocks metadata with a
+blackhole route, and once as the agent of box/probe-box.toml, inside the box.
 It prints status lines and error names only, never a token or a credential.
 
-Outside the box it only reports, and exits 0. Inside the box (probe-box.toml sets
-PROBE_WHERE=inside) it is a check, and exits 1 unless both paths fail the way the policy says
+Outside the box it exits 1 if either path reaches metadata. Inside the box (probe-box.toml
+sets PROBE_WHERE=inside) it exits 1 unless both paths fail the way the policy says
 they should: the raw connect gets no route, and the egress gateway refuses the token PUT with
 one of policy.dw's metadata rules. A refusal by Box's default deny alone fails the check too,
 because it means those rules are gone.
@@ -90,25 +90,34 @@ def token_put(proxy: str | None) -> tuple[bool, str, str]:
     return False, rule, f"{status} {marker}: {first}"
 
 
-inside = os.environ.get("PROBE_WHERE") == "inside"
-where = "inside the box" if inside else "outside the box"
-proxy = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
-via = "the egress gateway" if proxy else "a direct connection"
-connected, line = raw_socket()
-print(f"[{where}] raw TCP connect to {MMDS}:80 -> {line}")
-issued, rule, line = token_put(proxy)
-print(f"[{where}] IMDSv2 token PUT via {via} -> {line}")
+def main() -> int:
+    inside = os.environ.get("PROBE_WHERE") == "inside"
+    where = "inside the box" if inside else "outside the box"
+    proxy = (
+        os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy") if inside else None
+    )
+    via = "the egress gateway" if proxy else "a direct connection"
+    connected, line = raw_socket()
+    print(f"[{where}] raw TCP connect to {MMDS}:80 -> {line}")
+    issued, rule, line = token_put(proxy)
+    print(f"[{where}] IMDSv2 token PUT via {via} -> {line}")
 
-if inside:
     problems = []
     if connected:
         problems.append("the raw connect reached MMDS")
-    if not proxy:
-        problems.append("Box set no HTTP_PROXY, so the PUT bypassed the egress gateway")
     if issued:
         problems.append("MMDS issued a token")
-    elif not rule:
-        problems.append(f"no rule of {', '.join(RULES)} refused the PUT")
+    if inside:
+        if not proxy:
+            problems.append(
+                "Box set no HTTP_PROXY, so the PUT bypassed the egress gateway"
+            )
+        if not issued and not rule:
+            problems.append(f"no rule of {', '.join(RULES)} refused the PUT")
     for problem in problems:
         print(f"[{where}] FAIL: {problem}")
-    sys.exit(1 if problems else 0)
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

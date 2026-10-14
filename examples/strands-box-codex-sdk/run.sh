@@ -6,13 +6,13 @@
 # What this does, end to end:
 #   1. builds a MicroVM image with agentd, Python 3.12, and the Codex SDK (first run only),
 #   2. launches a VM from it with outbound network (--egress),
-#   3. copies Strands Box (from build-box.sh), the box's config, and the driver into the VM,
+#   3. blocks guest metadata access, then copies Strands Box (from build-box.sh), the box's config, and the driver into the VM,
 #   4. mints a short-lived Bedrock API key locally and copies it in for Box, not for Codex,
-#   5. probes the VM's metadata service from outside a box, and checks it is refused inside one,
+#   5. checks the VM's metadata service is refused outside and inside a box,
 #   6. runs vm/driver.py, which runs six scenarios through the SDK and checks Box's decisions,
 #   7. copies the results and Box's decision log back to out/, and terminates the VM.
 #
-# It exits 0 only when the in-box probe and every scenario pass.
+# It exits 0 only when both metadata probes and every scenario pass.
 #
 # Prerequisites:
 #   - `microvm` 1.0.0 on PATH, with MICROVM_BUCKET, MICROVM_BUILD_ROLE_ARN, and
@@ -36,7 +36,7 @@ done
 
 jqr() { python3 -c "import json,sys; print(json.load(sys.stdin)['data']$1)"; }
 vm() { microvm "$@" --name "$NAME" --region "$REGION"; }
-vmexec() { vm exec "$1" --timeout "${2:-120}"; }
+vmroot() { vm exec "$1" --user 0 --timeout "${2:-120}"; }
 
 # Whatever happens below, the trap terminates the VM once it has an id, and removes the local
 # copy of the Bedrock API key and the staging directory.
@@ -75,6 +75,10 @@ if [ "$LAUNCH_STATUS" -ne 0 ]; then
 fi
 echo "microvm: $ID" >&2
 
+# Block the driver as well as the boxed process. Root installs the route before
+# any driver code is uploaded or started; an error exits through the cleanup trap.
+vmroot "ip -4 route replace blackhole 169.254.169.254/32" >/dev/null
+
 # ── 3. Box, its config, and the driver ──────────────────────────────────────
 STAGE=$(mktemp -d)
 mkdir -p "$STAGE/opt" "$STAGE/home/project" "$STAGE/home/codex-tmp"
@@ -88,12 +92,13 @@ printf '# calc\n\nA tiny calculator project.\n' > "$STAGE/home/project/README.md
 printf 'DB_PASSWORD=not-a-real-secret-0123\n' > "$STAGE/home/project/.env"
 tar -C "$STAGE/opt" -cf "$STAGE/opt.tar" .
 tar -C "$STAGE/home" -cf "$STAGE/home.tar" .
-vm cp "$STAGE/opt.tar" vm:/opt/box --tar --json >/dev/null
+vm cp "$STAGE/opt.tar" vm:/home/agent/box-bin-upload --tar --json >/dev/null
 vm cp "$STAGE/home.tar" vm:/home/agent --tar --json >/dev/null
 rm -rf "$STAGE"
 STAGE=""
-# The daemon writes as root; Box and the driver run as uid 1000.
-vmexec "chown -R 0:0 /opt/box && chmod 0755 /opt/box /opt/box/* \
+# Upload into the default user's writable home, then install the launcher and Box
+# under /opt as root. Box and the driver run as uid 1000.
+vmroot "mv /home/agent/box-bin-upload /opt/box && chown -R 0:0 /opt/box && chmod 0755 /opt/box /opt/box/* \
   && chown -R 1000:1000 /home/agent && chmod 0600 /home/agent/project/.env" >/dev/null
 
 # ── 4. the Bedrock API key, for Box ─────────────────────────────────────────
@@ -106,30 +111,31 @@ uvx --from aws-bedrock-token-generator@latest --quiet python -c \
 vm cp "$KEYFILE" vm:/home/agent/.bedrock-token --mode 0600 --json >/dev/null
 rm -f "$KEYFILE"
 KEYFILE=""
-vmexec "chown 1000:1000 /home/agent/.bedrock-token" >/dev/null
+vmroot "chown 1000:1000 /home/agent/.bedrock-token" >/dev/null
 
 # ── 5. the metadata service, outside and inside a box ───────────────────────
-# Outside, uid 1000 reaches the execution role's credentials (docs/TRUST.md); that probe only
-# reports. Inside, the box's network namespace has no route, and the gateway refuses the address
-# by policy; that probe exits 1 otherwise, and `strands-box run` exits with its agent's status.
+# Outside, the host route must block uid 1000. Inside, keep proving Box's own
+# metadata policy: the network namespace has no route, and the gateway must name
+# a metadata rule. Either failed probe stops the run before the SDK driver starts.
 LAUNCHER="python3.12 /opt/box/launch_in_fresh_proc.py"
 echo "--- metadata service probe ---"
-vmexec "$LAUNCHER /usr/bin/python3.12 /home/agent/probe_mmds.py" | grep '^\['
+vmroot "$LAUNCHER /usr/bin/python3.12 /home/agent/probe_mmds.py" | grep '^\['
 set +e
-INSIDE=$(vmexec "$LAUNCHER /opt/box/strands-box run --config /home/agent/box/probe-box.toml \
+INSIDE=$(vmroot "$LAUNCHER /opt/box/strands-box run --config /home/agent/box/probe-box.toml \
   2>/home/agent/probe-box.err")
 PROBE_STATUS=$?
 set -e
 printf '%s\n' "$INSIDE" | grep '^\[' || true
 if [ "$PROBE_STATUS" -ne 0 ]; then
   echo "the metadata probe inside the box failed (exit $PROBE_STATUS); Box's stderr:" >&2
-  vmexec "tail -n 20 /home/agent/probe-box.err" >&2 || true
+  vmroot "tail -n 20 /home/agent/probe-box.err" >&2 || true
+  exit "$PROBE_STATUS"
 fi
 
 # ── 6. the scenarios ────────────────────────────────────────────────────────
 echo "--- codex sdk scenarios ---"
 set +e
-vmexec "$LAUNCHER /opt/guest/.venv/bin/python /home/agent/driver.py" 900
+vmroot "$LAUNCHER /opt/guest/.venv/bin/python /home/agent/driver.py" 900
 DRIVER_STATUS=$?
 set -e
 

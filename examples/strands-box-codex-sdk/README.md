@@ -16,7 +16,7 @@ examples/strands-box-codex-sdk/run.sh
 On first use `run.sh` builds the image. Each run then launches a VM, copies Box and the driver in,
 and runs six scenarios through the SDK. It prints the rule that decided each scenario, then runs
 `microvm terminate`. The script writes the results and Box's decision log to `out/`. It exits 0
-only when the metadata probe inside the box and all six scenarios pass.
+only when both metadata probes and all six scenarios pass.
 
 ## The layers
 
@@ -137,30 +137,28 @@ in its own file.
 
 ## The metadata service
 
-`docs/TRUST.md` records that any guest process can read the execution role's credentials from
-MMDS at `169.254.169.254`, unless root on an identity-repair image replaces the metadata
-service's route with a blackhole. This example doesn't install that route. `run.sh` probes MMDS
-twice with `vm/probe_mmds.py`, which prints status lines and never a token. Outside the box the
-probe only reports. Inside the box it's a check, and `run.sh` fails when it fails:
+`run.sh` installs a blackhole route for `169.254.169.254/32` as root immediately after
+launch. Route installation must succeed before the script uploads or starts the driver.
+The image sets `AGENTD_DEFAULT_USER=agent`; privileged setup and the launcher explicitly
+request `user: 0`. The launcher drops to uid 1000 before running a probe, Box, or the driver.
+As [Trust](../../docs/TRUST.md) describes, root can remove the route. Keep the execution role
+least-privilege.
 
-```text
-[outside the box] raw TCP connect to 169.254.169.254:80 -> connected
-[outside the box] IMDSv2 token PUT via a direct connection -> HTTP/1.1 200  (token issued, not printed)
-[inside the box] raw TCP connect to 169.254.169.254:80 -> refused: OSError: Network is unreachable
-[inside the box] IMDSv2 token PUT via the egress gateway -> HTTP/1.1 403 Forbidden x-strands-box-egress: refused: policy denied this operation on '169.254.169.254:80' [policy: metadata_hosts]: Refuse the instance metadata service by name, before resolution.
-```
+`vm/probe_mmds.py` checks metadata denial before the SDK scenarios. Outside the box, both a
+raw TCP connection and a direct token request must fail. The direct request ignores proxy
+variables so it tests the guest route. Inside the box, the raw connection must fail and the
+egress gateway must refuse the token request under `metadata_hosts` or `metadata_addresses`.
+A default-deny response alone fails this check: removing Box's metadata rules must still be
+observable when the guest route is blocked. Either failed probe stops the run before the
+driver starts. The probe prints status lines without tokens or credentials.
 
-The box's network namespace has no route. A direct connection fails there. A connection through
-the gateway meets the `metadata_hosts` rule. The probe inside the box exits 1 when the raw
-connection succeeds, when Box doesn't set a proxy, or when no metadata rule refuses the token
-request. A refusal by the default deny alone also fails the probe, because it means someone
-removed the metadata rules.
-
-The `curl` in Box's shell refuses link-local IP addresses itself, before the gateway sees the
+The `curl` in Box's shell refuses link-local IP addresses before the gateway sees the
 request. The `instance-metadata` scenario checks for that refusal, and the decision log has no
-entry for it. The box guards only what runs inside it. The driver and every other process
-outside the box can still connect to MMDS, because the example leaves the guest's route in
-place. Keep the execution role least-privilege, as `docs/TRUST.md` says.
+entry for it. The guest route covers the unprivileged driver outside the box; Box's own
+network and policy checks continue to cover code inside it.
+
+The route setup and failure ordering have offline regression coverage in `mise run box:check`.
+This example change is verified offline only until it is exercised on a live guest.
 
 ## Identity repair and a fresh /proc
 

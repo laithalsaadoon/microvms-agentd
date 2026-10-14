@@ -48,6 +48,7 @@ run = [
   { task = "parity:check" },
   { task = "publish:dry-run" },
   { task = "background:check" },
+  { task = "box:check" },
 ]
 
 ["ci:rust-client"]

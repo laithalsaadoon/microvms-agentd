@@ -1,0 +1,45 @@
+[[family]]
+guard = "tools/test_box_metadata.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_box_metadata.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "box-metadata-route-required"
+message = "test_root_route_precedes_driver_and_all_launchers_are_explicit_root"
+transform = { file = "examples/strands-box-codex-sdk/run.sh", replace = 'vmroot "ip -4 route replace blackhole 169.254.169.254/32" >/dev/null', with = ':' }
+
+[[family.fault]]
+id = "box-metadata-setup-fails-closed"
+message = "test_route_or_either_probe_failure_prevents_the_driver"
+transform = { file = "examples/strands-box-codex-sdk/run.sh", replace = 'vmroot "ip -4 route replace blackhole 169.254.169.254/32" >/dev/null', with = 'vmroot "ip -4 route replace blackhole 169.254.169.254/32" >/dev/null || true' }
+
+[[family.fault]]
+id = "box-metadata-explicit-root"
+message = "test_root_route_precedes_driver_and_all_launchers_are_explicit_root"
+transform = { file = "examples/strands-box-codex-sdk/run.sh", replace = 'vm exec "$1" --user 0 --timeout', with = 'vm exec "$1" --timeout' }
+
+[[family.fault]]
+id = "box-metadata-default-user"
+message = "test_root_route_precedes_driver_and_all_launchers_are_explicit_root"
+transform = { file = "examples/strands-box-codex-sdk/Dockerfile", replace = 'ENV AGENTD_DEFAULT_USER=agent', with = '# default user unset' }
+
+[[family.fault]]
+id = "box-metadata-outside-connect-refused"
+message = "test_outside_requires_both_refusals_and_ignores_proxy_variables"
+transform = { file = "examples/strands-box-codex-sdk/vm/probe_mmds.py", replace = '    if connected:', with = '    if connected and inside:' }
+
+[[family.fault]]
+id = "box-metadata-outside-token-refused"
+message = "test_outside_requires_both_refusals_and_ignores_proxy_variables"
+transform = { file = "examples/strands-box-codex-sdk/vm/probe_mmds.py", replace = '    if issued:', with = '    if issued and inside:' }
+
+[[family.fault]]
+id = "box-metadata-policy-still-required"
+message = "test_inside_still_requires_a_metadata_rule_from_the_gateway"
+transform = { file = "examples/strands-box-codex-sdk/vm/probe_mmds.py", replace = '        if not issued and not rule:', with = '        if False:' }
+
+[[family.fault]]
+id = "box-metadata-inside-fails-before-driver"
+message = "test_route_or_either_probe_failure_prevents_the_driver"
+transform = { file = "examples/strands-box-codex-sdk/run.sh", replace = '  exit "$PROBE_STATUS"', with = '  :' }
