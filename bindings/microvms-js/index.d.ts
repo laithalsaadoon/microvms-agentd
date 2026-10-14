@@ -1670,7 +1670,7 @@ export declare function coreVersion(): string
  */
 export declare function costConstants(): string
 
-/** The managed base every `docs/PLATFORM.md` measurement from 2026-08-06 onward used. */
+/** The managed Amazon Linux 2023 base used for measurements in `docs/PLATFORM.md`. */
 export declare function defaultBaseImage(): BaseImageInput
 
 /** How `deleteImage` retries while the image refuses. */

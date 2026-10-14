@@ -28,7 +28,7 @@ This distinction separates a failed workload from a failed platform operation.
 | A stdin write returns 410 | The pipe closed after EOF or the child exited | Treat that input stream as closed; retrying the same write cannot reopen it | `crates/agentd/src/exec.rs:772-781` |
 | A stdin write returns 408 | The child did not drain the pipe within the write timeout | Reconcile possible partial delivery before retrying; the response explicitly warns that some bytes may have been written | `crates/agentd/src/exec.rs:815-825` |
 | A Node error's `code` is `GenericFailure` | The asynchronous binding path uses the host runtime's status code | Read `err.cause.message` for `ERR_*` and `err.cause.cause.message` for the wire kind; use `isRetryable` for the retry verdict | `bindings/microvms-js/src/errors.rs:15-54`, `bindings/microvms-js/src/errors.rs:170-179` |
-| `microvm ls` still lists outstanding resources after interruption | The local run ledger retains identifiers until deletion is recorded | Inspect `leaked`; plain `ls` reads local state, while `ls --remote` reconciles it with service listings | `crates/microvms-cli/src/ledger.rs:11-22`, `crates/microvms-cli/src/ledger.rs:46-48`, `crates/microvms-cli/src/commands/local.rs:47-68` |
+| `microvm ls` still lists outstanding resources after interruption | The local run ledger retains identifiers until deletion is recorded | Inspect `leaked`; plain `ls` reads local state, while `ls --remote` reconciles it with service listings | `crates/microvms-cli/src/ledger.rs:11-22`, `crates/microvms-cli/src/ledger.rs:46-48`, `crates/microvms-cli/src/commands/local.rs:54-70` |
 
 ## Log and error surfaces
 
@@ -41,11 +41,11 @@ This distinction separates a failed workload from a failed platform operation.
 | Shutdown diagnostics | The daemon log | `SIGTERM received; draining`, `interrupt received; draining`, `cannot listen for SIGTERM` | `crates/agentd/src/serve.rs:127-139` |
 | Build log locator | `microvm logs <image-name>` returns the group and an AWS CLI tail command; it does not fetch log events | `data.logGroup`, `data.tailCommand`, `data.tailRequires`; `data.lines` is null | `crates/microvms-cli/src/commands/local.rs:778-804` |
 | Daemon health | The health response | `version`, `bootstrapped`, `disk`, `busy`, `execs`; `busy` tracks unfinished execs rather than results awaiting acknowledgment | `crates/protocol/src/health.rs:19-34`, `crates/protocol/src/health.rs:63-88` |
-| CLI failure envelope | Structured command output; normal progress is separate from stdout | `code`, `error`, `finding`, `suggestions`, `data.kind` | `crates/microvms-cli/src/envelope.rs:20-31`, `crates/microvms-cli/src/main.rs:22-24` |
+| CLI failure envelope | Structured command output; normal progress is separate from stdout | `code`, `error`, `finding`, `suggestions`, `data.kind` | `crates/microvms-cli/src/envelope.rs:20-31`, `crates/microvms-cli/src/main.rs:381-423` |
 | CLI streamed exec | NDJSON on stdout with a compact terminal envelope | Event records followed by the `microvm.exec.stream` envelope; do not parse it as one JSON document | `crates/microvms-cli/src/envelope.rs:33-49` |
 | Python exception | The raised exception instance | `code`, `wire_kind`, `retryable` | `bindings/microvms-py/src/errors.rs:153-168` |
 | Node exception | The error cause chain | `cause.message` and `cause.cause.message` | `bindings/microvms-js/src/errors.rs:35-44` |
-| Local run ledger | A JSON record read by `microvm ls` | `runId`, `region`, `imageIdentifier`, `microvmId`, `leaked` | `crates/microvms-cli/src/ledger.rs:35-48`, `crates/microvms-cli/src/commands/local.rs:52-58` |
+| Local run ledger | A JSON record read by `microvm ls` | `runId`, `region`, `imageIdentifier`, `microvmId`, `leaked` | `crates/microvms-cli/src/ledger.rs:35-48`, `crates/microvms-cli/src/commands/local.rs:54-57` |
 
 ## First-checks ladder
 
@@ -57,7 +57,7 @@ This distinction separates a failed workload from a failed platform operation.
    changing deployment settings. `crates/microvms-cli/src/exit.rs:97-102`, `crates/protocol/src/exec.rs:56-68`
 3. **Inspect local leftovers with `microvm ls`.** Preserve the run identifiers and `leaked`
    entries. Plain `ls` reads the local ledger; adding `--remote` performs service listings.
-   `crates/microvms-cli/src/commands/local.rs:47-68`, `crates/microvms-cli/src/ledger.rs:46-48`
+   `crates/microvms-cli/src/commands/local.rs:54-70`, `crates/microvms-cli/src/ledger.rs:46-48`
 4. **Run `microvm doctor --binary <path>` for setup problems.** Its diagnosis starts with
    project configuration, then resolves the region and credentials, checks infrastructure,
    reads managed bases, and inspects the binary. It includes service reads, so it is not a
