@@ -1678,11 +1678,12 @@ impl Sandbox {
                  call the service accepted would hand back a different machine."
             )));
         }
+        let mut resume_state = self.lifecycle;
         // Idle suspension happens without a client call. Refresh a RUNNING handle before
         // applying STATE-7, but keep STATE-11 above entirely local once termination is known.
         if self.lifecycle == Lifecycle::Running {
             let observed = self.control.get_microvm(&id).await?;
-            let lifecycle = Lifecycle::from_service(&observed.state).ok_or_else(|| {
+            resume_state = Lifecycle::from_service(&observed.state).ok_or_else(|| {
                 Error::new(
                     ErrorKind::Platform,
                     format!("microvm {id} reports unknown state {}", observed.state),
@@ -1701,17 +1702,21 @@ impl Sandbox {
                 )
             });
             self.microvm = Some(observed);
-            self.set_lifecycle(lifecycle);
+            // A transient state must not strand the handle: only RUNNING handles refresh
+            // here, so leave it eligible to observe the service again on the next call.
+            if resume_state == Lifecycle::Suspended {
+                self.set_lifecycle(resume_state);
+            }
             if let Some(error) = error {
                 self.was_terminated = true;
                 self.set_lifecycle(Lifecycle::Terminated);
                 return Err(error);
             }
         }
-        if self.lifecycle != Lifecycle::Suspended {
+        if resume_state != Lifecycle::Suspended {
             return Err(Error::invalid_arg(format!(
                 "microvm {id} is {} and a resume is only issued from SUSPENDED (STATE-7).",
-                self.lifecycle,
+                resume_state,
             )));
         }
 
@@ -4036,6 +4041,55 @@ mod tests {
             assert_eq!(&recorder.operations()[calls..], &["GetMicrovm"]);
             assert_eq!(sandbox.lifecycle(), Lifecycle::Running);
             assert!(!sandbox.was_terminated());
+        }
+    }
+
+    /// A transient service state must not strand a locally RUNNING handle: the next
+    /// resume still observes the service and can resume once suspension completes.
+    #[tokio::test]
+    async fn resume_retries_observation_after_transient_service_states() {
+        for state in ["SUSPENDING", "PENDING", "RESUMING"] {
+            let (mut sandbox, recorder, _) = planted();
+            recorder
+                .answer(
+                    "RunMicrovm",
+                    Answer::ok(fake::microvm_response("PENDING", None)),
+                )
+                .answer(
+                    "GetMicrovm",
+                    Answer::ok(fake::microvm_response("RUNNING", None)),
+                )
+                .answer(
+                    "GetMicrovm",
+                    Answer::ok(fake::microvm_response(state, None)),
+                )
+                .answer(
+                    "GetMicrovm",
+                    Answer::ok(fake::microvm_response("SUSPENDED", None)),
+                )
+                .answer(
+                    "GetMicrovm",
+                    Answer::ok(fake::microvm_response("RUNNING", None)),
+                )
+                .answer(
+                    "CreateMicrovmAuthToken",
+                    Answer::ok(fake::auth_token_response("proxy-token")),
+                )
+                .answer("ResumeMicrovm", Answer::ok(fake::empty_response()));
+            sandbox
+                .run(RunRequest::new().with_image("arn:image"))
+                .await
+                .expect("launch");
+            let error = sandbox.resume().await.expect_err("still changing state");
+            assert!(error.to_string().contains(state), "{error}");
+            assert_eq!(sandbox.lifecycle(), Lifecycle::Running);
+            assert_eq!(recorder.call_count("ResumeMicrovm"), 0);
+            sandbox
+                .resume()
+                .await
+                .expect("the next observation can resume");
+            assert_eq!(sandbox.lifecycle(), Lifecycle::Running);
+            assert_eq!(recorder.call_count("ResumeMicrovm"), 1);
         }
     }
 
