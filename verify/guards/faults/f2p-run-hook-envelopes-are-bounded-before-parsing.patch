@@ -103,8 +103,8 @@ diff --git a/crates/agentd/src/fs.rs b/crates/agentd/src/fs.rs
      /// create below fails and reports the real reason.
      fn replace(&self, dir: BorrowedFd<'_>, name: &OsStr) {
 @@ -802,9 +808,6 @@
-                             ),
-                         })?;
+                         continue;
+                     }
                  }
 -                // A later link replaces the member, so an earlier file's mode
 -                // must not be replayed onto the link's target.

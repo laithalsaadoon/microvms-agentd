@@ -1,0 +1,8 @@
+# A self-link preserves the earlier regular member's pending chmod.
+[[fault]]
+id = "tar-self-link-keeps-deferred-mode"
+guard = "fs::tests::a_self_naming_hard_link_keeps_its_source_and_still_validates_it"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "fs::tests::a_self_naming_hard_link_keeps_its_source_and_still_validates_it"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/fs.rs", replace = "                    if parts == source {\n                        // A self-link kept the same inode", with = "                    if false {\n                        // A self-link kept the same inode" }

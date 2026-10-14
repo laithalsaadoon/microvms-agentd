@@ -1,0 +1,50 @@
+diff --git a/crates/agentd/src/fs.rs b/crates/agentd/src/fs.rs
+index 523c848..1146b44 100644
+--- a/crates/agentd/src/fs.rs
++++ b/crates/agentd/src/fs.rs
+@@ -75,7 +75,7 @@ use std::path::{Component, Path, PathBuf};
+ 
+ use nix::errno::Errno;
+ use nix::fcntl::{AT_FDCWD, AtFlags, OFlag, OpenHow, ResolveFlag, openat2};
+-use nix::sys::stat::{FchmodatFlags, Mode, SFlag, fchmodat, fstatat, mkdirat};
++use nix::sys::stat::{FchmodatFlags, Mode, fchmodat, mkdirat};
+ use nix::unistd::{UnlinkatFlags, linkat, symlinkat, unlinkat};
+ 
+ use axum::body::Body;
+@@ -479,24 +479,6 @@ impl Confined {
+     ) -> Result<(), HardLinkError> {
+         let (parent, name) = self.parent_of(parts).map_err(HardLinkError::Dest)?;
+         let last = parts.len() - 1;
+-        if parts == source {
+-            // GNU tar emits a self-link when a file is listed twice. Validate
+-            // the existing leaf without following it, but never unlink its source.
+-            let stat = fstatat(
+-                parent.as_fd(),
+-                name.as_os_str(),
+-                AtFlags::AT_SYMLINK_NOFOLLOW,
+-            )
+-            .map_err(|errno| HardLinkError::Source(WalkError::at(source, last, errno)))?;
+-            if SFlag::from_bits_truncate(stat.st_mode) == SFlag::S_IFDIR {
+-                return Err(HardLinkError::Source(WalkError::at(
+-                    source,
+-                    last,
+-                    Errno::EPERM,
+-                )));
+-            }
+-            return Ok(());
+-        }
+         self.replace(parent.as_fd(), &name);
+ 
+         // An empty source is the archive naming the root as a hard-link target.
+@@ -819,11 +801,6 @@ fn extract_into(
+                                 &format!("hard link target {}: ", target.display()),
+                             ),
+                         })?;
+-                    if parts == source {
+-                        // A self-link kept the same inode, so its original file
+-                        // member still owns the deferred mode.
+-                        continue;
+-                    }
+                 }
+                 // A later link replaces the member, so an earlier file's mode
+                 // must not be replayed onto the link's target.

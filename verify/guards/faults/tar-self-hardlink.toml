@@ -1,0 +1,19 @@
+# ── tar-self-hardlink: FAIL_TO_PASS entries tools/fail-to-pass.py emitted ──
+
+# FAIL_TO_PASS: fails on 0b40f9fc4e4c with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-a-self-naming-hard-link-keeps-its-source-and-still"
+guard = "fs::tests::a_self_naming_hard_link_keeps_its_source_and_still_validates_it"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "fs::tests::a_self_naming_hard_link_keeps_its_source_and_still_validates_it"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-a-self-naming-hard-link-keeps-its-source-and-still.patch"
+
+# FAIL_TO_PASS: fails on 0b40f9fc4e4c with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-a-later-hard-link-preserves-its-targets-permissions-2"
+guard = "fs::tests::a_later_hard_link_preserves_its_targets_permissions"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "fs::tests::a_later_hard_link_preserves_its_targets_permissions"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-a-later-hard-link-preserves-its-targets-permissions-2.patch"
