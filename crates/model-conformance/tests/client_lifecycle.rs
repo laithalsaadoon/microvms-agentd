@@ -461,7 +461,14 @@ impl Replay {
                 self.requests += 1;
             }
             Call::Suspend { completes } => {
-                self.reports(if completes { "SUSPENDED" } else { "SUSPENDING" });
+                let state = if completes { "SUSPENDED" } else { "SUSPENDING" };
+                if step.before.platform_idle_suspended {
+                    // The prior idle state is already SUSPENDED. A newly accepted suspend
+                    // must replace that report before its wait can observe the new state.
+                    self.platform_reports(state).await?;
+                } else {
+                    self.reports(state);
+                }
                 waited(self.sandbox.suspend().await, completes, "suspend")?;
             }
             Call::SuspendRefused => refusal(self.sandbox.suspend().await, None)?,

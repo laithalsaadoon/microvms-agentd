@@ -74,15 +74,17 @@ Defined at: `crates/model/src/tunnel.rs:174-178`
 
 ## Lifecycle
 
-A new `Sandbox` starts at `Pending`; `run` records an accepted launch there, and `wait_until_running` records `Running`. `suspend` first records `Suspending`, then `Suspended` or `Terminated` when its wait settles. `resume` records `Running` after its wait succeeds (`crates/microvms-app/src/sandbox.rs:769-770`, `crates/microvms-app/src/sandbox.rs:1212-1227`, `crates/microvms-app/src/sandbox.rs:1284-1313`, `crates/microvms-app/src/sandbox.rs:1585-1639`, `crates/microvms-app/src/sandbox.rs:1669-1716`).
+A new `Sandbox` starts at `Pending`; `run` records an accepted launch there, and `wait_until_running` records `Running`. `suspend` first records `Suspending`, then `Suspended` or `Terminated` when its wait settles. `resume` reads the service state when the handle still holds `Running`. It records `Suspended` before it sends resume and `Running` when the wait succeeds (`crates/microvms-app/src/sandbox.rs:769-770`, `crates/microvms-app/src/sandbox.rs:1212-1227`, `crates/microvms-app/src/sandbox.rs:1284-1313`, `crates/microvms-app/src/sandbox.rs:1585-1639`, `crates/microvms-app/src/sandbox.rs:1668-1763`).
 
-The diagram shows the launch-driven path. `adopt` instead initializes the handle from any recognized service state. `terminate` writes `Terminating` whenever the handle still has a VM record, including on repeated calls, and only a successful requested termination wait writes `Terminated`. Consequently, `Terminated` is not an absorbing enum state. Detachment and other flags can refuse an operation without changing this enum (`crates/microvms-app/src/sandbox.rs:1388-1426`, `crates/microvms-app/src/sandbox.rs:1500-1543`, `crates/microvms-app/src/sandbox.rs:1742-1793`).
+The diagram shows the launch-driven path. `adopt` instead initializes the handle from any recognized service state. `terminate` writes `Terminating` whenever the handle still has a VM record, including on repeated calls, and only a successful requested termination wait writes `Terminated`. Consequently, `Terminated` is not an absorbing enum state. Detachment and other flags can refuse an operation without changing this enum (`crates/microvms-app/src/sandbox.rs:1388-1426`, `crates/microvms-app/src/sandbox.rs:1500-1543`, `crates/microvms-app/src/sandbox.rs:1776-1827`).
 
 ```mermaid
 stateDiagram-v2
     [*] --> Pending
     Pending --> Pending: run
     Pending --> Running: wait_until_running
+    Running --> Suspended: resume observes suspension
+    Running --> Terminated: resume observes ended VM
     Running --> Suspending: suspend
     Suspending --> Suspended: suspend
     Suspending --> Terminated: suspend
@@ -291,15 +293,21 @@ Defined at: `crates/microvms-app/src/session/exec.rs:874-887`
 
 ## VmState
 
-The client model mirrors the lifecycle vocabulary and starts at `Pending`. The diagram uses its guarded configuration: `LaunchAccepted` keeps the pending state; `HookSucceeded` starts the VM; suspend and resume actions progress through their corresponding phases. `ResumeRequested` keeps `Suspended` and records an in-flight resume while the platform still has the VM. `SuspendedVmEnded` sets the platform-ended flag without changing the client's `Suspended` state. Once `SuspendedVmEnded` has recorded that the platform ended the suspended VM, the service refuses the request and the model writes `Terminated` (`crates/model/src/client.rs:60-78`, `crates/model/src/client.rs:295-313`, `crates/model/src/client.rs:390-532`).
+`PlatformIdleSuspended` records a VM that the service has frozen while the client still holds `Running`. `ResumeRequested` reads the service state: it starts resuming from `Suspended`, or moves to `Terminated` for a VM that has ended. The request fails if the service still reports `Running`. `SuspendedVmEnded` can follow an idle suspend while the client still holds `Running` (`crates/model/src/client.rs:369-385`, `crates/model/src/client.rs:487-536`).
 
-`TerminateRequested` writes `Terminating` and clears an in-flight resume; `TerminateComplete` writes `Terminated`. The request is offered before the first termination, including during suspension. In the guarded model, the completed termination is absorbing. A late resume completion changes nothing once its preconditions no longer hold (`crates/model/src/client.rs:352-383`, `crates/model/src/client.rs:516-553`).
+The client model starts at `Pending`. In the guarded path, `LaunchAccepted` keeps that state, and `HookSucceeded` starts the VM. Suspend and resume actions step through their phases. `ResumeRequested` keeps `Suspended` while it waits for resume to finish. If `SuspendedVmEnded` has recorded the end of the VM, the service refuses the request. The model then writes `Terminated` (`crates/model/src/client.rs:59-72`, `crates/model/src/client.rs:295-314`, `crates/model/src/client.rs:395-527`).
+
+`TerminateRequested` writes `Terminating` and clears an in-flight resume; `TerminateComplete` writes `Terminated`. The request is offered before the first termination, including during suspension. In the guarded model, the completed termination is absorbing. A late resume completion changes nothing once its preconditions no longer hold (`crates/model/src/client.rs:357-389`, `crates/model/src/client.rs:541-584`).
 
 ```mermaid
 stateDiagram-v2
     [*] --> Pending
     Pending --> Pending: LaunchAccepted
     Pending --> Running: HookSucceeded
+    Running --> Running: PlatformIdleSuspended
+    Running --> Running: SuspendedVmEnded (idle suspension)
+    Running --> Suspended: ResumeRequested (service suspended)
+    Running --> Terminated: ResumeRequested (platform ended VM)
     Running --> Suspending: SuspendRequested
     Suspending --> Suspended: SuspendComplete
     Suspended --> Suspended: SuspendedVmEnded
@@ -314,7 +322,7 @@ stateDiagram-v2
     Terminated --> [*]
 ```
 
-Defined at: `crates/model/src/client.rs:65-78`
+Defined at: `crates/model/src/client.rs:59-72`
 
 ## WrapPhase
 
