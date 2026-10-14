@@ -1419,4 +1419,49 @@ mod tests {
         assert_eq!(a_to_b, 8);
         assert_eq!(b_to_a, 11);
     }
+
+    #[test]
+    fn hop_headers_preserve_only_negotiated_upgrades() {
+        for upgrade in [false, true] {
+            let mut headers = http::HeaderMap::new();
+            for (name, value) in [
+                ("connection", "x-private, upgrade"),
+                ("upgrade", "example"),
+                ("x-private", "one hop only"),
+                ("x-end-to-end", "preserved"),
+                ("keep-alive", "timeout=5"),
+                ("proxy-connection", "keep-alive"),
+                ("transfer-encoding", "chunked"),
+                ("te", "trailers"),
+                ("trailer", "x-checksum"),
+            ] {
+                headers.insert(
+                    http::HeaderName::from_static(name),
+                    http::HeaderValue::from_static(value),
+                );
+            }
+            strip_hop_headers(&mut headers, upgrade);
+            assert_eq!(headers["x-end-to-end"], "preserved");
+            for name in [
+                "x-private",
+                "keep-alive",
+                "proxy-connection",
+                "transfer-encoding",
+                "te",
+                "trailer",
+            ] {
+                assert!(
+                    !headers.contains_key(name),
+                    "{name} crossed a hop (upgrade={upgrade})"
+                );
+            }
+            if upgrade {
+                assert_eq!(headers["connection"], "upgrade");
+                assert_eq!(headers["upgrade"], "example");
+            } else {
+                assert!(!headers.contains_key("connection"));
+                assert!(!headers.contains_key("upgrade"));
+            }
+        }
+    }
 }

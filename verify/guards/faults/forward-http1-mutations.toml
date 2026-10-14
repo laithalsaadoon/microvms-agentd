@@ -1,0 +1,49 @@
+# The header-policy table must catch each previously surviving upgrade mutation.
+
+[[fault]]
+id = "forward-http1-nominated-and"
+guard = "session::forward::tests::hop_headers_preserve_only_negotiated_upgrades"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::forward::tests::hop_headers_preserve_only_negotiated_upgrades"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "        if !upgrade || name != http::header::UPGRADE {", with = "        if !upgrade && name != http::header::UPGRADE {" }
+
+[[fault]]
+id = "forward-http1-nominated-negation"
+guard = "session::forward::tests::hop_headers_preserve_only_negotiated_upgrades"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::forward::tests::hop_headers_preserve_only_negotiated_upgrades"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "        if !upgrade || name != http::header::UPGRADE {", with = "        if upgrade || name != http::header::UPGRADE {" }
+
+[[fault]]
+id = "forward-http1-nominated-upgrade"
+guard = "session::forward::tests::hop_headers_preserve_only_negotiated_upgrades"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::forward::tests::hop_headers_preserve_only_negotiated_upgrades"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "        if !upgrade || name != http::header::UPGRADE {", with = "        if !upgrade || name == http::header::UPGRADE {" }
+
+[[fault]]
+id = "forward-http1-standard-or"
+guard = "session::forward::tests::hop_headers_preserve_only_negotiated_upgrades"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::forward::tests::hop_headers_preserve_only_negotiated_upgrades"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "        if !upgrade || (name != \"connection\" && name != \"upgrade\") {", with = "        if !upgrade || (name != \"connection\" || name != \"upgrade\") {" }
+
+[[fault]]
+id = "forward-http1-standard-connection"
+guard = "session::forward::tests::hop_headers_preserve_only_negotiated_upgrades"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::forward::tests::hop_headers_preserve_only_negotiated_upgrades"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "        if !upgrade || (name != \"connection\" && name != \"upgrade\") {", with = "        if !upgrade || (name == \"connection\" && name != \"upgrade\") {" }
+
+[[fault]]
+id = "forward-http1-standard-upgrade"
+guard = "session::forward::tests::hop_headers_preserve_only_negotiated_upgrades"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::forward::tests::hop_headers_preserve_only_negotiated_upgrades"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "        if !upgrade || (name != \"connection\" && name != \"upgrade\") {", with = "        if !upgrade || (name != \"connection\" && name == \"upgrade\") {" }
