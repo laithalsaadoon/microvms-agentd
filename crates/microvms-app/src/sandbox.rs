@@ -124,8 +124,8 @@ pub const DENY_EGRESS_ENV_KEYS: [&str; 6] = [
     "ALL_PROXY",
 ];
 
-/// How often a lifecycle wait polls. Public so an adapter that builds its own [`WaitOpts`]
-/// polls at the same rate rather than retyping it.
+/// Default lifecycle polling interval. Public so an adapter that builds its own [`WaitOpts`]
+/// reuses the interval. Sandbox launches poll faster during their initial retries.
 pub const LIFECYCLE_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 /// The symspec's `vm_state`, verbatim.
@@ -1291,11 +1291,10 @@ impl Sandbox {
             )));
         }
         let opts = WaitOpts::for_lifecycle(timeout);
-        let running = if self.launch_adoptable {
-            self.control.wait_for_launch(&id, opts).await?
-        } else {
-            self.control.wait_for_running(&id, opts).await?
-        };
+        let running = self
+            .control
+            .wait_for_sandbox_launch(&id, opts, self.launch_adoptable)
+            .await?;
 
         // STATE-2. The platform reported the run hook succeeded, so the token is in the
         // guest's memory — and this is the one place that counts it (STATE-3).
@@ -1962,6 +1961,78 @@ mod tests {
                 "CreateMicrovmAuthToken",
                 Answer::ok(fake::auth_token_response("proxy-token")),
             );
+    }
+
+    #[tokio::test]
+    async fn sandbox_launch_polls_at_one_second_then_backs_off() {
+        for pending_polls in 0..=6 {
+            let (mut sandbox, recorder, clock) = planted();
+            recorder.answer(
+                "RunMicrovm",
+                Answer::ok(fake::microvm_response("PENDING", None)),
+            );
+            for _ in 0..pending_polls {
+                recorder.answer(
+                    "GetMicrovm",
+                    Answer::ok(fake::microvm_response("PENDING", None)),
+                );
+            }
+            recorder
+                .answer(
+                    "GetMicrovm",
+                    Answer::ok(fake::microvm_response("RUNNING", None)),
+                )
+                .answer(
+                    "CreateMicrovmAuthToken",
+                    Answer::ok(fake::auth_token_response("proxy-token")),
+                );
+            sandbox
+                .run(RunRequest::new().with_image("arn:image"))
+                .await
+                .expect("ready");
+            let expected_seconds = [0, 1, 2, 3, 8, 13, 18][pending_polls];
+            assert_eq!(clock.now(), Duration::from_secs(expected_seconds));
+            assert_eq!(recorder.call_count("GetMicrovm"), pending_polls + 1);
+            assert_eq!(sandbox.lifecycle(), Lifecycle::Running);
+            sandbox.detach().expect("hand the scripted VM off quietly");
+        }
+
+        // The public control-plane wait still honors a fixed interval.
+        let (sandbox, recorder, clock) = planted();
+        recorder
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("PENDING", None)),
+            )
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("RUNNING", None)),
+            );
+        sandbox
+            .control
+            .wait_for_launch("mvm-abc123", WaitOpts::for_launch())
+            .await
+            .expect("ready");
+        assert_eq!(clock.now(), Duration::from_secs(5));
+
+        // Only client-token adoption can resume a suspended launch.
+        let (mut sandbox, recorder, _) = planted();
+        recorder
+            .answer(
+                "RunMicrovm",
+                Answer::ok(fake::microvm_response("PENDING", None)),
+            )
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("SUSPENDED", None)),
+            );
+        let error = sandbox
+            .run(RunRequest::new().with_image("arn:image"))
+            .await
+            .expect_err("a fresh launch fails fast");
+        assert_eq!(error.kind(), ErrorKind::LaunchDied);
+        assert_eq!(recorder.call_count("ResumeMicrovm"), 0);
+        sandbox.detach().expect("hand the scripted VM off quietly");
     }
 
     #[tokio::test]

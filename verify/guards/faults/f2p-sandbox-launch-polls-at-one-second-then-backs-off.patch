@@ -1,0 +1,89 @@
+diff --git a/crates/microvms-app/src/control/microvm.rs b/crates/microvms-app/src/control/microvm.rs
+index 69ddefc..9611956 100644
+--- a/crates/microvms-app/src/control/microvm.rs
++++ b/crates/microvms-app/src/control/microvm.rs
+@@ -620,45 +620,18 @@ impl ControlPlane {
+     /// only the dead states fail fast. A genuine startup death still ends in a dead state,
+     /// so it still fails with `stateReason`.
+     pub async fn wait_for_launch(&self, id: &str, opts: WaitOpts) -> Result<Microvm, Error> {
+-        self.wait_for_launch_inner(id, opts, true, false).await
+-    }
+-
+-    /// Sandbox launches poll quickly while a typical launch is becoming ready. Public
+-    /// control-plane waits keep the caller's fixed polling interval.
+-    pub(crate) async fn wait_for_sandbox_launch(
+-        &self,
+-        id: &str,
+-        opts: WaitOpts,
+-        adoptable: bool,
+-    ) -> Result<Microvm, Error> {
+-        self.wait_for_launch_inner(id, opts, adoptable, true).await
+-    }
+-
+-    async fn wait_for_launch_inner(
+-        &self,
+-        id: &str,
+-        opts: WaitOpts,
+-        adoptable: bool,
+-        fast_start: bool,
+-    ) -> Result<Microvm, Error> {
+         let started = self.clock().elapsed();
+         let mut resumed = false;
+-        let mut fast_polls_remaining = 3;
+-        let fail_on = if adoptable {
+-            &crate::constants::DEAD_STATES[..]
+-        } else {
+-            &crate::constants::TERMINAL_STATES[..]
+-        };
+         loop {
+             let got = self.get_microvm(id).await?;
+             match got.state.as_str() {
+                 "RUNNING" => return Ok(got),
+-                state if fail_on.contains(&state) => {
++                state if crate::constants::DEAD_STATES.contains(&state) => {
+                     return Err(self.reached_terminal_state(&got, &["RUNNING"]));
+                 }
+                 // `GetMicrovm` is eventually consistent, so SUSPENDED can still be read
+                 // just after the resume was accepted; one resume is enough.
+-                "SUSPENDED" if adoptable && !resumed => {
++                "SUSPENDED" if !resumed => {
+                     self.resume(id).await?;
+                     resumed = true;
+                     continue;
+@@ -676,15 +649,7 @@ impl ControlPlane {
+                     elapsed,
+                 ));
+             }
+-            // Poll promptly during startup, then use the lifecycle interval to bound
+-            // repeated requests during a slower launch.
+-            let interval = if fast_start && fast_polls_remaining > 0 {
+-                fast_polls_remaining -= 1;
+-                opts.poll_interval.min(std::time::Duration::from_secs(1))
+-            } else {
+-                opts.poll_interval
+-            };
+-            self.clock().sleep(interval).await;
++            self.clock().sleep(opts.poll_interval).await;
+         }
+     }
+ 
+diff --git a/crates/microvms-app/src/sandbox.rs b/crates/microvms-app/src/sandbox.rs
+index 3000172..ad0b88d 100644
+--- a/crates/microvms-app/src/sandbox.rs
++++ b/crates/microvms-app/src/sandbox.rs
+@@ -1291,10 +1291,11 @@ impl Sandbox {
+             )));
+         }
+         let opts = WaitOpts::for_lifecycle(timeout);
+-        let running = self
+-            .control
+-            .wait_for_sandbox_launch(&id, opts, self.launch_adoptable)
+-            .await?;
++        let running = if self.launch_adoptable {
++            self.control.wait_for_launch(&id, opts).await?
++        } else {
++            self.control.wait_for_running(&id, opts).await?
++        };
+ 
+         // STATE-2. The platform reported the run hook succeeded, so the token is in the
+         // guest's memory — and this is the one place that counts it (STATE-3).
