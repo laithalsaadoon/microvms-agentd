@@ -59,6 +59,12 @@ tokio = { version = "1.53", features = ["time", "sync", "rt", "macros"] }
 # and both of those are std — so `src/exec.rs` advances the stream with nothing
 # but this crate's own dependencies. Retired 2026-08-09.
 
+[dev-dependencies]
+# Standalone conversion tests do not run inside Node. Resolve dormant Node-API
+# symbols dynamically so the test executable can link; the addon uses its normal
+# dependency features when it is built for Node.
+napi = { version = "3", default-features = false, features = ["dyn-symbols"] }
+
 [build-dependencies]
 # Omitting `napi_build::setup()` produces undefined-symbol link failures, which
 # is the one build-time requirement napi-rs still has — it uses no node-gyp and
