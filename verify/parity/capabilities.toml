@@ -1001,6 +1001,11 @@ core = "exec.reapGroupOnExit"
 py = ["Session.run(reap_group_on_exit)", "Session.run_sync(reap_group_on_exit)", "Session.run_to_completion(reap_group_on_exit)", "Session.spawn(reap_group_on_exit)", "Session.run_async(reap_group_on_exit)", "Session.run_sync_async(reap_group_on_exit)", "Session.run_to_completion_async(reap_group_on_exit)", "Session.spawn_async(reap_group_on_exit)"]
 
 [[default]]
+id = "exec-poweroff"
+core = "exec.poweroffOnExit"
+py = ["Session.run(poweroff_on_exit)", "Session.run_sync(poweroff_on_exit)", "Session.run_to_completion(poweroff_on_exit)", "Session.spawn(poweroff_on_exit)", "Session.run_async(poweroff_on_exit)", "Session.run_sync_async(poweroff_on_exit)", "Session.run_to_completion_async(poweroff_on_exit)", "Session.spawn_async(poweroff_on_exit)"]
+
+[[default]]
 id = "exec-inherit-env"
 core = "exec.inheritImageEnv"
 py = ["Session.run(inherit_image_env)", "Session.run_sync(inherit_image_env)", "Session.run_to_completion(inherit_image_env)", "Session.spawn(inherit_image_env)", "Session.run_async(inherit_image_env)", "Session.run_sync_async(inherit_image_env)", "Session.run_to_completion_async(inherit_image_env)", "Session.spawn_async(inherit_image_env)"]

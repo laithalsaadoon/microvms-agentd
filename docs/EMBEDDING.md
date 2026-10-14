@@ -151,6 +151,7 @@ needs live verification.
 |---|---|
 | Wait for a command's complete result | `Session.run_sync` waits and acknowledges the execution. Check its outcome and exit code. |
 | Stream or detach | `Session.run` returns an execution handle; retain its ID to poll, stream, signal, and acknowledge later. |
+| Power off after an execution group exits | Set Python `poweroff_on_exit=True` or Node `poweroffOnExit: true` on the execution call. Requires a supporting daemon with `CAP_SYS_BOOT`. All VM work ends, and acknowledgment or output delivery can race shutdown. |
 | Retry an uncertain start | Reuse the original execution ID and request. A duplicate ID refers to the existing execution. |
 | Bound guest execution | Set the request's execution timeout. A client wait deadline alone does not stop the guest process. |
 | End residual child processes | Request process-group cleanup when the workload requires it. |

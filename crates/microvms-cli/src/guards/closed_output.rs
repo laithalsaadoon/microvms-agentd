@@ -307,6 +307,7 @@ async fn a_stream_whose_reader_leaves_stops_detaches_and_exits_interrupted() {
             from_offset: None,
             stdin: false,
             reap: false,
+            poweroff_on_exit: false,
             kill_on_timeout: false,
             attach: AttachFlags {
                 state_dir: Some(dir.0.clone()),

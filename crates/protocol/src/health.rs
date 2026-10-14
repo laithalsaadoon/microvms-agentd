@@ -11,6 +11,10 @@ use serde::{Deserialize, Serialize};
 /// older clients can still construct and decode that exhaustive wire type.
 pub const DEFAULT_USER_CONFIGURED_HEADER: &str = "microvms-default-user-configured";
 
+/// A value of `1` advertises guest power-off support and the daemon's current privilege.
+/// Absence is an older peer or an unsupported environment; clients must not send the opt-in.
+pub const POWEROFF_ON_EXIT_HEADER: &str = "microvm-poweroff-on-exit";
+
 /// `GET /v1/health` response.
 #[derive(Debug, Deserialize, JsonSchema, Serialize)]
 pub struct Health {

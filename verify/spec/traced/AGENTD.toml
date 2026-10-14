@@ -102,6 +102,12 @@ issue = "#297"
 waive.gherkin = "no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate"
 waive.live = "a live daemon and the endpoint proxy neither replay nor forge a frame, so a live run can't present one; the relay tests send both to the daemon's real route"
 
+[AGENTD-25]
+issue = "#614"
+waive.model = "the process identities and liveness are Linux procfs observations; fixture snapshots and a real child group test the observer, while the live lane checks the guest shutdown path"
+waive.gherkin = "the route test starts a real shell and holds its background group member until after result publication; another textual scenario would restate that sequence"
+waive.fuzz = "the observer rejects malformed procfs records and tests PID reuse, disappearing entries, and zombie liveness directly; the shutdown action is injected so no fuzz input can power off the host"
+
 [AGENTD-26]
 issue = "#599"
 waive.model = "the policy uses Linux thread capabilities; injected syscall failures and an isolated real capability subprocess test its state transitions"

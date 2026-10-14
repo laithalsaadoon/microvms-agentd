@@ -871,6 +871,43 @@ async fn exec_reap_puts_the_flag_on_the_start_body_and_its_absence_puts_false() 
     }
 }
 
+#[tokio::test]
+async fn exec_poweroff_is_opt_in_and_requires_daemon_support() {
+    for enabled in [false, true] {
+        let script = DaemonScript::new().with_poweroff_support();
+        if enabled {
+            script.reply(200, "{}");
+        }
+        script
+            .reply(200, STARTED_BODY)
+            .reply(200, &poll_body("exited", "0", "", false))
+            .reply(200, &poll_body("acked", "0", "", false));
+        let command = exec_command(|args| args.poweroff_on_exit = enabled);
+        let (result, _, _) = against_daemon(&script, &command).await;
+        result.expect("supported exec completes");
+        let requests = script.requests();
+        assert_eq!(
+            requests.iter().filter(|r| r.path == "/v1/health").count(),
+            usize::from(enabled)
+        );
+        let start = requests
+            .iter()
+            .find(|r| r.path == "/v1/exec/start")
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&start.body).unwrap();
+        assert_eq!(
+            body.get("poweroff_on_exit"),
+            enabled.then_some(&serde_json::Value::Bool(true))
+        );
+    }
+    let old = DaemonScript::new();
+    old.reply(200, "{}");
+    let command = exec_command(|args| args.poweroff_on_exit = true);
+    let (result, _, _) = against_daemon(&old, &command).await;
+    assert!(result.is_err());
+    assert_eq!(old.paths(), ["GET /v1/health"]);
+}
+
 /// **`exec --kill-on-timeout` kills the exec after `ERR_TIMEOUT` and says whether it did; a
 /// plain timeout kills nothing and names `microvm kill` as the remedy.**
 ///

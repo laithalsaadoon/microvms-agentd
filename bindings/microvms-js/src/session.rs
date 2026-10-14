@@ -252,6 +252,10 @@ pub struct ExecOptions {
     /// backgrounded outlives it. Off by default, which keeps the backgrounded-grandchild-output
     /// guarantee for callers who rely on it.
     pub reap_group_on_exit: Option<bool>,
+    /// Power off the guest after the original process group exits. Requires daemon support;
+    /// all other VM work ends too, and acknowledgment and results may race shutdown.
+    /// Off by default. Does not keep an idle VM awake.
+    pub poweroff_on_exit: Option<bool>,
     /// Start the child's environment from the image's `ENV` (minus `AGENTD_*`, never the
     /// token), beneath everything else (AGENTD-11). Off by default, which keeps the child's environment
     /// exactly the launch environment plus `env`.
@@ -271,6 +275,7 @@ impl ExecOptions {
             exec_id: None,
             timeout: None,
             reap_group_on_exit: None,
+            poweroff_on_exit: None,
             inherit_image_env: None,
         }
     }
@@ -311,6 +316,9 @@ impl ExecOptions {
         }
         if let Some(reap) = self.reap_group_on_exit {
             request = request.with_reap_group_on_exit(reap);
+        }
+        if let Some(poweroff) = self.poweroff_on_exit {
+            request = request.with_poweroff_on_exit(poweroff);
         }
         if let Some(inherit) = self.inherit_image_env {
             request = request.with_inherit_image_env(inherit);
@@ -356,6 +364,10 @@ pub struct CompletionRequest {
     /// Signal the whole process group once the command's own child exits. See
     /// `ExecOptions.reapGroupOnExit`.
     pub reap_group_on_exit: Option<bool>,
+    /// Power off the guest after the original process group exits. Requires daemon support;
+    /// all other VM work ends too, and acknowledgment and results may race shutdown.
+    /// Off by default. Does not keep an idle VM awake.
+    pub poweroff_on_exit: Option<bool>,
     /// Start the child's environment from the image's `ENV`. See `ExecOptions.inheritImageEnv`.
     pub inherit_image_env: Option<bool>,
     /// How long past `timeoutSec` the client waits before it kills, and how long it then
@@ -374,6 +386,7 @@ impl CompletionRequest {
             timeout_sec: self.timeout_sec,
             exec_id: self.exec_id,
             reap_group_on_exit: self.reap_group_on_exit,
+            poweroff_on_exit: self.poweroff_on_exit,
             inherit_image_env: self.inherit_image_env,
             ..ExecOptions::empty()
         }

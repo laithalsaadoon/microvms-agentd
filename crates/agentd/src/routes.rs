@@ -413,6 +413,7 @@ async fn terminate_hook(State(state): State<AppState>) -> StatusCode {
 /// response the route already returned.
 async fn health_response(State(state): State<AppState>) -> Response {
     let configured = state.config().default_user.is_some();
+    let supported = state.poweroff().check().is_ok();
     let mut response = health(State(state)).await.into_response();
     if configured {
         response.headers_mut().insert(
@@ -420,6 +421,10 @@ async fn health_response(State(state): State<AppState>) -> Response {
             axum::http::HeaderValue::from_static("1"),
         );
     }
+    response.headers_mut().insert(
+        protocol::health::POWEROFF_ON_EXIT_HEADER,
+        axum::http::HeaderValue::from_static(if supported { "1" } else { "0" }),
+    );
     response
 }
 
@@ -593,7 +598,9 @@ pub fn surface_docs() -> Vec<schema::Endpoint> {
                 "/v1/exec/start".into(),
                 Auth::Bearer,
                 "start a command under a caller-minted exec_id. Idempotent on that \
-                 id: a retry returns success without spawning a second child.",
+                 id: a retry returns success without spawning a second child. \
+                 poweroff_on_exit requests guest shutdown after the original group \
+                 exits, requires daemon CAP_SYS_BOOT, and may race response delivery.",
                 schema::EXEC_START,
             )
         },
@@ -786,7 +793,9 @@ pub fn surface_docs() -> Vec<schema::Endpoint> {
                  work and return their normal status. Hook routes are \
                  unauthenticated and reachable over loopback from inside the \
                  guest, so entries show receipt rather than source identity. \
-                 Later platform requests are subject to the same cap.",
+                 Later platform requests are subject to the same cap. \
+                 microvm-poweroff-on-exit: 1 advertises shutdown support and the \
+                 daemon's CAP_SYS_BOOT privilege; 0 means unavailable.",
                 schema::HEALTH,
             )
         },
@@ -1007,6 +1016,48 @@ mod tests {
                     .get(protocol::health::DEFAULT_USER_CONFIGURED_HEADER)
                     .map(|value| value.to_str().unwrap()),
                 user.map(|_| "1")
+            );
+            let bytes = axum::body::to_bytes(response.into_body(), 65536)
+                .await
+                .unwrap();
+            let _: Health = serde_json::from_slice(&bytes).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn health_advertises_poweroff_only_when_the_daemon_is_privileged() {
+        use std::sync::Arc;
+        for supported in [false, true] {
+            let poweroff = crate::poweroff::Poweroff::testing(
+                Arc::new(move || {
+                    if supported {
+                        Ok(())
+                    } else {
+                        Err(std::io::Error::other("denied"))
+                    }
+                }),
+                Arc::new(|| panic!("health must not shut down the guest")),
+                Arc::new(|_| panic!("health must not inspect process groups")),
+            );
+            let state = AppState::with_services(
+                Config {
+                    default_user: Some("worker".into()),
+                    ..Config::default()
+                },
+                crate::disk::available_bytes,
+                crate::identity::no_repair(),
+                None,
+                poweroff,
+            );
+            let response = health_response(State(state)).await;
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                response.headers()[protocol::health::POWEROFF_ON_EXIT_HEADER],
+                if supported { "1" } else { "0" }
+            );
+            assert_eq!(
+                response.headers()[protocol::health::DEFAULT_USER_CONFIGURED_HEADER],
+                "1"
             );
             let bytes = axum::body::to_bytes(response.into_body(), 65536)
                 .await

@@ -1631,6 +1631,12 @@ export interface CompletionRequest {
    * `ExecOptions.reapGroupOnExit`.
    */
   reapGroupOnExit?: boolean
+  /**
+   * Power off the guest after the original process group exits. Requires daemon support;
+   * all other VM work ends too, and acknowledgment and results may race shutdown.
+   * Off by default. Does not keep an idle VM awake.
+   */
+  poweroffOnExit?: boolean
   /** Start the child's environment from the image's `ENV`. See `ExecOptions.inheritImageEnv`. */
   inheritImageEnv?: boolean
   /**
@@ -1828,6 +1834,12 @@ export interface ExecOptions {
    * guarantee for callers who rely on it.
    */
   reapGroupOnExit?: boolean
+  /**
+   * Power off the guest after the original process group exits. Requires daemon support;
+   * all other VM work ends too, and acknowledgment and results may race shutdown.
+   * Off by default. Does not keep an idle VM awake.
+   */
+  poweroffOnExit?: boolean
   /**
    * Start the child's environment from the image's `ENV` (minus `AGENTD_*`, never the
    * token), beneath everything else (AGENTD-11). Off by default, which keeps the child's environment

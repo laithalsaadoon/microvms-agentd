@@ -454,7 +454,27 @@ impl Session {
     /// The `exec_id` on the request is the idempotency key. The daemon returns success
     /// for a known id without spawning a second child, so a caller whose retry must be
     /// safe across its own restart supplies a stable one.
+    ///
+    /// `poweroff_on_exit` requires the daemon's support header before starting.
+    /// It can end every workload in the VM and race delivery of this call's
+    /// acknowledgment or later output. It does not keep an idle VM awake.
     pub async fn run(&self, req: protocol::exec::StartRequest) -> Result<ExecHandle, Error> {
+        if req.poweroff_on_exit {
+            let response = self
+                .transport
+                .send(unauthenticated(HttpRequest::new("GET", "/v1/health")))
+                .await?;
+            if response
+                .headers
+                .get(protocol::health::POWEROFF_ON_EXIT_HEADER)
+                .map(String::as_str)
+                != Some("1")
+            {
+                return Err(Error::invalid_arg(
+                    "poweroff_on_exit requires a supporting daemon with CAP_SYS_BOOT",
+                ));
+            }
+        }
         let requested = req.exec_id.clone();
         let mut request = HttpRequest::new("POST", "/v1/exec/start");
         request
@@ -1635,6 +1655,64 @@ mod tests {
             "the daemon defaults a missing flag to false, so a dropped key is a silent \
              behaviour change: {body}"
         );
+    }
+
+    #[tokio::test]
+    async fn poweroff_requires_explicit_peer_support_before_starting() {
+        for value in [None, Some("0"), Some("true"), Some("2")] {
+            let headers = value
+                .map(|value| {
+                    (
+                        protocol::health::POWEROFF_ON_EXIT_HEADER.into(),
+                        value.into(),
+                    )
+                })
+                .into_iter();
+            let recorder = Recorder::with_headers([Reply::Body(200, b"{}".to_vec())], headers);
+            let (session, _, _) = session_with(Arc::clone(&recorder));
+            let error = session
+                .run(start_request("poweroff").with_poweroff_on_exit(true))
+                .await
+                .expect_err("a peer must explicitly support poweroff");
+            assert!(error.to_string().contains("poweroff_on_exit"));
+            let requests = recorder.requests();
+            assert_eq!(requests.len(), 1, "an unsupported peer must not start work");
+            assert_eq!(requests[0].method, "GET");
+            assert_eq!(requests[0].path, "/v1/health");
+            assert!(header(&requests[0], "authorization").is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn poweroff_opt_in_is_gated_and_the_default_needs_no_extra_request() {
+        for enabled in [false, true] {
+            let mut replies = Vec::new();
+            if enabled {
+                replies.push(Reply::Body(200, b"{}".to_vec()));
+            }
+            replies.push(Reply::ok(
+                serde_json::json!({"exec_id":"e1","phase":"running"}),
+            ));
+            let headers = enabled.then_some((
+                protocol::health::POWEROFF_ON_EXIT_HEADER.to_owned(),
+                "1".to_owned(),
+            ));
+            let recorder = Recorder::with_headers(replies, headers);
+            let (session, _, _) = session_with(Arc::clone(&recorder));
+            session
+                .run(start_request("e1").with_poweroff_on_exit(enabled))
+                .await
+                .unwrap();
+            assert_eq!(recorder.requests().len(), if enabled { 2 } else { 1 });
+            let request = recorder.last();
+            assert_eq!(request.method, "POST");
+            assert_eq!(request.path, "/v1/exec/start");
+            let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+            assert_eq!(
+                body.get("poweroff_on_exit"),
+                enabled.then_some(&serde_json::Value::Bool(true))
+            );
+        }
     }
 
     /// A session's `Debug` does not print the agent token.

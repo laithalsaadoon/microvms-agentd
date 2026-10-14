@@ -46,7 +46,7 @@ function outcome(phase, exitCode, { signal = null, stdout = '', timedOut = false
 }
 
 /** A loopback server answering `route(method, path)` for every request, logging each. */
-async function serve(route) {
+async function serve(route, headers = {}) {
   const log = [];
   const starts = [];
   const server = http.createServer((request, response) => {
@@ -60,6 +60,7 @@ async function serve(route) {
       response.writeHead(status, {
         'content-type': type,
         'content-length': Buffer.byteLength(body),
+        ...headers,
       });
       response.end(body);
     });
@@ -75,6 +76,37 @@ async function serve(route) {
 }
 
 const json = (body) => [200, body, 'application/json'];
+
+for (const method of ['run', 'runSync', 'spawn', 'runToCompletion']) {
+  test(`${method} forwards poweroffOnExit and refuses unsupported peers`, async (t) => {
+    const supported = await serve(streamed([exitEvent(0)], outcome('acked', 0)), {
+      'microvm-poweroff-on-exit': '1',
+    });
+    t.after(supported.close);
+    const exec = { poweroffOnExit: true, execId: 'x-rtc' };
+    const options = method === 'spawn' ? { exec } : exec;
+    await supported.session[method]('true', options);
+    assert.equal(supported.log[0], 'GET /v1/health');
+    assert.equal(supported.starts.length, 1);
+    assert.equal(supported.starts[0].poweroff_on_exit, true);
+    const unsupported = await serve(streamed([], outcome('acked', 0)));
+    t.after(unsupported.close);
+    await assert.rejects(
+      unsupported.session[method]('true', options),
+      /poweroff_on_exit/,
+    );
+    assert.deepEqual(unsupported.log, ['GET /v1/health']);
+    assert.deepEqual(unsupported.starts, []);
+  });
+}
+
+test('poweroffOnExit defaults to no extra request and no wire field', async (t) => {
+  const server = await serve(streamed([], outcome('acked', 0)));
+  t.after(server.close);
+  await server.session.run('true', { execId: 'x-rtc' });
+  assert.deepEqual(server.log, ['POST /v1/exec/start']);
+  assert.equal(Object.hasOwn(server.starts[0], 'poweroff_on_exit'), false);
+});
 
 function streamed(frames, ack) {
   return (method, path) => {

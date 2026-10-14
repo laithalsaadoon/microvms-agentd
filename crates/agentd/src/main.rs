@@ -65,7 +65,13 @@ async fn run(config: Config) -> std::io::Result<()> {
     // what `/proc/1/environ` shows there.
     let image_env = exec_start::snapshot_image_env(std::env::vars_os());
     tracing::info!(keys = image_env.len(), "image environment snapshot taken");
-    let state = AppState::with_parts(config, disk::available_bytes, repairer, Some(image_env));
+    let state = AppState::with_services(
+        config,
+        disk::available_bytes,
+        repairer,
+        Some(image_env),
+        agentd::poweroff::Poweroff::host(),
+    );
 
     // Collection of acked exec entries runs on its own interval rather than
     // inside a request handler, so a slow collection cannot delay a response and

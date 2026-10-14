@@ -12,7 +12,7 @@ run = [
 expect = "test-failed"
 suite = "bindings"
 note = "bindings/microvms-py/tests/test_run_to_completion.py::test_reap_group_on_exit_reaches_the_start"
-transform = { file = "bindings/microvms-py/src/session.rs", replace = "            false,\n            exec_id,\n            reap_group_on_exit,\n            inherit_image_env,\n        );\n        let plan = completion_plan(&request, client_grace_sec)?;\n        // Started under the sandbox lock", with = "            false,\n            exec_id,\n            false,\n            inherit_image_env,\n        );\n        let plan = completion_plan(&request, client_grace_sec)?;\n        // Started under the sandbox lock" }
+transform = { file = "bindings/microvms-py/src/session.rs", replace = "            false,\n            exec_id,\n            reap_group_on_exit,\n            poweroff_on_exit,\n            inherit_image_env,\n        );\n        let plan = completion_plan(&request, client_grace_sec)?;\n        // Started under the sandbox lock", with = "            false,\n            exec_id,\n            false,\n            poweroff_on_exit,\n            inherit_image_env,\n        );\n        let plan = completion_plan(&request, client_grace_sec)?;\n        // Started under the sandbox lock" }
 
 [[fault]]
 id = "js-run-to-completion-drops-reap"
@@ -24,4 +24,4 @@ run = [
 expect = "test-failed"
 suite = "bindings"
 note = "bindings/microvms-js/__test__/run_to_completion.mjs::reapGroupOnExit reaches the start, and is off by default"
-transform = { file = "bindings/microvms-js/src/session.rs", replace = "            exec_id: self.exec_id,\n            reap_group_on_exit: self.reap_group_on_exit,\n            inherit_image_env: self.inherit_image_env,\n            ..ExecOptions::empty()\n", with = "            exec_id: self.exec_id,\n            inherit_image_env: self.inherit_image_env,\n            ..ExecOptions::empty()\n" }
+transform = { file = "bindings/microvms-js/src/session.rs", replace = "            exec_id: self.exec_id,\n            reap_group_on_exit: self.reap_group_on_exit,\n            poweroff_on_exit: self.poweroff_on_exit,\n            inherit_image_env: self.inherit_image_env,\n            ..ExecOptions::empty()\n", with = "            exec_id: self.exec_id,\n            poweroff_on_exit: self.poweroff_on_exit,\n            inherit_image_env: self.inherit_image_env,\n            ..ExecOptions::empty()\n" }

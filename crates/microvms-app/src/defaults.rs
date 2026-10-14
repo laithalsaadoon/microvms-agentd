@@ -84,6 +84,7 @@ pub fn client_defaults() -> Value {
             "shell": matches!(start.shell, protocol::exec::Shell::Flag(true)),
             "stdin": start.stdin,
             "reapGroupOnExit": start.reap_group_on_exit,
+            "poweroffOnExit": start.poweroff_on_exit,
             "inheritImageEnv": start.inherit_image_env,
         },
         "stream": {

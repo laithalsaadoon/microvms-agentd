@@ -56,11 +56,13 @@ tar = "0.4.46"
 subtle = "2.6"
 # Features, each earning its place: `signal` for the exec kill path, `fs` for
 # `statvfs` (the disk-pressure guard), `mount` for the `MS_BIND` that shadows the
-# read-only procfs `boot_id`, and `hostname` for `sethostname`. Pinned to the 0.31
+# read-only procfs `boot_id`, `hostname` for `sethostname`, and `reboot` for the
+# opt-in daemon-owned guest shutdown. Pinned to the 0.31
 # line, which is what is already locked; nix is pre-1.0 and every minor is a
 # breaking change, so a caret on 0.31 is the widest safe range.
-nix = { version = "0.31", features = ["signal", "fs", "mount", "hostname"] }
+nix = { version = "0.31", features = ["signal", "fs", "mount", "hostname", "reboot"] }
 # Safe thread-capability reads and writes for the image-owned exec policy.
+# Shutdown checks the daemon's capabilities without raising them.
 rustix = { version = "1.1", features = ["thread"] }
 tempfile = "3"
 tracing = "0.1"

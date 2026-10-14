@@ -797,6 +797,7 @@ fn start_request(
     stdin: bool,
     exec_id: Option<String>,
     reap_group_on_exit: bool,
+    poweroff_on_exit: bool,
     inherit_image_env: bool,
 ) -> protocol::exec::StartRequest {
     protocol::exec::StartRequest::new(exec_id.unwrap_or_else(mint_exec_id), command.into_argv())
@@ -808,6 +809,7 @@ fn start_request(
         .with_timeout_sec(timeout_sec)
         .with_stdin(stdin)
         .with_reap_group_on_exit(reap_group_on_exit)
+        .with_poweroff_on_exit(poweroff_on_exit)
         .with_inherit_image_env(inherit_image_env)
 }
 
@@ -1099,7 +1101,10 @@ impl PySession {
     /// `reap_group_on_exit` asks the daemon to signal the whole process group once the
     /// command's own child exits, so nothing it backgrounded outlives it; off by default,
     /// which keeps the backgrounded-grandchild-output guarantee for callers who rely on it.
-    // `shell`, `stdin`, `reap_group_on_exit` and `inherit_image_env` restate the wire's defaults
+    /// `poweroff_on_exit` asks a supporting daemon to power off the whole guest after
+    /// the original process group has no live members. Other work ends too, and the
+    /// start acknowledgment or result can be lost. It does not keep an idle VM awake.
+    // `shell`, `stdin`, `reap_group_on_exit`, `poweroff_on_exit` and `inherit_image_env` restate the wire's defaults
     // (`StartRequest::new`'s) here and in `run_sync`, and `run_to_completion` restates `shell`,
     // `reap_group_on_exit` and `inherit_image_env`, because a Python signature shows a value: `Option<bool> = None`
     // would turn the stub's `bool = False` into `bool | None`, an API change. So these setters
@@ -1117,6 +1122,7 @@ impl PySession {
         stdin=false,
         exec_id=None,
         reap_group_on_exit=false,
+        poweroff_on_exit=false,
         inherit_image_env=false,
     ))]
     #[allow(
@@ -1138,6 +1144,7 @@ impl PySession {
         stdin: bool,
         exec_id: Option<String>,
         reap_group_on_exit: bool,
+        poweroff_on_exit: bool,
         inherit_image_env: bool,
     ) -> PyCoreResult<PyExecHandle> {
         // Built before the block rather than inside it: a `Command` extraction needs the GIL
@@ -1153,6 +1160,7 @@ impl PySession {
             stdin,
             exec_id,
             reap_group_on_exit,
+            poweroff_on_exit,
             inherit_image_env,
         );
         Ok(PyExecHandle::wrap(runtime::block_on(
@@ -1176,6 +1184,7 @@ impl PySession {
         stdin=false,
         exec_id=None,
         reap_group_on_exit=false,
+        poweroff_on_exit=false,
         inherit_image_env=false,
     ))]
     #[allow(
@@ -1194,6 +1203,7 @@ impl PySession {
         stdin: bool,
         exec_id: Option<String>,
         reap_group_on_exit: bool,
+        poweroff_on_exit: bool,
         inherit_image_env: bool,
     ) -> PyCoreResult<PyExecHandle> {
         let request = start_request(
@@ -1207,6 +1217,7 @@ impl PySession {
             stdin,
             exec_id,
             reap_group_on_exit,
+            poweroff_on_exit,
             inherit_image_env,
         );
         Ok(PyExecHandle::wrap(
@@ -1243,6 +1254,7 @@ impl PySession {
         stdin=false,
         exec_id=None,
         reap_group_on_exit=false,
+        poweroff_on_exit=false,
         inherit_image_env=false,
         offset=0,
         reconnect=true,
@@ -1267,6 +1279,7 @@ impl PySession {
         stdin: bool,
         exec_id: Option<String>,
         reap_group_on_exit: bool,
+        poweroff_on_exit: bool,
         inherit_image_env: bool,
         offset: u64,
         reconnect: bool,
@@ -1288,6 +1301,7 @@ impl PySession {
             stdin,
             exec_id,
             reap_group_on_exit,
+            poweroff_on_exit,
             inherit_image_env,
         );
         let handle = runtime::block_on(py, self.start_op(request)).map_err(CoreError)?;
@@ -1308,6 +1322,7 @@ impl PySession {
         stdin=false,
         exec_id=None,
         reap_group_on_exit=false,
+        poweroff_on_exit=false,
         inherit_image_env=false,
         offset=0,
         reconnect=true,
@@ -1331,6 +1346,7 @@ impl PySession {
         stdin: bool,
         exec_id: Option<String>,
         reap_group_on_exit: bool,
+        poweroff_on_exit: bool,
         inherit_image_env: bool,
         offset: u64,
         reconnect: bool,
@@ -1357,6 +1373,7 @@ impl PySession {
             stdin,
             exec_id,
             reap_group_on_exit,
+            poweroff_on_exit,
             inherit_image_env,
         );
         let handle = runtime::spawn(self.start_op(request))
@@ -1389,6 +1406,7 @@ impl PySession {
         stdin=false,
         exec_id=None,
         reap_group_on_exit=false,
+        poweroff_on_exit=false,
         inherit_image_env=false,
     ))]
     #[allow(
@@ -1410,6 +1428,7 @@ impl PySession {
         stdin: bool,
         exec_id: Option<String>,
         reap_group_on_exit: bool,
+        poweroff_on_exit: bool,
         inherit_image_env: bool,
     ) -> PyCoreResult<PyExecResult> {
         let request = start_request(
@@ -1423,6 +1442,7 @@ impl PySession {
             stdin,
             exec_id,
             reap_group_on_exit,
+            poweroff_on_exit,
             inherit_image_env,
         );
         let timeout = seconds(timeout)?;
@@ -1444,6 +1464,7 @@ impl PySession {
         stdin=false,
         exec_id=None,
         reap_group_on_exit=false,
+        poweroff_on_exit=false,
         inherit_image_env=false,
     ))]
     #[allow(
@@ -1463,6 +1484,7 @@ impl PySession {
         stdin: bool,
         exec_id: Option<String>,
         reap_group_on_exit: bool,
+        poweroff_on_exit: bool,
         inherit_image_env: bool,
     ) -> PyCoreResult<PyExecResult> {
         let request = start_request(
@@ -1476,6 +1498,7 @@ impl PySession {
             stdin,
             exec_id,
             reap_group_on_exit,
+            poweroff_on_exit,
             inherit_image_env,
         );
         let timeout = seconds(timeout)?;
@@ -1494,7 +1517,7 @@ impl PySession {
     ///
     /// An exception from `on_output` stops delivery; the exec is still waited for and acked
     /// so nothing is left behind, and then the exception is re-raised. `shell`, `user`,
-    /// `group`, `reap_group_on_exit` and `inherit_image_env` mean what they mean on `run()`:
+    /// `group`, `reap_group_on_exit`, `poweroff_on_exit` and `inherit_image_env` mean what they mean on `run()`:
     /// `shell="bash"` with a script string runs it under bash, which dash-based images need for
     /// `pipefail`.
     #[pyo3(signature = (
@@ -1509,6 +1532,7 @@ impl PySession {
         timeout_sec=None,
         exec_id=None,
         reap_group_on_exit=false,
+        poweroff_on_exit=false,
         inherit_image_env=false,
         client_grace_sec=DEFAULT_CLIENT_GRACE_SEC,
     ))]
@@ -1530,6 +1554,7 @@ impl PySession {
         timeout_sec: Option<f64>,
         exec_id: Option<String>,
         reap_group_on_exit: bool,
+        poweroff_on_exit: bool,
         inherit_image_env: bool,
         client_grace_sec: f64,
     ) -> PyResult<PyExecResult> {
@@ -1545,6 +1570,7 @@ impl PySession {
             false,
             exec_id,
             reap_group_on_exit,
+            poweroff_on_exit,
             inherit_image_env,
         );
         let plan = completion_plan(&request, client_grace_sec)?;
@@ -1592,6 +1618,7 @@ impl PySession {
         timeout_sec=None,
         exec_id=None,
         reap_group_on_exit=false,
+        poweroff_on_exit=false,
         inherit_image_env=false,
         client_grace_sec=DEFAULT_CLIENT_GRACE_SEC,
     ))]
@@ -1612,6 +1639,7 @@ impl PySession {
         timeout_sec: Option<f64>,
         exec_id: Option<String>,
         reap_group_on_exit: bool,
+        poweroff_on_exit: bool,
         inherit_image_env: bool,
         client_grace_sec: f64,
     ) -> PyResult<PyExecResult> {
@@ -1626,6 +1654,7 @@ impl PySession {
             false,
             exec_id,
             reap_group_on_exit,
+            poweroff_on_exit,
             inherit_image_env,
         );
         let plan = completion_plan(&request, client_grace_sec)?;

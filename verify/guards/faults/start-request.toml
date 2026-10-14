@@ -31,4 +31,4 @@ run = ["cargo", "test", "-p", "microvms-protocol", "--lib", "--", "--exact", "ex
 expect = "test-failed"
 suite = "rust"
 note = "crates/protocol/src/exec.rs::the_builder_defaults_are_the_ones_serde_gives_an_omitted_field"
-transform = { file = "crates/protocol/src/exec.rs", replace = "            stdin: false,\n            reap_group_on_exit: false,\n            inherit_image_env: false,\n        }\n    }\n\n    /// Run `command` as a script", with = "            stdin: false,\n            reap_group_on_exit: true,\n            inherit_image_env: false,\n        }\n    }\n\n    /// Run `command` as a script" }
+transform = { file = "crates/protocol/src/exec.rs", replace = "            stdin: false,\n            reap_group_on_exit: false,\n            poweroff_on_exit: false,\n            inherit_image_env: false,\n        }\n    }\n\n    /// Run `command` as a script", with = "            stdin: false,\n            reap_group_on_exit: true,\n            poweroff_on_exit: false,\n            inherit_image_env: false,\n        }\n    }\n\n    /// Run `command` as a script" }

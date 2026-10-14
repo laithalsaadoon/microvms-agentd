@@ -31,6 +31,7 @@ traced requirement is missing a layer. Requirements are defined in
 | AGENTD-22 | 1 | 1 | 1 | 4 | 3 | 1 |
 | AGENTD-23 | 1 | 1 | 1 | 2 | 2 | 1 |
 | AGENTD-24 | 1 | 1 | 1 | 2 | 1 | 1 |
+| AGENTD-25 | waived | waived | waived | 2 | 1 | 1 |
 | AGENTD-26 | waived | waived | waived | 1 | 1 | 1 |
 | ARCH-1 | waived | waived | waived | 1 | 2 | waived |
 | ARCH-2 | waived | waived | waived | 1 | 4 | waived |
@@ -387,6 +388,17 @@ If a start request names no user and the guest's /etc/passwd does not contain th
 - **test:** `crates/agentd/src/exec.rs`, `crates/agentd/src/exec_start.rs`
 - **impl:** `crates/agentd/src/exec_start.rs`
 - **live:** `conformance/lanes/default_user.py`
+
+## AGENTD-25
+
+When an accepted start request sets poweroff_on_exit to true, the agentd shall request guest power-off only after observing that the execution's original process group has no live members.
+
+- **model:** waived: the process identities and liveness are Linux procfs observations; fixture snapshots and a real child group test the observer, while the live lane checks the guest shutdown path
+- **gherkin:** waived: the route test starts a real shell and holds its background group member until after result publication; another textual scenario would restate that sequence
+- **fuzz:** waived: the observer rejects malformed procfs records and tests PID reuse, disappearing entries, and zombie liveness directly; the shutdown action is injected so no fuzz input can power off the host
+- **test:** `crates/agentd/src/exec.rs`, `crates/agentd/src/poweroff.rs`
+- **impl:** `crates/agentd/src/poweroff.rs`
+- **live:** `conformance/lanes/poweroff.py`
 
 ## AGENTD-26
 

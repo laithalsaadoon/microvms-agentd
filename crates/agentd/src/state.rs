@@ -139,6 +139,7 @@ pub struct AppState {
 
 struct Inner {
     config: Config,
+    poweroff: crate::poweroff::Poweroff,
     /// `None` until bootstrap completes. Held as bytes because the token is
     /// compared in constant time on bytes: comparing `str` values raises on
     /// non-ASCII input in some runtimes, and any caller controls that header.
@@ -254,9 +255,27 @@ impl AppState {
         repairer: identity::Repairer,
         image_env: Option<HashMap<String, String>>,
     ) -> Self {
+        Self::with_services(
+            config,
+            space_probe,
+            repairer,
+            image_env,
+            crate::poweroff::Poweroff::unavailable(),
+        )
+    }
+
+    /// Runtime services are explicit: ordinary test states cannot power off their host.
+    pub fn with_services(
+        config: Config,
+        space_probe: disk::SpaceProbe,
+        repairer: identity::Repairer,
+        image_env: Option<HashMap<String, String>>,
+        poweroff: crate::poweroff::Poweroff,
+    ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 config,
+                poweroff,
                 token: Mutex::new(None),
                 launch_env: Mutex::new(HashMap::new()),
                 image_env,
@@ -269,6 +288,10 @@ impl AppState {
                 handler_lock: tokio::sync::Mutex::new(()),
             }),
         }
+    }
+
+    pub fn poweroff(&self) -> crate::poweroff::Poweroff {
+        self.inner.poweroff.clone()
     }
 
     pub fn config(&self) -> &Config {

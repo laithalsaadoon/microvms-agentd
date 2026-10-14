@@ -1,0 +1,30 @@
+[[family]]
+guard = "conformance/run_rs.py --self-test: conformance/selftest/poweroff.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "poweroff-live-empty"
+message = "FAIL  power-off lane rejects an empty observation"
+transform = { file = "conformance/lanes/poweroff.py", replace = 'check("AGENTD-25 the opt-in detached exec is accepted", accepted)', with = 'check("AGENTD-25 the opt-in detached exec is accepted", True)' }
+
+[[family.fault]]
+id = "poweroff-live-terminal"
+message = "FAIL  power-off lane rejects invalid states"
+transform = { file = "conformance/lanes/poweroff.py", replace = 'terminal = (', with = 'terminal = True or (' }
+
+[[family.fault]]
+id = "poweroff-live-option"
+message = "FAIL  power-off lane dispatches the public detached opt-in"
+transform = { file = "conformance/lanes/poweroff.py", replace = '"--poweroff-on-exit",', with = '' }
+
+[[family.fault]]
+id = "poweroff-live-repair"
+message = "FAIL  power-off lane builds a repair image"
+transform = { file = "conformance/lanes/poweroff.py", replace = 'repair=True', with = 'repair=False' }
+
+[[family.fault]]
+id = "poweroff-live-selector"
+message = "FAIL  power-off selector reaches the actual opt-in lane"
+transform = { file = "conformance/lanes/suite.py", replace = '"poweroff": drive_poweroff,', with = '"poweroff": None,' }

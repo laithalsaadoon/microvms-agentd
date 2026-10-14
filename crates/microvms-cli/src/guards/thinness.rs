@@ -182,6 +182,7 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
                 from_offset: None,
                 stdin: false,
                 reap: false,
+                poweroff_on_exit: false,
                 kill_on_timeout: false,
                 attach: AttachFlags {
                     state_dir: Some(std::env::temp_dir().join("microvm-guard-history")),

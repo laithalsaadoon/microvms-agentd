@@ -1921,6 +1921,7 @@ pub struct StartSpec<'a> {
     /// Whether the daemon signals the whole process group once the child exits. Off keeps
     /// the backgrounded-grandchild-output guarantee; `exec --reap` is the opt-in.
     pub reap: bool,
+    pub poweroff_on_exit: bool,
 }
 
 impl<'a> StartSpec<'a> {
@@ -1937,6 +1938,7 @@ impl<'a> StartSpec<'a> {
             shell: None,
             inherit_image_env: false,
             reap: false,
+            poweroff_on_exit: false,
         }
     }
 }
@@ -2001,6 +2003,7 @@ pub fn start_request(spec: StartSpec<'_>) -> microvms_core::protocol::exec::Star
         // too, so dropping this line would not fail anything: the exec would just quietly
         // keep leaving its grandchildren running, which is why the guard asserts on the wire.
         .with_reap_group_on_exit(spec.reap)
+        .with_poweroff_on_exit(spec.poweroff_on_exit)
         // Forwarded as asked and defaulted off, which keeps the exact `--env` map as the
         // child's environment.
         .with_inherit_image_env(spec.inherit_image_env)
@@ -2703,6 +2706,7 @@ mod tests {
             shell: None,
             inherit_image_env: false,
             reap: false,
+            poweroff_on_exit: false,
         });
 
         assert_eq!(from_run.command, from_exec.command);

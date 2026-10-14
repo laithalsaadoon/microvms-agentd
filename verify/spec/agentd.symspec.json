@@ -124,6 +124,25 @@
       "verificationMethod": "test",
       "verifies": []
     },
+    "450c6556-e235-4cc1-a632-102b038d89c5": {
+      "createdAt": "2026-10-14T00:00:00.000Z",
+      "derives": [],
+      "id": "450c6556-e235-4cc1-a632-102b038d89c5",
+      "key": "AGENTD-25",
+      "negated": false,
+      "patternType": "event-driven",
+      "priority": "high",
+      "refines": [],
+      "satisfies": [],
+      "sentence": "When an accepted start request sets poweroff_on_exit to true, the agentd shall request guest power-off only after observing that the execution's original process group has no live members.",
+      "status": "approved",
+      "systemName": "agentd",
+      "systemResponse": "request guest power-off only after observing that the execution's original process group has no live members",
+      "trigger": "an accepted start request sets poweroff_on_exit to true",
+      "updatedAt": "2026-10-14T00:00:00.000Z",
+      "verificationMethod": "test",
+      "verifies": []
+    },
     "460cd93a-573a-4a96-952f-d2998a97a389": {
       "createdAt": "2026-09-30T12:00:00.000Z",
       "derives": [],

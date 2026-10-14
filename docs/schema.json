@@ -597,6 +597,10 @@
           "description": "Whether the child's environment starts from the image's `ENV`.\n\nOff by default, which keeps the property the daemon has always had: nothing from\nits own environment reaches a child. Set, the environment the daemon inherited as\nthe container `CMD`, minus every `AGENTD_*` variable, is the lowest layer, under\nthe passwd identity, the launch environment and `env`. The agent token is never in\nthat snapshot: it arrives in the run hook, after the snapshot is taken.\n\nA daemon that predates this field ignores it, as serde ignores any unknown key; a\ncaller that depends on it can read `image_env_keys` on `GET /v1/health`, which such\na daemon does not report.",
           "type": "boolean"
         },
+        "poweroff_on_exit": {
+          "description": "Power off the guest after this exec's original process group has no live members.\nOff by default. Requires advertised daemon support and its CAP_SYS_BOOT privilege.\nOther work in the VM ends too; the start acknowledgment and exit record may be lost.\nProcesses that leave the group are outside this condition. This does not keep an\nidle guest awake, and a terminated state does not establish when billing stops.",
+          "type": "boolean"
+        },
         "reap_group_on_exit": {
           "default": false,
           "description": "Whether to signal the exec's whole process group once its own child exits.\n\nOff by default, and the default is the contract this daemon has always had:\na backgrounded grandchild that inherited the output pipe keeps running and\nkeeps writing, and the linger deadline is what bounds how long the daemon\nwaits on it. That is the \"backgrounded server keeps logging\" guarantee, and\ncallers rely on it. Set to `true`, the daemon runs the same SIGTERM-then-\nSIGKILL escalation `POST /v1/exec/{id}/kill` uses against the group as soon\nas the child's exit is observed, so nothing the command left behind outlives\nit and the linger sees EOF rather than `writers_may_be_alive`. A timed-out\nexec is already escalated and is not escalated twice.",
@@ -1004,7 +1008,7 @@
           "meaning": "the child could not be spawned, e.g. ENOENT on argv[0]. Deliberately not 404: a client reads 404 here as \"no such exec\"."
         }
       ],
-      "summary": "start a command under a caller-minted exec_id. Idempotent on that id: a retry returns success without spawning a second child."
+      "summary": "start a command under a caller-minted exec_id. Idempotent on that id: a retry returns success without spawning a second child. poweroff_on_exit requests guest shutdown after the original group exits, requires daemon CAP_SYS_BOOT, and may race response delivery."
     },
     {
       "auth": "bearer",
@@ -1553,7 +1557,7 @@
           "meaning": "always, whether or not the daemon is bootstrapped. bootstrapped is how a client learns whether the control API is open yet; busy is how an orchestrator outside the VM learns whether a workload is still running, so its own poll doubles as the inbound traffic the platform's idle policy measures. An in-guest request cannot serve that purpose: the endpoint proxy terminates outside the guest."
         }
       ],
-      "summary": "liveness, daemon version, whether bootstrap has completed, and whether any exec is still running. `busy` exists so an orchestrator OUTSIDE the VM can hold it alive: the platform measures idleness by inbound traffic through the endpoint proxy, which terminates outside the guest, so a request from inside the guest cannot reset the idle timer. Polling this from outside is both the traffic and the decision. `hooks` lists the earliest hook requests kept in the daemon's capped log, oldest first, with `fired_at` epoch seconds on the daemon's clock. Later requests increment `hooks_dropped` without being stored or running a workload handler. Their routes still perform other work and return their normal status. Hook routes are unauthenticated and reachable over loopback from inside the guest, so entries show receipt rather than source identity. Later platform requests are subject to the same cap."
+      "summary": "liveness, daemon version, whether bootstrap has completed, and whether any exec is still running. `busy` exists so an orchestrator OUTSIDE the VM can hold it alive: the platform measures idleness by inbound traffic through the endpoint proxy, which terminates outside the guest, so a request from inside the guest cannot reset the idle timer. Polling this from outside is both the traffic and the decision. `hooks` lists the earliest hook requests kept in the daemon's capped log, oldest first, with `fired_at` epoch seconds on the daemon's clock. Later requests increment `hooks_dropped` without being stored or running a workload handler. Their routes still perform other work and return their normal status. Hook routes are unauthenticated and reachable over loopback from inside the guest, so entries show receipt rather than source identity. Later platform requests are subject to the same cap. microvm-poweroff-on-exit: 1 advertises shutdown support and the daemon's CAP_SYS_BOOT privilege; 0 means unavailable."
     },
     {
       "auth": "none",

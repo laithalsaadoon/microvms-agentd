@@ -13,6 +13,7 @@ and the core tiers drive it under a paused clock.
 
 from __future__ import annotations
 
+import asyncio
 import http.server
 import json
 import math
@@ -78,7 +79,7 @@ RUNNING = json.dumps({"exec_id": "x-rtc", "phase": "running"}).encode()
 class ExecServer:
     """A loopback server answering `route(method, path)` for every request, logging each."""
 
-    def __init__(self, route: Route) -> None:
+    def __init__(self, route: Route, headers: dict[str, str] | None = None) -> None:
         self.log: list[str] = []
         self.starts: list[dict[str, object]] = []
         log = self.log
@@ -98,6 +99,8 @@ class ExecServer:
                 self.send_response(status)
                 self.send_header("content-type", content_type)
                 self.send_header("content-length", str(len(body)))
+                for name, value in (headers or {}).items():
+                    self.send_header(name, value)
                 self.end_headers()
                 self.wfile.write(body)
                 self.wfile.flush()
@@ -132,14 +135,61 @@ class ExecServer:
 def exec_server() -> Iterator[Callable[[Route], ExecServer]]:
     built: list[ExecServer] = []
 
-    def factory(route: Route) -> ExecServer:
-        server = ExecServer(route)
+    def factory(route: Route, headers: dict[str, str] | None = None) -> ExecServer:
+        server = ExecServer(route, headers)
         built.append(server)
         return server
 
     yield factory
     for server in built:
         server.close()
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
+        "run",
+        "run_async",
+        "run_sync",
+        "run_sync_async",
+        "spawn",
+        "spawn_async",
+        "run_to_completion",
+        "run_to_completion_async",
+    ],
+)
+def test_poweroff_is_forwarded_and_unsupported_peers_cannot_start(
+    exec_server, method
+) -> None:
+    async def invoke(session):
+        result = getattr(session, method)(
+            "true", poweroff_on_exit=True, exec_id="x-rtc"
+        )
+        if method.endswith("_async"):
+            result = await result
+        return result
+
+    supported = exec_server(
+        streamed([exit_event(0)], outcome("acked", 0)),
+        {"microvm-poweroff-on-exit": "1"},
+    )
+    asyncio.run(invoke(supported.session))
+    assert supported.log[0] == "GET /v1/health"
+    assert len(supported.starts) == 1
+    assert supported.starts[0]["poweroff_on_exit"] is True
+
+    unsupported = exec_server(streamed([], outcome("acked", 0)))
+    with pytest.raises(microvms.MicrovmError, match="poweroff_on_exit"):
+        asyncio.run(invoke(unsupported.session))
+    assert unsupported.log == ["GET /v1/health"]
+    assert unsupported.starts == []
+
+
+def test_poweroff_default_keeps_the_existing_request_sequence(exec_server) -> None:
+    server = exec_server(streamed([], outcome("acked", 0)))
+    server.session.run("true", exec_id="x-rtc")
+    assert server.log == ["POST /v1/exec/start"]
+    assert "poweroff_on_exit" not in server.starts[0]
 
 
 def json_ok(body: bytes) -> tuple[int, bytes, str]:
