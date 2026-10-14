@@ -7,7 +7,7 @@ suite = "script"
 [[family.fault]]
 id = "default-user-live-sync"
 message = "FAIL  default-user checks reject missing syncExit"
-transform = { file = "conformance/lanes/default_user.py", replace = 'report.get("syncExit") == 0', with = 'True' }
+transform = { file = "conformance/lanes/default_user.py", replace = 'sync_exit = report.get("syncExit")', with = 'sync_exit = 0' }
 
 [[family.fault]]
 id = "default-user-live-default"
@@ -32,7 +32,7 @@ transform = { file = "conformance/lanes/default_user.py", replace = 'report.get(
 [[family.fault]]
 id = "default-user-live-root-missing"
 message = "FAIL  default-user checks reject missing missingRootExit"
-transform = { file = "conformance/lanes/default_user.py", replace = 'report.get("missingRootExit")', with = '0' }
+transform = { file = "conformance/lanes/default_user.py", replace = 'root_exit = report.get("missingRootExit")', with = 'root_exit = 0' }
 
 [[family.fault]]
 id = "default-user-isolated-known-vm"

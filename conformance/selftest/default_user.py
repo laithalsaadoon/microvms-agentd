@@ -48,6 +48,8 @@ def check_default_user(results: Results) -> None:
         ("refusal", {"error": "unknown_user", "detail": "other"}),
         ("markerAbsent", False),
         ("missingRootExit", 1),
+        ("missingRootExit", False),
+        ("syncExit", False),
     ):
         broken = copy.deepcopy(good)
         broken[key] = value

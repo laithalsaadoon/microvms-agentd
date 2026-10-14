@@ -31,9 +31,12 @@ SYNC_WRITE = (
 
 def default_user_checks(report: dict[str, Any], results: Results) -> None:
     """Verdicts are separate from I/O so missing or wrong observations have negative twins."""
+    sync_exit = report.get("syncExit")
+    root_exit = report.get("missingRootExit")
     results.check(
         "AGENTD-22 run with a synced tree writes as the image's default user (#604)",
-        report.get("syncExit") == 0
+        type(sync_exit) is int
+        and sync_exit == 0
         and report.get("syncStdout") == "sync-write-ok"
         and report.get("files") == "updated\ncreated\n4242:4242\n4242:4242\n",
     )
@@ -62,10 +65,9 @@ def default_user_checks(report: dict[str, Any], results: Results) -> None:
         and report.get("execStatus") == 404
         and report.get("markerAbsent") is True,
     )
-    results.eq(
+    results.check(
         "AGENTD-23 explicit root still works when the default has no passwd row",
-        report.get("missingRootExit"),
-        0,
+        type(root_exit) is int and root_exit == 0,
     )
 
 
