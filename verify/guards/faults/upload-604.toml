@@ -157,3 +157,12 @@ run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session
 expect = "test-failed"
 suite = "rust"
 transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "if !path.starts_with('/') || path == \"/\" || path.ends_with('/') {", with = "if !path.starts_with('/') && path == \"/\" || path.ends_with('/') {" }
+
+# A guest-controlled parent symlink must not redirect sync's rm with root privileges.
+[[fault]]
+id = "upload-604-default-delete"
+guard = "workspace::tests::a_hostile_deletion_path_is_refused_not_executed"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "workspace::tests::a_hostile_deletion_path_is_refused_not_executed"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/workspace.rs", replace = ".with_cwd(Some(REMOTE_WORKDIR.into()))\n                .with_timeout_sec(Some(delete_timeout.as_secs_f64()));", with = ".with_cwd(Some(REMOTE_WORKDIR.into()))\n                .with_user(Some(crate::session::ROOT_UID.into()))\n                .with_timeout_sec(Some(delete_timeout.as_secs_f64()));" }

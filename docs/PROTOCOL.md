@@ -433,7 +433,9 @@ user until the ownership handoff finishes. Destination symlinks are refused;
 the install's remaining path races have only the default user's privileges.
 The client hands `/workspace` itself to the default user, so `run`, `cp`, sync,
 and both bindings can write the synced project. Other destinations must be
-writable by that user. Root-default sessions retain the direct upload path.
+writable by that user. Sync deletions use that same default identity, so a
+workload-controlled parent symlink cannot elevate the deletion's privileges.
+Root-default sessions retain the direct upload path.
 An unknown default refuses the probe before an upload. These client operations
 need `/bin/sh` and the guest's `id`, `mktemp`, `chown`, `find`, `cp`, `mv`, `stat`,
 and `rm` in the system command directories. The helpers use a fixed system

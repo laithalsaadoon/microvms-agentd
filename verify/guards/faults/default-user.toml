@@ -149,6 +149,7 @@ suite = "rust"
 transform = { file = "crates/model/src/exec_start.rs", replace = "        (UserReq::Absent, Some(default), _) => (Account::Default, default),\n", with = "        (UserReq::Absent, Some(_), _) => (Account::Daemon, UserReq::Absent),\n" }
 
 # FAIL_TO_PASS: fails on f410ec2f4c80 with the fix taken out (tools/fail-to-pass.py).
+# Narrowed to the guarded root selection when uploads acquired default-user ownership.
 [[fault]]
 id = "f2p-install-access-uploads-then-chowns-as-root"
 guard = "agents::tests::install_access_uploads_then_chowns_as_root"
@@ -158,6 +159,7 @@ suite = "rust"
 patch = "verify/guards/faults/f2p-install-access-uploads-then-chowns-as-root.patch"
 
 # FAIL_TO_PASS: fails on f410ec2f4c80 with the fix taken out (tools/fail-to-pass.py).
+# The obsolete root-deletion expectation is now the path-refusal guard this test retains.
 [[fault]]
 id = "f2p-a-hostile-deletion-path-is-refused-not-executed"
 guard = "workspace::tests::a_hostile_deletion_path_is_refused_not_executed"
