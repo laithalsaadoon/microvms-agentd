@@ -819,6 +819,11 @@ fn extract_into(
                                 &format!("hard link target {}: ", target.display()),
                             ),
                         })?;
+                    if parts == source {
+                        // A self-link kept the same inode, so its original file
+                        // member still owns the deferred mode.
+                        continue;
+                    }
                 }
                 // A later link replaces the member, so an earlier file's mode
                 // must not be replayed onto the link's target.
@@ -1552,10 +1557,14 @@ mod tests {
             Self(Builder::new(Vec::new()))
         }
 
-        fn file(mut self, path: &str, body: &[u8]) -> Self {
+        fn file(self, path: &str, body: &[u8]) -> Self {
+            self.file_mode(path, body, 0o644)
+        }
+
+        fn file_mode(mut self, path: &str, body: &[u8], mode: u32) -> Self {
             let mut header = Header::new_gnu();
             header.set_size(body.len() as u64);
-            header.set_mode(0o644);
+            header.set_mode(mode);
             header.set_cksum();
             self.0.append_data(&mut header, path, body).expect("append");
             self
@@ -1762,25 +1771,28 @@ mod tests {
     fn a_self_naming_hard_link_keeps_its_source_and_still_validates_it() {
         use std::os::unix::fs::MetadataExt;
 
-        let archive = Archive::new()
-            .file("dir/file", b"payload")
-            .link(EntryType::Link, "other", "dir/file")
-            .link(EntryType::Link, "./dir/file", "dir/../dir/file")
-            .link(EntryType::Symlink, "dir/symlink", "file")
-            .link(EntryType::Link, "dir/symlink", "dir/symlink")
-            .bytes();
-        let (dir, result) = extract(archive, OPEN);
-        assert_eq!(result.expect("self-links accepted"), 5);
-        let root = dir.path().join("root");
-        assert_eq!(std::fs::read(root.join("dir/file")).unwrap(), b"payload");
-        let original = std::fs::metadata(root.join("other")).unwrap();
-        let member = std::fs::metadata(root.join("dir/file")).unwrap();
-        assert_eq!(member.ino(), original.ino());
-        assert_eq!(member.mode(), original.mode());
-        assert_eq!(
-            std::fs::read_link(root.join("dir/symlink")).unwrap(),
-            Path::new("file")
-        );
+        for mode in [0o600, 0o755] {
+            let archive = Archive::new()
+                .file_mode("dir/file", b"payload", mode)
+                .link(EntryType::Link, "other", "dir/file")
+                .link(EntryType::Link, "./dir/file", "dir/../dir/file")
+                .link(EntryType::Symlink, "dir/symlink", "file")
+                .link(EntryType::Link, "dir/symlink", "dir/symlink")
+                .bytes();
+            let (dir, result) = extract(archive, OPEN);
+            assert_eq!(result.expect("self-links accepted"), 5);
+            let root = dir.path().join("root");
+            assert_eq!(std::fs::read(root.join("dir/file")).unwrap(), b"payload");
+            let original = std::fs::metadata(root.join("other")).unwrap();
+            let member = std::fs::metadata(root.join("dir/file")).unwrap();
+            assert_eq!(member.ino(), original.ino());
+            assert_eq!(member.mode(), original.mode());
+            assert_eq!(member.mode() & 0o777, mode);
+            assert_eq!(
+                std::fs::read_link(root.join("dir/symlink")).unwrap(),
+                Path::new("file")
+            );
+        }
 
         let missing = Archive::new()
             .link(EntryType::Link, "missing", "missing")
