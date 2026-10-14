@@ -1,8 +1,8 @@
 # microvms-agentd · State machines
 
-The diagrams project explicit enum-valued state fields. Model diagrams describe the model's transitions; implementation diagrams describe assignments in the app. The lifecycle model names its mirror explicitly, while the stream has its own private enum (`crates/model/src/client.rs:56-74`, `crates/microvms-app/src/session/exec.rs:872-887`).
+The diagrams project explicit enum-valued state fields. Model diagrams describe the model's transitions; implementation diagrams describe assignments in the app. The lifecycle model names its mirror explicitly, while the stream has its own private enum (`crates/model/src/client.rs:60-78`, `crates/microvms-app/src/session/exec.rs:872-887`).
 
-Transition labels use source event or function identifiers. Payloads and guards are explained beside each diagram; an unchanged enum value can still carry changed data (`crates/model/src/lib.rs:94-103`, `crates/model/src/client.rs:148-186`).
+Transition labels use source event or function identifiers. Payloads and guards are explained beside each diagram; an unchanged enum value can still carry changed data (`crates/model/src/lib.rs:94-103`, `crates/model/src/client.rs:154-192`).
 
 ## Boot
 
@@ -74,9 +74,9 @@ Defined at: `crates/model/src/tunnel.rs:174-178`
 
 ## Lifecycle
 
-A new `Sandbox` starts at `Pending`; `run` records an accepted launch there, and `wait_until_running` records `Running`. `suspend` first records `Suspending`, then `Suspended` or `Terminated` when its wait settles. `resume` records `Running` after its wait succeeds (`crates/microvms-app/src/sandbox.rs:764-765`, `crates/microvms-app/src/sandbox.rs:1208-1223`, `crates/microvms-app/src/sandbox.rs:1280-1309`, `crates/microvms-app/src/sandbox.rs:1587-1645`, `crates/microvms-app/src/sandbox.rs:1671-1710`).
+A new `Sandbox` starts at `Pending`; `run` records an accepted launch there, and `wait_until_running` records `Running`. `suspend` first records `Suspending`, then `Suspended` or `Terminated` when its wait settles. `resume` records `Running` after its wait succeeds (`crates/microvms-app/src/sandbox.rs:769-770`, `crates/microvms-app/src/sandbox.rs:1212-1227`, `crates/microvms-app/src/sandbox.rs:1284-1313`, `crates/microvms-app/src/sandbox.rs:1585-1639`, `crates/microvms-app/src/sandbox.rs:1669-1716`).
 
-The diagram shows the launch-driven path. `adopt` instead initializes the handle from any recognized service state. `terminate` writes `Terminating` whenever the handle still has a VM record, including on repeated calls, and only a successful requested termination wait writes `Terminated`. Consequently, `Terminated` is not an absorbing enum state. Detachment and other flags can refuse an operation without changing this enum (`crates/microvms-app/src/sandbox.rs:1390-1428`, `crates/microvms-app/src/sandbox.rs:1502-1545`, `crates/microvms-app/src/sandbox.rs:1775-1826`).
+The diagram shows the launch-driven path. `adopt` instead initializes the handle from any recognized service state. `terminate` writes `Terminating` whenever the handle still has a VM record, including on repeated calls, and only a successful requested termination wait writes `Terminated`. Consequently, `Terminated` is not an absorbing enum state. Detachment and other flags can refuse an operation without changing this enum (`crates/microvms-app/src/sandbox.rs:1388-1426`, `crates/microvms-app/src/sandbox.rs:1500-1543`, `crates/microvms-app/src/sandbox.rs:1742-1793`).
 
 ```mermaid
 stateDiagram-v2
@@ -96,7 +96,7 @@ stateDiagram-v2
     Terminating --> Terminated: terminate
 ```
 
-Defined at: `crates/microvms-app/src/sandbox.rs:133-147`
+Defined at: `crates/microvms-app/src/sandbox.rs:137-151`
 
 ## OutputEnd
 
@@ -247,7 +247,7 @@ Defined at: `crates/model/src/run.rs:225-241`
 
 ## StartStep
 
-The exec-start model's request phase is `Idle` until `Receive`, then `Resolved` after `Resolve`, and `Answered` after `Answer`. `Spawn` records a child without advancing the request phase; under the specified behavior it is offered after successful resolution. Boot and hook actions prepare the model before it offers requests (`crates/model/src/exec_start.rs:626-672`, `crates/model/src/exec_start.rs:675-721`).
+The exec-start model's request phase is `Idle` until `Receive`, then `Resolved` after `Resolve`, and `Answered` after `Answer`. `Spawn` records a child without advancing the request phase; under the specified behavior it is offered after successful resolution. Boot and hook actions prepare the model before it offers requests (`crates/model/src/exec_start.rs:781-830`, `crates/model/src/exec_start.rs:833-880`).
 
 ```mermaid
 stateDiagram-v2
@@ -259,7 +259,7 @@ stateDiagram-v2
     Answered --> [*]
 ```
 
-Defined at: `crates/model/src/exec_start.rs:521-530`
+Defined at: `crates/model/src/exec_start.rs:667-676`
 
 ## StreamState
 
@@ -291,9 +291,9 @@ Defined at: `crates/microvms-app/src/session/exec.rs:874-887`
 
 ## VmState
 
-The client model mirrors the lifecycle vocabulary and starts at `Pending`. The diagram uses its guarded configuration: `LaunchAccepted` keeps the pending state; `HookSucceeded` starts the VM; suspend and resume actions progress through their corresponding phases. `ResumeRequested` preserves `Suspended` while recording an in-flight resume (`crates/model/src/client.rs:56-74`, `crates/model/src/client.rs:287-305`, `crates/model/src/client.rs:374-505`).
+The client model mirrors the lifecycle vocabulary and starts at `Pending`. The diagram uses its guarded configuration: `LaunchAccepted` keeps the pending state; `HookSucceeded` starts the VM; suspend and resume actions progress through their corresponding phases. `ResumeRequested` keeps `Suspended` and records an in-flight resume. Once `SuspendedVmEnded` has recorded that the platform ended the suspended VM, the service refuses the request and the model writes `Terminated` (`crates/model/src/client.rs:60-78`, `crates/model/src/client.rs:295-313`, `crates/model/src/client.rs:390-532`).
 
-`TerminateRequested` writes `Terminating` and clears an in-flight resume; `TerminateComplete` writes `Terminated`. The request is offered before the first termination, including during suspension. In the guarded model, the completed termination is absorbing. A late resume completion changes nothing once its preconditions no longer hold (`crates/model/src/client.rs:344-367`, `crates/model/src/client.rs:489-526`).
+`TerminateRequested` writes `Terminating` and clears an in-flight resume; `TerminateComplete` writes `Terminated`. The request is offered before the first termination, including during suspension. In the guarded model, the completed termination is absorbing. A late resume completion changes nothing once its preconditions no longer hold (`crates/model/src/client.rs:352-383`, `crates/model/src/client.rs:516-553`).
 
 ```mermaid
 stateDiagram-v2
@@ -312,7 +312,7 @@ stateDiagram-v2
     Terminated --> [*]
 ```
 
-Defined at: `crates/model/src/client.rs:61-74`
+Defined at: `crates/model/src/client.rs:65-78`
 
 ## WrapPhase
 

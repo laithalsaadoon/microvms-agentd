@@ -16,8 +16,8 @@ classDiagram
     }
 
     namespace microvms-app {
-        %% Type: `crates/microvms-app/src/sandbox.rs:622`.
-        %% Methods: `crates/microvms-app/src/sandbox.rs:919`, `crates/microvms-app/src/sandbox.rs:1108`, `crates/microvms-app/src/sandbox.rs:1587`, `crates/microvms-app/src/sandbox.rs:1671`, `crates/microvms-app/src/sandbox.rs:1775`.
+        %% Type: `crates/microvms-app/src/sandbox.rs:629`.
+        %% Methods: `crates/microvms-app/src/sandbox.rs:923`, `crates/microvms-app/src/sandbox.rs:1112`, `crates/microvms-app/src/sandbox.rs:1585`, `crates/microvms-app/src/sandbox.rs:1669`, `crates/microvms-app/src/sandbox.rs:1742`.
         class Sandbox {
             +build_image(request)
             +run(request)
@@ -26,7 +26,7 @@ classDiagram
             +terminate(opts)
         }
         %% Type: `crates/microvms-app/src/control/mod.rs:130`.
-        %% Methods: `crates/microvms-app/src/control/image.rs:188`, `crates/microvms-app/src/control/microvm.rs:433`, `crates/microvms-app/src/control/microvm.rs:609`, `crates/microvms-app/src/control/microvm.rs:816`, `crates/microvms-app/src/control/microvm.rs:834`.
+        %% Methods: `crates/microvms-app/src/control/image.rs:188`, `crates/microvms-app/src/control/microvm.rs:433`, `crates/microvms-app/src/control/microvm.rs:609`, `crates/microvms-app/src/control/microvm.rs:861`, `crates/microvms-app/src/control/microvm.rs:879`.
         class ControlPlane {
             +create_image(request)
             +run_microvm(request)
@@ -34,8 +34,8 @@ classDiagram
             +terminate(id)
             +mint_auth_token(id)
         }
-        %% Type: `crates/microvms-app/src/session/mod.rs:221`.
-        %% Methods: `crates/microvms-app/src/session/mod.rs:383`, `crates/microvms-app/src/session/mod.rs:410`, `crates/microvms-app/src/session/mod.rs:448`, `crates/microvms-app/src/session/mod.rs:476`, `crates/microvms-app/src/session/mod.rs:538`.
+        %% Type: `crates/microvms-app/src/session/mod.rs:228`.
+        %% Methods: `crates/microvms-app/src/session/mod.rs:390`, `crates/microvms-app/src/session/mod.rs:417`, `crates/microvms-app/src/session/mod.rs:455`, `crates/microvms-app/src/session/mod.rs:483`, `crates/microvms-app/src/session/mod.rs:545`.
         class Session {
             +health()
             +wait_until_ready(timeout)
@@ -85,13 +85,13 @@ classDiagram
     CoreSeam --> ControlPlane : constructs
     CoreSeam --> Sandbox : constructs
     CoreSeam --> Session : constructs
-    %% Owned fields: `crates/microvms-app/src/sandbox.rs:622-628`.
+    %% Owned fields: `crates/microvms-app/src/sandbox.rs:629-635`.
     Sandbox --> ControlPlane : owns
     Sandbox --> Session : owns
-    %% Handle construction: `crates/microvms-app/src/session/mod.rs:448-472`.
+    %% Handle construction: `crates/microvms-app/src/session/mod.rs:455-479`.
     Session --> ExecHandle : creates
     %% Dashed edges are HTTP requests, not crate dependencies.
-    %% Requests and routing: `crates/microvms-app/src/session/mod.rs:383-387`, `crates/microvms-app/src/session/mod.rs:448-457`, `crates/agentd/src/routes.rs:160-177`.
+    %% Requests and routing: `crates/microvms-app/src/session/mod.rs:390-394`, `crates/microvms-app/src/session/mod.rs:455-464`, `crates/agentd/src/routes.rs:160-177`.
     Session ..> Routes : requests
     %% Requests and routing: `crates/microvms-app/src/session/exec.rs:364-371`, `crates/microvms-app/src/session/exec.rs:760-798`, `crates/agentd/src/routes.rs:161-169`.
     ExecHandle ..> Routes : requests
