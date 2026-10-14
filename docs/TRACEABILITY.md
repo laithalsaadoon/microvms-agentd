@@ -108,7 +108,7 @@ traced requirement is missing a layer. Requirements are defined in
 | STATE-9 | 1 | waived | waived | 2 | 1 | waived |
 | STATE-10 | 1 | waived | waived | 2 | 1 | 1 |
 | STATE-11 | 1 | waived | waived | 2 | 3 | waived |
-| STATE-12 | 1 | waived | waived | 4 | 6 | waived |
+| STATE-12 | 1 | waived | waived | 4 | 6 | 2 |
 | TRAP-1 | waived | waived | waived | 9 | 19 | waived |
 | TRAP-2 | waived | waived | waived | 1 | 5 | waived |
 | TRAP-3 | waived | waived | waived | 1 | 6 | 1 |
@@ -1243,7 +1243,7 @@ If a resume is requested for a suspended MicroVM that the service terminated whi
 - **fuzz:** waived: the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz
 - **test:** `crates/microvms-app/src/control/microvm.rs`, `crates/microvms-app/src/sandbox.rs`, `crates/microvms-cli/src/guards/history.rs`, `crates/model-conformance/tests/client_lifecycle.rs`
 - **impl:** `bindings/microvms-js/src/control.rs`, `bindings/microvms-js/src/sandbox.rs`, `bindings/microvms-py/src/control.rs`, `bindings/microvms-py/src/sandbox.rs`, `crates/microvms-app/src/control/microvm.rs`, `crates/microvms-app/src/sandbox.rs`
-- **live:** waived: the service's two answers are the 2026-10-12 us-east-1 measurement in #597 (an idle-suspended VM refused once its window passed, an explicit suspend resumed 1283 s into a 60 s window), which the app's tests, the CLI's and the replay script verbatim; a live check holds a billed VM through an idle suspend and its whole window, which the suite doesn't run yet
+- **live:** `conformance/lanes/state12.py`, `conformance/selftest/state12.py`
 
 ## TRAP-1
 
