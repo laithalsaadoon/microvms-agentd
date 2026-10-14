@@ -23,9 +23,11 @@ from selftest.closed_output import (
     check_closing_reader_helper,
 )
 from selftest.cost import check_cost_checks
+from selftest.default_user import check_default_user
 from selftest.ensure_image import check_ensure_image_section
 from selftest.harness import check_run_section
 from selftest.image_versions import check_image_versions_section
+from selftest.isolated_image import check_isolated_known_vm
 from selftest.local import check_doctor_region_lines, check_preflight_lines
 from selftest.names import check_terminate_fallback
 from selftest.posture import check_execution_role_policy, check_posture_lines
@@ -61,6 +63,8 @@ def self_test() -> int:
         check_execution_role_policy(results)
         check_preflight_lines(results)
         check_doctor_region_lines(results)
+        check_default_user(results)
+        check_isolated_known_vm(results)
         check_ensure_image_section(results)
         check_caller_artifact_section(results)
         check_image_versions_section(results)

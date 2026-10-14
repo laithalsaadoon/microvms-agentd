@@ -60,7 +60,7 @@ depends = ["build", "build:cli", "live:infra"]
 run = """
 ./conformance/run_rs.py \
   --binary target/$AGENTD_TARGET/release/agentd \
-  --microvm-binary target/release/microvm
+  --microvm-binary target/release/microvm {{arg(name="args", var=true)}}
 """
 
 ["live:paths"]

@@ -1,0 +1,45 @@
+[[family]]
+guard = "conformance/run_rs.py --self-test: conformance/selftest/default_user.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "default-user-live-sync"
+message = "FAIL  default-user checks reject missing syncExit"
+transform = { file = "conformance/lanes/default_user.py", replace = 'report.get("syncExit") == 0', with = 'True' }
+
+[[family.fault]]
+id = "default-user-live-default"
+message = "FAIL  default-user checks reject missing defaultIdentity"
+transform = { file = "conformance/lanes/default_user.py", replace = 'report.get("defaultIdentity")', with = 'f"{CONFORMANCE_UID}\n{CONFORMANCE_UID}\n{CONFORMANCE_HOME}\n{CONFORMANCE_USER}\n"' }
+
+[[family.fault]]
+id = "default-user-live-root"
+message = "FAIL  default-user checks reject missing explicitRoot"
+transform = { file = "conformance/lanes/default_user.py", replace = 'report.get("explicitRoot")', with = '"0\n0\n"' }
+
+[[family.fault]]
+id = "default-user-live-resolve"
+message = "FAIL  default-user checks reject missing changedIdentity"
+transform = { file = "conformance/lanes/default_user.py", replace = 'report.get("changedIdentity")', with = '"4343\n4344\n"' }
+
+[[family.fault]]
+id = "default-user-live-refusal"
+message = "FAIL  default-user checks reject missing refusalStatus"
+transform = { file = "conformance/lanes/default_user.py", replace = 'report.get("refusalStatus") == 400', with = 'True' }
+
+[[family.fault]]
+id = "default-user-live-root-missing"
+message = "FAIL  default-user checks reject missing missingRootExit"
+transform = { file = "conformance/lanes/default_user.py", replace = 'report.get("missingRootExit")', with = '0' }
+
+[[family.fault]]
+id = "default-user-isolated-known-vm"
+message = "FAIL  isolated cleanup reads and terminates a known VM omitted by listing after a probe raises"
+transform = { file = "conformance/lanes/isolated_image.py", replace = '    cleanup["vm"] = {"id": launched.data["microvmId"]}', with = '    pass' }
+
+[[family.fault]]
+id = "default-user-isolated-cleanup"
+message = "FAIL  isolated cleanup reads and terminates a known VM omitted by listing after a probe raises"
+transform = { file = "conformance/lanes/isolated_image.py", replace = '            ensure_image_cleanup(', with = '            (lambda *args: None)(' }
