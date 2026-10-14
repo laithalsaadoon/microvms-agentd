@@ -91,7 +91,7 @@ from lanes.suite import run_suite
 from selftest.suite import self_test
 
 
-def main() -> int:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--self-test",
@@ -120,8 +120,19 @@ def main() -> int:
         choices=["ensure_image", "default_user", "platform_measurements"],
         help="run one self-contained section instead of the suite: it builds its own image",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--measurement-variant",
+        choices=["default", "repair", "snapshot-drop"],
+        help="run one platform measurement variant; requires --only platform_measurements",
+    )
+    args = parser.parse_args(argv)
+    if args.measurement_variant is not None and args.only != "platform_measurements":
+        parser.error("--measurement-variant requires --only platform_measurements")
+    return args
 
+
+def main() -> int:
+    args = parse_args()
     if args.self_test:
         return self_test()
 

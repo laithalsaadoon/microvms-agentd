@@ -8,3 +8,23 @@ suite = "script"
 id = "platform-measurement-absent"
 message = "FAIL  measurement rejects every absent observation"
 transform = { file = "conformance/lanes/platform_measurements.py", replace = 'observation", complete', with = 'observation", True' }
+
+[[family.fault]]
+id = "snapshot-marker-verdict"
+message = "FAIL  snapshot marker rejects an absent or retained change"
+transform = { file = "conformance/lanes/platform_measurements.py", replace = '"snapshot marker changed and persisted", marker_persisted', with = '"snapshot marker changed and persisted", True' }
+
+[[family.fault]]
+id = "snapshot-marker-drop"
+message = "FAIL  snapshot bootstrap requests the marker drop"
+transform = { file = "conformance/drivers/platform_probe.py", replace = 'drop((*CAPABILITIES, SNAPSHOT_MARKER))', with = 'drop(CAPABILITIES)' }
+
+[[family.fault]]
+id = "platform-measurement-selector"
+message = "FAIL  measurement selector reaches the selected lane"
+transform = { file = "conformance/lanes/suite.py", replace = '[args.measurement_variant]', with = '[None]' }
+
+[[family.fault]]
+id = "platform-measurement-selector-validation"
+message = "FAIL  measurement selector rejects invalid combinations"
+transform = { file = "conformance/run_rs.py", replace = 'if args.measurement_variant is not None and args.only != "platform_measurements":', with = 'if False:' }

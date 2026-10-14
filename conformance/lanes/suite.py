@@ -130,6 +130,11 @@ def run_suite(args: argparse.Namespace) -> int:
             binary,
             boto3.Session(region_name=cli.region),
             results,
+            *(
+                [args.measurement_variant]
+                if args.only == "platform_measurements"
+                else []
+            ),
         )
         print(f"\n  passed: {len(results.passed)}")
         print(f"  failed: {len(results.failed)}")

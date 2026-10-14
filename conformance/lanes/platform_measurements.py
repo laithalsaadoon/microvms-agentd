@@ -34,6 +34,7 @@ STATUS_FIELDS = {
     "Seccomp",
 }
 DROPPED = (16, 17, 19, 21, 22, 38, 39)
+SNAPSHOT_MARKER = 27  # CAP_MKNOD proves an actual reduction across the snapshot.
 
 
 def measurement_dockerfile(drop_before_daemon: bool) -> str:
@@ -92,7 +93,11 @@ def check_measurement(report: dict[str, Any], label: str, results: Results) -> N
     complete = complete and observed_errnos(report.get("memOpenErrnos"), {"0", "4242"})
     build_drops = build.get("dropErrnos")
     complete = complete and (
-        observed_errnos(build_drops, capabilities)
+        observed_errnos(
+            build_drops,
+            capabilities
+            | ({str(SNAPSHOT_MARKER)} if label == "snapshot-drop" else set()),
+        )
         or (label != "snapshot-drop" and build_drops == {})
     )
     ptrace = report.get("ptraceScope")
@@ -110,9 +115,24 @@ def check_measurement(report: dict[str, Any], label: str, results: Results) -> N
         f"platform measurement {label} has every requested observation", complete
     )
 
+    if label == "snapshot-drop":
+        marker = 1 << SNAPSHOT_MARKER
+        # A no-op drop of an already absent bit cannot prove snapshot persistence.
+        marker_persisted = (
+            complete
+            and bool(int(build["before"]["CapBnd"], 16) & marker)
+            and build_drops[str(SNAPSHOT_MARKER)] == 0
+            and not int(build["after"]["CapBnd"], 16) & marker
+            and all(
+                not int(report[name]["CapBnd"], 16) & marker
+                for name in ("daemon", "execBefore", "execAfter")
+            )
+        )
+        results.check("snapshot marker changed and persisted", marker_persisted)
+
 
 def drive_platform_measurements(
-    cli: Cli, binary: Path, aws: Any, results: Results
+    cli: Cli, binary: Path, aws: Any, results: Results, variant: str | None = None
 ) -> None:
     """Own three image variants; a refusal is evidence, never an invented capability."""
     for label, repair, drop in (
@@ -121,6 +141,8 @@ def drive_platform_measurements(
         # Exec also removes effective capabilities, so repair would confound this probe.
         ("snapshot-drop", False, True),
     ):
+        if variant is not None and label != variant:
+            continue
         with isolated_image(
             cli,
             binary,

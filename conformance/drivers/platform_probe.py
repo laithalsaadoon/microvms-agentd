@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 CAPABILITIES = (16, 17, 19, 21, 22, 38, 39)
+SNAPSHOT_MARKER = 27  # CAP_MKNOD: no device creation is needed by the probe.
 STATUS_FIELDS = {
     "CapInh",
     "CapPrm",
@@ -33,10 +34,10 @@ def status(pid: int | str) -> dict[str, str]:
     }
 
 
-def drop() -> dict[str, int]:
+def drop(capabilities: tuple[int, ...] = CAPABILITIES) -> dict[str, int]:
     libc = ctypes.CDLL(None, use_errno=True)
     results = {}
-    for cap in CAPABILITIES:
+    for cap in capabilities:
         ctypes.set_errno(0)
         result = libc.prctl(24, cap, 0, 0, 0)  # PR_CAPBSET_DROP
         results[str(cap)] = 0 if result == 0 else ctypes.get_errno()
@@ -113,7 +114,7 @@ def measure() -> dict:
 def main() -> None:
     if sys.argv[1] == "bootstrap":
         before = status("self")
-        drops = drop() if "--drop" in sys.argv else {}
+        drops = drop((*CAPABILITIES, SNAPSHOT_MARKER)) if "--drop" in sys.argv else {}
         BUILD_REPORT.write_text(
             json.dumps(
                 {
