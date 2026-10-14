@@ -213,6 +213,27 @@ async fn conflicting_content_lengths_answer_400_before_minting() {
 }
 
 #[tokio::test]
+async fn malformed_chunked_bodies_answer_400_before_minting() {
+    for body in [b"not-hex\r\n".as_slice(), b"1\r\nx!\n".as_slice()] {
+        let (mut browser, task, auth) = relay("http://127.0.0.1:1".into());
+        browser
+            .write_all(b"POST / HTTP/1.1\r\nHost: localhost:8080\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n")
+            .await
+            .unwrap();
+        browser.write_all(body).await.unwrap();
+        let (head, body) = reply(&mut browser, false).await;
+        assert!(head.starts_with(b"HTTP/1.1 400 Bad Request"));
+        assert_eq!(body, b"the local request body is malformed");
+        assert_eq!(auth.mint_count(), 0);
+        tokio::time::timeout(BOUND, task)
+            .await
+            .expect("malformed request connection closes")
+            .unwrap()
+            .unwrap();
+    }
+}
+
+#[tokio::test]
 async fn host_validation_precedes_body_collection_and_large_bodies_are_refused() {
     for (host, status) in [("example.com:8080", 403), ("localhost:8080", 413)] {
         let (mut browser, task, auth) = relay("http://127.0.0.1:1".into());

@@ -56,3 +56,12 @@ run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "sessi
 expect = "test-failed"
 suite = "rust"
 transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "    status == 101", with = "    status != 101" }
+
+# Malformed framing is a bad request, distinct from a decoded body's size limit.
+[[fault]]
+id = "forward-http1-malformed-body-classification"
+guard = "malformed_chunked_bodies_answer_400_before_minting"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_http1", "--", "--exact", "malformed_chunked_bodies_answer_400_before_minting"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "Ok(Err(error)) if error.is::<http_body_util::LengthLimitError>() =>", with = "Ok(Err(error)) if true =>" }
