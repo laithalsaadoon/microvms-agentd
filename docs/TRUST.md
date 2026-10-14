@@ -56,7 +56,9 @@ The Host check runs before reading a request body or requesting proxy credential
 Local HTTP requests support keep-alive and chunked bodies, with a 16 MiB body
 cap. Headers and unfinished bodies have a five-second deadline, including
 headers on an idle keep-alive connection. An HTTP upgrade keeps the connection
-open until its byte relay ends.
+open until its byte relay ends. Response bodies stream with backpressure; the
+exchange timeout bounds the response head and each gap between body reads,
+so successful reads keep an active response open.
 
 ## Why source-address filtering is wrong, not merely weak
 

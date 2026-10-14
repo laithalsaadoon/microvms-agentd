@@ -1,0 +1,8 @@
+# A cached custom deadline must not be reused for a different spec.
+[[fault]]
+id = "forward-stream-custom-timeouts"
+guard = "replacing_a_custom_timeout_keeps_active_clients_independent"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_streams", "--", "--exact", "replacing_a_custom_timeout_keeps_active_clients_independent"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "&& *duration == timeout", with = "&& *duration != timeout" }
