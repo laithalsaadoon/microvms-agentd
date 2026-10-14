@@ -117,7 +117,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--only",
-        choices=["ensure_image", "default_user"],
+        choices=["ensure_image", "default_user", "platform_measurements"],
         help="run one self-contained section instead of the suite: it builds its own image",
     )
     args = parser.parse_args()

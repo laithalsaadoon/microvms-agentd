@@ -1,0 +1,10 @@
+[[family]]
+guard = "conformance/run_rs.py --self-test: conformance/selftest/platform_measurements.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "platform-measurement-absent"
+message = "FAIL  measurement rejects every absent observation"
+transform = { file = "conformance/lanes/platform_measurements.py", replace = 'observation", complete', with = 'observation", True' }

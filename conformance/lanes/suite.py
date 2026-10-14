@@ -56,6 +56,7 @@ from lanes.lifecycle import (
 )
 from lanes.local import drive_doctor_region, drive_local_commands, drive_preflight
 from lanes.names import drive_named_vm
+from lanes.platform_measurements import drive_platform_measurements
 from lanes.posture import drive_platform_posture, drive_posture_parity
 from lanes.project_build import drive_project_build
 from lanes.quickstart import drive_provisioned_quickstart
@@ -113,13 +114,18 @@ def run_suite(args: argparse.Namespace) -> int:
 
     cli = Cli(binary=microvm)
     results = Results()
-    if args.only in {"ensure_image", "default_user"}:
+    if args.only in {"ensure_image", "default_user", "platform_measurements"}:
         # A targeted run of the one section that owns everything it creates: no suite VM,
         # no suite build, the same named checks and the same independent cleanup.
+        driver = {
+            "ensure_image": drive_ensure_image,
+            "default_user": drive_default_user,
+            "platform_measurements": drive_platform_measurements,
+        }[args.only]
         run_section(
             results,
             args.only,
-            drive_ensure_image if args.only == "ensure_image" else drive_default_user,
+            driver,
             *([] if args.only == "ensure_image" else [cli]),
             binary,
             boto3.Session(region_name=cli.region),
