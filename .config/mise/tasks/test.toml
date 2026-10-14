@@ -120,7 +120,7 @@ run = [
 description = "Build the Node addon with the release compiler's glibc floor for Lambda"
 # A native Ubuntu build requires a newer glibc than Lambda's Amazon Linux runtime.
 # Match the release addon build's compiler and linker before testing that runtime.
-tools = { zig = "0.16.0", "cargo:cargo-zigbuild" = "0.23.4" }
+tools = { zig = "{{vars.zig}}", "cargo:cargo-zigbuild" = "{{vars.cargo_zigbuild}}" }
 shell = "bash -e -c"
 run = '''
 case "$(uname -m)" in
@@ -128,7 +128,9 @@ case "$(uname -m)" in
   x86_64) lambda_target=x86_64-unknown-linux-gnu ;;
   *) echo "Lambda smoke requires a Linux arm64 or x86_64 host" >&2; exit 1 ;;
 esac
-npx -y -p @napi-rs/cli@3.10.8 napi build --manifest-path Cargo.toml \
+# Activate both tools explicitly when this task runs as another task's dependency.
+mise exec zig@{{vars.zig}} cargo:cargo-zigbuild@{{vars.cargo_zigbuild}} -- \
+  npx -y -p @napi-rs/cli@3.10.8 napi build --manifest-path Cargo.toml \
   --package microvms-js --platform --release --target "$lambda_target" \
   --cross-compile --output-dir . --cwd bindings/microvms-js
 '''
