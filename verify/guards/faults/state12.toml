@@ -1,0 +1,42 @@
+# The STATE-12 verdict checks reject their negative controls.
+
+[[family]]
+guard = "conformance/run_rs.py --self-test: check_state12"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "state12-state"
+message = "FAIL  STATE-12 rejects live VM"
+transform = { file = "conformance/lanes/state12.py", replace = "        observed.get(\"state\"),\n", with = "        \"TERMINATED\",\n" }
+
+[[family.fault]]
+id = "state12-code"
+message = "FAIL  STATE-12 rejects wrong error"
+transform = { file = "conformance/lanes/state12.py", replace = "        refusal.code if refusal else None,\n", with = "        \"ERR_WINDOW_CLOSED\",\n" }
+
+[[family.fault]]
+id = "state12-exit"
+message = "FAIL  STATE-12 rejects wrong exit"
+transform = { file = "conformance/lanes/state12.py", replace = "\"STATE-12 ended resume exits 8\", refusal.exit_code if refusal else None, 8", with = "\"STATE-12 ended resume exits 8\", 8, 8" }
+
+[[family.fault]]
+id = "state12-state-message"
+message = "FAIL  STATE-12 rejects wrong state text"
+transform = { file = "conformance/lanes/state12.py", replace = "isinstance(observed.get(\"state\"), str) and observed[\"state\"] in message,", with = "True," }
+
+[[family.fault]]
+id = "state12-reason-message"
+message = "FAIL  STATE-12 rejects wrong reason text"
+transform = { file = "conformance/lanes/state12.py", replace = "isinstance(reason, str) and bool(reason) and reason in message,", with = "True," }
+
+[[family.fault]]
+id = "state12-driver-verdict"
+message = "FAIL  STATE-12 driver checks the ended resume"
+transform = { file = "conformance/lanes/state12.py", replace = "        check_ended_resume(observed, refusal, results)\n", with = "" }
+
+[[family.fault]]
+id = "state12-driver-cleanup"
+message = "FAIL  STATE-12 driver cleans both VMs"
+transform = { file = "conformance/lanes/state12.py", replace = '"terminate", vm_id, "--wait", "--region", cli.region, timeout=300', with = '"resume", vm_id, "--region", cli.region' }

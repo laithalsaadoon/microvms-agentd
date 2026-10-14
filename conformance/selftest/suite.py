@@ -32,6 +32,7 @@ from selftest.posture import check_execution_role_policy, check_posture_lines
 from selftest.privacy import check_log_privacy
 from selftest.quickstart import check_gh_logged_out
 from selftest.skew import check_version_skew_helpers
+from selftest.state12 import check_state12, check_state12_driver
 from selftest.stub import STUB_SOURCE
 
 
@@ -68,6 +69,8 @@ def self_test() -> int:
         check_version_skew_helpers(results)
         check_cost_checks(results)
         check_binding_handles(results)
+        check_state12(results)
+        check_state12_driver(results)
 
         # -- the success side -------------------------------------------------
         ok = cli.call("ok")

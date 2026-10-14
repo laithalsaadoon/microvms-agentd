@@ -67,6 +67,7 @@ from lanes.sessions import (
     drive_stable_launch,
 )
 from lanes.skew import drive_version_skew
+from lanes.state12 import drive_state12
 from lanes.suspend import drive_auto_resume, drive_suspend_resume
 from lanes.teardown import drive_teardown, read_daemon_logs
 from lanes.tunnel import drive_tunnel_identity
@@ -482,6 +483,7 @@ def run_suite(args: argparse.Namespace) -> int:
             run_section(
                 results, "auto_resume", drive_auto_resume, cli, launched, aws, results
             )
+            run_section(results, "state12", drive_state12, cli, launched, aws, results)
             # The idle-keepalive section runs on its own VM (launched from the image this
             # suite already built, so no second build) and is the slowest section here —
             # its own output says how long. Last, so its four minutes of deliberate
