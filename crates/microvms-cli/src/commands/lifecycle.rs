@@ -449,6 +449,16 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
         ctx.out
             .progress(&format!("using project config {}", path.display()));
     }
+    // An existing image keeps the capabilities it was built with. Keep this accepted
+    // invocation working within 1.x, but make its ineffective build option visible.
+    if args.image.is_some() && args.repair_identity {
+        ctx.out.warn(
+            "--repair-identity applies only when run builds the image; it cannot change an \
+             existing image. Rebuild with `microvm build --repair-identity`, then pass the \
+             rebuilt image to --image. This combination is deprecated and will be refused \
+             no earlier than 2.0.0.",
+        );
+    }
 
     // `run <DIR>` (issue #72): a positional that names a directory is a project to sync,
     // not a binary to bake. Decided on the *typed* positional, never a config `binary` —
