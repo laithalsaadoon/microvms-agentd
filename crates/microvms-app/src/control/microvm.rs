@@ -620,18 +620,45 @@ impl ControlPlane {
     /// only the dead states fail fast. A genuine startup death still ends in a dead state,
     /// so it still fails with `stateReason`.
     pub async fn wait_for_launch(&self, id: &str, opts: WaitOpts) -> Result<Microvm, Error> {
+        self.wait_for_launch_inner(id, opts, true, false).await
+    }
+
+    /// Sandbox launches poll quickly while a typical launch is becoming ready. Public
+    /// control-plane waits keep the caller's fixed polling interval.
+    pub(crate) async fn wait_for_sandbox_launch(
+        &self,
+        id: &str,
+        opts: WaitOpts,
+        adoptable: bool,
+    ) -> Result<Microvm, Error> {
+        self.wait_for_launch_inner(id, opts, adoptable, true).await
+    }
+
+    async fn wait_for_launch_inner(
+        &self,
+        id: &str,
+        opts: WaitOpts,
+        adoptable: bool,
+        fast_start: bool,
+    ) -> Result<Microvm, Error> {
         let started = self.clock().elapsed();
         let mut resumed = false;
+        let mut fast_polls_remaining = 3;
+        let fail_on = if adoptable {
+            &crate::constants::DEAD_STATES[..]
+        } else {
+            &crate::constants::TERMINAL_STATES[..]
+        };
         loop {
             let got = self.get_microvm(id).await?;
             match got.state.as_str() {
                 "RUNNING" => return Ok(got),
-                state if crate::constants::DEAD_STATES.contains(&state) => {
+                state if fail_on.contains(&state) => {
                     return Err(self.reached_terminal_state(&got, &["RUNNING"]));
                 }
                 // `GetMicrovm` is eventually consistent, so SUSPENDED can still be read
                 // just after the resume was accepted; one resume is enough.
-                "SUSPENDED" if !resumed => {
+                "SUSPENDED" if adoptable && !resumed => {
                     self.resume(id).await?;
                     resumed = true;
                     continue;
@@ -649,7 +676,15 @@ impl ControlPlane {
                     elapsed,
                 ));
             }
-            self.clock().sleep(opts.poll_interval).await;
+            // Poll promptly during startup, then use the lifecycle interval to bound
+            // repeated requests during a slower launch.
+            let interval = if fast_start && fast_polls_remaining > 0 {
+                fast_polls_remaining -= 1;
+                opts.poll_interval.min(std::time::Duration::from_secs(1))
+            } else {
+                opts.poll_interval
+            };
+            self.clock().sleep(interval).await;
         }
     }
 

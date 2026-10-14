@@ -1,0 +1,10 @@
+# ── launch-poll: FAIL_TO_PASS entries tools/fail-to-pass.py emitted ──
+
+# FAIL_TO_PASS: fails on 0b40f9fc4e4c with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-sandbox-launch-polls-at-one-second-then-backs-off"
+guard = "sandbox::tests::sandbox_launch_polls_at_one_second_then_backs_off"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "sandbox::tests::sandbox_launch_polls_at_one_second_then_backs_off"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-sandbox-launch-polls-at-one-second-then-backs-off.patch"
