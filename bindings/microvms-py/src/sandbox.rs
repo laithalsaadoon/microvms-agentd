@@ -2107,6 +2107,7 @@ pub(crate) fn egress_posture_for(
 mod ensure_tests {
     use super::*;
 
+    /// **Falsification**: discard the identity-repair option before handing the request to core.
     #[test]
     fn ensure_identity_repair_reaches_core_without_changing_the_default() {
         for repair in [false, true] {

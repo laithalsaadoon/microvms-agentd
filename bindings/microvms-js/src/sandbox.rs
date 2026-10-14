@@ -521,34 +521,35 @@ impl EnsureImageOptions {
         self,
         size: Option<&SizeClass>,
     ) -> Result<microvms_core::control::EnsureImageRequest, AsyncError> {
+        let options = self;
         let mut request = microvms_core::control::EnsureImageRequest::new(
-            self.name_prefix,
-            self.binary.to_vec(),
-            self.dockerfile,
-            self.s3_bucket,
-            self.build_role_arn,
+            options.name_prefix,
+            options.binary.to_vec(),
+            options.dockerfile,
+            options.s3_bucket,
+            options.build_role_arn,
         );
-        request.s3_key_prefix = self.s3_key_prefix;
+        request.s3_key_prefix = options.s3_key_prefix;
         if let Some(size) = size {
             request.size = size.inner;
         }
-        request.base_image = self.base_image.map(BaseImageInput::into_core);
-        request.base_image_version = self.base_image_version;
-        request.force = self.force.unwrap_or(false);
-        if let Some(repair) = self.repair_guest_identity {
+        request.base_image = options.base_image.map(BaseImageInput::into_core);
+        request.base_image_version = options.base_image_version;
+        request.force = options.force.unwrap_or(false);
+        if let Some(repair) = options.repair_guest_identity {
             request.repair_guest_identity = repair;
         }
-        if let Some(tags) = self.tags {
+        if let Some(tags) = options.tags {
             request.tags = tags.into_iter().collect::<BTreeMap<_, _>>();
         }
-        if let Some(timeout) = self.wait_timeout_seconds {
+        if let Some(timeout) = options.wait_timeout_seconds {
             request.wait_timeout = Some(seconds_async(timeout)?);
         }
-        if let Some(dir) = self.context_dir {
+        if let Some(dir) = options.context_dir {
             request.context =
                 Some(microvms_core::control::BuildContext::from_dir(dir).map_err(js_async)?);
         }
-        if let Some(dir) = self.project_dir {
+        if let Some(dir) = options.project_dir {
             request.project_files =
                 Some(microvms_core::control::read_project_files(dir).map_err(js_async)?);
         }
@@ -1212,6 +1213,7 @@ impl Sandbox {
 mod ensure_tests {
     use super::*;
 
+    /// **Falsification**: discard the identity-repair option before handing the request to core.
     #[test]
     fn ensure_identity_repair_reaches_core_without_changing_the_default() {
         for repair in [None, Some(false), Some(true)] {
