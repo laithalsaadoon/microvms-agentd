@@ -1222,7 +1222,14 @@ mod tests {
             zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("a readable zip");
 
         let mut names: Vec<String> = (0..archive.len())
-            .map(|index| archive.by_index(index).expect("entry").name().to_string())
+            .map(|index| {
+                archive
+                    .by_index(index)
+                    .expect("entry")
+                    .name()
+                    .expect("a name")
+                    .into_owned()
+            })
             .collect();
         names.sort();
         assert_eq!(names, ["Dockerfile", "agentd"]);
@@ -1350,7 +1357,7 @@ mod tests {
         );
         for index in 0..archive.len() {
             let mut entry = archive.by_index(index).expect("entry");
-            let name = entry.name().to_string();
+            let name = entry.name().expect("a name").into_owned();
             let mut content = Vec::new();
             entry.read_to_end(&mut content).expect("reads");
             assert!(
@@ -1388,7 +1395,14 @@ mod tests {
                 zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("a readable zip");
 
             let mut names: Vec<String> = (0..archive.len())
-                .map(|index| archive.by_index(index).expect("entry").name().to_string())
+                .map(|index| {
+                    archive
+                        .by_index(index)
+                        .expect("entry")
+                        .name()
+                        .expect("a name")
+                        .into_owned()
+                })
                 .collect();
             names.sort();
             let mut expected = vec![
@@ -2456,20 +2470,20 @@ mod tests {
         let mut names = Vec::new();
         for index in 0..archive.len() {
             let entry = archive.by_index(index).expect("entry");
-            names.push(entry.name().to_string());
+            let name = entry.name().expect("a name").into_owned();
             let modified = entry.last_modified().expect("a date");
             assert_eq!(
                 (modified.year(), modified.month(), modified.day()),
                 (1980, 1, 1),
-                "IMAGE-7: {} carries a fixed date",
-                entry.name()
+                "IMAGE-7: {name} carries a fixed date"
             );
             let mode = entry.unix_mode().expect("a mode") & 0o777;
-            let expected = match entry.name() {
+            let expected = match name.as_str() {
                 "agentd" | "app/run.sh" => 0o755,
                 _ => 0o644,
             };
-            assert_eq!(mode, expected, "IMAGE-7: {} mode {mode:o}", entry.name());
+            assert_eq!(mode, expected, "IMAGE-7: {name} mode {mode:o}");
+            names.push(name);
         }
         assert_eq!(names, ["Dockerfile", "agentd", "app/run.sh", "data"]);
         let mut dockerfile = String::new();
