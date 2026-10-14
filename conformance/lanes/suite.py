@@ -30,6 +30,7 @@ from lanes.bindings import BindingBuild, drive_binding_handles
 from lanes.bootstrap import drive_daemon_lane
 from lanes.caller_artifact import drive_caller_artifact
 from lanes.closed_output import drive_closed_output, drive_closed_output_bdd
+from lanes.default_user import drive_default_user
 from lanes.ensure_image import drive_ensure_image
 from lanes.exec import (
     drive_exec,
@@ -112,13 +113,14 @@ def run_suite(args: argparse.Namespace) -> int:
 
     cli = Cli(binary=microvm)
     results = Results()
-    if args.only == "ensure_image":
+    if args.only in {"ensure_image", "default_user"}:
         # A targeted run of the one section that owns everything it creates: no suite VM,
         # no suite build, the same named checks and the same independent cleanup.
         run_section(
             results,
-            "ensure_image",
-            drive_ensure_image,
+            args.only,
+            drive_ensure_image if args.only == "ensure_image" else drive_default_user,
+            *([] if args.only == "ensure_image" else [cli]),
             binary,
             boto3.Session(region_name=cli.region),
             results,
@@ -421,6 +423,9 @@ def run_suite(args: argparse.Namespace) -> int:
                 aws.client("s3"),
                 aws.client(SERVICE),
                 results,
+            )
+            run_section(
+                results, "default_user", drive_default_user, cli, binary, aws, results
             )
             # Version skew (#298) beside them: this tree's CLI builds an image around the
             # previous release's daemon, and the previous release's CLI launches the suite's
