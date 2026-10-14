@@ -726,10 +726,10 @@ fn streaming_body(
                 Ok(Some(Ok(chunk))) => {
                     if let Some(left) = remaining.as_mut() {
                         *left = left.saturating_sub(chunk.len() as u64);
-                        if *left == 0 {
-                            if let Some(event) = event.take() {
-                                let _ = events.send(event);
-                            }
+                        if *left == 0
+                            && let Some(event) = event.take()
+                        {
+                            let _ = events.send(event);
                         }
                     }
                     Some((
