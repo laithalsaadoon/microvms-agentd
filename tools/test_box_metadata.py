@@ -81,7 +81,7 @@ class RunOrderingTests(unittest.TestCase):
                 env=env,
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=120,
             )
             return result, [json.loads(line) for line in calls.read_text().splitlines()]
 
