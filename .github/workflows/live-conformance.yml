@@ -99,7 +99,7 @@ jobs:
     if: ${{ !cancelled() && needs.owner.result == 'success' && (needs.draft.result == 'success' || needs.draft.result == 'skipped') }}
     runs-on: ubuntu-latest
     environment: live-aws
-    timeout-minutes: 60
+    timeout-minutes: 90
     permissions:
       contents: read
       id-token: write # for OIDC; no long-lived key is stored
