@@ -164,8 +164,8 @@ const FILE_MODE: u32 = 0o644;
 /// # One set of inputs, one object
 ///
 /// Every entry carries the DOS epoch (1980-01-01) as its date and a fixed mode — `0o755` for
-/// the daemon and for context files with an execute bit, `0o644` for everything else — and
-/// the entries are written in a fixed order: `Dockerfile`, `agentd`, the project pair, then
+/// the daemon and for context files with an execute bit, `0o644` for everything else — under
+/// Unix as the host system, and the entries are written in a fixed order: `Dockerfile`, `agentd`, the project pair, then
 /// the context sorted by name. So equal inputs produce byte-identical archives on any host
 /// at any time, and a content-addressed S3 key holds one object rather than whichever
 /// upload landed last. (Byte identity across `zip` crate versions is not promised; the image
@@ -198,10 +198,15 @@ pub fn build_artifact_with_context(
     }
 
     let mut writer = ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    // Unix as every entry's host system: left unset, zip records the host the build runs on,
+    // MS-DOS on Windows, where a reader that follows the record reads these modes as DOS
+    // attributes (zip 9 gives `0o664`, so the daemon loses its execute bit) and the bytes
+    // differ from a Linux or macOS build of the same inputs.
     let options = |mode: u32| {
         SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Deflated)
             .last_modified_time(zip::DateTime::default())
+            .system(zip::System::Unix)
             .unix_permissions(mode)
     };
 
@@ -2474,6 +2479,55 @@ mod tests {
             .read_to_string(&mut dockerfile)
             .expect("reads");
         assert_eq!(dockerfile, "FROM x\n");
+    }
+
+    /// **IMAGE-7, the host system.** Every entry's central-directory header records Unix (3)
+    /// as the system that made it, whatever host builds the artifact. zip records the running
+    /// host otherwise, MS-DOS (0) on Windows, and that one byte made a Windows build differ
+    /// from a Linux build of the same inputs and let a reader that follows it take the
+    /// entries' modes for DOS attributes.
+    ///
+    /// **Falsification**: set `.system(zip::System::Dos)`, the Windows default, in
+    /// `build_artifact_with_context`'s options, and every host byte reads 0.
+    #[test]
+    fn every_artifact_entry_records_unix_as_its_host_system() {
+        let context = context_of(&[("app/run.sh", 0o755, b"#!/bin/sh\n")]);
+        let bytes = build_artifact_with_context(
+            &aarch64_daemon(b"daemon"),
+            "FROM x\n",
+            None,
+            Some(&context),
+        )
+        .expect("zips");
+        assert_eq!(
+            central_directory_hosts(&bytes),
+            [3, 3, 3],
+            "IMAGE-7: every entry's host system is Unix"
+        );
+    }
+
+    /// The host-system byte of each central-directory header, in order (APPNOTE 4.3.12 and
+    /// 4.4.2: the high byte of "version made by"). The artifact carries no archive comment, so
+    /// its end record is the last 22 bytes: the entry count at +10, the directory's offset at
+    /// +16.
+    fn central_directory_hosts(bytes: &[u8]) -> Vec<u8> {
+        let u16_at = |at: usize| usize::from(u16::from_le_bytes([bytes[at], bytes[at + 1]]));
+        let end = bytes.len() - 22;
+        assert_eq!(&bytes[end..end + 4], b"PK\x05\x06", "the end record");
+        let offset = bytes[end + 16..end + 20].try_into().expect("four bytes");
+        let mut at = usize::try_from(u32::from_le_bytes(offset)).expect("fits");
+        (0..u16_at(end + 10))
+            .map(|_| {
+                assert_eq!(
+                    &bytes[at..at + 4],
+                    b"PK\x01\x02",
+                    "a central-directory header"
+                );
+                let host = bytes[at + 5];
+                at += 46 + u16_at(at + 28) + u16_at(at + 30) + u16_at(at + 32);
+                host
+            })
+            .collect()
     }
 
     /// **IMAGE-7, the byte scan extended.** The agent token has no path into a context either:
