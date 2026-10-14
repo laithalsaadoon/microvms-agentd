@@ -75,7 +75,7 @@ use std::path::{Component, Path, PathBuf};
 
 use nix::errno::Errno;
 use nix::fcntl::{AT_FDCWD, AtFlags, OFlag, OpenHow, ResolveFlag, openat2};
-use nix::sys::stat::{FchmodatFlags, Mode, fchmodat, mkdirat};
+use nix::sys::stat::{FchmodatFlags, Mode, SFlag, fchmodat, fstatat, mkdirat};
 use nix::unistd::{UnlinkatFlags, linkat, symlinkat, unlinkat};
 
 use axum::body::Body;
@@ -479,6 +479,24 @@ impl Confined {
     ) -> Result<(), HardLinkError> {
         let (parent, name) = self.parent_of(parts).map_err(HardLinkError::Dest)?;
         let last = parts.len() - 1;
+        if parts == source {
+            // GNU tar emits a self-link when a file is listed twice. Validate
+            // the existing leaf without following it, but never unlink its source.
+            let stat = fstatat(
+                parent.as_fd(),
+                name.as_os_str(),
+                AtFlags::AT_SYMLINK_NOFOLLOW,
+            )
+            .map_err(|errno| HardLinkError::Source(WalkError::at(source, last, errno)))?;
+            if SFlag::from_bits_truncate(stat.st_mode) == SFlag::S_IFDIR {
+                return Err(HardLinkError::Source(WalkError::at(
+                    source,
+                    last,
+                    Errno::EPERM,
+                )));
+            }
+            return Ok(());
+        }
         self.replace(parent.as_fd(), &name);
 
         // An empty source is the archive naming the root as a hard-link target.
@@ -1738,6 +1756,51 @@ mod tests {
             std::fs::metadata(&original).unwrap().ino(),
             std::fs::metadata(root.join("member")).unwrap().ino()
         );
+    }
+
+    #[test]
+    fn a_self_naming_hard_link_keeps_its_source_and_still_validates_it() {
+        use std::os::unix::fs::MetadataExt;
+
+        let archive = Archive::new()
+            .file("dir/file", b"payload")
+            .link(EntryType::Link, "other", "dir/file")
+            .link(EntryType::Link, "./dir/file", "dir/../dir/file")
+            .link(EntryType::Symlink, "dir/symlink", "file")
+            .link(EntryType::Link, "dir/symlink", "dir/symlink")
+            .bytes();
+        let (dir, result) = extract(archive, OPEN);
+        assert_eq!(result.expect("self-links accepted"), 5);
+        let root = dir.path().join("root");
+        assert_eq!(std::fs::read(root.join("dir/file")).unwrap(), b"payload");
+        let original = std::fs::metadata(root.join("other")).unwrap();
+        let member = std::fs::metadata(root.join("dir/file")).unwrap();
+        assert_eq!(member.ino(), original.ino());
+        assert_eq!(member.mode(), original.mode());
+        assert_eq!(
+            std::fs::read_link(root.join("dir/symlink")).unwrap(),
+            Path::new("file")
+        );
+
+        let missing = Archive::new()
+            .link(EntryType::Link, "missing", "missing")
+            .bytes();
+        assert!(
+            matches!(extract(missing, OPEN).1, Err(Refusal::Io(error)) if error.raw_os_error() == Some(2))
+        );
+        let directory = Archive::new()
+            .dir("dir", 0o755)
+            .link(EntryType::Link, "dir", "dir")
+            .bytes();
+        assert!(
+            matches!(extract(directory, OPEN).1, Err(Refusal::Io(error)) if error.raw_os_error() == Some(1))
+        );
+        let redirected = Archive::new()
+            .dir("dir", 0o755)
+            .link(EntryType::Symlink, "hop", "dir")
+            .link(EntryType::Link, "hop/file", "hop/file")
+            .bytes();
+        assert!(refusal_reason(extract(redirected, OPEN).1).contains("symbolic link"));
     }
 
     #[test]
