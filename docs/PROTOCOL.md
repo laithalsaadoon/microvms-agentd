@@ -244,7 +244,8 @@ its exec reported exit 0). `GET /v1/procs` answers `{procs: [{exec_id, pgid,
 started_at, child_exited, reap, pids}]}`, one entry per registered exec in any
 phase. `pids` are the live pids whose process group is `pgid`, read from
 `/proc/<pid>/stat` inside the guest, so the route needs no `ps` in the image;
-zombies are not live and are not listed, and an entry whose `pgid` was never
+zombie leaders remain listed while any of their worker threads are alive.
+Fully exited zombies are not listed, and an entry whose `pgid` was never
 captured lists none. `child_exited` is read from the same write-once marker
 `busy` uses, never from the polled result, so an acked exec still reads exited.
 `started_at` is epoch seconds on the daemon's clock, like a hook's `fired_at`.
