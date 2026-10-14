@@ -118,7 +118,8 @@ def drive_platform_measurements(
     for label, repair, drop in (
         ("default", False, False),
         ("repair", True, False),
-        ("snapshot-drop", True, True),
+        # Exec also removes effective capabilities, so repair would confound this probe.
+        ("snapshot-drop", False, True),
     ):
         with isolated_image(
             cli,
