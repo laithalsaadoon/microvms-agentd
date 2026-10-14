@@ -15,3 +15,30 @@ run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_streams", "--
 expect = "test-failed"
 suite = "rust"
 transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = ".redirect(reqwest::redirect::Policy::none())", with = ".redirect(reqwest::redirect::Policy::none()).read_timeout(std::time::Duration::from_millis(500))" }
+
+# FAIL_TO_PASS: fails on e6efec0d6e59 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-first-event-arrives-while-the-upstream-body-is-still"
+guard = "first_event_arrives_while_the_upstream_body_is_still_open"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_streams", "--", "--exact", "first_event_arrives_while_the_upstream_body_is_still_open"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-first-event-arrives-while-the-upstream-body-is-still.patch"
+
+# FAIL_TO_PASS: fails on e6efec0d6e59 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-successful-reads-keep-a-stream-open-past-the-exchange"
+guard = "successful_reads_keep_a_stream_open_past_the_exchange_timeout"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_streams", "--", "--exact", "successful_reads_keep_a_stream_open_past_the_exchange_timeout"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-successful-reads-keep-a-stream-open-past-the-exchange.patch"
+
+# FAIL_TO_PASS: fails on e6efec0d6e59 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-response-head-and-body-gaps-each-have-a-deadline"
+guard = "response_head_and_body_gaps_each_have_a_deadline"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_streams", "--", "--exact", "response_head_and_body_gaps_each_have_a_deadline"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-response-head-and-body-gaps-each-have-a-deadline.patch"
