@@ -9,6 +9,7 @@ import os
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 CAPABILITIES = (16, 17, 19, 21, 22, 38, 39)
@@ -23,6 +24,7 @@ STATUS_FIELDS = {
     "Seccomp",
 }
 BUILD_REPORT = Path("/tmp/microvm-cap-build.json")
+POWEROFF_REPORT = Path("/tmp/microvm-poweroff.json")
 
 
 def status(pid: int | str) -> dict[str, str]:
@@ -127,6 +129,26 @@ def main() -> None:
         os.execv("/agentd", ["/agentd"])
     elif sys.argv[1] == "measure":
         print(json.dumps(measure()))
+    elif sys.argv[1] == "poweroff":
+        pid = os.fork()
+        if pid == 0:
+            os.setsid()
+            with open(os.devnull, "wb") as sink:
+                os.dup2(sink.fileno(), 1)
+                os.dup2(sink.fileno(), 2)
+            time.sleep(3)
+            libc = ctypes.CDLL(None, use_errno=True)
+            result = libc.reboot(0x4321FEDC)  # LINUX_REBOOT_CMD_POWER_OFF
+            POWEROFF_REPORT.write_text(
+                json.dumps(
+                    {
+                        "result": result,
+                        "errno": ctypes.get_errno(),
+                    }
+                )
+            )
+            os._exit(0)
+        print(json.dumps({"scheduled": True}))
     else:
         raise ValueError("unknown mode")
 

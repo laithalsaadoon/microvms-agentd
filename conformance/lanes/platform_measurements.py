@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Opt-in measurements for capability hardening (#599).
+"""Opt-in measurements for capability hardening and guest power-off (#599, #614).
 
 This section records observations rather than presuming whether AWS permits an
 operation. It runs only with --only platform_measurements, before either feature
-is selected.
+is selected. A control-plane terminal state alone does not prove a billing stop.
 The snapshot wrapper drops before execing agentd to measure inheritance; that
 exec removes effective/permitted capabilities too. This snapshot cannot rule
 out an in-process drop that preserves the daemon's effective capabilities.
@@ -13,12 +13,14 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import re
+import time
 from pathlib import Path
 from typing import Any
 
 from harness.cli import Cli, attach_args
-from harness.constants import REPO
+from harness.constants import REPO, SERVICE
 from harness.image import conformance_dockerfile, resolve_base_ref
 from harness.results import Results
 
@@ -131,6 +133,104 @@ def check_measurement(report: dict[str, Any], label: str, results: Results) -> N
         results.check("snapshot marker changed and persisted", marker_persisted)
 
 
+def measure_poweroff(cli: Cli, launched: Any, plane: Any) -> dict[str, Any]:
+    vm_id = launched.data["microvmId"]
+    before = plane.get_microvm(microvmIdentifier=vm_id)
+    start = time.monotonic()
+    scheduled = cli.call(
+        "exec",
+        "python3 /platform-probe.py poweroff",
+        "--user",
+        "0",
+        *attach_args(cli, launched),
+    )
+    if json.loads(scheduled.data.get("stdout") or "{}").get("scheduled") is not True:
+        raise RuntimeError("guest did not schedule power-off")
+    states = []
+    guest_result = None
+    while True:
+        observed = plane.get_microvm(microvmIdentifier=vm_id)
+        state = observed.get("state")
+        states.append({"seconds": round(time.monotonic() - start, 3), "state": state})
+        if state == "TERMINATED" or time.monotonic() - start >= 120:
+            break
+        if (
+            state == "RUNNING"
+            and time.monotonic() - start >= 6
+            and guest_result is None
+        ):
+            try:
+                outcome = cli.call(
+                    "exec",
+                    "cat /tmp/microvm-poweroff.json",
+                    "--user",
+                    "0",
+                    *attach_args(cli, launched),
+                    timeout=10,
+                )
+                if outcome.data.get("exitCode") == 0:
+                    guest_result = json.loads(outcome.data.get("stdout") or "{}")
+                    if (
+                        guest_result.get("result") == -1
+                        and type(guest_result.get("errno")) is int
+                    ):
+                        break
+            except Exception:  # noqa: BLE001 - shutdown can race this diagnostic read
+                pass
+        time.sleep(2)
+    report = {
+        "before": before.get("state"),
+        "scheduledDelaySeconds": 3,
+        "states": states,
+        "terminalSeconds": states[-1]["seconds"] if state == "TERMINATED" else None,
+        "billingStop": "unverified: terminal state is not billing evidence",
+    }
+    if guest_result is not None:
+        report["guestResult"] = guest_result
+    elif state != "TERMINATED":
+        try:
+            outcome = cli.call(
+                "exec",
+                "cat /tmp/microvm-poweroff.json",
+                "--user",
+                "0",
+                *attach_args(cli, launched),
+                timeout=20,
+            )
+            report["guestResult"] = json.loads(outcome.data.get("stdout") or "{}")
+        except Exception as error:  # noqa: BLE001 - a dead guest may reject exec
+            report["guestResult"] = {"errorType": type(error).__name__}
+    return report
+
+
+def check_poweroff(report: dict[str, Any], results: Results) -> None:
+    states = report.get("states")
+    observed = (
+        report.get("before") == "RUNNING"
+        and isinstance(states, list)
+        and bool(states)
+        and all(
+            isinstance(row, dict)
+            and row.get("state")
+            in {
+                "PENDING",
+                "RUNNING",
+                "SUSPENDING",
+                "SUSPENDED",
+                "TERMINATING",
+                "TERMINATED",
+            }
+            and type(row.get("seconds")) in (float, int)
+            and math.isfinite(row["seconds"])
+            and row["seconds"] >= 0
+            for row in states
+        )
+    )
+    results.check(
+        "platform power-off measurement observed a control-plane state", observed
+    )
+
+
 def drive_platform_measurements(
     cli: Cli, binary: Path, aws: Any, results: Results, variant: str | None = None
 ) -> None:
@@ -170,3 +270,10 @@ def drive_platform_measurements(
             print(
                 f"MEASUREMENT {label} {json.dumps(report, sort_keys=True)}", flush=True
             )
+            if label in {"default", "repair"}:
+                poweroff = measure_poweroff(cli, launched, aws.client(SERVICE))
+                check_poweroff(poweroff, results)
+                print(
+                    f"MEASUREMENT poweroff-{label} {json.dumps(poweroff, sort_keys=True)}",
+                    flush=True,
+                )
