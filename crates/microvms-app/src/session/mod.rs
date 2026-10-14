@@ -37,6 +37,7 @@ pub mod keepalive;
 pub mod proxy;
 pub mod split;
 pub mod sse;
+mod upload;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -227,6 +228,7 @@ fn unauthenticated(mut request: HttpRequest) -> HttpRequest {
 #[derive(Clone)]
 pub struct Session {
     transport: Arc<Transport>,
+    upload_identity: Arc<tokio::sync::OnceCell<(u32, u32)>>,
     endpoint: String,
     port: u16,
     egress_posture: crate::control::EgressPosture,
@@ -515,7 +517,7 @@ impl Session {
         data: &[u8],
         mode: Option<&str>,
     ) -> Result<(), Error> {
-        files::upload_file(&self.transport, path, data, mode).await
+        upload::upload(self, path, data, mode, false).await
     }
 
     /// Reads one file.
@@ -543,7 +545,7 @@ impl Session {
 
     /// Extracts pre-built tar bytes under `remote`.
     pub async fn upload_tar(&self, remote: &str, archive: &[u8]) -> Result<(), Error> {
-        files::upload_tar(&self.transport, remote, archive).await
+        upload::upload(self, remote, archive, None, true).await
     }
 
     /// The raw tar bytes of a remote tree.
@@ -672,6 +674,7 @@ impl SessionBuilder {
             (None, None) => None,
         };
         Ok(Session {
+            upload_identity: Arc::new(tokio::sync::OnceCell::new()),
             transport: Arc::new(Transport {
                 backend,
                 agent_token: self.agent_token,
@@ -725,6 +728,8 @@ pub(crate) mod testing {
     pub enum Reply {
         /// A status and a body.
         Body(u16, Vec<u8>),
+        /// A response with explicit headers, such as health's capability markers.
+        WithHeaders(u16, Vec<(String, String)>, Vec<u8>),
         /// A stream: the head status, then these chunks in order.
         Chunks(u16, Vec<Vec<u8>>),
         /// A transport failure, i.e. the request never produced a status.
@@ -817,6 +822,11 @@ pub(crate) mod testing {
             let reply = self.record(request);
             Box::pin(async move {
                 match reply {
+                    Reply::WithHeaders(status, headers, body) => Ok(HttpResponse {
+                        status,
+                        headers: headers.into_iter().collect(),
+                        body,
+                    }),
                     Reply::Body(status, body) => Ok(HttpResponse {
                         status,
                         headers: HashMap::new(),
@@ -845,6 +855,7 @@ pub(crate) mod testing {
             let reply = self.record(request);
             Box::pin(async move {
                 let (status, chunks) = match reply {
+                    Reply::WithHeaders(_, _, _) => panic!("header fixture is a buffered response"),
                     Reply::Chunks(status, chunks) => (status, chunks),
                     Reply::Body(status, body) => (status, vec![body]),
                     Reply::Cut(why) => return Err(Error::wire(WireKind::Transport, why)),
@@ -904,6 +915,12 @@ pub(crate) mod testing {
             .with_clock(Arc::clone(&clock) as Arc<dyn Clock>)
             .try_build()
             .expect("builds");
+        // Existing transfer tests model a daemon with the historical root default.
+        // The ownership tests exercise the identity probe with an empty cache.
+        session
+            .upload_identity
+            .set((0, 0))
+            .expect("empty identity cache");
         (session, auth, clock)
     }
 

@@ -1,0 +1,84 @@
+# Upload ownership uses new private helpers, which cannot compile with the entire
+# new module reverted. These narrow faults keep the tests compiled while removing
+# the individual guarantees; the privileged tier exercises the shipped script.
+
+[[fault]]
+id = "upload-604-legacy-root"
+guard = "session::upload::tests::root_uploads_remain_direct_and_identity_is_probed_once"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::upload::tests::root_uploads_remain_direct_and_identity_is_probed_once"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/microvms-app/src/session/upload.rs::root_uploads_remain_direct_and_identity_is_probed_once"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "None => return Ok((ROOT_UID, ROOT_UID)),", with = "None => return Err(Error::invalid_arg(\"missing ownership marker\"))," }
+
+[[fault]]
+id = "upload-604-default-install"
+guard = "session::upload::tests::nonroot_uploads_stage_then_chown_as_root_then_install_as_default_user"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::upload::tests::nonroot_uploads_stage_then_chown_as_root_then_install_as_default_user"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/microvms-app/src/session/upload.rs::nonroot_uploads_stage_then_chown_as_root_then_install_as_default_user"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "script(session, &[operation, staging, path], false).await?;", with = "script(session, &[operation, staging, path], true).await?;" }
+
+[[fault]]
+id = "upload-604-root-cleanup"
+guard = "session::upload::tests::refused_uploads_do_not_install_and_failed_writes_clean_the_stage"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::upload::tests::refused_uploads_do_not_install_and_failed_writes_clean_the_stage"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/microvms-app/src/session/upload.rs::refused_uploads_do_not_install_and_failed_writes_clean_the_stage"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = " && !handoff_started {", with = " {" }
+
+[[fault]]
+id = "upload-604-real-ownership"
+guard = "private_tree_handoff_has_real_nonroot_ownership_and_preserves_link_targets"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "upload_ownership", "--", "--ignored", "--exact", "private_tree_handoff_has_real_nonroot_ownership_and_preserves_link_targets"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/microvms-core/tests/upload_ownership.rs::private_tree_handoff_has_real_nonroot_ownership_and_preserves_link_targets"
+transform = { file = "crates/microvms-app/src/session/upload.sh", replace = "        chown -hR \"$3:$4\" \"$2/payload\"", with = "        : # skipped payload ownership" }
+
+[[fault]]
+id = "upload-604-leaf-symlink"
+guard = "planted_destination_symlinks_and_swapped_directories_are_refused"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "upload_ownership", "--", "--ignored", "--exact", "planted_destination_symlinks_and_swapped_directories_are_refused"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/microvms-core/tests/upload_ownership.rs::planted_destination_symlinks_and_swapped_directories_are_refused"
+transform = { file = "crates/microvms-app/src/session/upload.sh", replace = "find \"$2/payload\" ! -type l -exec sh -c", with = "find \"$2/payload\" -type d -exec sh -c" }
+
+[[fault]]
+id = "upload-604-cleanup-refusal"
+guard = "cleanup_after_handoff_cannot_remove_a_substituted_root_directory"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "upload_ownership", "--", "--ignored", "--exact", "cleanup_after_handoff_cannot_remove_a_substituted_root_directory"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/microvms-core/tests/upload_ownership.rs::cleanup_after_handoff_cannot_remove_a_substituted_root_directory"
+transform = { file = "crates/microvms-app/src/session/upload.sh", replace = "    cleanup)\n        rm -rf -- \"$2\"", with = "    cleanup)\n        : # swallowed cleanup refusal" }
+
+[[fault]]
+id = "upload-604-writable-directory"
+guard = "upload_to_a_writable_root_owned_directory_keeps_its_ownership_and_mode"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "upload_ownership", "--", "--ignored", "--exact", "upload_to_a_writable_root_owned_directory_keeps_its_ownership_and_mode"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/microvms-core/tests/upload_ownership.rs::upload_to_a_writable_root_owned_directory_keeps_its_ownership_and_mode"
+transform = { file = "crates/microvms-app/src/session/upload.sh", replace = "cp -dR --remove-destination --", with = "cp -a --remove-destination --" }
+
+[[fault]]
+id = "upload-604-trusted-path"
+guard = "root_handoff_ignores_commands_planted_in_the_inherited_path"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "upload_ownership", "--", "--ignored", "--exact", "root_handoff_ignores_commands_planted_in_the_inherited_path"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/microvms-core/tests/upload_ownership.rs::root_handoff_ignores_commands_planted_in_the_inherited_path"
+transform = { file = "crates/microvms-app/src/session/upload.sh", replace = "PATH=/usr/sbin:/usr/bin:/sbin:/bin\nexport PATH", with = "export PATH" }
+
+[[fault]]
+id = "upload-604-header"
+guard = "routes::tests::health_marks_a_configured_default_without_changing_its_body"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "routes::tests::health_marks_a_configured_default_without_changing_its_body"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/agentd/src/routes.rs::health_marks_a_configured_default_without_changing_its_body"
+transform = { file = "crates/agentd/src/routes.rs", replace = "    if configured {", with = "    if false && configured {" }

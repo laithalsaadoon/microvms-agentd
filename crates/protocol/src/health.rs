@@ -6,6 +6,11 @@ use std::borrow::Cow;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// Health response marker for an image-configured exec user. Its value is `1`;
+/// absent means the historical daemon/root default. Kept outside `Health` so
+/// older clients can still construct and decode that exhaustive wire type.
+pub const DEFAULT_USER_CONFIGURED_HEADER: &str = "microvms-default-user-configured";
+
 /// `GET /v1/health` response.
 #[derive(Debug, Deserialize, JsonSchema, Serialize)]
 pub struct Health {

@@ -323,6 +323,7 @@ async function cost(testCase) {
 async function daemonStatus(testCase) {
   const server = await startSseServer([[testCase.input.body ?? '']], {
     status: testCase.input.status ?? 200, response: testCase.input.response,
+    healthOk: !testCase.input.response && ['upload-file', 'sync-directory'].includes(testCase.capability),
   });
   try {
     const session = Session.direct(server.endpoint, 'agent-token');

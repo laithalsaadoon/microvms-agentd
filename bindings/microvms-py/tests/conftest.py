@@ -80,7 +80,8 @@ class SseServer:
         scripts: Sequence[Sequence[bytes]],
         status: int = 200,
         *,
-        response: dict[str, object] | None = None,
+        response: dict[str, object] | list[dict[str, object]] | None = None,
+        health_ok: bool = False,
     ) -> None:
         self.requested_paths: list[str] = []
         self.requested_methods: list[str] = []
@@ -115,6 +116,11 @@ class SseServer:
                     self.rfile.read(length)
                 methods.append(self.command)
                 paths.append(self.path)
+                if health_ok and self.path == "/v1/health":
+                    self.send_response(200)
+                    self.send_header("content-length", "0")
+                    self.end_headers()
+                    return
                 try:
                     frames = next(remaining)
                 except StopIteration:
@@ -123,7 +129,14 @@ class SseServer:
                     # own assertion rather than on a timeout.
                     frames = []
                 body = b"".join(frames)
-                spec = response if len(paths) == 1 else None
+                if isinstance(response, list):
+                    spec = (
+                        response[len(paths) - 1]
+                        if len(paths) <= len(response)
+                        else None
+                    )
+                else:
+                    spec = response if len(paths) == 1 else None
                 code = int(spec["status"]) if spec else (400 if response else status)
                 if spec:
                     body = (
@@ -197,9 +210,10 @@ def sse_server() -> Iterator[type[SseServer]]:
         scripts: Sequence[Sequence[bytes]],
         status: int = 200,
         *,
-        response: dict[str, object] | None = None,
+        response: dict[str, object] | list[dict[str, object]] | None = None,
+        health_ok: bool = False,
     ) -> SseServer:
-        server = SseServer(scripts, status, response=response)
+        server = SseServer(scripts, status, response=response, health_ok=health_ok)
         built.append(server)
         return server
 

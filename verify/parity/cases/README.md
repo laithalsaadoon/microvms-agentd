@@ -111,6 +111,10 @@ without a reset.
   `headers`, and `chunked` framing. These cases cover the buffered response and stream-opening
   paths. The CLI starts an exec before opening its stream; that setup request is excluded
   from the shared response request count.
+  An upload case can supply an array in `response` to script each exchange in order,
+  including default-user discovery, the identity probe, staging, and ownership handoff.
+  Ordinary upload status cases answer discovery successfully before returning the
+  requested failure to the upload itself.
 - `egress`: a launch's egress options, refused or classified.
 - `names`: a VM adopted by name (`from-name`) from a registry holding `input.record_text` as
   `<name>.json`, in `input.region`. A record from another region and a torn one are refused

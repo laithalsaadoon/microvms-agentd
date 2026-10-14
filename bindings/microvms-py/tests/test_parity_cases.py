@@ -314,6 +314,7 @@ def daemon_status(case: Case, servers: Callable[..., SseServer]) -> dict[str, An
         [[case.input.get("body", "").encode()]],
         case.input.get("status", 200),
         response=spec,
+        health_ok=spec is None and case.capability in ("upload-file", "sync-directory"),
     )
     session = microvms.Session.direct(server.endpoint, "agent-token")
 

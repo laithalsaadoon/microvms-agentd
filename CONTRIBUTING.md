@@ -40,6 +40,7 @@ cargo test -p microvms-domain
 cargo test -p microvms-app
 cargo test -p microvms-edges
 cargo test -p microvms-core
+mise run test:upload-ownership # Linux, passwordless sudo; distinct root and non-root owners
 cargo test -p microvms-cli
 cargo test --test proptest_tar
 cargo test --test turmoil_transport

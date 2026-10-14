@@ -714,7 +714,10 @@ impl ForwardUpstream {
             .get("response")
             .cloned()
             .unwrap_or_else(|| serde_json::json!({"status":200,"body":"parity"}));
-        let response = wire_response(&spec);
+        let responses: Vec<_> = match spec.as_array() {
+            Some(sequence) => sequence.iter().map(wire_response).collect(),
+            None => vec![wire_response(&spec)],
+        };
         let streaming = case.capability == "stream";
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -752,7 +755,7 @@ impl ForwardUpstream {
                     wire_response(
                         &serde_json::json!({"status":200,"body": "{\"exec_id\":\"x-1\",\"phase\":\"running\"}"}),
                     )
-                } else if index == 0 || (streaming && request.contains("/stream")) {
+                } else if let Some(response) = responses.get(if streaming { 0 } else { index }) {
                     response.clone()
                 } else {
                     wire_response(&serde_json::json!({"status":400,"body":"follow-up response"}))

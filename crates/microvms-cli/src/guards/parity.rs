@@ -235,6 +235,25 @@ async fn parity_daemon_status(case: &parity_corpus::Case) -> serde_json::Value {
             super::support::exec_command(|args| {
                 args.stream = true;
             })
+        } else if case.capability == "upload-file" {
+            let dir = TempDir::new("parity-upload");
+            let local = dir.0.join("upload.bin");
+            std::fs::write(&local, b"parity").expect("writes");
+            let command = Command::Cp(CpArgs {
+                src: local.to_string_lossy().to_string(),
+                dst: format!("vm:{}", case.input_str("path")),
+                tar: false,
+                mode: None,
+                lines: None,
+                attach: attach_flags(),
+                region: region_flags(),
+            });
+            let mut answer = match against_daemon(&script, &command).await.0 {
+                Ok(_) => serde_json::json!({"ok":true}),
+                Err(failure) => parity_refusal(&failure),
+            };
+            answer["upstream_requests"] = serde_json::json!(upstream.request_count());
+            return answer;
         } else {
             Command::Health(HealthArgs {
                 attach: attach_flags(),
@@ -263,7 +282,7 @@ async fn parity_daemon_status(case: &parity_corpus::Case) -> serde_json::Value {
             })
         }
         "upload-file" => {
-            script.reply(status, body);
+            script.reply(200, "").reply(status, body);
             let local = dir.0.join("upload.bin");
             std::fs::write(&local, b"parity").expect("writes");
             Command::Cp(CpArgs {
@@ -278,7 +297,10 @@ async fn parity_daemon_status(case: &parity_corpus::Case) -> serde_json::Value {
         }
         // No manifest in the guest yet, so the whole tree travels and meets the status.
         "sync-directory" => {
-            script.reply(404, "no such file").reply(status, body);
+            script
+                .reply(404, "no such file")
+                .reply(200, "")
+                .reply(status, body);
             std::fs::write(dir.0.join("upload.bin"), b"parity").expect("writes");
             sync_command(&dir.0, |_| {})
         }

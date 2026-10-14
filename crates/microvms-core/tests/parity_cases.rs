@@ -253,14 +253,20 @@ fn cost(case: &Case) -> Value {
 struct ScriptedStatus {
     status: u16,
     body: Vec<u8>,
+    upload: bool,
 }
 
 impl HttpBackend for ScriptedStatus {
-    fn send(&self, _request: HttpRequest) -> BoxFuture<'_, Result<HttpResponse, Error>> {
+    fn send(&self, request: HttpRequest) -> BoxFuture<'_, Result<HttpResponse, Error>> {
+        let discovery = self.upload && request.path == "/v1/health";
         let response = HttpResponse {
-            status: self.status,
+            status: if discovery { 200 } else { self.status },
             headers: std::collections::HashMap::new(),
-            body: self.body.clone(),
+            body: if discovery {
+                Vec::new()
+            } else {
+                self.body.clone()
+            },
         };
         Box::pin(async move { Ok(response) })
     }
@@ -288,6 +294,10 @@ async fn daemon_status(case: &Case) -> Value {
             let stream = handle.stream();
             futures_util::pin_mut!(stream);
             stream.next().await.expect("stream response").map(|_| ())
+        } else if case.capability == "upload-file" {
+            session
+                .upload_file(case.input_str("path"), b"parity", None)
+                .await
         } else {
             session.health().await.map(|_| ())
         };
@@ -301,6 +311,7 @@ async fn daemon_status(case: &Case) -> Value {
     let backend = Arc::new(ScriptedStatus {
         status: u16::try_from(case.input_u64("status")).expect("a status"),
         body: case.input_str("body").as_bytes().to_vec(),
+        upload: matches!(case.capability.as_str(), "upload-file" | "sync-directory"),
     });
     let session = Session::builder("http://127.0.0.1:9", "agent-token")
         .with_backend(backend)

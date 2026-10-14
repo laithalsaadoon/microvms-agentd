@@ -419,13 +419,28 @@ directories made for them. Tar extraction masks each member's mode to `0755` at
 most, so it doesn't set a group or other write bit on a file or directory.
 `PUT /v1/fs/file` gives the file the `mode` the request sets, or `0644` without
 one, and the parent directories it creates are `0755`. The image's default user
-can read an uploaded tree, then, but can't write into the directories an upload
-created, or change a file unless its requested `mode` lets other users write.
-An exec that must write there runs with
-`user: 0`, or the image or an exec started with `user: 0` hands the tree to the
-default user first with `chown`. The agent recipe's `chown` of `/workspace`
-does that. A default with no passwd row doesn't refuse an upload, because an
-upload doesn't read the variable.
+can read a tree written directly through these routes, but cannot write into
+its directories unless another operation transfers their ownership.
+
+Health sends `microvms-default-user-configured: 1` when the image sets a default
+user; the header reveals no account name. Its absence keeps the direct upload
+path, including older, shell-free images. With that marker the shared client
+probes the default uid and gid once per session with a nameless `id -u; id -g`
+exec. For a non-root default it uploads into a private,
+root-owned staging directory, runs `chown` as `user: 0` there, then installs the
+contents as the default user. The staging directory stays inaccessible to that
+user until the ownership handoff finishes. Destination symlinks are refused;
+the install's remaining path races have only the default user's privileges.
+The client hands `/workspace` itself to the default user, so `run`, `cp`, sync,
+and both bindings can write the synced project. Other destinations must be
+writable by that user. Root-default sessions retain the direct upload path.
+An unknown default refuses the probe before an upload. These client operations
+need `/bin/sh` and the guest's `id`, `mktemp`, `chown`, `find`, `cp`, `mv`, `stat`,
+and `rm` in the system command directories. The helpers use a fixed system
+`PATH`, with shell startup-file variables cleared. The staging parent `/tmp`
+must be root-owned and sticky or writable only by root. If a handoff response
+is lost, cleanup runs only with the default user's privileges; a stage that
+the user cannot remove may remain for an authorized root caller to inspect.
 
 ## Line-ranged text reads
 

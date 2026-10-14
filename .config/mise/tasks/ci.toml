@@ -41,6 +41,7 @@ description = "CI's `rust` job on its ubuntu leg: lint, every test tier, the gen
 run = [
   { task = "lint" },
   { task = "test" },
+  { task = "test:upload-ownership" },
   { task = "schema:check" },
   { task = "schema:compat" },
   { task = "manifest:check" },
