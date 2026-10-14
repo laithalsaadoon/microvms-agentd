@@ -71,6 +71,7 @@
 //! a caller rediscover it from a closed socket.
 
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use http_body_util::{BodyExt as _, Full, Limited};
@@ -431,8 +432,18 @@ where
 {
     let events = Mutex::new(on_event);
     let upgraded = Mutex::new(None);
-    let service =
-        service_fn(|request| forward_request(request, spec, auth, client, &events, &upgraded));
+    let answered = AtomicBool::new(false);
+    let service = service_fn(|request| {
+        let result = forward_request(request, spec, auth, client, &events, &upgraded);
+        let answered = &answered;
+        Box::pin(async move {
+            let response = result.await;
+            if response.is_ok() {
+                answered.store(true, Ordering::Relaxed);
+            }
+            response
+        })
+    });
     let mut builder = hyper::server::conn::http1::Builder::new();
     builder
         .timer(TokioTimer::new())
@@ -440,16 +451,21 @@ where
         .max_buf_size(MAX_REQUEST_HEAD_BYTES);
     // The public primitive accepts borrowed streams. Hyper's automatic upgrade API
     // requires 'static I/O, so take its buffered bytes and socket back explicitly.
-    let parts = builder
-        .serve_connection(TokioIo::new(local), service)
-        .without_shutdown()
-        .await
-        .map_err(|err| {
-            Error::new(
+    let mut connection = builder.serve_connection(TokioIo::new(local), service);
+    let result = futures_util::future::poll_fn(|cx| connection.poll_without_shutdown(cx)).await;
+    let parts = connection.into_parts();
+    if let Err(error) = result {
+        // The next request's timer also bounds idle keep-alive. Closing an empty
+        // idle connection is normal; partial headers still report a timeout.
+        let idle =
+            error.is_timeout() && answered.load(Ordering::Relaxed) && parts.read_buf.is_empty();
+        if !idle {
+            return Err(Error::new(
                 ErrorKind::Protocol,
-                format!("the local HTTP connection failed: {err}"),
-            )
-        })?;
+                format!("the local HTTP connection failed: {error}"),
+            ));
+        }
+    }
     let upstream = upgraded.lock().expect("upgrade lock poisoned").take();
     if let Some(mut upstream) = upstream {
         // Replay read-ahead through the same bidirectional pump, so either peer can
@@ -681,6 +697,7 @@ where
         )))
     });
     hyper::server::conn::http1::Builder::new()
+        .half_close(true)
         .serve_connection(TokioIo::new(io), service)
         .await
         .map_err(|err| {

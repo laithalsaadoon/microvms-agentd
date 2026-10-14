@@ -339,12 +339,12 @@ where
                         events.push(event);
                     })
                     .await;
-                outcome.map(|()| events)
+                Ok((events, outcome))
             }
         },
         |peer, done| {
             let (events, failure) = match done {
-                Ok(events) => (events, None),
+                Ok((events, outcome)) => (events, outcome.err()),
                 Err(error) => (Vec::new(), Some(error)),
             };
             for event in events {
