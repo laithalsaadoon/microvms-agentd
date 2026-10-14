@@ -1786,14 +1786,14 @@ mod tests {
             .link(EntryType::Link, "missing", "missing")
             .bytes();
         assert!(
-            matches!(extract(missing, OPEN).1, Err(Refusal::Io(error)) if error.raw_os_error() == Some(2))
+            matches!(extract(missing, OPEN).1, Err(Refusal::Io(error)) if error.raw_os_error() == Some(Errno::ENOENT as i32))
         );
         let directory = Archive::new()
             .dir("dir", 0o755)
             .link(EntryType::Link, "dir", "dir")
             .bytes();
         assert!(
-            matches!(extract(directory, OPEN).1, Err(Refusal::Io(error)) if error.raw_os_error() == Some(1))
+            matches!(extract(directory, OPEN).1, Err(Refusal::Io(error)) if error.raw_os_error() == Some(Errno::EPERM as i32))
         );
         let redirected = Archive::new()
             .dir("dir", 0o755)
@@ -1817,10 +1817,11 @@ mod tests {
         let archive = Archive::new()
             .file("member", b"temporary bytes")
             .link(EntryType::Link, "member", "target")
+            .link(EntryType::Link, "member", "member")
             .bytes();
         assert_eq!(
             extract_into(&root, archive.as_slice(), OPEN, &roomy_guard()).unwrap(),
-            2
+            3
         );
         assert_eq!(
             std::fs::read(root.join("member")).unwrap(),
