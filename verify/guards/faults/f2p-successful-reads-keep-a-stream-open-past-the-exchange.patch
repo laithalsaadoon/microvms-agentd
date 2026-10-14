@@ -5,7 +5,7 @@ index cee6825..de231cb 100644
 @@ -74,26 +74,21 @@ use std::net::SocketAddr;
  use std::sync::atomic::{AtomicBool, Ordering};
  use std::sync::{Arc, Mutex};
- 
+
 -use futures_util::StreamExt as _;
 -use http_body_util::combinators::UnsyncBoxBody;
 -use http_body_util::{BodyExt as _, Full, Limited, StreamBody};
@@ -14,14 +14,14 @@ index cee6825..de231cb 100644
 +use hyper::body::{Bytes, Incoming};
  use hyper::service::service_fn;
  use hyper_util::rt::{TokioIo, TokioTimer};
- 
+
  use tokio::io::{AsyncRead, AsyncWrite};
  use tokio::net::{TcpListener, TcpStream};
 -use tokio::sync::mpsc;
- 
+
  use microvms_app::error::{Error, ErrorKind};
  use microvms_app::session::proxy::{PROXY_AUTH_HEADER, PROXY_PORT_HEADER, ProxyAuth};
- 
+
 -/// The limit for the response head and for each read of a proxied response body.
 +/// How long one proxied exchange may take before it is abandoned.
  ///
@@ -43,7 +43,7 @@ index cee6825..de231cb 100644
 +    /// How long one non-upgraded exchange may take.
      pub exchange_timeout: std::time::Duration,
  }
- 
+
 @@ -431,13 +424,13 @@ pub(crate) async fn serve_connection_via<S, F>(
      spec: &ForwardSpec,
      auth: Option<&Arc<ProxyAuth>>,
@@ -84,7 +84,7 @@ index cee6825..de231cb 100644
 @@ -502,16 +483,8 @@ where
  const HEADER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
  const MAX_REQUEST_BODY_BYTES: usize = 16 * 1024 * 1024;
- 
+
 -type ForwardBody = UnsyncBoxBody<Bytes, Error>;
 -
 -fn full_body(body: Bytes) -> ForwardBody {
@@ -103,7 +103,7 @@ index cee6825..de231cb 100644
 @@ -561,14 +534,14 @@ fn strip_hop_headers(headers: &mut http::HeaderMap, upgrade: bool) {
      }
  }
- 
+
 -async fn forward_request(
 +async fn forward_request<F: FnMut(ForwardEvent)>(
      request: http::Request<Incoming>,
@@ -212,7 +212,7 @@ index cee6825..de231cb 100644
 +    });
      Ok(response)
  }
- 
+
 -// Report a successful exchange only once the upstream body has completed. The
 -// channel keeps the response body independent of the caller's borrowed callback.
 -fn streaming_body(
