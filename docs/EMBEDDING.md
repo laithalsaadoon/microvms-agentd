@@ -139,7 +139,8 @@ work such as tunnels and token refresh stops during a freeze. Finish required cl
 a later invocation needs the VM.
 
 `mise run npm:lambda` checks the minimal package in the Lambda Node.js 24
-container image. CI runs it on arm64. It makes a control-plane call without
+container image. It builds with the release addon compiler configuration, and
+CI runs it on arm64. It makes a control-plane call without
 networking or AWS credentials. The call must fail with `ERR_CREDENTIALS`. This checks
 runtime loading and credential resolution. A deployed Lambda invocation still
 needs live verification.

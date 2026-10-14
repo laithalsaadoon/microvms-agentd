@@ -116,9 +116,26 @@ run = [
   'node --test "bindings/microvms-js/__test__/*.mjs"',
 ]
 
+["npm:lambda:build"]
+description = "Build the Node addon with the release compiler's glibc floor for Lambda"
+# A native Ubuntu build requires a newer glibc than Lambda's Amazon Linux runtime.
+# Match the release addon build's compiler and linker before testing that runtime.
+tools = { zig = "0.16.0", "cargo:cargo-zigbuild" = "0.23.4" }
+shell = "bash -e -c"
+run = '''
+case "$(uname -m)" in
+  aarch64|arm64) lambda_target=aarch64-unknown-linux-gnu ;;
+  x86_64) lambda_target=x86_64-unknown-linux-gnu ;;
+  *) echo "Lambda smoke requires a Linux arm64 or x86_64 host" >&2; exit 1 ;;
+esac
+npx -y -p @napi-rs/cli@3.10.8 napi build --manifest-path Cargo.toml \
+  --package microvms-js --platform --release --target "$lambda_target" \
+  --cross-compile --output-dir . --cwd bindings/microvms-js
+'''
+
 ["npm:lambda"]
 description = "Load the minimal Node package in the Lambda Node.js 24 runtime without AWS credentials"
-depends = ["dts"]
+depends = ["npm:lambda:build"]
 shell = "bash -e -c"
 run = '''
 case "$(uname -m)" in
