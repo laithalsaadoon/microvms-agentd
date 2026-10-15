@@ -216,6 +216,49 @@ mod tests {
         format!("7 (odd ) name) {}", fields.join(" "))
     }
 
+    /// AGENTD-25: a permitted capability alone does not authorize shutdown.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn host_requires_sys_boot_to_be_effective_as_well_as_permitted() {
+        const CHILD: &str = "AGENTD_POWEROFF_CAPABILITY_TEST_CHILD";
+        const TEST: &str =
+            "poweroff::tests::host_requires_sys_boot_to_be_effective_as_well_as_permitted";
+        if std::env::var_os(CHILD).is_none() {
+            // capset changes only this isolated child, never the test runner.
+            let output = std::process::Command::new("unshare")
+                .args(["--user", "--map-root-user"])
+                .arg(std::env::current_exe().unwrap())
+                .args(["--exact", TEST, "--nocapture"])
+                .env(CHILD, "1")
+                .output()
+                .expect("unshare is required for the isolated capability test");
+            assert!(
+                output.status.success(),
+                "isolated capability test: {}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+
+        use rustix::thread::{self, CapabilitySet};
+        let required = CapabilitySet::SYS_BOOT;
+        let mut caps = thread::capabilities(None).unwrap();
+        assert!(caps.effective.contains(required));
+        assert!(caps.permitted.contains(required));
+        assert!(Poweroff::host().check().is_ok());
+        caps.effective.remove(required);
+        thread::set_capabilities(None, caps).unwrap();
+        let after = thread::capabilities(None).unwrap();
+        assert!(!after.effective.contains(required));
+        assert!(after.permitted.contains(required));
+        // Read the host's real check, but never invoke its shutdown action.
+        assert_eq!(
+            Poweroff::host().check().unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+    }
+
     #[test]
     fn a_dead_leader_with_other_threads_does_not_prove_group_completion() {
         for state in ["Z", "X"] {
@@ -262,6 +305,13 @@ mod tests {
         assert!(group_empty(dir.path(), 7).unwrap());
         std::fs::write(dir.path().join("7/stat"), "malformed").unwrap();
         assert!(group_empty(dir.path(), 7).is_err());
+        // A directory produces a read error even when the tests run as root.
+        std::fs::remove_file(dir.path().join("7/stat")).unwrap();
+        std::fs::create_dir(dir.path().join("7/stat")).unwrap();
+        assert_ne!(
+            group_empty(dir.path(), 7).unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
     }
 
     #[test]

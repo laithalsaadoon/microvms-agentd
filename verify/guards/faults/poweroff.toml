@@ -72,3 +72,27 @@ run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact
 expect = "test-failed"
 suite = "rust"
 transform = { file = "crates/microvms-cli/src/commands/attached.rs", replace = "            poweroff_on_exit: args.poweroff_on_exit,", with = "            poweroff_on_exit: false," }
+
+[[fault]]
+id = "poweroff-host-permitted-only"
+guard = "poweroff::tests::host_requires_sys_boot_to_be_effective_as_well_as_permitted"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "poweroff::tests::host_requires_sys_boot_to_be_effective_as_well_as_permitted"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/poweroff.rs", replace = "if caps.effective.contains(required) && caps.permitted.contains(required)", with = "if caps.effective.contains(required) || caps.permitted.contains(required)" }
+
+[[fault]]
+id = "poweroff-procfs-read-error"
+guard = "poweroff::tests::group_observation_excludes_zombies_but_refuses_missing_and_malformed_records"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "poweroff::tests::group_observation_excludes_zombies_but_refuses_missing_and_malformed_records"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/poweroff.rs", replace = "Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),", with = "Err(_error) if true => return Ok(None)," }
+
+[[fault]]
+id = "poweroff-startup-noop"
+guard = "daemon_startup_serves_health_with_host_poweroff_support"
+run = ["cargo", "test", "-p", "agentd", "--test", "poweroff_startup", "--", "--exact", "daemon_startup_serves_health_with_host_poweroff_support"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/main.rs", replace = "async fn run(config: Config) -> std::io::Result<()> {", with = "async fn run(config: Config) -> std::io::Result<()> {\n    return Ok(());" }
