@@ -13,7 +13,7 @@ CONTRIBUTING.md, "Changelog", says how to write one.
 
 <!-- towncrier release notes start -->
 
-## [1.1.0] - 2026-10-15
+## [1.1.1] - 2026-10-15
 
 ### Added
 
@@ -61,7 +61,7 @@ CONTRIBUTING.md, "Changelog", says how to write one.
 
 - **The identity-repair flag on an existing-image run is deprecated (#602).**
   Passing `--repair-identity` with an existing image to `microvm run` is deprecated
-  starting in 1.1.0. This combination will be refused no earlier than 2.0.0, after at
+  starting in 1.1.1. This combination will be refused no earlier than 2.0.0, after at
   least six calendar months and two minor releases from this announcement. Build the
   image with `microvm build --repair-identity`, then run that image without the flag.
 
@@ -109,6 +109,11 @@ CONTRIBUTING.md, "Changelog", says how to write one.
   Kill, reap, and timeout escalation no longer stop after SIGTERM when a zombie
   thread-group leader still has live workers. These processes remain visible in
   `/v1/procs` until their workers exit.
+- **Keep live conformance credentials valid through cleanup (#605).** The workflow requests a two-hour AWS session for its 90-minute job so the suite and its cleanup can finish before credentials expire.
+- **Verify branch quickstart with its matching release (#605).** Live verification loads the CLI version's matching release before AWS work, so an unpublished draft can be verified while the suite still uses source-built binaries.
+- **Version-skew checks use the last published stable release (#605).** The conformance suite
+  excludes drafts and unpublished tags from its compatibility baseline. Invalid publication
+  metadata fails the check.
 - **Sandbox launches poll readiness sooner (#615).** `Sandbox.run` and its Python and
   JavaScript bindings poll for RUNNING every second for the first three retries, then
   back off to the usual five-second interval. Explicit control-plane wait intervals
@@ -135,6 +140,12 @@ CONTRIBUTING.md, "Changelog", says how to write one.
   completes the handshake without post-quantum key exchange. The other three advisories fixed in
   the same release (RUSTSEC-2026-0346, -0347 and -0348) need a custom session store, Encrypted
   Client Hello or the `brotli` feature, which these packages don't use.
+
+## [1.1.0] - 2026-10-15
+
+This version was tagged but never published. Its [tag verification run](https://github.com/laithalsaadoon/microvms-agentd/actions/runs/38757839191)
+failed before the suite and cleanup completed. The [tag](https://github.com/laithalsaadoon/microvms-agentd/tree/v1.1.0)
+remains as the record of that attempt. Version 1.1.1 is the first published release carrying its intended changes.
 
 ## [1.0.1] - 2026-10-12
 
