@@ -438,10 +438,10 @@ user so the command-line tool and both bindings can write the project. Other des
 need write permission for that user. Root sessions use direct uploads.
 
 An invalid default stops the identity probe before upload. These operations
-need `/bin/sh` and the guest's `id`, `mktemp`, `chown`, `find`, `cp`, `mv`, `stat`,
+need `/bin/sh` and the guest's `id`, `mktemp`, `mkdir`, `chown`, `cp`, `mv`, `stat`,
 and `rm` in the system command directories. The helpers use a fixed system
-`PATH` and clear shell startup-file variables. The staging parent `/tmp` must
-belong to root. It must be sticky or writable only by root. After a lost handoff
+`PATH` and clear variables that control shell startup and glob expansion. The staging
+parent `/tmp` must belong to root. It must be sticky or writable only by root. After a lost handoff
 response, the client cleans up as the default user. An authorized root caller
 can inspect any remaining stage.
 

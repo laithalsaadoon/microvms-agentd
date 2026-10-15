@@ -42,7 +42,7 @@ run = ["cargo", "test", "-p", "microvms-core", "--test", "upload_ownership", "--
 expect = "test-failed"
 suite = "rust"
 untraced = "The ownership test uses setuid sudo, which ptrace suppresses."
-transform = { file = "crates/microvms-app/src/session/upload.sh", replace = "find \"$2/payload\" ! -type l -exec sh -c", with = "find \"$2/payload\" -type d -exec sh -c" }
+transform = { file = "crates/microvms-app/src/session/upload.sh", replace = "    refuse_links \"$2\"\n    if [ -d \"$1\" ]; then", with = "    if [ -d \"$1\" ]; then\n        refuse_links \"$2\"" }
 
 [[fault]]
 id = "upload-604-cleanup-refusal"

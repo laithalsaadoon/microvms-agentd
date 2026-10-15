@@ -21,6 +21,10 @@ async fn run(session: &Session, command: Vec<String>, root: bool) -> Result<Stri
             ("ENV".into(), String::new()),
             ("BASH_ENV".into(), String::new()),
             ("CDPATH".into(), String::new()),
+            // Bash imports these before it reads the script, even as /bin/sh.
+            ("SHELLOPTS".into(), String::new()),
+            ("BASHOPTS".into(), String::new()),
+            ("GLOBIGNORE".into(), String::new()),
         ]))
         .with_timeout_sec(Some(BUDGET.as_secs_f64()));
     if root {
@@ -262,6 +266,9 @@ mod tests {
             assert_eq!(probe["env"]["ENV"], "");
             assert_eq!(probe["env"]["BASH_ENV"], "");
             assert_eq!(probe["env"]["CDPATH"], "");
+            assert_eq!(probe["env"]["SHELLOPTS"], "");
+            assert_eq!(probe["env"]["BASHOPTS"], "");
+            assert_eq!(probe["env"]["GLOBIGNORE"], "");
             assert_eq!(start(4)["command"][0], "/bin/sh");
             assert_eq!(start(4)["env"]["PATH"], "/usr/sbin:/usr/bin:/sbin:/bin");
             assert_eq!(start(4)["user"], 0);

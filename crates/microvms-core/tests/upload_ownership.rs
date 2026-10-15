@@ -415,3 +415,165 @@ fn root_handoff_ignores_commands_planted_in_the_inherited_path() {
         "65534:65534"
     );
 }
+
+/// The shipped script runs unchanged in a private mount namespace with only its
+/// install tools visible. In particular, no system directory can supply `find`.
+fn minimal_install(tree: &Tree, tools: &Path, stage: &str, destination: &str) -> Output {
+    command(
+        true,
+        tree.0.path(),
+        "/usr/bin/env",
+        &[
+            "SHELLOPTS=noglob",
+            "BASHOPTS=failglob:dotglob:nullglob",
+            "GLOBIGNORE=*",
+            "unshare",
+            "--mount",
+            "--fork",
+            "/bin/sh",
+            "-c",
+            r#"set -eu
+mount --make-rprivate /
+for directory in /usr/bin /usr/sbin /bin /sbin; do
+    mount --bind "$1" "$directory"
+done
+if command -v find; then exit 99; fi
+# Model the helper's explicit request environment, whose keys the app tests pin.
+exec setpriv --reuid=65534 --regid=65534 --clear-groups env SHELLOPTS= BASHOPTS= GLOBIGNORE= /bin/sh -c "$2" microvms-upload install-tar "$3" "$4"
+"#,
+            "minimal-install",
+            tools.to_str().unwrap(),
+            SCRIPT,
+            stage,
+            destination,
+        ],
+    )
+}
+
+#[test]
+#[ignore = "requires passwordless sudo; run mise run test:upload-ownership"]
+fn minimal_tools_install_hidden_and_unusual_names_without_following_links() {
+    let tree = Tree::new();
+    let tools = tree.0.path().join("tools");
+    fs::create_dir(&tools).unwrap();
+    // mount and setpriv belong to the test harness, not the guest script. Copies
+    // keep ownership changes in this test from ever touching system binaries.
+    for tool in ["mount", "setpriv", "env", "mkdir", "cp", "rm"] {
+        fs::copy(format!("/usr/bin/{tool}"), tools.join(tool)).unwrap();
+    }
+    // Amazon Linux uses Bash for /bin/sh. Imported glob options must not change
+    // traversal; the launch environment above deliberately starts with them set.
+    fs::copy("/bin/bash", tools.join("sh")).unwrap();
+    let names = [
+        "plain/sub/file",
+        ".hidden/file",
+        "..dots/file",
+        "space\nand tab\t/file",
+    ];
+    let payload = tree.0.path().join("stage/payload");
+    for name in names {
+        let path = payload.join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, name.as_bytes()).unwrap();
+    }
+    fs::write(payload.join("safe"), b"safe").unwrap();
+    symlink("missing", payload.join("dangling")).unwrap();
+    let outside = tree.0.path().join("outside");
+    fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("secret"), b"unchanged").unwrap();
+    symlink(&outside, payload.join("source-link")).unwrap();
+    success(command(
+        true,
+        tree.0.path(),
+        "chown",
+        &["-R", "0:0", "stage"],
+    ));
+    success(command(true, tree.0.path(), "chmod", &["0700", "stage"]));
+    success(script(
+        true,
+        tree.0.path(),
+        &["handoff", "stage", USER, USER],
+    ));
+
+    for (index, member) in [
+        "plain/sub",
+        ".hidden",
+        "..dots",
+        "space\nand tab\t",
+        "plain/sub/file",
+        ".hidden/file",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let destination = format!("refused-{index}");
+        let link = tree.0.path().join(&destination).join(member);
+        fs::create_dir_all(link.parent().unwrap()).unwrap();
+        // Include dangling destination links as well as live directory links.
+        let target = if index % 2 == 0 {
+            outside.clone()
+        } else {
+            outside.join("missing")
+        };
+        symlink(target, &link).unwrap();
+        success(command(
+            true,
+            tree.0.path(),
+            "chown",
+            &["-hR", "65534:65534", &destination],
+        ));
+        let output = minimal_install(&tree, &tools, "stage", &destination);
+        assert!(
+            !output.status.success(),
+            "followed destination link {member:?}"
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("symbolic link"),
+            "unexpected refusal for {member:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!tree.0.path().join(&destination).join("safe").exists());
+        assert_eq!(fs::read(outside.join("secret")).unwrap(), b"unchanged");
+    }
+
+    fs::create_dir(tree.0.path().join("destination")).unwrap();
+    symlink("old-missing", tree.0.path().join("destination/dangling")).unwrap();
+    success(command(
+        true,
+        tree.0.path(),
+        "chown",
+        &["-hR", "65534:65534", "destination"],
+    ));
+    success(minimal_install(&tree, &tools, "stage", "destination"));
+    for name in names {
+        let path = tree.0.path().join("destination").join(name);
+        assert_eq!(fs::read(&path).unwrap(), name.as_bytes());
+        assert_eq!(fs::metadata(path).unwrap().uid(), 65534);
+    }
+    assert_eq!(
+        fs::read_link(tree.0.path().join("destination/dangling")).unwrap(),
+        Path::new("missing")
+    );
+    assert_eq!(
+        fs::read_link(tree.0.path().join("destination/source-link")).unwrap(),
+        outside
+    );
+    assert!(!tree.0.path().join("stage").exists());
+
+    fs::create_dir_all(tree.0.path().join("empty/payload")).unwrap();
+    success(command(
+        true,
+        tree.0.path(),
+        "chown",
+        &["-R", "0:0", "empty"],
+    ));
+    success(command(true, tree.0.path(), "chmod", &["0700", "empty"]));
+    success(script(
+        true,
+        tree.0.path(),
+        &["handoff", "empty", USER, USER],
+    ));
+    success(minimal_install(&tree, &tools, "empty", "empty-destination"));
+    assert!(tree.0.path().join("empty-destination").is_dir());
+    assert!(!tree.0.path().join("empty").exists());
+}

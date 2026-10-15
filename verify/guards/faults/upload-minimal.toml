@@ -1,0 +1,50 @@
+[[fault]]
+id = "upload-minimal-no-find"
+guard = "minimal_tools_install_hidden_and_unusual_names_without_following_links"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "upload_ownership", "--", "--ignored", "--exact", "minimal_tools_install_hidden_and_unusual_names_without_following_links"]
+expect = "test-failed"
+suite = "rust"
+untraced = "The ownership test uses setuid sudo, which ptrace suppresses."
+patch = "verify/guards/faults/upload-minimal-find.patch"
+
+[[fault]]
+id = "upload-minimal-hidden"
+guard = "minimal_tools_install_hidden_and_unusual_names_without_following_links"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "upload_ownership", "--", "--ignored", "--exact", "minimal_tools_install_hidden_and_unusual_names_without_following_links"]
+expect = "test-failed"
+suite = "rust"
+untraced = "The ownership test uses setuid sudo, which ptrace suppresses."
+transform = { file = "crates/microvms-app/src/session/upload.sh", replace = 'for entry in "$1"/* "$1"/.[!.]* "$1"/..?*;', with = 'for entry in "$1"/*;' }
+
+[[fault]]
+id = "upload-minimal-source-link"
+guard = "minimal_tools_install_hidden_and_unusual_names_without_following_links"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "upload_ownership", "--", "--ignored", "--exact", "minimal_tools_install_hidden_and_unusual_names_without_following_links"]
+expect = "test-failed"
+suite = "rust"
+untraced = "The ownership test uses setuid sudo, which ptrace suppresses."
+transform = { file = "crates/microvms-app/src/session/upload.sh", replace = '[ ! -L "$1" ] || return 0', with = ': # source link skip removed' }
+
+[[fault]]
+id = "upload-minimal-clear-shellopts"
+guard = "session::upload::tests::nonroot_uploads_stage_then_chown_as_root_then_install_as_default_user"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::upload::tests::nonroot_uploads_stage_then_chown_as_root_then_install_as_default_user"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = '            ("SHELLOPTS".into(), String::new()),', with = '' }
+
+[[fault]]
+id = "upload-minimal-clear-bashopts"
+guard = "session::upload::tests::nonroot_uploads_stage_then_chown_as_root_then_install_as_default_user"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::upload::tests::nonroot_uploads_stage_then_chown_as_root_then_install_as_default_user"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = '            ("BASHOPTS".into(), String::new()),', with = '' }
+
+[[fault]]
+id = "upload-minimal-clear-globignore"
+guard = "session::upload::tests::nonroot_uploads_stage_then_chown_as_root_then_install_as_default_user"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::upload::tests::nonroot_uploads_stage_then_chown_as_root_then_install_as_default_user"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = '            ("GLOBIGNORE".into(), String::new()),', with = '' }
