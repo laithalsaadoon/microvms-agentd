@@ -122,6 +122,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "default_user",
             "platform_measurements",
             "capability_policy",
+            "poweroff",
         ],
         help="run one self-contained section instead of the suite: it builds its own image",
     )

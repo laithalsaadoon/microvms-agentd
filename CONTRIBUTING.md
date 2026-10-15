@@ -37,6 +37,11 @@ The Linux Rust, mutation, and seeded-fault CI jobs opt into allowing these
 namespaces when Ubuntu's AppArmor restriction blocks them; other jobs keep
 the runner's default restriction.
 
+The daemon's power-off tests need Linux user, PID, and mount namespaces,
+`unshare` from util-linux, and `ip` from iproute2. They use a private `/proc` mount
+so other host processes cannot delay their exit checks. When this isolation is unavailable,
+the normal test command fails rather than skipping the tests.
+
 Useful checks while iterating:
 
 ```bash

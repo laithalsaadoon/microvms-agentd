@@ -45,6 +45,7 @@ mod exec_start_fuzz;
 pub mod fs;
 pub mod hook_handlers;
 pub mod identity;
+pub mod poweroff;
 pub mod routes;
 pub mod schema;
 pub mod serve;

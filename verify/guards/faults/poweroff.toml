@@ -1,0 +1,98 @@
+# Opt-in guest shutdown (#614). The new field and injected service are absent on the base,
+# so these compiling mutants prove refusal, ordering, observation, and failure reporting.
+
+[[fault]]
+id = "poweroff-before-group-exit"
+guard = "exec::tests::poweroff_waits_for_the_original_group_after_publishing_the_result"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec::tests::poweroff_waits_for_the_original_group_after_publishing_the_result"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/poweroff.rs", replace = "            if empty {", with = "            if empty || true {" }
+
+[[fault]]
+id = "poweroff-live-worker-ignored"
+guard = "exec::tests::poweroff_waits_for_workers_after_their_main_thread_exits"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec::tests::poweroff_waits_for_workers_after_their_main_thread_exits"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/exec.rs", replace = "    if threads == 0 || (matches!(state, \"Z\" | \"X\") && threads == 1) {", with = "    if threads == 0 || matches!(state, \"Z\" | \"X\") {" }
+
+[[fault]]
+id = "poweroff-oversized-thread-count-accepted"
+guard = "poweroff::tests::oversized_thread_counts_cannot_prove_group_completion"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "poweroff::tests::oversized_thread_counts_cannot_prove_group_completion"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/poweroff.rs", replace = "    let threads: u32 = fields", with = "    let threads: u64 = fields" }
+
+[[fault]]
+id = "poweroff-daemon-privilege-ignored"
+guard = "exec::tests::poweroff_unavailable_refuses_start_without_registering_or_spawning"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec::tests::poweroff_unavailable_refuses_start_without_registering_or_spawning"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/exec.rs", replace = "    if req.poweroff_on_exit\n", with = "    if false && req.poweroff_on_exit\n" }
+
+[[fault]]
+id = "poweroff-peer-support-ignored"
+guard = "session::tests::poweroff_requires_explicit_peer_support_before_starting"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::tests::poweroff_requires_explicit_peer_support_before_starting"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/session/mod.rs", replace = "        if req.poweroff_on_exit {", with = "        if false && req.poweroff_on_exit {" }
+
+[[fault]]
+id = "poweroff-false-wire-field"
+guard = "exec::tests::poweroff_defaults_to_absent_and_true_round_trips"
+run = ["cargo", "test", "-p", "microvms-protocol", "--lib", "--", "--exact", "exec::tests::poweroff_defaults_to_absent_and_true_round_trips"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/protocol/src/exec.rs", replace = "    #[serde(default, skip_serializing_if = \"is_false\")]", with = "    #[serde(default)]" }
+
+[[fault]]
+id = "poweroff-pid-identity-ignored"
+guard = "poweroff::tests::fork_exit_churn_and_pid_reuse_cannot_prove_group_completion"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "poweroff::tests::fork_exit_churn_and_pid_reuse_cannot_prove_group_completion"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/poweroff.rs", replace = "            first == second && first.values().all(|p| p.live_group != Some(pgid))", with = "            let _ = second; first.values().all(|p| p.live_group != Some(pgid))" }
+
+[[fault]]
+id = "poweroff-syscall-failure-hidden"
+guard = "poweroff::tests::a_failed_shutdown_is_reported_as_failure"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "poweroff::tests::a_failed_shutdown_is_reported_as_failure"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/poweroff.rs", replace = "                    return Err(error);", with = "                    let _ = error; return Ok(());" }
+
+[[fault]]
+id = "poweroff-cli-forwarding"
+guard = "guards::exec::exec_poweroff_is_opt_in_and_requires_daemon_support"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::exec::exec_poweroff_is_opt_in_and_requires_daemon_support"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-cli/src/commands/attached.rs", replace = "            poweroff_on_exit: args.poweroff_on_exit,", with = "            poweroff_on_exit: false," }
+
+[[fault]]
+id = "poweroff-host-permitted-only"
+guard = "poweroff::tests::host_requires_sys_boot_to_be_effective_as_well_as_permitted"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "poweroff::tests::host_requires_sys_boot_to_be_effective_as_well_as_permitted"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/poweroff.rs", replace = "if caps.effective.contains(required) && caps.permitted.contains(required)", with = "if caps.effective.contains(required) || caps.permitted.contains(required)" }
+
+[[fault]]
+id = "poweroff-procfs-read-error"
+guard = "poweroff::tests::group_observation_excludes_zombies_but_refuses_missing_and_malformed_records"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "poweroff::tests::group_observation_excludes_zombies_but_refuses_missing_and_malformed_records"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/poweroff.rs", replace = "Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),", with = "Err(_error) if true => return Ok(None)," }
+
+[[fault]]
+id = "poweroff-startup-noop"
+guard = "daemon_startup_serves_health_with_host_poweroff_support"
+run = ["cargo", "test", "-p", "agentd", "--test", "poweroff_startup", "--", "--exact", "daemon_startup_serves_health_with_host_poweroff_support"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/main.rs", replace = "async fn run(config: Config) -> std::io::Result<()> {", with = "async fn run(config: Config) -> std::io::Result<()> {\n    return Ok(());" }

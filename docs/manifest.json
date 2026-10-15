@@ -10,6 +10,7 @@
       "clientGraceSeconds": 60.0,
       "exec": {
         "inheritImageEnv": false,
+        "poweroffOnExit": false,
         "reapGroupOnExit": false,
         "shell": false,
         "stdin": false
@@ -1500,6 +1501,15 @@
             "default": null,
             "help": "Signal the command's whole process group once its own child exits",
             "name": "reap",
+            "positional": false,
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Power off the guest after this exec's original process group exits. Requires a supporting daemon with CAP_SYS_BOOT. Other work ends too; start acknowledgment and results may race shutdown. Does not prevent idle suspend",
+            "name": "poweroff-on-exit",
             "positional": false,
             "required": false,
             "type": "boolean"

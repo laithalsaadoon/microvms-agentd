@@ -21,7 +21,7 @@ index a6c5c04..caa2947 100644
 +/// it: state, ppid, pgrp, so pgrp is index 2. A `Z` state is a process that has
 +/// exited and not yet been reaped; it holds no pipe and runs nothing, so listing it
 +/// as live would make a killed group look like a survivor.
-+fn live_pgrp(stat: &str) -> Option<u32> {
++pub(crate) fn live_pgrp(stat: &str) -> Option<u32> {
      let after_comm = &stat[stat.rfind(')')? + 1..];
 -    let fields: Vec<_> = after_comm.split_whitespace().collect();
 -    let state = *fields.first()?;

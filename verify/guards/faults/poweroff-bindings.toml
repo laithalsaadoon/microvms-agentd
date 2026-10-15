@@ -1,0 +1,17 @@
+# Binding forwarding is separate from shared peer negotiation.
+
+[[fault]]
+id = "poweroff-python-forwarding"
+guard = "bindings/microvms-py/tests/test_run_to_completion.py::test_poweroff_is_forwarded_and_unsupported_peers_cannot_start[run]"
+run = [["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_run_to_completion.py", "-k", "poweroff"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "bindings/microvms-py/src/session.rs", replace = "        .with_poweroff_on_exit(poweroff_on_exit)", with = "        .with_poweroff_on_exit(false)" }
+
+[[fault]]
+id = "poweroff-node-forwarding"
+guard = "run forwards poweroffOnExit and refuses unsupported peers"
+run = [["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"], ["node", "--test", "--test-reporter=tap", "--test-name-pattern", "poweroff", "bindings/microvms-js/__test__/run_to_completion.mjs"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "bindings/microvms-js/src/session.rs", replace = "            request = request.with_poweroff_on_exit(poweroff);", with = "            request = request.with_poweroff_on_exit(false && poweroff);" }

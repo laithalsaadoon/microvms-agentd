@@ -264,6 +264,38 @@ flag defaults to false and the default is the contract above: a backgrounded
 grandchild that keeps writing is a feature for the caller who did not set it.
 `reap` on a procs entry echoes what the start request asked.
 
+**Guest power-off is a separate opt-in.** `poweroff_on_exit: true` asks the
+daemon to request guest power-off after the exec's original process group has
+no live members. The default is false, and clients omit a false value from the
+JSON body. Before sending true, clients require `microvm-poweroff-on-exit: 1`
+on `GET /v1/health`. Missing or other values refuse the operation locally;
+older daemons must not silently ignore the request. The daemon advertises `1`
+only while its own effective and permitted capabilities include `CAP_SYS_BOOT`.
+Otherwise, it rejects a true start with HTTP 400 `poweroff_unavailable` before
+spawning. It does not raise capabilities or run a shell to shut down the guest.
+
+The daemon stores the normal exec result before it checks for group exit.
+It counts a zombie as dead only when all its other threads have exited.
+The check needs two scans with the same PIDs, start times, and live groups.
+If a process vanishes during a scan, the check waits for the next scan.
+It stops with an error if it cannot read or parse a record, and never sends
+signals. Shutdown can wait indefinitely if other processes keep starting or
+exiting during each scan.
+`reap_group_on_exit` remains independent: when true, it may stop group
+members before the shutdown task observes them gone.
+Processes that escape with `setsid` or `setpgid` are outside the original group.
+
+Power-off ends all other work in the VM too. A short command can shut down before
+its start reply or result reaches the client. The option leaves the VM's idle
+timer unchanged, so the platform can suspend it and pause this task. The daemon
+rechecks its capabilities before the syscall and logs a failed request without
+claiming termination. Seccomp can still block the syscall after that check.
+Billing stop remains unverified even after the service reports `TERMINATED`.
+
+Use `microvm exec --poweroff-on-exit`. Python execution methods use
+`poweroff_on_exit=True`, and Node execution options use `poweroffOnExit: true`.
+Use it only when losing the entire VM and its remaining results is acceptable.
+
 ## The launch environment
 
 The run-hook payload may carry an `env` map alongside `agent_token`. It becomes

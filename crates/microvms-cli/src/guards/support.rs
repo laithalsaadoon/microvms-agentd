@@ -15,6 +15,7 @@ use std::time::Duration;
 use microvms_core::control::transport::{Call, Reply, Transport};
 use microvms_core::control::{Clock, ControlPlane};
 use microvms_core::prelude::*;
+use microvms_core::protocol;
 use microvms_core::sandbox::Sandbox;
 use microvms_core::session::Session;
 use microvms_core::testing::YieldingClock;
@@ -679,6 +680,7 @@ pub(super) fn script_prov_build(transport: &ScriptedTransport) {
 pub(super) struct DaemonScript {
     endpoint: String,
     use_http: bool,
+    poweroff_support: bool,
     seen: Mutex<Vec<microvms_core::session::HttpRequest>>,
     pub(super) replies: Mutex<std::collections::VecDeque<(u16, Vec<u8>)>>,
     /// Chunk sequences for `open_stream`, front to back.
@@ -694,6 +696,7 @@ impl DaemonScript {
         Arc::new(Self {
             endpoint,
             use_http: false,
+            poweroff_support: false,
             seen: Mutex::new(Vec::new()),
             replies: Mutex::new(std::collections::VecDeque::new()),
             streams: Mutex::new(std::collections::VecDeque::new()),
@@ -704,6 +707,13 @@ impl DaemonScript {
         let mut script = Self::at_endpoint(endpoint);
         Arc::get_mut(&mut script).expect("unshared script").use_http = true;
         script
+    }
+
+    pub(super) fn with_poweroff_support(mut self: Arc<Self>) -> Arc<Self> {
+        Arc::get_mut(&mut self)
+            .expect("unshared script")
+            .poweroff_support = true;
+        self
     }
 
     /// Queues one non-streaming reply.
@@ -752,6 +762,13 @@ impl microvms_core::session::HttpBackend for DaemonScript {
         request: microvms_core::session::HttpRequest,
     ) -> BoxFuture<'_, Result<microvms_core::session::HttpResponse, Error>> {
         let described = format!("{} {}", request.method, request.path);
+        let headers = if self.poweroff_support && request.path == "/v1/health" {
+            [(protocol::health::POWEROFF_ON_EXIT_HEADER.into(), "1".into())]
+                .into_iter()
+                .collect()
+        } else {
+            std::collections::HashMap::new()
+        };
         self.seen.lock().expect("not poisoned").push(request);
         let reply = self
             .replies
@@ -762,7 +779,7 @@ impl microvms_core::session::HttpBackend for DaemonScript {
         Box::pin(async move {
             Ok(microvms_core::session::HttpResponse {
                 status: reply.0,
-                headers: std::collections::HashMap::new(),
+                headers,
                 body: reply.1,
             })
         })
@@ -907,6 +924,7 @@ pub(super) fn exec_command(shape: impl FnOnce(&mut ExecArgs)) -> Command {
         from_offset: None,
         stdin: false,
         reap: false,
+        poweroff_on_exit: false,
         kill_on_timeout: false,
         attach: AttachFlags {
             state_dir: Some(std::env::temp_dir().join(format!(

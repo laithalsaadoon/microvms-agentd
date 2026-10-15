@@ -1484,6 +1484,12 @@ pub struct ExecArgs {
     #[arg(long, conflicts_with = "poll")]
     pub reap: bool,
 
+    /// Power off the guest after this exec's original process group exits.
+    /// Requires a supporting daemon with CAP_SYS_BOOT. Other work ends too; start
+    /// acknowledgment and results may race shutdown. Does not prevent idle suspend.
+    #[arg(long, conflicts_with = "poll")]
+    pub poweroff_on_exit: bool,
+
     /// On `ERR_TIMEOUT`, stop the exec rather than leaving it running.
     ///
     /// A plain `--timeout` is a client-side deadline: it abandons the exec and the command

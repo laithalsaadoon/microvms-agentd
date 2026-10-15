@@ -59,6 +59,7 @@ from lanes.local import drive_doctor_region, drive_local_commands, drive_preflig
 from lanes.names import drive_named_vm
 from lanes.platform_measurements import drive_platform_measurements
 from lanes.posture import drive_platform_posture, drive_posture_parity
+from lanes.poweroff import drive_poweroff
 from lanes.project_build import drive_project_build
 from lanes.quickstart import drive_provisioned_quickstart
 from lanes.sessions import (
@@ -120,6 +121,7 @@ def run_suite(args: argparse.Namespace) -> int:
         "default_user",
         "platform_measurements",
         "capability_policy",
+        "poweroff",
     }:
         # A targeted run of the one section that owns everything it creates: no suite VM,
         # no suite build, the same named checks and the same independent cleanup.
@@ -128,6 +130,7 @@ def run_suite(args: argparse.Namespace) -> int:
             "default_user": drive_default_user,
             "capability_policy": drive_capability_policy,
             "platform_measurements": drive_platform_measurements,
+            "poweroff": drive_poweroff,
         }[args.only]
         run_section(
             results,
@@ -454,6 +457,7 @@ def run_suite(args: argparse.Namespace) -> int:
                 aws,
                 results,
             )
+            run_section(results, "poweroff", drive_poweroff, cli, binary, aws, results)
             # Version skew (#298) beside them: this tree's CLI builds an image around the
             # previous release's daemon, and the previous release's CLI launches the suite's
             # image, so an upgrade of either side alone is run end to end.

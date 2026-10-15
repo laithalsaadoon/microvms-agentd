@@ -291,6 +291,7 @@ pub async fn exec<O: std::io::Write, E: std::io::Write>(
             shell: args.shell.clone(),
             inherit_image_env: args.inherit_image_env,
             reap: args.reap,
+            poweroff_on_exit: args.poweroff_on_exit,
         })
         // The daemon's own deadline, only when the caller asked for one. `--timeout` is this
         // process's wait, and it never becomes the daemon's budget (`start_request` says why).

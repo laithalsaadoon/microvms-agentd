@@ -3050,7 +3050,7 @@ class Session:
         and no `Deref`, so "treat `authToken` as a string" is as inexpressible here as it
         is there (TRAP-7).
         """
-    def run(self, /, command: Sequence[str] |str, *, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, inherit_image_env: bool = False) -> ExecHandle:
+    def run(self, /, command: Sequence[str] |str, *, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, poweroff_on_exit: bool = False, inherit_image_env: bool = False) -> ExecHandle:
         """
         Starts a command and returns its handle. Does not wait.
         
@@ -3071,23 +3071,26 @@ class Session:
         `reap_group_on_exit` asks the daemon to signal the whole process group once the
         command's own child exits, so nothing it backgrounded outlives it; off by default,
         which keeps the backgrounded-grandchild-output guarantee for callers who rely on it.
+        `poweroff_on_exit` asks a supporting daemon to power off the whole guest after
+        the original process group has no live members. Other work ends too, and the
+        start acknowledgment or result can be lost. It does not keep an idle VM awake.
         """
-    async def run_async(self, /, command: Sequence[str] |str, *, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, inherit_image_env: bool = False) -> ExecHandle:
+    async def run_async(self, /, command: Sequence[str] |str, *, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, poweroff_on_exit: bool = False, inherit_image_env: bool = False) -> ExecHandle:
         """
         The awaitable twin of `run`, with its keywords. Cancelling it before the daemon
         answers may leave the exec started, under the `exec_id` the call was given or minted;
         `Session.exec(exec_id)` reaches it, which is why a caller that cancels passes one.
         """
-    def run_sync(self, /, command: Sequence[str] |str, *, timeout: float = ..., shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, inherit_image_env: bool = False) -> ExecResult:
+    def run_sync(self, /, command: Sequence[str] |str, *, timeout: float = ..., shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, poweroff_on_exit: bool = False, inherit_image_env: bool = False) -> ExecResult:
         """
         Start, wait, ack. The one-shot shape, for when output is all you want.
         """
-    async def run_sync_async(self, /, command: Sequence[str] |str, *, timeout: float = ..., shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, inherit_image_env: bool = False) -> ExecResult:
+    async def run_sync_async(self, /, command: Sequence[str] |str, *, timeout: float = ..., shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, poweroff_on_exit: bool = False, inherit_image_env: bool = False) -> ExecResult:
         """
         The awaitable twin of `run_sync`, with its keywords. Cancelling it stops the wait,
         as a `timeout` would: the exec keeps running and its output stays until acked.
         """
-    def run_to_completion(self, /, command: Sequence[str] |str, *, on_output: Any |None = None, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, exec_id: str |None = None, reap_group_on_exit: bool = False, inherit_image_env: bool = False, client_grace_sec: float = ...) -> ExecResult:
+    def run_to_completion(self, /, command: Sequence[str] |str, *, on_output: Any |None = None, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, exec_id: str |None = None, reap_group_on_exit: bool = False, poweroff_on_exit: bool = False, inherit_image_env: bool = False, client_grace_sec: float = ...) -> ExecResult:
         """
         Start, stream, and collect one command: exactly one `ExecResult` back (BIND-6..10).
         
@@ -3101,11 +3104,11 @@ class Session:
         
         An exception from `on_output` stops delivery; the exec is still waited for and acked
         so nothing is left behind, and then the exception is re-raised. `shell`, `user`,
-        `group`, `reap_group_on_exit` and `inherit_image_env` mean what they mean on `run()`:
+        `group`, `reap_group_on_exit`, `poweroff_on_exit` and `inherit_image_env` mean what they mean on `run()`:
         `shell="bash"` with a script string runs it under bash, which dash-based images need for
         `pipefail`.
         """
-    async def run_to_completion_async(self, /, command: Sequence[str] |str, *, on_output: Any |None = None, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, exec_id: str |None = None, reap_group_on_exit: bool = False, inherit_image_env: bool = False, client_grace_sec: float = ...) -> ExecResult:
+    async def run_to_completion_async(self, /, command: Sequence[str] |str, *, on_output: Any |None = None, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, exec_id: str |None = None, reap_group_on_exit: bool = False, poweroff_on_exit: bool = False, inherit_image_env: bool = False, client_grace_sec: float = ...) -> ExecResult:
         """
         The awaitable twin of `run_to_completion`, with its keywords.
         
@@ -3116,7 +3119,7 @@ class Session:
         waited for and acked, as in `run_to_completion`. Cancelling the call stops the drive and
         leaves the exec running in the VM.
         """
-    def spawn(self, /, command: Sequence[str] |str, *, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, inherit_image_env: bool = False, offset: int = 0, reconnect: bool = True, max_reconnects: int |None = None, idle_timeout: float |None = None, gap_policy: str |None = None) -> ExecProcess:
+    def spawn(self, /, command: Sequence[str] |str, *, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, poweroff_on_exit: bool = False, inherit_image_env: bool = False, offset: int = 0, reconnect: bool = True, max_reconnects: int |None = None, idle_timeout: float |None = None, gap_policy: str |None = None) -> ExecProcess:
         """
         Starts a command and returns it as two byte iterators, a `wait()`, and a `kill()`.
         
@@ -3133,7 +3136,7 @@ class Session:
         `proc.gaps` and keeps both going. `offset`, `reconnect`, `max_reconnects` and
         `idle_timeout` are `ExecHandle.stream()`'s.
         """
-    async def spawn_async(self, /, command: Sequence[str] |str, *, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, inherit_image_env: bool = False, offset: int = 0, reconnect: bool = True, max_reconnects: int |None = None, idle_timeout: float |None = None, gap_policy: str |None = None) -> ExecProcess:
+    async def spawn_async(self, /, command: Sequence[str] |str, *, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, poweroff_on_exit: bool = False, inherit_image_env: bool = False, offset: int = 0, reconnect: bool = True, max_reconnects: int |None = None, idle_timeout: float |None = None, gap_policy: str |None = None) -> ExecProcess:
         """
         The awaitable twin of `spawn`, with its keywords. The process it answers iterates
         with `async for` as well as `for`; cancelling the call is `run_async`'s.

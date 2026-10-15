@@ -28,6 +28,16 @@ root, so that user can read an uploaded tree but can't write into it. An authori
 caller can still execute as root by asking for `root` or `0`, and workload hook
 handlers still run as root.
 
+An authorized start with `poweroff_on_exit: true` also delegates guest shutdown
+to the daemon after that exec's original process group exits. This can end
+unrelated work and lose results from the VM, even when the exec runs as an
+unprivileged user. The daemon needs its own effective and permitted
+`CAP_SYS_BOOT` for this request and leaves the workload's capabilities unchanged.
+This API remains available to an authorized caller while those daemon
+capabilities remain, even if the workload has no capabilities. See
+[Protocol](PROTOCOL.md) for support negotiation, observation limits, and failure
+reporting.
+
 ## Platform isolation guarantees
 
 An image may enable `AGENTD_DROP_EXEC_CAPABILITIES=true` to remove selected

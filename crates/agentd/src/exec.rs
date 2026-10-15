@@ -360,6 +360,15 @@ pub async fn start(
 
     // Validated here, before anything is spawned. Doing it in the waiter left a
     // running child with nobody to reap it.
+    if req.poweroff_on_exit
+        && let Err(error) = state.poweroff().check()
+    {
+        return fail(
+            StatusCode::BAD_REQUEST,
+            protocol::exec::ERROR_POWEROFF_UNAVAILABLE,
+            error.to_string(),
+        );
+    }
     let timeout = match validate_timeout(req.timeout_sec) {
         Ok(timeout) => timeout,
         Err(detail) => return fail(StatusCode::BAD_REQUEST, ERROR_MALFORMED_REQUEST, detail),
@@ -398,6 +407,7 @@ pub async fn start(
         command,
         timeout,
         req.reap_group_on_exit,
+        req.poweroff_on_exit.then(|| state.poweroff()),
     ) {
         Ok(()) => (
             StatusCode::OK,
@@ -1304,6 +1314,7 @@ fn spawn(
     mut command: Command,
     timeout: Option<Duration>,
     reap: bool,
+    poweroff: Option<crate::poweroff::Poweroff>,
 ) -> std::io::Result<()> {
     let mut child = command.spawn()?;
 
@@ -1384,6 +1395,18 @@ fn spawn(
         // pipe fd alive for an entry that may sit until its TTL.
         drop(shared.stdin.lock().await.take());
         let _ = shared.live.send(Frame::Finished);
+        if let Some(poweroff) = poweroff {
+            match pgid {
+                Some(pgid) => {
+                    if let Err(error) = poweroff.after_group_exit(pgid).await {
+                        tracing::error!(exec_id = %owned_id, %error, "guest power-off failed; termination is not confirmed");
+                    }
+                }
+                None => {
+                    tracing::error!(exec_id = %owned_id, "guest power-off refused: no process group was captured")
+                }
+            }
+        }
     });
 
     Ok(())
@@ -1727,6 +1750,48 @@ mod tests {
         StartRequest::new(id, argv.iter().map(|s| s.to_string()).collect())
     }
 
+    /// Exercise the real procfs observer without unrelated host process churn.
+    /// The child verifies both its PID namespace and the matching procfs mount;
+    /// unavailable namespaces fail the test instead of skipping its assertions.
+    fn delegate_to_private_proc_namespace(test_name: &str) -> bool {
+        const CHILD: &str = "AGENTD_POWEROFF_TEST_CHILD";
+        if std::env::var(CHILD).as_deref() == Ok(test_name) {
+            assert_eq!(
+                std::process::id(),
+                1,
+                "the test needs a private PID namespace"
+            );
+            assert_eq!(
+                std::fs::read_link("/proc/self").expect("read private procfs"),
+                Path::new("1"),
+                "procfs must describe the private PID namespace"
+            );
+            return false;
+        }
+        let output = std::process::Command::new("unshare")
+            .args([
+                "--user",
+                "--map-root-user",
+                "--pid",
+                "--fork",
+                "--kill-child",
+                "--mount-proc",
+            ])
+            .arg(std::env::current_exe().expect("test executable"))
+            .args(["--exact", test_name, "--nocapture"])
+            .env(CHILD, test_name)
+            .output()
+            .expect("run unshare; install util-linux and enable user/PID/mount namespaces");
+        assert!(
+            output.status.success(),
+            "isolated test failed: {}\nstdout: {}\nstderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        true
+    }
+
     /// Drives an exec to completion the way the daemon does, then returns the
     /// outcome. Polls the shared slot rather than sleeping a fixed interval, so
     /// the test is fast and does not race.
@@ -1738,7 +1803,7 @@ mod tests {
         let id = req.exec_id.clone();
         let timeout = validate_timeout(req.timeout_sec).expect("valid timeout");
         let command = build_command(&req, state).expect("buildable command");
-        spawn(state, &id, command, timeout, req.reap_group_on_exit).expect("spawn");
+        spawn(state, &id, command, timeout, req.reap_group_on_exit, None).expect("spawn");
         await_result(state, &id).await
     }
 
@@ -1917,7 +1982,15 @@ mod tests {
         let id = request.exec_id.clone();
         let timeout = validate_timeout(request.timeout_sec).expect("valid timeout");
         let command = build_command(&request, state).expect("buildable command");
-        spawn(state, &id, command, timeout, request.reap_group_on_exit).expect("spawn");
+        spawn(
+            state,
+            &id,
+            command,
+            timeout,
+            request.reap_group_on_exit,
+            None,
+        )
+        .expect("spawn");
     }
 
     fn stdin_body(data: Option<&str>, signal: Option<&str>) -> StdinRequest {
@@ -1934,6 +2007,203 @@ mod tests {
         assert_eq!(outcome.exit_code, Some(0));
         assert_eq!(outcome.stdout.trim(), "hi");
         assert!(!outcome.truncated);
+    }
+
+    #[tokio::test]
+    async fn poweroff_unavailable_refuses_start_without_registering_or_spawning() {
+        let state = state();
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("spawned");
+        let request = req(
+            "poweroff-denied",
+            &["/usr/bin/touch", marker.to_str().unwrap()],
+        )
+        .with_poweroff_on_exit(true);
+        let response = start(State(state.clone()), Ok(Json(request))).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(body_json(response).await["error"], "poweroff_unavailable");
+        assert!(state.with_execs(|execs| execs.is_empty()));
+        assert!(!marker.exists());
+    }
+
+    #[tokio::test]
+    /// AGENTD-25: the shutdown opt-in waits for group completion after publication.
+    async fn poweroff_waits_for_the_original_group_after_publishing_the_result() {
+        if delegate_to_private_proc_namespace(
+            "exec::tests::poweroff_waits_for_the_original_group_after_publishing_the_result",
+        ) {
+            return;
+        }
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        for enabled in [false, true] {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let observed = calls.clone();
+            let probes = Arc::new(AtomicUsize::new(0));
+            let nonempty = probes.clone();
+            let poweroff = crate::poweroff::Poweroff::testing(
+                Arc::new(|| Ok(())),
+                Arc::new(move || {
+                    observed.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                }),
+                Arc::new(move |pgid| {
+                    let empty = crate::poweroff::group_empty(Path::new("/proc"), pgid)?;
+                    if !empty {
+                        nonempty.fetch_add(1, Ordering::SeqCst);
+                    }
+                    Ok(empty)
+                }),
+            );
+            let state = AppState::with_services(
+                Config::default(),
+                crate::disk::available_bytes,
+                crate::identity::no_repair(),
+                None,
+                poweroff,
+            );
+            let dir = tempfile::tempdir().unwrap();
+            let marker = dir.path().join("release");
+            // The bounded child avoids leaving work behind even if an assertion
+            // fails. Redirected pipes let the direct child's result publish while
+            // the original process group is still alive.
+            let request = req("poweroff-group", &[
+                "/bin/sh", "-c",
+                "(i=0; while [ ! -e \"$1\" ] && [ \"$i\" -lt 500 ]; do sleep .02; i=$((i+1)); done) >/dev/null 2>&1 & echo ready",
+                "sh", marker.to_str().unwrap(),
+            ]).with_poweroff_on_exit(enabled);
+            let response = start(State(state.clone()), Ok(Json(request))).await;
+            assert_eq!(response.status(), StatusCode::OK);
+            let outcome = await_result(&state, "poweroff-group").await;
+            assert_eq!(outcome.exit_code, Some(0));
+            assert_eq!(outcome.stdout.trim(), "ready");
+            if enabled {
+                // A second nonempty probe proves the first monitor iteration chose
+                // to wait. Publication alone does not mean the monitor has run,
+                // especially under tracing; an early action must fail this barrier.
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    while probes.load(Ordering::SeqCst) < 2 && calls.load(Ordering::SeqCst) == 0 {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                })
+                .await
+                .expect("the poweroff monitor observes the held group");
+            }
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                0,
+                "a live group postpones shutdown"
+            );
+            std::fs::write(marker, "release").unwrap();
+            if enabled {
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    while calls.load(Ordering::SeqCst) == 0 {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                })
+                .await
+                .expect("poweroff follows group completion");
+            } else {
+                tokio::time::sleep(Duration::from_millis(150)).await;
+            }
+            assert_eq!(calls.load(Ordering::SeqCst), usize::from(enabled));
+        }
+    }
+
+    /// AGENTD-25: a zombie main thread does not hide the process's live workers.
+    #[tokio::test]
+    async fn poweroff_waits_for_workers_after_their_main_thread_exits() {
+        if delegate_to_private_proc_namespace(
+            "exec::tests::poweroff_waits_for_workers_after_their_main_thread_exits",
+        ) {
+            return;
+        }
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = calls.clone();
+        let poweroff = crate::poweroff::Poweroff::testing(
+            Arc::new(|| Ok(())),
+            Arc::new(move || {
+                observed.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }),
+            Arc::new(|pgid| crate::poweroff::group_empty(Path::new("/proc"), pgid)),
+        );
+        let state = AppState::with_services(
+            Config::default(),
+            crate::disk::available_bytes,
+            crate::identity::no_repair(),
+            None,
+            poweroff,
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("release-thread");
+        // Python supplies a portable pthread wrapper for this Linux regression.
+        // The worker is bounded so a failed assertion does not leave a process.
+        let worker = concat!(
+            "import ctypes, pathlib, sys, threading, time\n",
+            "def worker():\n",
+            "    for _ in range(1000):\n",
+            "        if pathlib.Path(sys.argv[1]).exists(): return\n",
+            "        time.sleep(.01)\n",
+            "threading.Thread(target=worker).start()\n",
+            "ctypes.CDLL(None).pthread_exit(None)\n",
+        );
+        let request = req(
+            "poweroff-thread",
+            &[
+                "/bin/sh",
+                "-c",
+                "python3 -c \"$1\" \"$2\" </dev/null >/dev/null 2>&1 & echo $!",
+                "sh",
+                worker,
+                marker.to_str().unwrap(),
+            ],
+        )
+        .with_poweroff_on_exit(true);
+        let response = start(State(state.clone()), Ok(Json(request))).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let outcome = await_result(&state, "poweroff-thread").await;
+        assert_eq!(outcome.exit_code, Some(0));
+        let pid: u32 = outcome.stdout.trim().parse().unwrap();
+        let stat = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+                let fields: Vec<_> = stat
+                    .rsplit_once(')')
+                    .unwrap()
+                    .1
+                    .split_whitespace()
+                    .collect();
+                if fields[0] == "Z" && fields[17].parse::<u32>().unwrap() > 1 {
+                    break stat;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("main thread exits while its worker remains alive");
+        // Feed the actual kernel record through a stable census too. Unrelated
+        // host churn must not make the negative assertion pass inconclusively.
+        let pgid = state.with_execs(|execs| execs["poweroff-thread"].pgid.unwrap());
+        let record = dir.path().join(pid.to_string());
+        std::fs::create_dir(&record).unwrap();
+        std::fs::write(record.join("stat"), stat).unwrap();
+        assert!(!crate::poweroff::group_empty(dir.path(), pgid).unwrap());
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            0,
+            "a live worker must prevent power-off"
+        );
+        std::fs::write(marker, "release").unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while calls.load(Ordering::SeqCst) == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("worker exit permits power-off");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
@@ -2317,7 +2587,7 @@ mod tests {
         let request = req("live", &["/bin/sh", "-c", "sleep 30"]);
         let timeout = validate_timeout(request.timeout_sec).expect("valid");
         let command = build_command(&request, &state).expect("buildable");
-        spawn(&state, "live", command, timeout, false).expect("spawn");
+        spawn(&state, "live", command, timeout, false, None).expect("spawn");
 
         let response = ack(State(state.clone()), Path("live".to_string())).await;
         assert_eq!(response.status(), StatusCode::CONFLICT);
@@ -2340,7 +2610,7 @@ mod tests {
         });
         let request = req("group", &["/bin/sh", "-c", "sleep 30 & echo started; wait"]);
         let command = build_command(&request, &state).expect("buildable");
-        spawn(&state, "group", command, None, false).expect("spawn");
+        spawn(&state, "group", command, None, false, None).expect("spawn");
 
         let pgid = state
             .with_execs(|execs| execs.get("group").and_then(|e| e.pgid))

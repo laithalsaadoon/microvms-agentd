@@ -276,6 +276,13 @@ pub struct StartRequest {
     /// exec is already escalated and is not escalated twice.
     #[serde(default)]
     pub reap_group_on_exit: bool,
+    /// Power off the guest after this exec's original process group has no live members.
+    /// Off by default. Requires advertised daemon support and its CAP_SYS_BOOT privilege.
+    /// Other work in the VM ends too; the start acknowledgment and exit record may be lost.
+    /// Processes that leave the group are outside this condition. This does not keep an
+    /// idle guest awake, and a terminated state does not establish when billing stops.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub poweroff_on_exit: bool,
     /// Whether the child's environment starts from the image's `ENV`.
     ///
     /// Off by default, which keeps the property the daemon has always had: nothing from
@@ -463,6 +470,8 @@ pub const ERROR_MALFORMED_REQUEST: &str = "malformed_request";
 pub const ERROR_UNKNOWN_EXEC: &str = "unknown_exec";
 /// The child could not be spawned. 500, deliberately not 404.
 pub const ERROR_SPAWN_FAILED: &str = "spawn_failed";
+/// The requested shutdown is unavailable with the daemon's current privileges.
+pub const ERROR_POWEROFF_UNAVAILABLE: &str = "poweroff_unavailable";
 /// The exec has not exited, so acking would drop output still being written.
 pub const ERROR_STILL_RUNNING: &str = "still_running";
 /// An earlier ack already released the output.
@@ -488,6 +497,10 @@ pub const ERROR_UNKNOWN_GROUP: &str = "unknown_group";
 /// A start request named a shell that no searched directory holds as an executable
 /// file. 400, and nothing was spawned; `detail` names the shell and where it looked.
 pub const ERROR_UNKNOWN_SHELL: &str = "unknown_shell";
+
+fn is_false(value: &bool) -> bool {
+    !value
+}
 
 impl StartRequest {
     /// A request to run `command` as an argv under the idempotency key `exec_id`, with
@@ -530,6 +543,7 @@ impl StartRequest {
             timeout_sec: None,
             stdin: false,
             reap_group_on_exit: false,
+            poweroff_on_exit: false,
             inherit_image_env: false,
         }
     }
@@ -580,6 +594,12 @@ impl StartRequest {
     /// Signal the exec's process group once its own child exits.
     pub fn with_reap_group_on_exit(mut self, reap: bool) -> Self {
         self.reap_group_on_exit = reap;
+        self
+    }
+
+    /// Power off the guest when this exec's original process group has exited.
+    pub fn with_poweroff_on_exit(mut self, poweroff: bool) -> Self {
+        self.poweroff_on_exit = poweroff;
         self
     }
 
@@ -831,5 +851,25 @@ mod tests {
         assert_eq!(written, r#"{"error":"unknown_exec","detail":"e1"}"#);
         let read: ErrorBody = serde_json::from_str(&written).expect("deserializes");
         assert_eq!(read.error, ERROR_UNKNOWN_EXEC);
+    }
+
+    #[test]
+    fn poweroff_defaults_to_absent_and_true_round_trips() {
+        let request = StartRequest::new("e1", vec!["true".into()]);
+        assert!(!request.poweroff_on_exit);
+        let body = serde_json::to_value(&request).unwrap();
+        assert!(body.get("poweroff_on_exit").is_none());
+        assert!(
+            !serde_json::from_value::<StartRequest>(body)
+                .unwrap()
+                .poweroff_on_exit
+        );
+        let body = serde_json::to_value(request.with_poweroff_on_exit(true)).unwrap();
+        assert_eq!(body["poweroff_on_exit"], true);
+        assert!(
+            serde_json::from_value::<StartRequest>(body)
+                .unwrap()
+                .poweroff_on_exit
+        );
     }
 }
