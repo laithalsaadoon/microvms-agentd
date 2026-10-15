@@ -18,6 +18,7 @@ exceptions:
   - gRPC
   - I
   - Kubernetes
+  - Lambda
   - Linux
   - macOS
   - Marketplace

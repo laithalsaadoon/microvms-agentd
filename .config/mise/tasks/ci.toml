@@ -123,6 +123,10 @@ run = [
   { task = "npm:package" },
 ]
 
+["ci:lambda-bindings"]
+description = "Load the Node addon from a minimal deployment in the Lambda Node.js 24 arm64 runtime"
+run = [{ task = "npm:lambda" }]
+
 ["ci:guards"]
 description = "CI's `guards` job: shard $SHARD (k/N, or all of it unset) of every suite's seeded faults, four at a time, each worker's bindings entries in an environment of its own"
 # `guards:fire`'s command as the job runs it. The job's steps add `--target-dir target`, the

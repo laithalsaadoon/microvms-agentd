@@ -95,6 +95,8 @@ cargo_mutants = "27.1.0"
 cargo_bolero = "0.13.4"
 cargo_fuzz = "0.13.2"
 lychee = "0.24.2"
+zig = "0.16.0"
+cargo_zigbuild = "0.23.4"
 
 [task_config]
 # The tasks live in `.config/mise/tasks/`, a file per area: `check.toml` holds `check`,

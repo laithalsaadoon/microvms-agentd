@@ -115,3 +115,47 @@ run = [
   { task = "dts" },
   'node --test "bindings/microvms-js/__test__/*.mjs"',
 ]
+
+["npm:lambda:build"]
+description = "Build the Node addon with the release compiler's glibc floor for Lambda"
+# A native Ubuntu build requires a newer glibc than Lambda's Amazon Linux runtime.
+# Match the release addon build's compiler and linker before testing that runtime.
+tools = { zig = "{{vars.zig}}", "cargo:cargo-zigbuild" = "{{vars.cargo_zigbuild}}" }
+shell = "bash -e -c"
+run = '''
+case "$(uname -m)" in
+  aarch64|arm64) lambda_target=aarch64-unknown-linux-gnu ;;
+  x86_64) lambda_target=x86_64-unknown-linux-gnu ;;
+  *) echo "Lambda smoke requires a Linux arm64 or x86_64 host" >&2; exit 1 ;;
+esac
+# Activate both tools explicitly when this task runs as another task's dependency.
+mise exec zig@{{vars.zig}} cargo:cargo-zigbuild@{{vars.cargo_zigbuild}} -- \
+  npx -y -p @napi-rs/cli@3.10.8 napi build --manifest-path Cargo.toml \
+  --package microvms-js --platform --release --target "$lambda_target" \
+  --cross-compile --output-dir . --cwd bindings/microvms-js
+'''
+
+["npm:lambda"]
+description = "Load the minimal Node package in the Lambda Node.js 24 runtime without AWS credentials"
+depends = ["npm:lambda:build"]
+shell = "bash -e -c"
+run = '''
+case "$(uname -m)" in
+  aarch64|arm64) lambda_arch=arm64; lambda_image_arch=arm64 ;;
+  x86_64) lambda_arch=x64; lambda_image_arch=x86_64 ;;
+  *) echo "Lambda smoke requires a Linux arm64 or x86_64 host" >&2; exit 1 ;;
+esac
+lambda_stage=$(mktemp -d)
+trap 'rm -rf "$lambda_stage"' EXIT
+mkdir -p "$lambda_stage/__test__"
+cp bindings/microvms-js/index.js bindings/microvms-js/package.json "$lambda_stage/"
+cp "bindings/microvms-js/microvms.linux-$lambda_arch-gnu.node" "$lambda_stage/"
+cp bindings/microvms-js/__test__/smoke.mjs "$lambda_stage/__test__/"
+docker run --rm --network none --read-only --tmpfs /tmp \
+  --entrypoint /var/lang/bin/node \
+  -e MICROVMS_LAMBDA_SMOKE=1 -e "MICROVMS_LAMBDA_ARCH=$lambda_arch" \
+  -e AWS_EC2_METADATA_DISABLED=true -e AWS_CONFIG_FILE=/tmp/no-config \
+  -e AWS_SHARED_CREDENTIALS_FILE=/tmp/no-credentials \
+  -v "$lambda_stage:/var/task:ro" "public.ecr.aws/lambda/nodejs:24-$lambda_image_arch" \
+  --test --test-name-pattern '^Lambda runtime' /var/task/__test__/smoke.mjs
+'''

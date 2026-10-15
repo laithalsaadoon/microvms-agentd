@@ -1,0 +1,9 @@
+# A minimal Lambda deployment must contain its platform addon.
+[[fault]]
+id = "lambda-node-missing-addon"
+guard = "Lambda runtime loads the minimal package and reaches credential resolution"
+run = ["mise", "run", "npm:lambda"]
+expect = "exit-nonzero"
+message = "Cannot find native binding"
+suite = "bindings"
+transform = { file = ".config/mise/tasks/test.toml", replace = "cp \"bindings/microvms-js/microvms.linux-$lambda_arch-gnu.node\" \"$lambda_stage/\"", with = ": \"deliberately omit the native addon\"" }

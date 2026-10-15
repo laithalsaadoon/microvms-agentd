@@ -100,6 +100,51 @@ and can collect configured artifacts after the command finishes. A raw tar
 download is an archive; it does not choose which files an application should
 restore locally.
 
+## Running inside Lambda
+
+The Node package can manage MicroVMs from a Lambda function. Match the native
+addon to the function architecture: an arm64 function uses
+`microvms.linux-arm64-gnu.node`. An x86_64 function uses
+`microvms.linux-x64-gnu.node`.
+
+A bundler such as esbuild cannot bundle the native `.node` addon. Mark
+`microvms` as external and include its loader, package manifest, and matching
+addon in the deployment zip. For an arm64 function, after installing the package:
+
+```bash
+npx esbuild handler.mjs --bundle --platform=node --target=node24 --format=esm \
+  --external:microvms --outfile=dist/handler.mjs
+mkdir -p dist/node_modules/microvms
+cp node_modules/microvms/index.js node_modules/microvms/package.json \
+  node_modules/microvms/microvms.linux-arm64-gnu.node dist/node_modules/microvms/
+(cd dist && zip -r ../function.zip .)
+```
+
+The loader tries the local addon first. Leave the other platform binaries out
+of this zip. The published package includes every supported platform.
+
+`Sandbox.create` and `ControlPlane.create` use the function's execution role
+through the default credential chain. Let that chain read Lambda's environment
+instead of passing a profile or embedding keys. Give the function role the
+permissions the handler needs. Pass the VM's own execution role to
+`sandbox.run`.
+
+If the VM should keep running after the handler returns, call
+`sandbox.detach()` first and save the VM identifier for later control-plane
+calls. You own cleanup after detaching. Returning from Lambda leaves the VM
+running.
+
+Lambda can freeze its execution environment between invocations. Background
+work such as tunnels and token refresh stops during a freeze. Finish required client work within the invocation and reconnect when
+a later invocation needs the VM.
+
+`mise run npm:lambda` checks the minimal package in the Lambda Node.js 24
+container image. It builds with the release addon compiler configuration, and
+CI runs it on arm64. It makes a control-plane call without
+networking or AWS credentials. The call must fail with `ERR_CREDENTIALS`. This checks
+runtime loading and credential resolution. A deployed Lambda invocation still
+needs live verification.
+
 ## Choose execution semantics
 
 | Need | API behavior |
