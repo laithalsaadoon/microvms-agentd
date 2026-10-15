@@ -42,6 +42,10 @@ in exactly the case that needs it. A shell trap is the only always-run primitive
 available, so `live`'s body is a sequence with one — and this guard asserts the trap is
 there and that it fires, rather than trusting the comment saying so.
 
+**4. The conformance task accepts both the full suite and selectors.** Its variadic
+arguments must be optional without inserting an empty argument. The real task body is
+rendered by mise against a local argv recorder, with no dependencies or AWS calls.
+
 The sequencing half is behavioral: it builds a throwaway repo whose `live` task body is
 **the real one, read out of the task file that defines it** (through tools/mise_config.py, the
 loader every gate that reads the tasks shares), with the suite members stubbed, and runs it
@@ -440,6 +444,80 @@ def check_sequencing(report: list[str]) -> None:
         )
 
 
+def check_conformance_args(report: list[str]) -> None:
+    """Render the shipped task with mise; only the conformance executable is a stub."""
+    task = config().tasks.get("live:conformance-rs")
+    body = task.table.get("run") if task is not None else None
+    if not isinstance(body, str):
+        say(report, False, "conformance task has a run body", "missing")
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        at = Path(tmp)
+        (at / "conformance").mkdir()
+        recorder = at / "conformance" / "run_rs.py"
+        recorder.write_text(
+            f"#!{sys.executable}\n"
+            "import json, sys\n"
+            "from pathlib import Path\n"
+            "Path('argv.json').write_text(json.dumps(sys.argv[1:]))\n",
+            encoding="utf-8",
+        )
+        recorder.chmod(0o755)
+        fixture = at / "mise.toml"
+        fixture.write_text(
+            f'[tasks."live:conformance-rs"]\nrun = {json.dumps(body)}\n',
+            encoding="utf-8",
+        )
+        # Explicitly select the dependency-free fixture, even under a mise task or
+        # git hook. Reading the caller's config here could launch the real live tier.
+        env = {
+            k: v
+            for k, v in _clean_git_env().items()
+            if not k.startswith(("MISE_", "__MISE_"))
+        } | {
+            "MISE_CONFIG_FILE": str(fixture),
+            "MISE_TRUSTED_CONFIG_PATHS": str(at),
+            "MISE_CEILING_PATHS": str(at.parent),
+            "MISE_GLOBAL_CONFIG_FILE": str(at / "no-global.toml"),
+            "MISE_CONFIG_DIR": str(at / "no-config"),
+            "MISE_TASK_RUN_AUTO_INSTALL": "false",
+            "AGENTD_TARGET": "aarch64-unknown-linux-musl",
+        }
+        fixed = [
+            "--binary",
+            "target/aarch64-unknown-linux-musl/release/agentd",
+            "--microvm-binary",
+            "target/release/microvm",
+        ]
+        for label, args in (
+            ("bare", []),
+            ("selected", ["--only", "poweroff"]),
+            (
+                "measurement",
+                ["--only", "platform_measurements", "--measurement-variant", "cold"],
+            ),
+            ("spaced", ["--infra-dir", "path with spaces"]),
+        ):
+            output = at / "argv.json"
+            output.unlink(missing_ok=True)
+            done = subprocess.run(
+                ["mise", "run", "--skip-tools", "live:conformance-rs"]
+                + (["--", *args] if args else []),
+                cwd=at,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            actual = json.loads(output.read_text()) if output.exists() else None
+            say(
+                report,
+                done.returncode == 0 and actual == fixed + args,
+                f"{label} conformance task preserves argv",
+                f"exit {done.returncode}, argv {actual!r}",
+            )
+
+
 # ── reporting ────────────────────────────────────────────────────────────────
 
 
@@ -456,6 +534,8 @@ def check() -> int:
     check_marker_path(report)
     print("-- 2 and 3. the sequencing, and the trap that survives a failure --")
     check_sequencing(report)
+    print("-- 4. optional conformance arguments through mise --")
+    check_conformance_args(report)
     if report:
         print("\nlive wiring: the tier would not do what its comments say")
         for line in report:
@@ -463,7 +543,8 @@ def check() -> int:
         return 1
     print(
         "\nlive wiring: the marker resolves in both repo shapes; the leak check runs "
-        "after\nthe suite and on the failure path; the marker records successes only"
+        "after\nthe suite and on the failure path; the marker records successes only; "
+        "conformance arguments remain optional"
     )
     return 0
 

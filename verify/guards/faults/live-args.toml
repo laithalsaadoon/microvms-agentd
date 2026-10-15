@@ -1,0 +1,21 @@
+# Exercise the real conformance task template through mise, without its live dependencies.
+[[family]]
+guard = "tools/check-live-wiring.py"
+run = ["./tools/check-live-wiring.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "live-args-required"
+message = "FAIL  bare conformance task preserves argv"
+transform = { file = ".config/mise/tasks/live.toml", replace = 'arg(name="args", var=true, required=false)', with = 'arg(name="args", var=true)' }
+
+[[family.fault]]
+id = "live-args-empty-default"
+message = "FAIL  bare conformance task preserves argv"
+transform = { file = ".config/mise/tasks/live.toml", replace = 'arg(name="args", var=true, required=false)', with = 'arg(name="args", var=true, default="")' }
+
+[[family.fault]]
+id = "live-args-forwarding"
+message = "FAIL  selected conformance task preserves argv"
+transform = { file = ".config/mise/tasks/live.toml", replace = '{{arg(name="args", var=true, required=false)}}', with = '# {{arg(name="args", var=true, required=false)}}' }
