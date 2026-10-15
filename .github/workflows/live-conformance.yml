@@ -113,8 +113,8 @@ jobs:
       id-token: write # for OIDC; no long-lived key is stored
     steps:
       # The full history and the tags, for the suite's version-skew section
-      # (`conformance/lanes/skew.py`): it pairs this tree with the highest `v*` tag reachable
-      # from HEAD and reads the daemon's version from that tag's tree with `git show`, and the
+      # (`conformance/lanes/skew.py`): it pairs this tree with the highest reachable stable tag with a
+      # published release, excluding HEAD, and reads that daemon's version with `git show`; the
       # default one-commit checkout has neither.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:

@@ -24,7 +24,7 @@ transform = { file = "conformance/lanes/skew.py", replace = "    if want is None
 [[family.fault]]
 id = "conformance-skew-previous-is-head"
 message = "FAIL  skew: on a release's own commit the previous release is the one before"
-transform = { file = "conformance/lanes/skew.py", replace = "        if commit != head:\n", with = "        if True:\n" }
+transform = { file = "conformance/lanes/skew.py", replace = "        if commit != head and STABLE_TAG.fullmatch(tag) and tag in published:\n", with = "        if STABLE_TAG.fullmatch(tag) and tag in published:\n" }
 
 # Health's version is agentd's crate version, read from its manifest at the daemon's tree (wave 2's
 # live run expected the release tag and failed). A release from before #374 has only the old
@@ -39,3 +39,128 @@ transform = { file = "conformance/lanes/skew.py", replace = "DAEMON_MANIFESTS = 
 id = "conformance-skew-daemon-manifest-order"
 message = "FAIL  skew: the current path wins where both exist"
 transform = { file = "conformance/lanes/skew.py", replace = "DAEMON_MANIFESTS = (\"crates/agentd/Cargo.toml\", \"agentd/Cargo.toml\")", with = "DAEMON_MANIFESTS = (\"agentd/Cargo.toml\", \"crates/agentd/Cargo.toml\")" }
+
+[[family.fault]]
+id = "conformance-skew-unpublished-tag"
+message = "FAIL  skew: main after an unpublished tag keeps the published baseline"
+transform = { file = "conformance/lanes/skew.py", replace = " and tag in published:\n", with = ":\n" }
+
+[[family.fault]]
+id = "conformance-skew-draft-eligible"
+message = "FAIL  skew: publication metadata excludes drafts and prereleases"
+transform = { file = "conformance/lanes/skew.py", replace = "            if not draft and not prerelease and STABLE_TAG.fullmatch(tag):\n", with = "            if not prerelease and STABLE_TAG.fullmatch(tag):\n" }
+
+[[family.fault]]
+id = "conformance-skew-prerelease-eligible"
+message = "FAIL  skew: publication metadata excludes drafts and prereleases"
+transform = { file = "conformance/lanes/skew.py", replace = "            if not draft and not prerelease and STABLE_TAG.fullmatch(tag):\n", with = "            if not draft and STABLE_TAG.fullmatch(tag):\n" }
+
+[[family.fault]]
+id = "conformance-skew-nonstable-eligible"
+message = "FAIL  skew: publication metadata excludes drafts and prereleases"
+transform = { file = "conformance/lanes/skew.py", replace = "            if not draft and not prerelease and STABLE_TAG.fullmatch(tag):\n", with = "            if not draft and not prerelease:\n" }
+
+[[family.fault]]
+id = "conformance-skew-first-page-only"
+message = "FAIL  skew: publication discovery reads later pages"
+transform = { file = "conformance/lanes/skew.py", replace = "        if len(records) < 100:\n", with = "        if True:\n" }
+
+[[family.fault]]
+id = "conformance-skew-null-publication"
+message = "FAIL  skew: metadata with a missing publication time is refused"
+transform = { file = "conformance/lanes/skew.py", replace = "                or (not draft and not published_at)\n", with = "" }
+
+[[family.fault]]
+id = "conformance-skew-metadata-wiring"
+message = "FAIL  skew: the lane wires publication eligibility into git ancestry"
+transform = { file = "conformance/lanes/skew.py", replace = "        published_release_tags(),\n", with = "        set(names),\n" }
+
+[[family.fault]]
+id = "conformance-skew-empty-metadata-tag-fallback"
+message = "FAIL  skew: no published baseline is an error"
+transform = { file = "conformance/lanes/skew.py", replace = " and tag in published:\n", with = " and (not published or tag in published):\n" }
+
+[[family.fault]]
+id = "conformance-skew-transport-fallback"
+message = "FAIL  skew: metadata transport failure propagates without fallback"
+transform = { file = "conformance/lanes/skew.py", replace = "        payload = fetch(f\"{RELEASE_METADATA}?per_page=100&page={page}\")\n", with = "        try:\n            payload = fetch(f\"{RELEASE_METADATA}?per_page=100&page={page}\")\n        except ConnectionError:\n            return set()\n" }
+
+[[family.fault]]
+id = "conformance-skew-duplicate-metadata"
+message = "FAIL  skew: metadata with a duplicate tag is refused"
+transform = { file = "conformance/lanes/skew.py", replace = "            if tag in seen:\n", with = "            if False:\n" }
+
+[[family.fault]]
+id = "conformance-skew-metadata-initial-origin"
+message = "FAIL  skew: metadata initial URL with HTTP downgrade is refused before opening"
+transform = { file = "conformance/lanes/skew.py", replace = "    require_metadata_url(url)\n", with = "" }
+
+[[family.fault]]
+id = "conformance-skew-metadata-redirect-origin"
+message = "FAIL  skew: metadata redirect to another host is refused"
+transform = { file = "conformance/lanes/skew.py", replace = "        require_metadata_url(newurl)\n", with = "" }
+
+[[family.fault]]
+id = "conformance-skew-metadata-final-origin"
+message = "FAIL  skew: metadata final URL with another host is refused before reading"
+transform = { file = "conformance/lanes/skew.py", replace = "        require_metadata_url(response.geturl())\n", with = "" }
+
+[[family.fault]]
+id = "conformance-skew-metadata-redirect-handler"
+message = "FAIL  skew: metadata installs the constrained redirect handler"
+transform = { file = "conformance/lanes/skew.py", replace = "urllib.request.build_opener(MetadataRedirect())", with = "urllib.request.build_opener()" }
+
+[[family.fault]]
+id = "conformance-skew-metadata-https-required"
+message = "FAIL  skew: metadata redirect to HTTP downgrade is refused"
+transform = { file = "conformance/lanes/skew.py", replace = "            parsed.scheme == \"https\"\n", with = "            True\n" }
+
+[[family.fault]]
+id = "conformance-skew-metadata-host-required"
+message = "FAIL  skew: metadata redirect to another host is refused"
+transform = { file = "conformance/lanes/skew.py", replace = "            and parsed.hostname == \"api.github.com\"\n", with = "" }
+
+[[family.fault]]
+id = "conformance-skew-metadata-port-required"
+message = "FAIL  skew: metadata redirect to another port is refused"
+transform = { file = "conformance/lanes/skew.py", replace = "            and parsed.port in (None, 443)\n", with = "" }
+
+[[family.fault]]
+id = "conformance-skew-metadata-userinfo-refused"
+message = "FAIL  skew: metadata redirect to user info is refused"
+transform = { file = "conformance/lanes/skew.py", replace = "            and parsed.username is None\n", with = "" }
+
+[[family.fault]]
+id = "conformance-skew-metadata-transport-default"
+message = "FAIL  skew: default publication fetch uses the constrained transport"
+transform = { file = "conformance/lanes/skew.py", replace = "    fetch: Callable[[str], bytes] = metadata_download,\n", with = "    fetch: Callable[[str], bytes] = download,\n" }
+
+[[family.fault]]
+id = "conformance-skew-json-duplicate-fields"
+message = "FAIL  skew: duplicate draft JSON fields are refused"
+transform = { file = "conformance/lanes/skew.py", replace = "json.loads(payload, object_pairs_hook=unique_metadata_object)", with = "json.loads(payload)" }
+
+[[family.fault]]
+id = "conformance-skew-timestamp-complete"
+message = "FAIL  skew: publication time with date only is refused"
+transform = { file = "conformance/lanes/skew.py", replace = "    if not isinstance(value, str) or PUBLICATION_TIME.fullmatch(value) is None:\n", with = "    if not isinstance(value, str):\n" }
+
+[[family.fault]]
+id = "conformance-skew-timestamp-calendar"
+message = "FAIL  skew: publication time with impossible calendar date is refused"
+transform = { file = "conformance/lanes/skew.py", replace = "        datetime.datetime.fromisoformat(value.replace(\"Z\", \"+00:00\"))\n", with = "        pass\n" }
+
+[[family.fault]]
+id = "conformance-skew-timestamp-required"
+message = "FAIL  skew: publication time with arbitrary text is refused"
+transform = { file = "conformance/lanes/skew.py", replace = "                    and not valid_publication_time(published_at)\n", with = "                    and False\n" }
+
+[[family.fault]]
+id = "conformance-skew-timestamp-zone-range"
+message = "FAIL  skew: RFC3339 time bounds refuse calendar normalization"
+transform = { file = "conformance/lanes/skew.py", replace = "[+-](?:[01][0-9]|2[0-3]):[0-5][0-9]", with = "[+-][0-9]{2}:[0-9]{2}" }
+
+[[family.fault]]
+id = "conformance-skew-timestamp-time-range"
+message = "FAIL  skew: RFC3339 time bounds refuse calendar normalization"
+transform = { file = "conformance/lanes/skew.py", replace = "T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]", with = "T[0-9]{2}:[0-9]{2}:[0-9]{2}" }
