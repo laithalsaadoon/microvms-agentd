@@ -17,6 +17,21 @@ refuse_links() {
     done
 }
 
+refuse_tree_links() {
+    # Source symlinks replace destination names instead of traversing them.
+    [ ! -L "$1" ] || return 0
+    refuse_links "$2"
+    if [ -d "$1" ]; then
+        # Positional arguments belong to each call. The loop variable is consumed
+        # before recursion and overwritten by the next iteration, never read after
+        # returning. This walks wide trees without starting a process per entry.
+        for entry in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+            [ -e "$entry" ] || [ -L "$entry" ] || continue
+            refuse_tree_links "$entry" "$2/${entry##*/}"
+        done
+    fi
+}
+
 case "$1" in
     prepare)
         refuse_links "$2"
@@ -56,20 +71,7 @@ case "$1" in
         refuse_links "$3"
         # Refuse existing symlinks at directories and regular-file leaves before
         # copying anything. Source symlinks replace their destination names.
-        find "$2/payload" ! -type l -exec sh -c '
-            source=$1; destination=$2; shift 2
-            for dir do
-                path=$destination${dir#"$source"}
-                while [ "$path" != / ] && [ "$path" != . ]; do
-                    if [ -L "$path" ]; then
-                        echo "refusing upload through a symbolic link: $path" >&2
-                        exit 1
-                    fi
-                    case "$path" in */*) path=${path%/*} ;; *) path=. ;; esac
-                    [ -n "$path" ] || path=/
-                done
-            done
-        ' sh "$2/payload" "$3" {} +
+        refuse_tree_links "$2/payload" "$3"
         mkdir -p -- "$3"
         # Unlink file leaves before copying, so a symlink planted after the
         # check cannot redirect the write. Traversal runs as the default user.
