@@ -129,6 +129,38 @@ id = "release-live-credentials-missing"
 message = "FAIL: test_live_credentials_outlast_the_whole_job"
 transform = { file = ".github/workflows/live-conformance.yml", replace = "uses: aws-actions/configure-aws-credentials@", with = "uses: actions/cache@" }
 
+
+# Main needs its exact CLI version's release before AWS; it still builds its own binaries.
+[[family.fault]]
+id = "live-release-branch-download"
+message = "FAIL: test_live_matching_release_preserves_privilege_and_binary_sources"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "  draft:\n    name: the CLI version's release assets", with = "  draft:\n    if: github.ref_type == 'tag'\n    name: the CLI version's release assets" }
+
+[[family.fault]]
+id = "live-release-manifest-floating-ref"
+message = "FAIL: test_live_release_lookup_uses_exact_cli_version_and_fails_closed"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "Cargo.toml?ref=$HEAD_SHA", with = "Cargo.toml?ref=main" }
+
+[[family.fault]]
+id = "live-release-wrong-version-fallback"
+message = "FAIL: test_live_release_lookup_uses_exact_cli_version_and_fails_closed"
+transform = { file = ".github/workflows/live-conformance.yml", replace = 'gh release download "$TAG"', with = 'gh release download "v1.1.0"' }
+
+[[family.fault]]
+id = "live-release-directory-tag-only"
+message = "FAIL: test_live_matching_release_preserves_privilege_and_binary_sources"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "      - name: the matching release is available for provisioning\n", with = "      - name: the matching release is available for provisioning\n        if: github.ref_type == 'tag'\n" }
+
+[[family.fault]]
+id = "live-release-main-binary-replaced"
+message = "FAIL: test_live_matching_release_preserves_privilege_and_binary_sources"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "AGENTD=target/aarch64-unknown-linux-musl/release/agentd", with = "AGENTD=draft-release/v1.1.0/agentd" }
+
+[[family.fault]]
+id = "live-release-missing-prerequisite"
+message = "FAIL: test_live_matching_release_preserves_privilege_and_binary_sources"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "needs.draft.result == 'success' }}", with = "(needs.draft.result == 'success' || needs.draft.result == 'skipped') }}" }
+
 [[scanner]]
 id = "release-builds"
 guard = "tools/check-release-builds.py"

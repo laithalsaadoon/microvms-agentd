@@ -32,6 +32,149 @@ policy = SimpleNamespace(
 )
 
 
+class LiveReleaseInputTests(unittest.TestCase):
+    def workflow(self):
+        return yaml.safe_load(
+            (ROOT / ".github/workflows/live-conformance.yml").read_text()
+        )
+
+    def test_live_release_lookup_uses_exact_cli_version_and_fails_closed(self):
+        workflow = self.workflow()
+        downloads = [
+            step
+            for step in workflow["jobs"]["draft"]["steps"]
+            if step.get("name")
+            == "download the matching release and check its SHA256SUMS"
+        ]
+        self.assertEqual(
+            len(downloads), 1, "the workflow needs its matching-release download"
+        )
+        script = downloads[0]["run"]
+        scenarios = (
+            ("branch", "1.1.0", "main", False, False, True, "v1.1.0"),
+            ("branch", "1.1.1", "main", False, False, False, "v1.1.1"),
+            ("branch", "1.1.0/../other", "main", False, False, False, None),
+            ("branch", "1.1.0", "main", True, False, False, None),
+            ("branch", "1.1.0", "main", False, True, False, "v1.1.0"),
+            ("tag", "9.9.9", "v1.1.0", False, False, True, "v1.1.0"),
+        )
+        for kind, version, ref, api_fails, corrupt, success, wanted in scenarios:
+            with self.subTest(
+                kind=kind, version=version, api_fails=api_fails, corrupt=corrupt
+            ):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    remote = root / "remote" / "v1.1.0"
+                    remote.mkdir(parents=True)
+                    (remote / "agentd").write_bytes(b"verified fixture bytes")
+                    digest = hashlib.sha256(b"verified fixture bytes").hexdigest()
+                    (remote / "SHA256SUMS").write_text(f"{digest}  agentd\n")
+                    if corrupt:
+                        (remote / "agentd").write_bytes(b"changed fixture bytes")
+                    gh = root / "gh"
+                    gh.write_text(
+                        "#!/usr/bin/env python3\n"
+                        "import base64, json, os, shutil, sys\n"
+                        "from pathlib import Path\n"
+                        "args = sys.argv[1:]\n"
+                        "with open('calls.jsonl', 'a') as out: out.write(json.dumps(args) + '\\n')\n"
+                        "if args[0] == 'api':\n"
+                        "    expected = 'https://api.github.com/repos/owner/repo/contents/crates/microvms-cli/Cargo.toml?ref=' + 'a' * 40\n"
+                        "    if args != ['api', expected, '--jq', '.content'] or os.environ['API_FAILS'] == '1': sys.exit(3)\n"
+                        "    body = '[package]\\nversion = ' + json.dumps(os.environ['CLI_VERSION']) + '\\n'\n"
+                        "    print(base64.b64encode(body.encode()).decode())\n"
+                        "elif args[:2] == ['release', 'download']:\n"
+                        "    if len(args) != 7 or args[3:5] != ['--repo', 'owner/repo'] or args[5] != '--dir': sys.exit(4)\n"
+                        "    source = Path('remote') / args[2]\n"
+                        "    if not source.is_dir(): sys.exit(5)\n"
+                        "    shutil.copytree(source, args[6])\n"
+                        "else: sys.exit(6)\n"
+                    )
+                    gh.chmod(0o755)
+                    result = subprocess.run(
+                        ["bash", "-c", script],
+                        cwd=root,
+                        env={
+                            **os.environ,
+                            "PATH": directory + os.pathsep + os.environ["PATH"],
+                            "GITHUB_REPOSITORY": "owner/repo",
+                            "HEAD_SHA": "a" * 40,
+                            "REF_TYPE": kind,
+                            "TAG": ref,
+                            "CLI_VERSION": version,
+                            "API_FAILS": str(int(api_fails)),
+                        },
+                        capture_output=True,
+                        text=True,
+                    )
+                    self.assertEqual(result.returncode == 0, success, result.stderr)
+                    calls = [
+                        json.loads(line)
+                        for line in (root / "calls.jsonl").read_text().splitlines()
+                    ]
+                    downloads = [
+                        call for call in calls if call[:2] == ["release", "download"]
+                    ]
+                    self.assertEqual(
+                        [call[2] for call in downloads], [wanted] if wanted else []
+                    )
+                    self.assertEqual(
+                        sum(call[0] == "api" for call in calls), int(kind != "tag")
+                    )
+                    if success:
+                        self.assertEqual(
+                            (root / "draft-release" / wanted / "agentd").read_bytes(),
+                            b"verified fixture bytes",
+                        )
+
+    def test_live_matching_release_preserves_privilege_and_binary_sources(self):
+        workflow = self.workflow()
+        draft = workflow["jobs"]["draft"]
+        live = workflow["jobs"]["live"]
+        self.assertNotIn("if", draft, "branches also need the matching release")
+        self.assertEqual(draft["needs"], "owner")
+        self.assertEqual(draft["permissions"], {"contents": "write"})
+        self.assertTrue(
+            all("checkout" not in step.get("uses", "") for step in draft["steps"])
+        )
+        self.assertEqual(live["permissions"]["contents"], "read")
+        self.assertNotIn("needs.draft.result == 'skipped'", live["if"])
+        self.assertIn("needs.draft.result == 'success'", live["if"])
+        steps = {step.get("name"): step for step in live["steps"]}
+        for name in (
+            "build the shipping binary",
+            "build the microvm CLI",
+            "the binaries under test are the ones just built",
+        ):
+            self.assertEqual(steps[name]["if"], "github.ref_type != 'tag'")
+        source = steps["the binaries under test are the ones just built"]["run"]
+        self.assertIn("AGENTD=target/aarch64-unknown-linux-musl/release/agentd", source)
+        self.assertIn("MICROVM=target/release/microvm", source)
+        directory = steps["the matching release is available for provisioning"]
+        self.assertNotIn("if", directory)
+        self.assertIn("MICROVM_RELEASE_DIR=$PWD/draft-release", directory["run"])
+        download = next(
+            step
+            for step in live["steps"]
+            if step.get("with", {}).get("name") == "draft-release"
+        )
+        self.assertNotIn("if", download)
+        self.assertEqual(
+            steps["the binaries under test are the draft's"]["if"],
+            "github.ref_type == 'tag'",
+        )
+        self.assertEqual(
+            steps["record that the tag's draft passed"]["if"],
+            "github.ref_type == 'tag'",
+        )
+        marker = next(
+            step
+            for step in live["steps"]
+            if step.get("with", {}).get("name") == "live-verified"
+        )
+        self.assertEqual(marker["if"], "github.ref_type == 'tag'")
+
+
 class ReleaseBuildTests(unittest.TestCase):
     def setUp(self):
         self.workflow = yaml.safe_load((ROOT / policy.WORKFLOW).read_text())
