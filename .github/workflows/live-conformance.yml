@@ -141,15 +141,16 @@ jobs:
         with:
           terraform_wrapper: false
 
-      # OIDC rather than a stored access key: the credentials exist for the life
-      # of this job and cannot be exfiltrated from a log for later use. The role
-      # needs to create MicroVM images, run MicroVMs, and manage the conformance
-      # stack's bucket and roles.
+      # Request two hours so the OIDC session outlasts the 90-minute job, including
+      # failure-path cleanup. The action otherwise defaults to one hour, and the
+      # role's MaxSessionDuration must permit this request. The role needs to create
+      # MicroVM images, run MicroVMs, and manage the conformance stack's bucket and roles.
       - name: assume AWS role
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6
         with:
           role-to-assume: ${{ secrets.LIVE_CONFORMANCE_ROLE_ARN }}
           aws-region: ${{ inputs.region }}
+          role-duration-seconds: 7200
 
       - name: build the shipping binary
         if: github.ref_type != 'tag'

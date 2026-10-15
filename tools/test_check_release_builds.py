@@ -74,6 +74,33 @@ class ReleaseBuildTests(unittest.TestCase):
                         "release builds: fresh dependencies and pinned tools\n",
                     )
 
+    def test_live_credentials_outlast_the_whole_job(self):
+        # One static session serves the suite and its failure-path cleanup. Comparing
+        # against the job budget catches both a shorter session and a longer job.
+        workflow = yaml.safe_load(
+            (ROOT / ".github/workflows/live-conformance.yml").read_text()
+        )
+        job = workflow.get("jobs", {}).get("live", {})
+        timeout = job.get("timeout-minutes")
+        self.assertIs(type(timeout), int, "live job needs an explicit numeric timeout")
+        self.assertGreater(timeout, 0)
+        credentials = [
+            step
+            for step in job.get("steps", [])
+            if str(step.get("uses", "")).split("@")[0]
+            == "aws-actions/configure-aws-credentials"
+        ]
+        self.assertEqual(len(credentials), 1, "live job needs its credential step")
+        duration = credentials[0].get("with", {}).get("role-duration-seconds")
+        self.assertIs(
+            type(duration), int, "live credentials need an explicit numeric duration"
+        )
+        self.assertGreater(
+            duration,
+            timeout * 60,
+            "live credentials must outlast the whole job, including cleanup",
+        )
+
     def test_node_build_commands_use_the_manifest_generator_pin(self):
         expected = self.package["devDependencies"]["@napi-rs/cli"]
         paths = (

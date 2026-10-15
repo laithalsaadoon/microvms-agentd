@@ -108,6 +108,27 @@ id = "release-builds-draft-completeness"
 message = "FAIL: test_draft_retry_reuses_the_first_complete_assets"
 transform = { file = ".github/workflows/release.yml", replace = "            cmp expected-files retained-files", with = "            : expected-files retained-files" }
 
+# The live job uses one static OIDC session through failure-path cleanup.
+[[family.fault]]
+id = "release-live-duration-omitted"
+message = "FAIL: test_live_credentials_outlast_the_whole_job"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "          role-duration-seconds: 7200\n", with = "" }
+
+[[family.fault]]
+id = "release-live-duration-short"
+message = "FAIL: test_live_credentials_outlast_the_whole_job"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "          role-duration-seconds: 7200\n", with = "          role-duration-seconds: 3600\n" }
+
+[[family.fault]]
+id = "release-live-timeout-exhausts-session"
+message = "FAIL: test_live_credentials_outlast_the_whole_job"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "    timeout-minutes: 90\n", with = "    timeout-minutes: 120\n" }
+
+[[family.fault]]
+id = "release-live-credentials-missing"
+message = "FAIL: test_live_credentials_outlast_the_whole_job"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "uses: aws-actions/configure-aws-credentials@", with = "uses: actions/cache@" }
+
 [[scanner]]
 id = "release-builds"
 guard = "tools/check-release-builds.py"
