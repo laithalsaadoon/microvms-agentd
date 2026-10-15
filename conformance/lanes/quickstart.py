@@ -89,13 +89,11 @@ def drive_provisioned_quickstart(
     one got the checksum. So the proof asserted here is `attestation`, not either proof,
     and a `gh` shim first on `PATH` records whether anything tried the tool.
 
-    The fetch targets `v{CLI version}`. On a release tag, `live-conformance.yml` sets
-    `$MICROVM_RELEASE_DIR` to the tag's draft release, so the fetch reads the draft's
-    assets and proves them by the same attestation, and the release's live gate can pass
-    before anything is public. On main, between a version bump landing and that version's
-    release publishing, this section fails with the fetch error naming the missing tag.
-    That failure is the calendar, not the code: run the suite again once the release
-    exists.
+    The fetch targets `v{CLI version}`. `live-conformance.yml` supplies that matching
+    release through `$MICROVM_RELEASE_DIR` on branches and tags, so a draft can be
+    verified before publication. The workflow reads the branch CLI version from its
+    exact source commit and refuses to start AWS work when that release is missing.
+    Other branch sections still use the daemon and CLI built from the branch source.
 
     Its own build (~3 minutes): provisioning fires only when building, so no launch
     from the suite's image can carry it. Teardown is quickstart's default, and the

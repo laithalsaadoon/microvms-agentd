@@ -1,10 +1,8 @@
 name: live conformance
 
-# Manual only, and deliberately so. This workflow launches real MicroVMs in a
-# real account: it costs money, it takes about twenty minutes (the suite's own
-# docstring breaks that down — the idle-keepalive section deliberately waits out
-# a 60-second idle window twice), and it needs credentials that can create IAM
-# roles. None of that belongs on a push trigger.
+# Manual only: the full suite creates billable MicroVMs and supporting resources,
+# then verifies their cleanup. It needs credentials that can create IAM roles;
+# neither the resource creation nor the cleanup belongs on a push trigger.
 #
 # The `environment:` below is the actual gate. Configure it in repository settings
 # with a required reviewer, and no fork, no bot, and no compromised token can
@@ -16,7 +14,8 @@ name: live conformance
 # test is the draft's Linux archive, and `$MICROVM_RELEASE_DIR` points the quickstart section's
 # fetch at the draft's assets, which it verifies against their attestation as it would the
 # published release's. When every step passes it uploads the `live-verified` marker the gate
-# reads. Dispatched on a branch, it builds both binaries from that branch as it always has.
+# reads. On a branch, both binaries are built from source, while quickstart uses the
+# matching CLI release as its provisioning fixture.
 on:
   workflow_dispatch:
     inputs:
@@ -65,23 +64,33 @@ jobs:
             exit 1
           fi
 
-  # On a tag only. A draft release is visible only with push access, so the download gets a job
-  # of its own: this one holds `contents: write` and runs nothing from the repository, and the
-  # job below, which builds and runs the suite with AWS credentials, keeps `contents: read`.
+  # Fetch the CLI version's release before AWS work, including an unpublished draft on main.
+  # This isolated job reads the exact commit's manifest as data and runs no repository code.
+  # Draft visibility needs `contents: write`; the AWS job keeps only `contents: read`.
   draft:
-    name: the tag's draft release
+    name: the CLI version's release assets
     needs: owner
-    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
       contents: write # lists and downloads a draft release
     steps:
-      - name: download the draft's assets and check them against its SHA256SUMS
+      - name: download the matching release and check its SHA256SUMS
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          HEAD_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
+          if [ "$REF_TYPE" != tag ]; then
+            gh api "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/crates/microvms-cli/Cargo.toml?ref=$HEAD_SHA" \
+              --jq .content | base64 --decode > release-manifest.toml
+            TAG="v$(python3 -c 'import tomllib; print(tomllib.load(open("release-manifest.toml", "rb"))["package"]["version"])')"
+          fi
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::the CLI release tag must be vX.Y.Z with an optional prerelease suffix"
+            exit 1
+          fi
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "draft-release/$TAG"
           (cd "draft-release/$TAG" && sha256sum -c SHA256SUMS)
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -93,10 +102,9 @@ jobs:
   live:
     name: real AWS
     needs: [owner, draft]
-    # A branch run skips `draft` and runs this on its own build; a tag run runs it only once the
-    # draft downloaded. `draft` also reads as skipped when `owner` failed, so `owner` is checked
-    # by name.
-    if: ${{ !cancelled() && needs.owner.result == 'success' && (needs.draft.result == 'success' || needs.draft.result == 'skipped') }}
+    # Every run needs its matching release for quickstart. A missing release fails before
+    # AWS work; main still tests its own source-built daemon and CLI in the other sections.
+    if: ${{ !cancelled() && needs.owner.result == 'success' && needs.draft.result == 'success' }}
     runs-on: ubuntu-latest
     environment: live-aws
     timeout-minutes: 90
@@ -173,10 +181,14 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        if: github.ref_type == 'tag'
         with:
           name: draft-release
           path: draft-release
+
+      # The directory supplies quickstart's matching release on branches and tags alike.
+      # It does not replace main's source-built AGENTD or MICROVM.
+      - name: the matching release is available for provisioning
+        run: echo "MICROVM_RELEASE_DIR=$PWD/draft-release" >> "$GITHUB_ENV"
 
       # The release's own binaries, the ones a user downloads, not a rebuild of the tag.
       # `$MICROVM_RELEASE_DIR` is read by every provisioning fetch, and only the quickstart
@@ -193,7 +205,6 @@ jobs:
           {
             echo "AGENTD=draft-release/$TAG/agentd"
             echo "MICROVM=draft-release/bin/microvm"
-            echo "MICROVM_RELEASE_DIR=$PWD/draft-release"
           } >> "$GITHUB_ENV"
 
       # The `live-aws` environment's `LIVE_CONFORMANCE_PERMISSIONS_BOUNDARY` variable names the
