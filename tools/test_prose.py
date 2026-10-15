@@ -4,6 +4,7 @@
 import inspect
 import io
 import json
+import os
 import runpy
 import subprocess
 import tempfile
@@ -17,6 +18,31 @@ P = runpy.run_path(str(Path(__file__).with_name("prose.py")), run_name="tools.pr
 
 # Mutation instrumentation wraps functions; patch the underlying module globals.
 PROSE_GLOBALS = inspect.unwrap(P["main"]).__globals__
+
+# A linked-worktree hook points Git at its admin directory. Inheriting that
+# pointer makes a fixture's `git init` reinitialize the caller's common repository
+# as bare. Scrub the whole fixture scope, including the prose gate's Git reads.
+GIT_ENV_LEAKS = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_CEILING_DIRECTORIES",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_PREFIX",
+    "GIT_INTERNAL_SUPER_PREFIX",
+    "GIT_SHALLOW_FILE",
+    "GIT_GRAFT_FILE",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_NO_REPLACE_OBJECTS",
+)
+
+
+def clean_env() -> dict[str, str]:
+    """The caller's environment without repository pointers, read at call time."""
+    return {k: v for k, v in os.environ.items() if k not in GIT_ENV_LEAKS}
 
 
 class GitTests(unittest.TestCase):
@@ -389,6 +415,9 @@ class MainTests(unittest.TestCase):
 
 
 class ValeIntegrationTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.dict(os.environ, clean_env(), clear=True))
+
     def test_real_vale_errors_and_per_rule_budgets(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -500,6 +529,92 @@ class ValeIntegrationTests(unittest.TestCase):
                             redirect_stderr(io.StringIO()),
                         ):
                             self.assertEqual(P["main"]([]), expected)
+
+
+class InheritedGitEnvTests(unittest.TestCase):
+    def test_hook_pointers_leave_the_linked_repository_unchanged(self):
+        # Use a real linked admin directory: an ordinary repo's .git does not
+        # reproduce the shared core.bare mutation. Even a broken scrub touches
+        # only this decoy; setup and inspection never inherit the tested pointers.
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+        with tempfile.TemporaryDirectory() as tmp:
+            top = Path(tmp)
+            decoy, linked = top / "decoy", top / "linked"
+
+            def git(*args):
+                return subprocess.run(
+                    ["git", *args], env=env, check=True, capture_output=True, text=True
+                ).stdout
+
+            git("init", "-q", "-b", "main", str(decoy))
+            (decoy / "keep.txt").write_text("decoy\n")
+            git("-C", str(decoy), "add", "keep.txt")
+            git(
+                "-C",
+                str(decoy),
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-qm",
+                "keep",
+            )
+            git("-C", str(decoy), "update-ref", "refs/remotes/origin/main", "HEAD")
+            git("-C", str(decoy), "worktree", "add", "-q", "-b", "linked", str(linked))
+            common = decoy / ".git"
+            admin = Path(
+                git("-C", str(linked), "rev-parse", "--absolute-git-dir").strip()
+            )
+
+            def snapshot():
+                return (
+                    (common / "config").read_bytes(),
+                    git("--git-dir", str(common), "show-ref"),
+                    (common / "HEAD").read_bytes(),
+                    (admin / "HEAD").read_bytes(),
+                )
+
+            before = snapshot()
+            pointers = {key: str(common / "unused") for key in GIT_ENV_LEAKS} | {
+                "GIT_DIR": str(admin),
+                "GIT_COMMON_DIR": str(common),
+                "GIT_WORK_TREE": str(linked),
+                "GIT_IMPLICIT_WORK_TREE": "0",
+            }
+            for inherited in (
+                {"GIT_DIR": str(admin)},
+                {"GIT_COMMON_DIR": str(common)},
+                {"GIT_DIR": os.path.relpath(admin)},
+                pointers,
+            ):
+                with self.subTest(pointers=tuple(inherited)):
+                    reads = []
+                    real_git = PROSE_GLOBALS["git"]
+
+                    def fixture_git(root, *args):
+                        self.assertFalse(set(GIT_ENV_LEAKS) & os.environ.keys())
+                        self.assertNotIn(root, (decoy, linked))
+                        reads.append(root)
+                        return real_git(root, *args)
+
+                    cases = unittest.TestLoader().loadTestsFromTestCase(
+                        ValeIntegrationTests
+                    )
+                    result = unittest.TestResult()
+                    with (
+                        patch.dict(os.environ, env | inherited, clear=True),
+                        patch.dict(PROSE_GLOBALS, git=fixture_git),
+                    ):
+                        cases.run(result)
+                    self.assertEqual(snapshot(), before)
+                    self.assertTrue(
+                        result.wasSuccessful(), result.errors + result.failures
+                    )
+                    self.assertTrue(reads)
 
 
 if __name__ == "__main__":
