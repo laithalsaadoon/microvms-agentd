@@ -8,8 +8,10 @@ against an image this tree built. `docs/schema.json` and `schema:compat` hold th
 fields to the previous release offline; this is the same claim run end to end: each pairing
 launches, runs an exec, copies a file up and back, reads health and tears down.
 
-The previous release is the highest `v*` tag reachable from HEAD that doesn't point at HEAD, so
-on a release's own commit it's the release before. Its daemon and its x86_64 Linux CLI come from
+The previous release is the highest stable `vX.Y.Z` tag reachable from HEAD that has a
+published, non-prerelease GitHub release and does not point at HEAD. A draft or bare tag is
+not a release a user can upgrade from. Publication metadata errors fail the section rather
+than silently choosing an older baseline. Its daemon and its x86_64 Linux CLI come from
 that release's assets, each checked against the release's `SHA256SUMS`. That's integrity, not
 provenance: both come from the same release, and core's provisioning is where a Sigstore bundle
 is verified (BIND-18).
@@ -29,12 +31,15 @@ builds nothing. Each pairing keeps its record in a state directory of its own.
 
 from __future__ import annotations
 
+import datetime
 import hashlib
+import json
 import re
 import secrets
 import subprocess
 import tarfile
 import tomllib
+import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from io import BytesIO
@@ -47,6 +52,14 @@ from harness.envelope import Envelope, EnvelopeError, KindError
 from harness.results import Results
 
 RELEASES = "https://github.com/laithalsaadoon/microvms-agentd/releases/download"
+RELEASE_METADATA = (
+    "https://api.github.com/repos/laithalsaadoon/microvms-agentd/releases"
+)
+PUBLICATION_TIME = re.compile(
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]"
+    r"(?:\.[0-9]+)?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])"
+)
+STABLE_TAG = re.compile(r"v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
 DAEMON_ASSET = "agentd"
 CLI_ASSET = "microvm-x86_64-unknown-linux-gnu.tar.gz"
 SUMS_LINE = re.compile(r"([0-9a-f]{64}) [ *]?(\S+)")
@@ -63,14 +76,14 @@ def git(*args: str) -> str:
     ).stdout
 
 
-def pick_previous(tags: list[tuple[str, str]], head: str) -> str:
-    """The first of `tags` (`(tag, commit)`, newest first) whose commit isn't `head`."""
+def pick_previous(tags: list[tuple[str, str]], head: str, published: set[str]) -> str:
+    """The newest reachable published stable tag whose commit differs from HEAD."""
     for tag, commit in tags:
-        if commit != head:
+        if commit != head and STABLE_TAG.fullmatch(tag) and tag in published:
             return tag
     raise RuntimeError(
-        "no release tag other than HEAD's is reachable from HEAD, so there's no previous "
-        "release to skew against. Fetch the tags: git fetch --tags"
+        "no published stable release other than HEAD is reachable from HEAD; "
+        "git fetch --tags and check the repository's published releases"
     )
 
 
@@ -125,7 +138,9 @@ def previous_release() -> str:
     head = git("rev-parse", "HEAD").strip()
     names = git("tag", "--merged", "HEAD", "--list", "v*", "--sort=-v:refname").split()
     return pick_previous(
-        [(tag, git("rev-parse", f"{tag}^{{commit}}").strip()) for tag in names], head
+        [(tag, git("rev-parse", f"{tag}^{{commit}}").strip()) for tag in names],
+        head,
+        published_release_tags(),
     )
 
 
@@ -160,6 +175,113 @@ def verified(asset: str, data: bytes, sums: dict[str, str]) -> bytes:
 def download(url: str) -> bytes:
     with urllib.request.urlopen(url, timeout=120) as response:
         return response.read()
+
+
+def require_metadata_url(url: str) -> None:
+    """Publication authority stays on the exact GitHub API HTTPS origin."""
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        valid = (
+            parsed.scheme == "https"
+            and parsed.hostname == "api.github.com"
+            and parsed.port in (None, 443)
+            and parsed.username is None
+            and parsed.password is None
+        )
+    except ValueError:
+        valid = False
+    if not valid:
+        raise RuntimeError("release metadata URL is outside https://api.github.com")
+
+
+class MetadataRedirect(urllib.request.HTTPRedirectHandler):
+    """Reject a changed origin before urllib follows it, including intermediate hops."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        require_metadata_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def metadata_download(url: str) -> bytes:
+    """Metadata has a stricter origin boundary than the existing asset CDN transport."""
+    require_metadata_url(url)
+    opener = urllib.request.build_opener(MetadataRedirect())
+    with opener.open(url, timeout=120) as response:
+        require_metadata_url(response.geturl())
+        return response.read()
+
+
+def unique_metadata_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Ambiguous JSON cannot attest that a release is published and stable."""
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise RuntimeError(f"release metadata repeats JSON key {key!r}")
+        result[key] = value
+    return result
+
+
+def valid_publication_time(value: Any) -> bool:
+    """Require a complete RFC 3339 timestamp and a real calendar date/time."""
+    if not isinstance(value, str) or PUBLICATION_TIME.fullmatch(value) is None:
+        return False
+    try:
+        datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return True
+
+
+def published_release_tags(
+    fetch: Callable[[str], bytes] = metadata_download,
+) -> set[str]:
+    """Read all public release pages; missing or malformed metadata is not eligibility.
+
+    List metadata, rather than probing asset URLs: a 404 for a broken published release
+    must fail its asset check, not silently move compatibility testing to an older tag.
+    """
+    published: set[str] = set()
+    seen: set[str] = set()
+    page = 1
+    while True:
+        payload = fetch(f"{RELEASE_METADATA}?per_page=100&page={page}")
+        try:
+            records = json.loads(payload, object_pairs_hook=unique_metadata_object)
+        except (ValueError, UnicodeDecodeError) as error:
+            raise RuntimeError(f"release metadata page {page} is not JSON") from error
+        if not isinstance(records, list) or len(records) > 100:
+            raise RuntimeError(f"release metadata page {page} is not a release list")
+        for record in records:
+            if not isinstance(record, dict):
+                raise RuntimeError(
+                    f"release metadata page {page} has a non-object entry"
+                )
+            tag = record.get("tag_name")
+            draft = record.get("draft")
+            prerelease = record.get("prerelease")
+            published_at = record.get("published_at")
+            if (
+                not isinstance(tag, str)
+                or not tag
+                or type(draft) is not bool
+                or type(prerelease) is not bool
+                or (
+                    published_at is not None
+                    and not valid_publication_time(published_at)
+                )
+                or (not draft and not published_at)
+            ):
+                raise RuntimeError(
+                    f"release metadata page {page} has invalid publication fields"
+                )
+            if tag in seen:
+                raise RuntimeError(f"release metadata repeats tag {tag!r}")
+            seen.add(tag)
+            if not draft and not prerelease and STABLE_TAG.fullmatch(tag):
+                published.add(tag)
+        if len(records) < 100:
+            return published
+        page += 1
 
 
 def fetch_release(
