@@ -90,6 +90,7 @@ jobs:
         with:
           install_args: ${{ matrix.tools }}
           tools-cache: ${{ matrix.tools-cache }}
+          test-namespaces: ${{ matrix.os == 'ubuntu-latest' }}
       - run: mise run ${{ matrix.task }}
 
   security:
@@ -269,6 +270,8 @@ jobs:
           shared-key: guards-deps
           save-if: false
       - uses: ./.github/actions/mise
+        with:
+          test-namespaces: 'true'
       # `--record` traces every run with strace, which a mise task can't install. The runner
       # image carries it; this installs it where one doesn't. Both legs have it: the pull
       # request's runs the TraceReading entry's real-strace case, so a runner that can't trace
@@ -476,6 +479,8 @@ jobs:
           save-if: false
       - uses: ./.github/actions/mise
         if: steps.diff.outputs.rust == 'true'
+        with:
+          test-namespaces: 'true'
       - name: mutate this shard of the change
         if: steps.diff.outputs.rust == 'true'
         env:

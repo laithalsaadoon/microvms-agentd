@@ -1,0 +1,109 @@
+# The opt-in did not exist on the base. Compiling mutations prove its defaults,
+# exact reduction, refusal paths, and real inherited credentials.
+
+[[fault]]
+id = "exec-capabilities-default-enabled"
+guard = "exec_capabilities::tests::the_setting_is_strict_and_default_off"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec_capabilities::tests::the_setting_is_strict_and_default_off"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/exec_capabilities.rs", replace = "    if !enabled {", with = "    if false && !enabled {" }
+
+[[family]]
+guard = "exec_capabilities::tests::reduction_clears_i_a_and_only_the_seven_bounding_bits"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec_capabilities::tests::reduction_clears_i_a_and_only_the_seven_bounding_bits"]
+expect = "test-failed"
+suite = "rust"
+
+[[family.fault]]
+id = "exec-capabilities-inheritable-retained"
+transform = { file = "crates/agentd/src/exec_capabilities.rs", replace = "    kernel.clear_inheritable(before)?;", with = "    // inheritable clearing removed" }
+
+[[family.fault]]
+id = "exec-capabilities-admin-retained"
+transform = { file = "crates/agentd/src/exec_capabilities.rs", replace = "    for bit in DROP_BITS {", with = "    for bit in DROP_BITS.into_iter().filter(|bit| *bit != 21) {" }
+
+[[family.fault]]
+id = "exec-capabilities-mask-skips-admin"
+transform = { file = "crates/agentd/src/exec_capabilities.rs", replace = "const DROP_MASK: u64 = 0x00c0_006b_0000;", with = "const DROP_MASK: u64 = 0x00c0_004b_0000;" }
+
+[[family]]
+guard = "exec_capabilities::tests::every_syscall_failure_aborts_and_every_postcondition_is_checked"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec_capabilities::tests::every_syscall_failure_aborts_and_every_postcondition_is_checked"]
+expect = "test-failed"
+suite = "rust"
+
+[[family.fault]]
+id = "exec-capabilities-drop-error-ignored"
+transform = { file = "crates/agentd/src/exec_capabilities.rs", replace = "            kernel.drop_bounding(bit)?;", with = "            let _ = kernel.drop_bounding(bit);" }
+
+[[family.fault]]
+id = "exec-capabilities-effective-not-verified"
+transform = { file = "crates/agentd/src/exec_capabilities.rs", replace = "    if after.effective != before.effective", with = "    if false" }
+
+# Linux also clears corresponding ambient bits when I is cleared. Removing just
+# clear-A is therefore not evidence of lost protection; retain both seeded sets.
+[[fault]]
+id = "exec-capabilities-inheritance-retained"
+guard = "exec_capabilities::tests::real_reduction_clears_nonempty_i_a_and_reaches_future_threads_and_execs"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec_capabilities::tests::real_reduction_clears_nonempty_i_a_and_reaches_future_threads_and_execs"]
+expect = "test-failed"
+suite = "rust"
+transform = [
+  { file = "crates/agentd/src/exec_capabilities.rs", replace = "    kernel.clear_ambient()?;", with = "    // ambient clearing removed" },
+  { file = "crates/agentd/src/exec_capabilities.rs", replace = "    kernel.clear_inheritable(before)?;", with = "    // inheritable clearing removed" },
+]
+
+[[fault]]
+id = "exec-capabilities-host-clears-permitted"
+guard = "exec_capabilities::tests::real_reduction_clears_nonempty_i_a_and_reaches_future_threads_and_execs"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec_capabilities::tests::real_reduction_clears_nonempty_i_a_and_reaches_future_threads_and_execs"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/exec_capabilities.rs", replace = "                permitted: CapabilitySet::from_bits_retain(before.permitted),", with = "                permitted: CapabilitySet::empty()," }
+
+[[family]]
+guard = "exec_capabilities::tests::real_reduction_clears_nonempty_i_a_and_reaches_future_threads_and_execs"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec_capabilities::tests::real_reduction_clears_nonempty_i_a_and_reaches_future_threads_and_execs"]
+expect = "test-failed"
+suite = "rust"
+
+[[family.fault]]
+id = "exec-capabilities-ambient-bit-shift"
+transform = { file = "crates/agentd/src/exec_capabilities.rs", replace = "                snapshot.ambient |= 1 << bit;", with = "                snapshot.ambient |= 1 >> bit;" }
+
+# This proves the clear-A primitive itself, before clear-I can also empty A.
+[[family.fault]]
+id = "exec-capabilities-host-ambient-clear"
+transform = { file = "crates/agentd/src/exec_capabilities.rs", replace = "        Ok(rustix::thread::clear_ambient_capability_set()?)", with = "        Ok(())" }
+
+[[family]]
+guard = "exec_capabilities::tests::unsupported_platform_is_disabled_or_refuses_every_kernel_operation"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec_capabilities::tests::unsupported_platform_is_disabled_or_refuses_every_kernel_operation"]
+expect = "test-failed"
+suite = "rust"
+
+# A compiling success verdict tests refusal; Snapshot deliberately has no Default.
+[[family.fault]]
+id = "exec-capabilities-unsupported-snapshot"
+transform = { file = "crates/agentd/src/exec_capabilities.rs", replace = "            Err(io::Error::new(\n                io::ErrorKind::Unsupported,\n                \"exec capability policy requires Linux\",\n            ))", with = "            Ok(Snapshot { effective: 0, permitted: 0, inheritable: 0, bounding: 0, ambient: 0, supported: 0 })" }
+
+[[family.fault]]
+id = "exec-capabilities-unsupported-ambient"
+transform = { file = "crates/agentd/src/exec_capabilities.rs", replace = "        fn clear_ambient(&mut self) -> io::Result<()> {\n            self.snapshot().map(|_| ())\n        }", with = "        fn clear_ambient(&mut self) -> io::Result<()> {\n            Ok(())\n        }" }
+
+[[family.fault]]
+id = "exec-capabilities-unsupported-inheritable"
+transform = { file = "crates/agentd/src/exec_capabilities.rs", replace = "        fn clear_inheritable(&mut self, _: Snapshot) -> io::Result<()> {\n            self.snapshot().map(|_| ())\n        }", with = "        fn clear_inheritable(&mut self, _: Snapshot) -> io::Result<()> {\n            Ok(())\n        }" }
+
+[[family.fault]]
+id = "exec-capabilities-unsupported-bounding"
+transform = { file = "crates/agentd/src/exec_capabilities.rs", replace = "        fn drop_bounding(&mut self, _: u32) -> io::Result<()> {\n            self.snapshot().map(|_| ())\n        }", with = "        fn drop_bounding(&mut self, _: u32) -> io::Result<()> {\n            Ok(())\n        }" }
+
+[[fault]]
+id = "exec-capabilities-startup-skipped"
+guard = "malformed_policy_refuses_startup_before_tracing_or_listening"
+run = ["cargo", "test", "-p", "agentd", "--test", "exec_capability_startup", "--", "--exact", "malformed_policy_refuses_startup_before_tracing_or_listening"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/main.rs", replace = "    let restricted = agentd::exec_capabilities::apply_from_env()?;", with = "    let restricted = false;" }

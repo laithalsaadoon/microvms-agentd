@@ -445,6 +445,25 @@
       "verificationMethod": "test",
       "verifies": []
     },
+    "ed73f972-dd62-489b-93ea-70f3e1789c21": {
+      "createdAt": "2026-10-14T00:00:00.000Z",
+      "derives": [],
+      "id": "ed73f972-dd62-489b-93ea-70f3e1789c21",
+      "key": "AGENTD-26",
+      "negated": false,
+      "patternType": "event-driven",
+      "priority": "high",
+      "refines": [],
+      "satisfies": [],
+      "sentence": "When the image enables AGENTD_DROP_EXEC_CAPABILITIES, the agentd shall verify that inheritable and ambient capabilities are empty and bounding capabilities SYS_MODULE, SYS_RAWIO, SYS_PTRACE, SYS_ADMIN, SYS_BOOT, PERFMON, and BPF are absent while its permitted and effective capabilities remain unchanged before creating threads or serving requests.",
+      "status": "approved",
+      "systemName": "agentd",
+      "systemResponse": "verify that inheritable and ambient capabilities are empty and bounding capabilities SYS_MODULE, SYS_RAWIO, SYS_PTRACE, SYS_ADMIN, SYS_BOOT, PERFMON, and BPF are absent while its permitted and effective capabilities remain unchanged before creating threads or serving requests",
+      "trigger": "the image enables AGENTD_DROP_EXEC_CAPABILITIES",
+      "updatedAt": "2026-10-14T00:00:00.000Z",
+      "verificationMethod": "test",
+      "verifies": []
+    },
     "f7d0a588-6b31-4b49-8f4c-eaa0c7afc334": {
       "createdAt": "2026-09-24T21:09:26.088Z",
       "derives": [],

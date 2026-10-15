@@ -29,6 +29,7 @@ from lanes.agents import drive_agent_vm
 from lanes.bindings import BindingBuild, drive_binding_handles
 from lanes.bootstrap import drive_daemon_lane
 from lanes.caller_artifact import drive_caller_artifact
+from lanes.capability_policy import drive_capability_policy
 from lanes.closed_output import drive_closed_output, drive_closed_output_bdd
 from lanes.default_user import drive_default_user
 from lanes.ensure_image import drive_ensure_image
@@ -114,12 +115,18 @@ def run_suite(args: argparse.Namespace) -> int:
 
     cli = Cli(binary=microvm)
     results = Results()
-    if args.only in {"ensure_image", "default_user", "platform_measurements"}:
+    if args.only in {
+        "ensure_image",
+        "default_user",
+        "platform_measurements",
+        "capability_policy",
+    }:
         # A targeted run of the one section that owns everything it creates: no suite VM,
         # no suite build, the same named checks and the same independent cleanup.
         driver = {
             "ensure_image": drive_ensure_image,
             "default_user": drive_default_user,
+            "capability_policy": drive_capability_policy,
             "platform_measurements": drive_platform_measurements,
         }[args.only]
         run_section(
@@ -437,6 +444,15 @@ def run_suite(args: argparse.Namespace) -> int:
             )
             run_section(
                 results, "default_user", drive_default_user, cli, binary, aws, results
+            )
+            run_section(
+                results,
+                "capability_policy",
+                drive_capability_policy,
+                cli,
+                binary,
+                aws,
+                results,
             )
             # Version skew (#298) beside them: this tree's CLI builds an image around the
             # previous release's daemon, and the previous release's CLI launches the suite's

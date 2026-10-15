@@ -17,6 +17,7 @@ from lanes.quickstart import digest_record_agrees
 
 from selftest.bindings import check_binding_handles
 from selftest.caller_artifact import check_caller_artifact_section
+from selftest.capability_policy import check_policy_lane
 from selftest.closed_output import (
     check_bdd_outcome,
     check_cli8_attribution,
@@ -65,6 +66,7 @@ def self_test() -> int:
         check_execution_role_policy(results)
         check_preflight_lines(results)
         check_doctor_region_lines(results)
+        check_policy_lane(results)
         check_default_user(results)
         check_platform_measurements(results)
         check_isolated_known_vm(results)

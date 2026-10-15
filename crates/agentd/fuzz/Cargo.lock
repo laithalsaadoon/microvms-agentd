@@ -27,6 +27,7 @@ dependencies = [
  "hyper-util",
  "microvms-protocol",
  "nix",
+ "rustix",
  "schemars",
  "serde",
  "serde_json",

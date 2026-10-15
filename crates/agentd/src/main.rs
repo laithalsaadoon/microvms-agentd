@@ -12,7 +12,15 @@ use agentd::{AppState, Config, disk, exec, exec_start, identity, routes, serve};
 use tokio::net::TcpListener;
 
 fn main() -> std::io::Result<()> {
+    // Thread credentials are inherited at creation. Apply before even tracing
+    // can create a thread, and never listen after a partial or failed reduction.
+    let restricted = agentd::exec_capabilities::apply_from_env()?;
     init_tracing();
+    if restricted {
+        tracing::info!(
+            "exec capability policy applied; bounding bits 16,17,19,21,22,38,39 removed, inheritable and ambient cleared, daemon permitted and effective unchanged"
+        );
+    }
 
     let config = Config::from_env();
 

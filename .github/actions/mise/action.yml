@@ -35,6 +35,11 @@ inputs:
       one for this platform. `exact`: that key only, for the job that saves it, so an entry
       doesn't carry forward every tool version an older one held. `none`: no cache.
     default: restore
+  test-namespaces:
+    description: >-
+      Enable unprivileged user namespaces on a disposable Linux test runner when Ubuntu's
+      AppArmor restriction blocks them. Only jobs that run the isolated daemon tests opt in.
+    default: 'false'
 
 outputs:
   tools-cache-key:
@@ -47,6 +52,20 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: allow isolated daemon test namespaces
+      if: runner.os == 'Linux' && inputs.test-namespaces == 'true'
+      shell: bash
+      run: |
+        # Ubuntu 24.04 can allow creating a user namespace but deny writing its uid_map.
+        # Try first; change only that restriction on opted-in test runners, then prove it works.
+        if unshare --user --map-root-user true; then
+          exit 0
+        fi
+        restriction=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+        if [ -f "$restriction" ] && [ "$(cat "$restriction")" = 1 ]; then
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        fi
+        unshare --user --map-root-user true
     - id: key
       shell: bash
       run: |
