@@ -124,16 +124,35 @@ run = [
 description = "Build the Node addon with the release compiler's glibc floor for Lambda"
 # A native Ubuntu build requires a newer glibc than Lambda's Amazon Linux runtime.
 # Match the release addon build's compiler and linker before testing that runtime.
-tools = { zig = "{{vars.zig}}", "cargo:cargo-zigbuild" = "{{vars.cargo_zigbuild}}" }
+tools = { "cargo:cargo-zigbuild" = "{{vars.cargo_zigbuild}}" }
 shell = "bash -e -c"
 run = '''
 case "$(uname -m)" in
-  aarch64|arm64) lambda_target=aarch64-unknown-linux-gnu ;;
-  x86_64) lambda_target=x86_64-unknown-linux-gnu ;;
+  aarch64|arm64)
+    lambda_target=aarch64-unknown-linux-gnu
+    zig_arch=aarch64
+    zig_sha=ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17
+    ;;
+  x86_64)
+    lambda_target=x86_64-unknown-linux-gnu
+    zig_arch=x86_64
+    zig_sha=70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
+    ;;
   *) echo "Lambda smoke requires a Linux arm64 or x86_64 host" >&2; exit 1 ;;
 esac
-# Activate both tools explicitly when this task runs as another task's dependency.
-mise exec zig@{{vars.zig}} cargo:cargo-zigbuild@{{vars.cargo_zigbuild}} -- \
+# The pinned mise's Zig backend guesses an obsolete filename if its index fetch
+# fails. Use the release build's official tarballs, verified before extraction.
+lambda_zig_dir=$(mktemp -d)
+trap 'rm -rf "$lambda_zig_dir"' EXIT
+zig_archive=zig-$zig_arch-linux-{{vars.zig}}
+curl -fsSL -o "$lambda_zig_dir/zig.tar.xz" \
+  "https://ziglang.org/download/{{vars.zig}}/$zig_archive.tar.xz"
+printf '%s  %s\n' "$zig_sha" "$lambda_zig_dir/zig.tar.xz" | sha256sum -c -
+tar -xJf "$lambda_zig_dir/zig.tar.xz" -C "$lambda_zig_dir"
+export PATH="$lambda_zig_dir/$zig_archive:$PATH"
+zig version
+# Activate the compiler driver when this task runs as another task's dependency.
+mise exec cargo:cargo-zigbuild@{{vars.cargo_zigbuild}} -- \
   npx -y -p @napi-rs/cli@3.10.8 napi build --manifest-path Cargo.toml \
   --package microvms-js --platform --release --target "$lambda_target" \
   --cross-compile --output-dir . --cwd bindings/microvms-js

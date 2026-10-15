@@ -9,7 +9,10 @@ import json
 import os
 import re
 import runpy
+import shutil
 import subprocess
+import sys
+import tarfile
 import tempfile
 import tomllib
 import unittest
@@ -17,6 +20,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import mise_config
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -502,6 +506,123 @@ class ReleaseBuildTests(unittest.TestCase):
     def test_tag_interpolation_is_refused(self):
         self.step("draft", "draft the release")["run"] += " ${{ github.ref_name }}"
         self.assert_refused("environment variable")
+
+
+class LambdaZigTests(unittest.TestCase):
+    # Official 0.16.0 hashes from https://ziglang.org/download/index.json.
+    HASHES = {
+        "aarch64": "ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17",
+        "x86_64": "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00",
+    }
+
+    def setUp(self):
+        self.config = mise_config.load(ROOT)
+        self.task = self.config.tasks["npm:lambda:build"].table
+
+    def test_zig_is_not_installed_by_mise_before_the_lambda_task(self):
+        tools = [self.config.data.get("tools", {})]
+        tools.extend(task.table.get("tools", {}) for task in self.config.tasks.values())
+        for group in tools:
+            self.assertFalse(set(group) & {"zig", "core:zig"})
+        self.assertNotIn("zig@", self.task["run"])
+
+    def run_installer(self, machine, corrupt=False):
+        arch = "aarch64" if machine in {"aarch64", "arm64"} else "x86_64"
+        version = self.config.data["vars"]["zig"]
+        script = self.task["run"]
+        for name, value in self.config.data["vars"].items():
+            script = script.replace("{{vars." + name + "}}", str(value))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "bin").mkdir()
+            (root / "tmp").mkdir()
+            archive = root / "fixture.tar.xz"
+            binary = f"#!/bin/sh\nprintf '%s\\n' '{version}'\n".encode()
+            with tarfile.open(archive, "w:xz") as tar:
+                entry = tarfile.TarInfo(f"zig-{arch}-linux-{version}/zig")
+                entry.mode = 0o755
+                entry.size = len(binary)
+                tar.addfile(entry, io.BytesIO(binary))
+            # Use real checksum/extraction commands with a local archive, keeping
+            # the production hash assertions independent of the fixture contents.
+            self.assertIn(self.HASHES[arch], script)
+            script = script.replace(
+                self.HASHES[arch], hashlib.sha256(archive.read_bytes()).hexdigest()
+            )
+            if corrupt:
+                with archive.open("ab") as target:
+                    target.write(b"corrupt")
+            stub = (
+                f"#!{sys.executable}\n"
+                + """import json, os, shutil, subprocess, sys
+from pathlib import Path
+name = Path(sys.argv[0]).name
+args = sys.argv[1:]
+def record(value):
+    with open(os.environ["EVENTS"], "a") as stream:
+        stream.write(value + "\\n")
+if name == "uname":
+    print(os.environ["MACHINE"])
+elif name == "curl":
+    assert args[-1] == os.environ["EXPECTED_URL"], args
+    record("download")
+    shutil.copyfile(os.environ["ARCHIVE"], args[args.index("-o") + 1])
+elif name == "tar":
+    record("extract")
+    sys.exit(subprocess.call([os.environ["REAL_TAR"], *args]))
+elif name == "mise":
+    assert args[0] == "exec" and args[1] == os.environ["DRIVER"], args
+    assert args[2:4] == ["--", "npx"], args
+    assert args[args.index("--target") + 1] == os.environ["TARGET"], args
+    result = subprocess.run(["zig", "version"], text=True, capture_output=True, check=True)
+    assert result.stdout.strip() == os.environ["VERSION"], result
+    assert shutil.which("zig").startswith(os.environ["TMPDIR"] + "/"), shutil.which("zig")
+    record("build")
+else:
+    sys.exit(91)
+"""
+            )
+            for tool in ("uname", "curl", "tar", "mise", "zig"):
+                path = root / "bin" / tool
+                path.write_text(stub)
+                path.chmod(0o755)
+            events = root / "events"
+            result = subprocess.run(
+                ["bash", "-e", "-c", script],
+                env={
+                    **os.environ,
+                    "PATH": str(root / "bin") + os.pathsep + os.environ["PATH"],
+                    "TMPDIR": str(root / "tmp"),
+                    "ARCHIVE": str(archive),
+                    "EVENTS": str(events),
+                    "MACHINE": machine,
+                    "VERSION": version,
+                    "REAL_TAR": shutil.which("tar"),
+                    "TARGET": arch + "-unknown-linux-gnu",
+                    "DRIVER": "cargo:cargo-zigbuild@"
+                    + self.config.data["vars"]["cargo_zigbuild"],
+                    "EXPECTED_URL": f"https://ziglang.org/download/{version}/zig-{arch}-linux-{version}.tar.xz",
+                },
+                text=True,
+                capture_output=True,
+                timeout=15,
+            )
+            self.assertEqual(
+                list((root / "tmp").iterdir()), [], "staging directory leaked"
+            )
+            return result, events.read_text().splitlines() if events.exists() else []
+
+    def test_lambda_zig_selects_and_verifies_each_linux_archive(self):
+        for machine in ("aarch64", "arm64", "x86_64"):
+            with self.subTest(machine=machine):
+                result, events = self.run_installer(machine)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(events, ["download", "extract", "build"])
+
+    def test_lambda_zig_rejects_corruption_before_extracting_or_building(self):
+        result, events = self.run_installer("aarch64", corrupt=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(events, ["download"])
 
 
 if __name__ == "__main__":

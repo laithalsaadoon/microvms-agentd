@@ -79,6 +79,21 @@ message = "FAIL: test_python_build_commands_use_the_stub_generator_pin"
 transform = { file = ".config/mise/tasks/test.toml", replace = "uvx maturin@1.14.1 develop", with = "uvx maturin@1.14.0 develop" }
 
 [[family.fault]]
+id = "lambda-zig-checksum"
+message = "FAIL: test_lambda_zig_rejects_corruption_before_extracting_or_building"
+transform = { file = ".config/mise/tasks/test.toml", replace = "| sha256sum -c -", with = "| cat >/dev/null" }
+
+[[family.fault]]
+id = "lambda-zig-arm-archive"
+message = "FAIL: test_lambda_zig_selects_and_verifies_each_linux_archive"
+transform = { file = ".config/mise/tasks/test.toml", replace = "zig_arch=aarch64", with = "zig_arch=x86_64" }
+
+[[family.fault]]
+id = "lambda-zig-mise-backend"
+message = "FAIL: test_zig_is_not_installed_by_mise_before_the_lambda_task"
+transform = { file = ".config/mise/tasks/test.toml", replace = 'tools = { "cargo:cargo-zigbuild"', with = 'tools = { zig = "{{vars.zig}}", "cargo:cargo-zigbuild"' }
+
+[[family.fault]]
 id = "release-builds-draft-retry"
 message = "FAIL: test_draft_retry_reuses_the_first_complete_assets"
 transform = { file = ".github/workflows/release.yml", replace = "            cp retained/SHA256SUMS SHA256SUMS", with = "            : retained/SHA256SUMS SHA256SUMS" }
