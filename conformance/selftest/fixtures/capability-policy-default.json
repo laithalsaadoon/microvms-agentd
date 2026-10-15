@@ -1,0 +1,115 @@
+{
+  "baseline": {
+    "before": {
+      "CapAmb": "0000000000000000",
+      "CapBnd": "00000000a80425fb",
+      "CapEff": "00000000a80425fb",
+      "CapInh": "0000000000000000",
+      "CapPrm": "00000000a80425fb",
+      "NoNewPrivs": "1",
+      "Seccomp": "0"
+    },
+    "seeded": {
+      "CapAmb": "0000000000000001",
+      "CapBnd": "00000000a80425fb",
+      "CapEff": "00000000a80425fb",
+      "CapInh": "0000000000000001",
+      "CapPrm": "00000000a80425fb",
+      "NoNewPrivs": "1",
+      "Seccomp": "0"
+    }
+  },
+  "blockingTransfer": true,
+  "compatExit": 0,
+  "compatOutput": "4242:4242\nchanged\nuploaded-appended\n4242:4242\n4242:4242\n",
+  "daemon": {
+    "CapAmb": "0000000000000000",
+    "CapBnd": "00000000a80425fb",
+    "CapEff": "00000000a80425fb",
+    "CapInh": "0000000000000000",
+    "CapPrm": "00000000a80425fb",
+    "NoNewPrivs": "1",
+    "Seccomp": "0"
+  },
+  "daemonPid": 1,
+  "hook": {
+    "status": {
+      "CapAmb": "0000000000000000",
+      "CapBnd": "00000000a80425fb",
+      "CapEff": "00000000a80425fb",
+      "CapInh": "0000000000000000",
+      "CapPrm": "00000000a80425fb",
+      "NoNewPrivs": "1",
+      "Seccomp": "0"
+    },
+    "uid": 0
+  },
+  "identitySteps": [
+    {
+      "error": null,
+      "name": "machine-id",
+      "outcome": "repaired"
+    },
+    {
+      "error": "Operation not permitted (os error 1)",
+      "name": "hostname",
+      "outcome": "failed"
+    },
+    {
+      "error": "Operation not permitted (os error 1)",
+      "name": "boot-id",
+      "outcome": "failed"
+    },
+    {
+      "error": null,
+      "name": "random-seed",
+      "outcome": "not_applicable"
+    },
+    {
+      "error": null,
+      "name": "cached-credential",
+      "outcome": "not_applicable"
+    }
+  ],
+  "initialSyncExit": 0,
+  "readerConnected": true,
+  "repair": false,
+  "rootExec": {
+    "status": {
+      "CapAmb": "0000000000000000",
+      "CapBnd": "00000000a80425fb",
+      "CapEff": "00000000a80425fb",
+      "CapInh": "0000000000000000",
+      "CapPrm": "00000000a80425fb",
+      "NoNewPrivs": "1",
+      "Seccomp": "0"
+    },
+    "uid": 0
+  },
+  "threads": [
+    {
+      "status": {
+        "CapAmb": "0000000000000000",
+        "CapBnd": "00000000a80425fb",
+        "CapEff": "00000000a80425fb",
+        "CapInh": "0000000000000000",
+        "CapPrm": "00000000a80425fb",
+        "NoNewPrivs": "1",
+        "Seccomp": "0"
+      },
+      "tid": 1
+    },
+    {
+      "status": {
+        "CapAmb": "0000000000000000",
+        "CapBnd": "00000000a80425fb",
+        "CapEff": "00000000a80425fb",
+        "CapInh": "0000000000000000",
+        "CapPrm": "00000000a80425fb",
+        "NoNewPrivs": "1",
+        "Seccomp": "0"
+      },
+      "tid": 7
+    }
+  ]
+}

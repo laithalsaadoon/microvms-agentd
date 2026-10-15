@@ -52,3 +52,61 @@ transform = { file = "conformance/lanes/suite.py", replace = '''                
 id = "capability-policy-live-reader"
 message = "FAIL  policy reader stays connected through successful observation"
 transform = { file = "conformance/drivers/capability_policy_probe.py", replace = 'report["readerConnected"] = True', with = 'report["readerConnected"] = False' }
+
+[[family.fault]]
+id = "capability-policy-live-default-empty-identity"
+message = "FAIL  policy accepts captured default-image evidence"
+transform = { file = "conformance/lanes/capability_policy.py", replace = '''        and all(
+            any(
+                isinstance(step, dict)
+                and step.get("name") == name
+                and step.get("outcome") == "repaired"
+                for step in steps
+            )
+            for name in required
+        ),''', with = '''        and (
+            all(
+                any(
+                    isinstance(step, dict)
+                    and step.get("name") == name
+                    and step.get("outcome") == "repaired"
+                    for step in steps
+                )
+                for name in required
+            ) if repair else steps == []
+        ),''' }
+
+[[family.fault]]
+id = "capability-policy-live-default-machine-id"
+message = "FAIL  policy default requires repaired machine-id"
+transform = { file = "conformance/lanes/capability_policy.py", replace = 'if repair else {"machine-id"}', with = 'if repair else set()' }
+
+[[family.fault]]
+id = "capability-policy-live-pid-discovery"
+message = "FAIL  policy observer uses recorded PID when executable reads are denied"
+transform = { file = "conformance/drivers/capability_policy_probe.py", replace = 'pid = baseline.get("daemonPid")', with = 'pid = __import__("platform_probe").daemon_pid()' }
+
+[[family.fault]]
+id = "capability-policy-live-pid-record"
+message = "FAIL  policy bootstrap records its PID before exec"
+transform = { file = "conformance/drivers/capability_policy_probe.py", replace = '{"daemonPid": os.getpid(), "before": before, "seeded": status("self")}', with = '{"before": before, "seeded": status("self")}' }
+
+[[family.fault]]
+id = "capability-policy-live-pid-validation"
+message = "FAIL  policy observer rejects invalid bootstrap PID"
+transform = { file = "conformance/drivers/capability_policy_probe.py", replace = 'if type(pid) is not int or pid <= 0:', with = 'if False:' }
+
+[[family.fault]]
+id = "capability-policy-live-failure-diagnostics"
+message = "FAIL  policy probe reports bounded failure details"
+transform = { file = "conformance/lanes/capability_policy.py", replace = 'raise ValueError(f"capability policy probe failed: {detail}")', with = 'raise ValueError("capability policy probe failed")' }
+
+[[family.fault]]
+id = "capability-policy-live-diagnostics-bound"
+message = "FAIL  policy probe reports bounded failure details"
+transform = { file = "conformance/lanes/capability_policy.py", replace = 'repr(data.get(key))[-limit:]', with = 'repr(data.get(key))' }
+
+[[family.fault]]
+id = "capability-policy-live-rendered-diagnostics"
+message = "FAIL  policy section retains probe failure cause"
+transform = { file = "conformance/lanes/capability_policy.py", replace = '(("exitCode", 16), ("stderr", 160), ("stdout", 48))', with = '(("exitCode", 512), ("stderr", 512), ("stdout", 512))' }

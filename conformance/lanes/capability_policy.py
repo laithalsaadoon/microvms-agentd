@@ -159,25 +159,35 @@ def check_capability_policy(report: dict, repair: bool, results: Results) -> Non
         and report.get("compatOutput") == COMPAT_OUTPUT,
     )
     steps = report.get("identitySteps")
-    required = {"machine-id", "hostname", "boot-id"}
+    # The build flag grants capabilities; daemon identity repair is on in both
+    # images. Without extra authority only machine-id repair is guaranteed.
+    required = {"machine-id", "hostname", "boot-id"} if repair else {"machine-id"}
     results.check(
         f"AGENTD-26 {prefix} identity repair retains its privileged operations",
         report.get("repair") is repair
         and isinstance(steps, list)
-        and (
-            all(
-                any(
-                    isinstance(step, dict)
-                    and step.get("name") == name
-                    and step.get("outcome") == "repaired"
-                    for step in steps
-                )
-                for name in required
+        and all(
+            any(
+                isinstance(step, dict)
+                and step.get("name") == name
+                and step.get("outcome") == "repaired"
+                for step in steps
             )
-            if repair
-            else steps == []
+            for name in required
         ),
     )
+
+
+def probe_report(data: dict) -> dict:
+    if type(data.get("exitCode")) is not int or data["exitCode"] != 0:
+        # The section renderer keeps 300 characters. Reserve most of that for
+        # the traceback's final cause, then retain a small stdout tail as context.
+        detail = ", ".join(
+            f"{key}={repr(data.get(key))[-limit:]}"
+            for key, limit in (("exitCode", 16), ("stderr", 160), ("stdout", 48))
+        )
+        raise ValueError(f"capability policy probe failed: {detail}")
+    return json.loads(data.get("stdout") or "{}")
 
 
 def observe_policy(cli: Cli, launched: Any, directory: Path, repair: bool) -> dict:
@@ -255,9 +265,7 @@ def observe_policy(cli: Cli, launched: Any, directory: Path, repair: bool) -> di
             timeout=REQUEST_SECONDS,
         )
         transfer.result(timeout=REQUEST_SECONDS + 5)
-    if type(observed.data.get("exitCode")) is not int or observed.data["exitCode"] != 0:
-        raise ValueError("capability policy probe failed")
-    report = json.loads(observed.data.get("stdout") or "{}")
+    report = probe_report(observed.data)
     report.update(
         initialSyncExit=initial.data.get("exitCode"),
         compatExit=compatible.data.get("exitCode"),
