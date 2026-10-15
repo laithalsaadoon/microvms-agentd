@@ -57,10 +57,11 @@ depends = ["build", "build:cli", "live:infra"]
 # The number stays in the description for the same reason it did when it was 38: this task's
 # one line is where someone decides whether to trust the tier, and "the live suite" without
 # a count is a sentence that stays true while coverage shrinks.
+# No selector runs the full suite; an optional variadic must contribute no empty argument.
 run = """
 ./conformance/run_rs.py \
   --binary target/$AGENTD_TARGET/release/agentd \
-  --microvm-binary target/release/microvm {{arg(name="args", var=true)}}
+  --microvm-binary target/release/microvm {{arg(name="args", var=true, required=false)}}
 """
 
 ["live:paths"]
