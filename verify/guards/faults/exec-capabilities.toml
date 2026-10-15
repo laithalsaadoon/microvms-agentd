@@ -58,6 +58,44 @@ expect = "test-failed"
 suite = "rust"
 transform = { file = "crates/agentd/src/exec_capabilities.rs", replace = "                permitted: CapabilitySet::from_bits_retain(before.permitted),", with = "                permitted: CapabilitySet::empty()," }
 
+[[family]]
+guard = "exec_capabilities::tests::real_reduction_clears_nonempty_i_a_and_reaches_future_threads_and_execs"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec_capabilities::tests::real_reduction_clears_nonempty_i_a_and_reaches_future_threads_and_execs"]
+expect = "test-failed"
+suite = "rust"
+
+[[family.fault]]
+id = "exec-capabilities-ambient-bit-shift"
+transform = { file = "crates/agentd/src/exec_capabilities.rs", replace = "                snapshot.ambient |= 1 << bit;", with = "                snapshot.ambient |= 1 >> bit;" }
+
+# This proves the clear-A primitive itself, before clear-I can also empty A.
+[[family.fault]]
+id = "exec-capabilities-host-ambient-clear"
+transform = { file = "crates/agentd/src/exec_capabilities.rs", replace = "        Ok(rustix::thread::clear_ambient_capability_set()?)", with = "        Ok(())" }
+
+[[family]]
+guard = "exec_capabilities::tests::unsupported_platform_is_disabled_or_refuses_every_kernel_operation"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec_capabilities::tests::unsupported_platform_is_disabled_or_refuses_every_kernel_operation"]
+expect = "test-failed"
+suite = "rust"
+
+# A compiling success verdict tests refusal; Snapshot deliberately has no Default.
+[[family.fault]]
+id = "exec-capabilities-unsupported-snapshot"
+transform = { file = "crates/agentd/src/exec_capabilities.rs", replace = "            Err(io::Error::new(\n                io::ErrorKind::Unsupported,\n                \"exec capability policy requires Linux\",\n            ))", with = "            Ok(Snapshot { effective: 0, permitted: 0, inheritable: 0, bounding: 0, ambient: 0, supported: 0 })" }
+
+[[family.fault]]
+id = "exec-capabilities-unsupported-ambient"
+transform = { file = "crates/agentd/src/exec_capabilities.rs", replace = "        fn clear_ambient(&mut self) -> io::Result<()> {\n            self.snapshot().map(|_| ())\n        }", with = "        fn clear_ambient(&mut self) -> io::Result<()> {\n            Ok(())\n        }" }
+
+[[family.fault]]
+id = "exec-capabilities-unsupported-inheritable"
+transform = { file = "crates/agentd/src/exec_capabilities.rs", replace = "        fn clear_inheritable(&mut self, _: Snapshot) -> io::Result<()> {\n            self.snapshot().map(|_| ())\n        }", with = "        fn clear_inheritable(&mut self, _: Snapshot) -> io::Result<()> {\n            Ok(())\n        }" }
+
+[[family.fault]]
+id = "exec-capabilities-unsupported-bounding"
+transform = { file = "crates/agentd/src/exec_capabilities.rs", replace = "        fn drop_bounding(&mut self, _: u32) -> io::Result<()> {\n            self.snapshot().map(|_| ())\n        }", with = "        fn drop_bounding(&mut self, _: u32) -> io::Result<()> {\n            Ok(())\n        }" }
+
 [[fault]]
 id = "exec-capabilities-startup-skipped"
 guard = "malformed_policy_refuses_startup_before_tracing_or_listening"

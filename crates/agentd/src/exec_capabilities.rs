@@ -82,7 +82,11 @@ fn apply(enabled: bool, kernel: &mut impl Kernel) -> io::Result<bool> {
     Ok(true)
 }
 
+#[cfg(target_os = "linux")]
 struct Host;
+
+#[cfg(not(target_os = "linux"))]
+use unsupported::Host;
 
 #[cfg(target_os = "linux")]
 impl Kernel for Host {
@@ -335,6 +339,21 @@ mod tests {
         );
     }
 
+    #[test]
+    fn unsupported_platform_is_disabled_or_refuses_every_kernel_operation() {
+        let mut host = unsupported::Host;
+        assert!(!apply(false, &mut host).unwrap());
+        for result in [
+            host.snapshot().map(|_| ()),
+            host.clear_ambient(),
+            host.clear_inheritable(Fake::new().value),
+            host.drop_bounding(21),
+            apply(true, &mut host).map(|_| ()),
+        ] {
+            assert_eq!(result.unwrap_err().kind(), io::ErrorKind::Unsupported);
+        }
+    }
+
     /// AGENTD-26: irreversible changes belong only to an isolated subprocess.
     #[cfg(target_os = "linux")]
     #[test]
@@ -363,14 +382,34 @@ mod tests {
             }
             Ok("apply") => {
                 use rustix::thread::{self, CapabilitySet};
+                // Include a nonzero bit so a broken ambient-bit shift cannot
+                // masquerade as a correct snapshot of bit zero alone.
+                let inherited = CapabilitySet::CHOWN | CapabilitySet::SETUID;
                 let mut seeded = thread::capabilities(None).unwrap();
-                seeded.inheritable |= CapabilitySet::CHOWN;
-                thread::set_capabilities(None, seeded).expect("seed inheritable CHOWN");
-                thread::configure_capability_in_ambient_set(CapabilitySet::CHOWN, true)
-                    .expect("seed ambient CHOWN");
+                seeded.inheritable = inherited;
+                thread::set_capabilities(None, seeded).expect("seed inheritable capabilities");
+                for cap in [CapabilitySet::CHOWN, CapabilitySet::SETUID] {
+                    thread::configure_capability_in_ambient_set(cap, true)
+                        .expect("seed ambient capability");
+                }
                 let before = Host.snapshot().unwrap();
-                assert_ne!(before.inheritable, 0);
-                assert_ne!(before.ambient, 0);
+                assert_eq!(before.inheritable, inherited.bits());
+                assert_eq!(before.ambient, inherited.bits());
+                // Exercise this primitive before I is cleared, because Linux
+                // also clears corresponding ambient bits when clearing I.
+                Host.clear_ambient().unwrap();
+                assert_eq!(
+                    Host.snapshot().unwrap(),
+                    Snapshot {
+                        ambient: 0,
+                        ..before
+                    }
+                );
+                for cap in [CapabilitySet::CHOWN, CapabilitySet::SETUID] {
+                    thread::configure_capability_in_ambient_set(cap, true)
+                        .expect("restore ambient capability");
+                }
+                assert_eq!(Host.snapshot().unwrap(), before);
                 assert!(!apply(false, &mut Host).unwrap());
                 assert_eq!(Host.snapshot().unwrap(), before);
                 assert!(apply(true, &mut Host).unwrap());
@@ -429,21 +468,29 @@ mod tests {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
-impl Kernel for Host {
-    fn snapshot(&mut self) -> io::Result<Snapshot> {
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "exec capability policy requires Linux",
-        ))
-    }
-    fn clear_ambient(&mut self) -> io::Result<()> {
-        self.snapshot().map(|_| ())
-    }
-    fn clear_inheritable(&mut self, _: Snapshot) -> io::Result<()> {
-        self.snapshot().map(|_| ())
-    }
-    fn drop_bounding(&mut self, _: u32) -> io::Result<()> {
-        self.snapshot().map(|_| ())
+// Compile the same refusal implementation into tests on Linux, where the
+// daemon's test and mutation suites run, as well as on unsupported targets.
+#[cfg(any(not(target_os = "linux"), test))]
+mod unsupported {
+    use super::{Kernel, Snapshot, io};
+
+    pub(super) struct Host;
+
+    impl Kernel for Host {
+        fn snapshot(&mut self) -> io::Result<Snapshot> {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "exec capability policy requires Linux",
+            ))
+        }
+        fn clear_ambient(&mut self) -> io::Result<()> {
+            self.snapshot().map(|_| ())
+        }
+        fn clear_inheritable(&mut self, _: Snapshot) -> io::Result<()> {
+            self.snapshot().map(|_| ())
+        }
+        fn drop_bounding(&mut self, _: u32) -> io::Result<()> {
+            self.snapshot().map(|_| ())
+        }
     }
 }
