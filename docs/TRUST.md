@@ -23,10 +23,13 @@ A start request that omits `user` runs as root unless the image sets
 `AGENTD_DEFAULT_USER`. With it set, that start runs as the image's user, with
 its passwd row's uid and primary gid, whether the image gives the user's name
 or its uid. A value with no passwd row, digits included, refuses the start
-instead of running it as root or in root's group. Uploads are still written as
-root, so that user can read an uploaded tree but can't write into it. An authorized
-caller can still execute as root by asking for `root` or `0`, and workload hook
-handlers still run as root.
+instead of running it as root or in root's group. Direct `PUT /v1/fs/tar` and
+`PUT /v1/fs/file` uploads are still written as root. For a non-root default, the
+shared client stages uploads privately and transfers ownership to that user.
+It then installs them with that user's privileges. Sync deletions also run with
+that user's privileges.
+An authorized caller can still execute as root by asking for `root` or `0`, and
+workload hook handlers still run as root.
 
 An authorized start with `poweroff_on_exit: true` also delegates guest shutdown
 to the daemon after that exec's original process group exits. This can end

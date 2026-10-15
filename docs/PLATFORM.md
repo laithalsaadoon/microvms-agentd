@@ -185,9 +185,8 @@ agentd. The launched daemon and its root execs kept the smaller bounding set:
 | Launched daemon and root execs | `00000000a00425fb` | `00000000a00425fb` |
 
 The wrapper's exec also removed the marker from its permitted and effective
-sets. This experiment proves that the reduced bounding set persists across
-the snapshot. It does not test an in-process daemon drop without that exec, or
-identity repair after such a drop.
+sets. This marker experiment measures persistence of the reduced bounding set
+across the snapshot.
 
 In both control images, a probe running with effective uid 0 could open the
 daemon's `/proc/<pid>/mem`, while effective uid 4242 received `EACCES`. It did
@@ -201,6 +200,27 @@ from success to `EINVAL` (22), and route removal succeeded. The default
 image's route command exited 2, so no post-route connectivity observation was
 available there. This probe did not make a metadata HTTP request or read a
 token or credential.
+
+## Startup capability policy retains daemon authority and limits fresh children
+
+Measured 2026-10-15, us-east-1, API `2025-09-09`, `al2023-1`, using the
+[`capability_policy` conformance lane at `9eef8f0`](https://github.com/laithalsaadoon/microvms-agentd/blob/9eef8f0/conformance/lanes/capability_policy.py)
+and its [guest probe](https://github.com/laithalsaadoon/microvms-agentd/blob/9eef8f0/conformance/drivers/capability_policy_probe.py).
+With `AGENTD_DROP_EXEC_CAPABILITIES=true`, the daemon applied the policy in
+process while retaining its permitted and effective capabilities:
+
+| Image build | Daemon `CapBnd` | Daemon `CapPrm` and `CapEff` | Fresh root exec and run hook: `CapBnd`, `CapPrm`, and `CapEff` |
+|---|---|---|---|
+| Default | `00000000a80425fb` | `00000000a80425fb` | `00000000a80425fb` |
+| `--repair-identity` | `0000013fff94ffff` | `000001ffffffffff` | `0000013fff94ffff` |
+
+The runtime and blocking worker had the same sets as the daemon. The probe
+seeded nonzero inheritable and ambient sets before startup; both were zero in
+the daemon, its workers, the fresh root exec, and the run hook. The default
+image repaired `machine-id`; the image built with `--repair-identity` repaired
+`machine-id`, `hostname`, and `boot-id`.
+
+Memory and ptrace access after this startup policy remain unverified.
 
 ## Identity repair runs at the first run hook, because the image snapshot captures daemon start
 

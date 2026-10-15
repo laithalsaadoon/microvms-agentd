@@ -1,6 +1,6 @@
 {
   "name": "microvms",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Node.js and TypeScript client for AWS Lambda MicroVMs",
   "license": "Apache-2.0",
   "author": "Laith Al-Saadoon",
