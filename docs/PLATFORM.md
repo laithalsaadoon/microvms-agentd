@@ -140,6 +140,50 @@ procfs the namespace can see has a mount over part of it. With identity repair,
 root could mount a fresh procfs at `/proc` in a private mount namespace, and a
 user namespace below that one could mount its own.
 
+## A reduced capability bounding set persists across an image snapshot
+
+Measured 2026-10-14, us-east-1, API `2025-09-09`, `al2023-1`, using the
+[targeted conformance probe at `fd548af`](https://github.com/laithalsaadoon/microvms-agentd/blob/fd548af/conformance/drivers/platform_probe.py)
+and the [snapshot marker at `217b0ea`](https://github.com/laithalsaadoon/microvms-agentd/blob/217b0ea/conformance/drivers/platform_probe.py).
+The default daemon and root exec had `CapBnd`, `CapPrm`, and `CapEff` of
+`00000000a80425fb`. The repaired image had `000001ffffffffff` in those sets.
+Both had zero inheritable and ambient sets, `NoNewPrivs: 1`, and `Seccomp: 0`.
+
+A root exec called `PR_CAPBSET_DROP` for `CAP_SYS_MODULE`, `CAP_SYS_RAWIO`,
+`CAP_SYS_PTRACE`, `CAP_SYS_ADMIN`, `CAP_SYS_BOOT`, `CAP_PERFMON`, and `CAP_BPF`.
+Every call succeeded. These bits were already absent from the default set.
+In the repaired exec, `CapBnd` became `0000013fff94ffff`, while `CapPrm` and
+`CapEff` stayed `000001ffffffffff`. This shows a process can reduce its
+bounding set while keeping its permitted and effective capabilities.
+
+The snapshot probe used `CAP_MKNOD` (bit 27), which was present before the
+drop, as a marker. It dropped that bit in the image-build process, then execed
+agentd. The launched daemon and its root execs kept the smaller bounding set:
+
+| Stage | `CapBnd` | `CapPrm` and `CapEff` |
+|---|---|---|
+| Build process before the marker drop | `00000000a80425fb` | `00000000a80425fb` |
+| Build process after the successful drop | `00000000a00425fb` | `00000000a80425fb` |
+| Launched daemon and root execs | `00000000a00425fb` | `00000000a00425fb` |
+
+The wrapper's exec also removed the marker from its permitted and effective
+sets. This experiment proves that the reduced bounding set persists across
+the snapshot. It does not test an in-process daemon drop without that exec, or
+identity repair after such a drop.
+
+In both control images, a probe running with effective uid 0 could open the
+daemon's `/proc/<pid>/mem`, while effective uid 4242 received `EACCES`. It did
+not read memory or attempt a ptrace attach. `/proc/sys/kernel/yama/ptrace_scope`
+was absent. These observations do not establish the access of a fresh exec
+after an in-process daemon drop.
+
+After the repaired exec dropped the selected bounding bits, it could still
+replace the metadata host route with a blackhole. Its TCP connect changed
+from success to `EINVAL` (22), and route removal succeeded. The default
+image's route command exited 2, so no post-route connectivity observation was
+available there. This probe did not make a metadata HTTP request or read a
+token or credential.
+
 ## Identity repair runs at the first run hook, because the image snapshot captures daemon start
 
 The daemon starts in the image-build VM, and every VM launched from the image
