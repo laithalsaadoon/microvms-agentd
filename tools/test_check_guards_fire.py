@@ -2205,6 +2205,21 @@ class ShapeExact(unittest.TestCase):
         self.assertEqual(self.shape(), [])
         self.assertEqual(self.shape(transform={"file": "f", "with": ""}), [])
 
+    def test_untraced_requires_a_nonempty_reason(self):
+        missing = "`untraced` must be a non-empty string"
+        blank = "`untraced` must explain why the command cannot be traced"
+        for value, want in (
+            (None, [missing]),
+            (False, [missing]),
+            (1, [missing]),
+            ("", [missing, blank]),
+            (" \t\n", [blank]),
+            ("needs setuid sudo", []),
+            (" \tneeds setuid sudo\n", []),
+        ):
+            with self.subTest(value=value):
+                self.assertEqual(self.shape(untraced=value), want)
+
     def test_each_transform_that_isnt_either_form_is_refused(self):
         for transform, want in (
             ({"file": "f", "replace": "a"}, [self.FORM]),
