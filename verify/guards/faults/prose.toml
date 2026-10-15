@@ -47,3 +47,13 @@ transform = { file = "tools/prose.py", replace = "    if name.startswith((\"docs
 id = "prose-correction-trail"
 message = "FAIL: test_correction_trail_phrasing_is_an_error"
 transform = { file = ".vale/styles/Microvms/CorrectionTrail.yml", replace = "level: error\n", with = "level: suggestion\n" }
+
+# A linked-worktree hook must not redirect the fixtures' writes or nested Git reads.
+[[fault]]
+id = "prose-fixture-inherits-git-env"
+guard = "tools/test_prose.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_prose.py", "-k", "InheritedGitEnvTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_hook_pointers_leave_the_linked_repository_unchanged ("
+transform = { file = "tools/test_prose.py", replace = "if k not in GIT_ENV_LEAKS}", with = "if k not in ()}" }
