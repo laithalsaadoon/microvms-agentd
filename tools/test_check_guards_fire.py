@@ -122,9 +122,12 @@ if tool == "cargo" and "clippy" in sys.argv[1:]:
 seeded = bool(marks) or any(
     v not in ("ok", "no")
     for k, v in state.items()
-    if k not in ("slow", "flaky", "absent", "mark", "await") and "." not in k
+    if k not in ("slow", "flaky", "absent", "mark", "await", "trace_forbidden") and "." not in k
 )
 if os.environ.get("FAKE_TRACE"):
+    if state.get("trace_forbidden") in sys.argv[1:]:
+        print("tracing suppressed the command's required privilege")
+        sys.exit(77)
     here = os.getcwd()
     wanted = {{a for a in sys.argv[1:] if not a.startswith("-")}}
     lines = []
@@ -1187,6 +1190,11 @@ class RegistryShape(unittest.TestCase):
     def test_an_empty_registry_fails(self):
         self.check("# nothing\n", "has no [[fault]] entry")
 
+    def test_untraced_requires_a_nonempty_reason(self):
+        for value in ('""', '"   "', "false"):
+            with self.subTest(value=value):
+                self.check(entry() + f"untraced = {value}\n", "`untraced` must")
+
     def test_exit_nonzero_needs_a_message(self):
         self.check(entry(expect="exit-nonzero", run=["./gate"]), "needs a `message`")
 
@@ -2196,6 +2204,21 @@ class ShapeExact(unittest.TestCase):
     def test_a_well_formed_entry_has_no_problem(self):
         self.assertEqual(self.shape(), [])
         self.assertEqual(self.shape(transform={"file": "f", "with": ""}), [])
+
+    def test_untraced_requires_a_nonempty_reason(self):
+        missing = "`untraced` must be a non-empty string"
+        blank = "`untraced` must explain why the command cannot be traced"
+        for value, want in (
+            (None, [missing]),
+            (False, [missing]),
+            (1, [missing]),
+            ("", [missing, blank]),
+            (" \t\n", [blank]),
+            ("needs setuid sudo", []),
+            (" \tneeds setuid sudo\n", []),
+        ):
+            with self.subTest(value=value):
+                self.assertEqual(self.shape(untraced=value), want)
 
     def test_each_transform_that_isnt_either_form_is_refused(self):
         for transform, want in (
@@ -4397,6 +4420,77 @@ class VerdictCache(unittest.TestCase):
             out.stdout,
         )
         self.assertEqual(repo.worktrees(), 1)
+
+    def test_an_untraced_command_runs_all_phases_and_never_reuses_its_verdict(self):
+        repo = cache_repo(self, b="trace_forbidden=gb")
+        registry = (
+            (repo.root / REGISTRY)
+            .read_text()
+            .replace('guard = "gb"', 'guard = "gb"\nuntraced = "requires setuid sudo"')
+        )
+        repo.write(REGISTRY, registry)
+        repo.commit()
+        log = repo.root.parent / "runs.log"
+        where = self.record(repo, FAKE_LOG=str(log))
+        runs = [
+            line for line in log.read_text().splitlines() if line.endswith("--exact gb")
+        ]
+        self.assertEqual(len(runs), 3, "clean, seeded and restored must all run")
+        self.assertEqual(sum("\tseeded\t" in line for line in runs), 1)
+        (record,) = where.glob("*.json")
+        data = json.loads(record.read_text())
+        command = next(c for c in data["commands"] if "b" in c["entries"])
+        self.assertFalse(command["closure"]["traced"])
+        self.assertFalse(command["entries"]["b"]["closure"]["traced"])
+        self.fires(self.reuse(repo, where), {"b": "must run untraced"})
+
+        # Even a stale record claiming a complete trace cannot override the
+        # current command's explicit inability to run safely under ptrace.
+        command["closure"]["traced"] = True
+        command["entries"]["b"]["closure"]["traced"] = True
+        record.write_text(json.dumps(data))
+        self.fires(self.reuse(repo, where), {"b": "must run untraced"})
+
+    def test_an_untraced_sibling_controls_both_orders_and_partial_selection(self):
+        for reverse in (False, True):
+            for partial in (False, True):
+                with self.subTest(reverse=reverse, partial=partial):
+                    repo = cache_repo(self, a="trace_forbidden=ga")
+                    text = (
+                        (repo.root / REGISTRY)
+                        .read_text()
+                        .replace(
+                            'id = "a1"', 'id = "a1"\nuntraced = "requires setuid sudo"'
+                        )
+                    )
+                    if reverse:
+                        tables = text.split("[[fault]]")[1:]
+                        tables[0], tables[1] = tables[1], tables[0]
+                        text = "".join("[[fault]]" + table for table in tables)
+                    repo.write(REGISTRY, text)
+                    repo.commit()
+                    selected = ["--only", "a2"] if partial else []
+                    where = self.record(repo, *selected)
+                    out = self.reuse(repo, where, *selected)
+                    wanted = ["a2"] if partial else ["a1", "a2"]
+                    self.assertEqual(sorted(fired_ids(out.stdout)), wanted)
+                    self.assertEqual(sorted(firing(out.stdout)), wanted)
+                    self.assertEqual(
+                        sorted(reused(out.stdout)), [] if partial else ["b", "c", "p"]
+                    )
+
+    def test_ownership_commands_disable_ptrace_recording(self):
+        faults, problems = fire_module()["load"](HERE.parent)
+        self.assertEqual(problems, [])
+        ownership = [
+            fault
+            for fault in faults
+            if any("upload_ownership" in argv for argv in fault.run)
+        ]
+        self.assertTrue(
+            ownership, "the privileged ownership guards must remain registered"
+        )
+        self.assertEqual([fault.id for fault in ownership if not fault.untraced], [])
 
     def test_a_changed_file_its_command_read_fires_its_entries_alone(self):
         repo = cache_repo(self)

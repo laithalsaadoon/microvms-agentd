@@ -1,0 +1,46 @@
+# Commands needing setuid privilege must execute untraced, and never reuse a verdict.
+
+[[fault]]
+id = "guards-untraced-execution"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_an_untraced_command_runs_all_phases_and_never_reuses_its_verdict"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_untraced_command_runs_all_phases_and_never_reuses_its_verdict ("
+transform = { file = "tools/check-guards-fire.py", replace = "            if trace is not None and not fault.untraced:\n", with = "            if trace is not None:\n" }
+
+[[fault]]
+id = "guards-untraced-reuse"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_an_untraced_command_runs_all_phases_and_never_reuses_its_verdict"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_untraced_command_runs_all_phases_and_never_reuses_its_verdict ("
+transform = { file = "tools/check-guards-fire.py", replace = "        if fault.untraced:\n            return f\"its command must run untraced: {fault.untraced}\", None\n", with = "" }
+
+[[fault]]
+id = "guards-untraced-siblings"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_an_untraced_sibling_controls_both_orders_and_partial_selection"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_untraced_sibling_controls_both_orders_and_partial_selection ("
+transform = { file = "tools/check-guards-fire.py", replace = "        fault.untraced = untraced.get(command_key(fault))\n", with = "        pass  # ignore sibling tracing requirements\n" }
+
+[[fault]]
+id = "guards-untraced-reason"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_untraced_requires_a_nonempty_reason"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_untraced_requires_a_nonempty_reason ("
+transform = { file = "tools/check-guards-fire.py", replace = "    if isinstance(entry.get(\"untraced\"), str) and not entry[\"untraced\"].strip():\n", with = "    if False:\n" }
+
+[[fault]]
+id = "guards-untraced-ownership"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_ownership_commands_disable_ptrace_recording"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_ownership_commands_disable_ptrace_recording ("
+transform = { file = "verify/guards/faults/upload-604.toml", replace = "\nid = \"upload-604-real-ownership\"\nguard = \"private_tree_handoff_has_real_nonroot_ownership_and_preserves_link_targets\"\nrun = [\"cargo\", \"test\", \"-p\", \"microvms-core\", \"--test\", \"upload_ownership\", \"--\", \"--ignored\", \"--exact\", \"private_tree_handoff_has_real_nonroot_ownership_and_preserves_link_targets\"]\nexpect = \"test-failed\"\nsuite = \"rust\"\nuntraced = \"The ownership test uses setuid sudo, which ptrace suppresses.\"\ntransform = { file = \"crates/microvms-app/src/session/upload.sh\", replace = \"        chown -hR \\\"$3:$4\\\" \\\"$2/payload\\\"\", with = \"        : # skipped payload ownership\" }\n\n", with = "\nid = \"upload-604-real-ownership\"\nguard = \"private_tree_handoff_has_real_nonroot_ownership_and_preserves_link_targets\"\nrun = [\"cargo\", \"test\", \"-p\", \"microvms-core\", \"--test\", \"upload_ownership\", \"--\", \"--ignored\", \"--exact\", \"private_tree_handoff_has_real_nonroot_ownership_and_preserves_link_targets\"]\nexpect = \"test-failed\"\nsuite = \"rust\"\ntransform = { file = \"crates/microvms-app/src/session/upload.sh\", replace = \"        chown -hR \\\"$3:$4\\\" \\\"$2/payload\\\"\", with = \"        : # skipped payload ownership\" }\n\n" }

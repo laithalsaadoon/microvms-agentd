@@ -141,7 +141,8 @@ Three subcommands:
           are what the restored pass adds after the last fault's verdict.
 
           `--record DIR` (CI's `guards` legs on a push to main) runs every clean run and every
-          seeded run under strace (`STRACE`), and writes a record to DIR: the commit, the
+          seeded run under strace (`STRACE`), except commands with an `untraced` reason,
+          and writes a record to DIR: the commit, the
           environment, each tool's digest, and per command its clean run's closure and
           seconds, with each entry's registry table, verdict, seconds and what its fault run
           read beyond the clean one, the files the fault is made from among them. The fault
@@ -162,8 +163,14 @@ Three subcommands:
           through its manifest, which cargo reads for every build. A cargo process whose build
           the graph can't name counts every file it touched, the lockfile's text included.
           It needs a committed tree, since a pull request diffs from the record's commit, and
-          strace on PATH. The record's seconds are traced runs', slower than the same runs
-          without strace.
+          strace on PATH. The record's seconds include tracing overhead except for commands
+          declared untraced.
+
+          An entry whose command cannot run under ptrace (for example, a test using
+          setuid sudo) declares `untraced = "reason"`. Every entry sharing that command
+          runs without tracing, even when only one is selected. Its clean, seeded and
+          restored runs still determine the verdict, but its record has no traced closure
+          and `--reuse` always fires it again.
 
           `--reuse DIR` (CI's pull requests) keeps an entry's recorded `fired` verdict instead
           of firing it when every input its runs had is the same in the tree: its registry
@@ -284,6 +291,7 @@ An entry, in `verify/guards/faults/<owner>.toml`:
   code = "E0432"                # compile-error only
   suite = "rust"                # rust | script | bindings
   note = "<path>::<item>"       # the Falsification note this entry registers, if any
+  untraced = "needs setuid sudo" # optional reason; always rerun, never reuse its verdict
   # and exactly one fault:
   transform = { file = "...", replace = "...", with = "..." }   # or a list of them; with no
                                                                 # `replace`, `with` is the
@@ -456,6 +464,7 @@ KEYS = {
     "code",
     "suite",
     "note",
+    "untraced",
     "transform",
     "patch",
     "argv_fault",
@@ -523,6 +532,8 @@ class Fault:
     message: str | None = None
     code: str | None = None
     note: str | None = None
+    # Aggregated across entries sharing a command, before any selection or reuse.
+    untraced: str | None = None
     transforms: list[dict] = field(default_factory=list)
     patch: str | None = None
     argv_fault: list[str] | None = None
@@ -1036,6 +1047,7 @@ def load(root: Path) -> tuple[list[Fault], list[str]]:
                 message=entry.get("message"),
                 code=entry.get("code"),
                 note=entry.get("note"),
+                untraced=entry.get("untraced"),
                 transforms=(
                     []
                     if transform is None
@@ -1048,6 +1060,15 @@ def load(root: Path) -> tuple[list[Fault], list[str]]:
                 file=table.file,
             )
         )
+    # A command's tracing requirements cannot depend on registry order or which
+    # sibling entry a shard selects. One entry needing privilege applies to all
+    # runs of that command, including its shared clean and restored runs.
+    untraced: dict[tuple, str] = {}
+    for fault in faults:
+        if fault.untraced:
+            untraced.setdefault(command_key(fault), fault.untraced)
+    for fault in faults:
+        fault.untraced = untraced.get(command_key(fault))
     return faults, problems
 
 
@@ -1114,9 +1135,11 @@ def shape(entry: dict, root: Path) -> list[str]:
     for key in ("guard", "expect", "suite"):
         if not isinstance(entry.get(key), str) or not entry.get(key):
             out.append(f"`{key}` must be a non-empty string")
-    for key in ("message", "code", "note", "patch"):
+    for key in ("message", "code", "note", "patch", "untraced"):
         if key in entry and (not isinstance(entry[key], str) or not entry[key]):
             out.append(f"`{key}` must be a non-empty string")
+    if isinstance(entry.get("untraced"), str) and not entry["untraced"].strip():
+        out.append("`untraced` must explain why the command cannot be traced")
     run = entry.get("run")
     commands = [run] if _argv(run) else run
     if not (
@@ -1848,6 +1871,7 @@ def run_commands(
     Verdicts read the output alone: an echoed argv that happens to contain an entry's
     `message` would otherwise match on every run. With `trace`, each argv runs under strace
     (`STRACE`), which writes argv N's trace to `<trace>.N` and changes nothing it prints.
+    An untraced command leaves no trace files, so its recorded closure cannot be reused.
     """
     output: list[str] = []
     said: list[str] = []
@@ -1859,7 +1883,7 @@ def run_commands(
                     a.replace("{empty_dir}", empty) for a in fault.argv_fault
                 ]
             output.append(f"$ {' '.join(argv)}\n")
-            if trace is not None:
+            if trace is not None and not fault.untraced:
                 argv = [*STRACE, f"{trace}.{index}", *argv]
             try:
                 done, out = procs.run(argv, tree, env, timeout)
@@ -3830,6 +3854,8 @@ class Reuse:
     def why(self, fault: Fault) -> tuple[str | None, str | None]:
         """Why `fault` fires (None when it keeps its recorded verdict), and the commit the record
         it keeps came from."""
+        if fault.untraced:
+            return f"its command must run untraced: {fault.untraced}", None
         found = self.commands.get(command_key(fault))
         if found is None:
             return "no record has its command", None
@@ -4448,7 +4474,7 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
                 return 1
             graph = cargo_graph(first.path, env)
             print(
-                "guards: --record traces every clean and seeded run with strace; "
+                "guards: --record traces clean and seeded runs except commands declared untraced; "
                 + (
                     f"cargo metadata names {len(graph.members)} workspace members"
                     if graph

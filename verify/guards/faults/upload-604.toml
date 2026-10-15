@@ -32,6 +32,7 @@ guard = "private_tree_handoff_has_real_nonroot_ownership_and_preserves_link_targ
 run = ["cargo", "test", "-p", "microvms-core", "--test", "upload_ownership", "--", "--ignored", "--exact", "private_tree_handoff_has_real_nonroot_ownership_and_preserves_link_targets"]
 expect = "test-failed"
 suite = "rust"
+untraced = "The ownership test uses setuid sudo, which ptrace suppresses."
 transform = { file = "crates/microvms-app/src/session/upload.sh", replace = "        chown -hR \"$3:$4\" \"$2/payload\"", with = "        : # skipped payload ownership" }
 
 [[fault]]
@@ -40,6 +41,7 @@ guard = "planted_destination_symlinks_and_swapped_directories_are_refused"
 run = ["cargo", "test", "-p", "microvms-core", "--test", "upload_ownership", "--", "--ignored", "--exact", "planted_destination_symlinks_and_swapped_directories_are_refused"]
 expect = "test-failed"
 suite = "rust"
+untraced = "The ownership test uses setuid sudo, which ptrace suppresses."
 transform = { file = "crates/microvms-app/src/session/upload.sh", replace = "find \"$2/payload\" ! -type l -exec sh -c", with = "find \"$2/payload\" -type d -exec sh -c" }
 
 [[fault]]
@@ -48,6 +50,7 @@ guard = "cleanup_after_handoff_cannot_remove_a_substituted_root_directory"
 run = ["cargo", "test", "-p", "microvms-core", "--test", "upload_ownership", "--", "--ignored", "--exact", "cleanup_after_handoff_cannot_remove_a_substituted_root_directory"]
 expect = "test-failed"
 suite = "rust"
+untraced = "The ownership test uses setuid sudo, which ptrace suppresses."
 transform = { file = "crates/microvms-app/src/session/upload.sh", replace = "    cleanup)\n        rm -rf -- \"$2\"", with = "    cleanup)\n        : # swallowed cleanup refusal" }
 
 [[fault]]
@@ -56,6 +59,7 @@ guard = "upload_to_a_writable_root_owned_directory_keeps_its_ownership_and_mode"
 run = ["cargo", "test", "-p", "microvms-core", "--test", "upload_ownership", "--", "--ignored", "--exact", "upload_to_a_writable_root_owned_directory_keeps_its_ownership_and_mode"]
 expect = "test-failed"
 suite = "rust"
+untraced = "The ownership test uses setuid sudo, which ptrace suppresses."
 transform = { file = "crates/microvms-app/src/session/upload.sh", replace = "cp -dR --remove-destination --", with = "cp -a --remove-destination --" }
 
 [[fault]]
@@ -64,6 +68,7 @@ guard = "root_handoff_ignores_commands_planted_in_the_inherited_path"
 run = ["cargo", "test", "-p", "microvms-core", "--test", "upload_ownership", "--", "--ignored", "--exact", "root_handoff_ignores_commands_planted_in_the_inherited_path"]
 expect = "test-failed"
 suite = "rust"
+untraced = "The ownership test uses setuid sudo, which ptrace suppresses."
 transform = { file = "crates/microvms-app/src/session/upload.sh", replace = "PATH=/usr/sbin:/usr/bin:/sbin:/bin\nexport PATH", with = "export PATH" }
 
 [[fault]]
