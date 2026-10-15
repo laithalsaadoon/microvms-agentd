@@ -62,6 +62,9 @@ reqwest = { version = "0.13", default-features = false, features = [
     "stream",
 ] }
 http = "1.5"
+hyper = { version = "1.11", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
 # Retry with jitter for the STS and S3 calls, as the control plane retries its own.
 backon = { version = "1.6", features = ["tokio-sleep"] }
 # The daemon binary's checksum in `provision`.

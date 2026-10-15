@@ -152,7 +152,7 @@ async fn forwarded_redirects_keep_the_status_location_and_body() {
     let task =
         tokio::spawn(async move { serve_connection(relay, &spec, &auth, &http, |_| {}).await });
     browser
-        .write_all(b"GET / HTTP/1.1\r\nHost: localhost:8080\r\n\r\n")
+        .write_all(b"GET / HTTP/1.1\r\nHost: localhost:8080\r\nConnection: close\r\n\r\n")
         .await
         .expect("request");
     task.await.expect("task").expect("relay");

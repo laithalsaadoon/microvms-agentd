@@ -62,7 +62,7 @@ guard = "session::forward::tests::requests_name_the_local_listener_before_mintin
 run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::forward::tests::requests_name_the_local_listener_before_minting"]
 expect = "test-failed"
 suite = "rust"
-transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "    if !local_host_matches(&head.headers, spec.bind) {", with = "    if false && !local_host_matches(&head.headers, spec.bind) {" }
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "    if !local_host_matches(&headers, spec.bind) {", with = "    if false && !local_host_matches(&headers, spec.bind) {" }
 
 [[fault]]
 id = "forward-host-authority"
@@ -86,7 +86,7 @@ guard = "session::forward::tests::the_caller_cannot_smuggle_its_own_proxy_header
 run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::forward::tests::the_caller_cannot_smuggle_its_own_proxy_headers_upstream"]
 expect = "test-failed"
 suite = "rust"
-transform = {file = "crates/microvms-edges/src/session/forward.rs", replace = "    if !local_host_matches(&head.headers, spec.bind) {", with = "    if true || !local_host_matches(&head.headers, spec.bind) {"}
+transform = {file = "crates/microvms-edges/src/session/forward.rs", replace = "    if !local_host_matches(&headers, spec.bind) {", with = "    if true || !local_host_matches(&headers, spec.bind) {"}
 
 [[fault]]
 id = "forward-host-a-scope-refusal-is-answered-with-the-sentence-that-names-it"
@@ -94,7 +94,7 @@ guard = "session::forward::tests::a_scope_refusal_is_answered_with_the_sentence_
 run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::forward::tests::a_scope_refusal_is_answered_with_the_sentence_that_names_it"]
 expect = "test-failed"
 suite = "rust"
-transform = {file = "crates/microvms-edges/src/session/forward.rs", replace = "    if !local_host_matches(&head.headers, spec.bind) {", with = "    if true || !local_host_matches(&head.headers, spec.bind) {"}
+transform = {file = "crates/microvms-edges/src/session/forward.rs", replace = "    if !local_host_matches(&headers, spec.bind) {", with = "    if true || !local_host_matches(&headers, spec.bind) {"}
 
 [[fault]]
 id = "forward-host-a-dead-guest-server-is-reported-as-502-rather-than-as-an-auth-problem"
@@ -102,7 +102,7 @@ guard = "session::forward::tests::a_dead_guest_server_is_reported_as_502_rather_
 run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::forward::tests::a_dead_guest_server_is_reported_as_502_rather_than_as_an_auth_problem"]
 expect = "test-failed"
 suite = "rust"
-transform = {file = "crates/microvms-edges/src/session/forward.rs", replace = "    if !local_host_matches(&head.headers, spec.bind) {", with = "    if true || !local_host_matches(&head.headers, spec.bind) {"}
+transform = {file = "crates/microvms-edges/src/session/forward.rs", replace = "    if !local_host_matches(&headers, spec.bind) {", with = "    if true || !local_host_matches(&headers, spec.bind) {"}
 
 [[fault]]
 id = "forward-host-the-guests-own-404-is-relayed-and-not-reinterpreted"
@@ -110,7 +110,7 @@ guard = "session::forward::tests::the_guests_own_404_is_relayed_and_not_reinterp
 run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::forward::tests::the_guests_own_404_is_relayed_and_not_reinterpreted"]
 expect = "test-failed"
 suite = "rust"
-transform = {file = "crates/microvms-edges/src/session/forward.rs", replace = "    if !local_host_matches(&head.headers, spec.bind) {", with = "    if true || !local_host_matches(&head.headers, spec.bind) {"}
+transform = {file = "crates/microvms-edges/src/session/forward.rs", replace = "    if !local_host_matches(&headers, spec.bind) {", with = "    if true || !local_host_matches(&headers, spec.bind) {"}
 
 [[fault]]
 id = "forward-host-a-post-body-is-forwarded-and-the-response-length-is-re-derived"
@@ -118,7 +118,7 @@ guard = "session::forward::tests::a_post_body_is_forwarded_and_the_response_leng
 run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::forward::tests::a_post_body_is_forwarded_and_the_response_length_is_re_derived"]
 expect = "test-failed"
 suite = "rust"
-transform = {file = "crates/microvms-edges/src/session/forward.rs", replace = "    if !local_host_matches(&head.headers, spec.bind) {", with = "    if true || !local_host_matches(&head.headers, spec.bind) {"}
+transform = {file = "crates/microvms-edges/src/session/forward.rs", replace = "    if !local_host_matches(&headers, spec.bind) {", with = "    if true || !local_host_matches(&headers, spec.bind) {"}
 
 [[fault]]
 id = "forward-host-a-101-relays-the-handshake-and-then-stops-parsing"
@@ -126,7 +126,7 @@ guard = "session::forward::tests::a_101_relays_the_handshake_and_then_stops_pars
 run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::forward::tests::a_101_relays_the_handshake_and_then_stops_parsing"]
 expect = "test-failed"
 suite = "rust"
-transform = {file = "crates/microvms-edges/src/session/forward.rs", replace = "    if !local_host_matches(&head.headers, spec.bind) {", with = "    if true || !local_host_matches(&head.headers, spec.bind) {"}
+transform = {file = "crates/microvms-edges/src/session/forward.rs", replace = "    if !local_host_matches(&headers, spec.bind) {", with = "    if true || !local_host_matches(&headers, spec.bind) {"}
 
 [[fault]]
 id = "forward-host-every-exchange-mints-through-the-cache-rather-than-capturing-headers-once"
@@ -134,7 +134,7 @@ guard = "session::forward::tests::every_exchange_mints_through_the_cache_rather_
 run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::forward::tests::every_exchange_mints_through_the_cache_rather_than_capturing_headers_once"]
 expect = "test-failed"
 suite = "rust"
-transform = {file = "crates/microvms-edges/src/session/forward.rs", replace = "    if !local_host_matches(&head.headers, spec.bind) {", with = "    if true || !local_host_matches(&head.headers, spec.bind) {"}
+transform = {file = "crates/microvms-edges/src/session/forward.rs", replace = "    if !local_host_matches(&headers, spec.bind) {", with = "    if true || !local_host_matches(&headers, spec.bind) {"}
 
 [[fault]]
 id = "bg-publisher-secret"
@@ -167,3 +167,27 @@ run = ["cargo", "test", "-p", "microvms-edges", "--test", "serve", "--", "--exac
 expect = "test-failed"
 suite = "rust"
 transform = { file = "crates/microvms-edges/src/session/serve.rs", replace = "                spec.bind = stream.local_addr().map_err(|error| {", with = "                let _ = stream.local_addr().map_err(|error| {" }
+
+[[fault]]
+id = "forward-http1-redirect-keeps-destination"
+guard = "forwarded_redirects_keep_the_status_location_and_body"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "http_responses", "--", "--exact", "forwarded_redirects_keep_the_status_location_and_body"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = ".redirect(reqwest::redirect::Policy::none())", with = ".redirect(reqwest::redirect::Policy::limited(1))" }
+
+[[fault]]
+id = "forward-http1-allows-body-limit"
+guard = "request_body_at_the_limit_is_accepted"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_http1", "--", "--exact", "request_body_at_the_limit_is_accepted"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "length > MAX_REQUEST_BODY_BYTES as u64", with = "length >= MAX_REQUEST_BODY_BYTES as u64" }
+
+[[fault]]
+id = "forward-http1-upgrade-read-ahead"
+guard = "upgrade_read_ahead_is_spliced_without_losing_bytes"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_http1", "--", "--exact", "upgrade_read_ahead_is_spliced_without_losing_bytes"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "std::io::Cursor::new(parts.read_buf)", with = "std::io::Cursor::new(Bytes::new())" }

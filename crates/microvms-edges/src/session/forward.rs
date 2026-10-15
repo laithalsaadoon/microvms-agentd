@@ -71,9 +71,15 @@
 //! a caller rediscover it from a closed socket.
 
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use http_body_util::{BodyExt as _, Full, Limited};
+use hyper::body::{Bytes, Incoming};
+use hyper::service::service_fn;
+use hyper_util::rt::{TokioIo, TokioTimer};
+
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
 
 use microvms_app::error::{Error, ErrorKind};
@@ -378,7 +384,7 @@ pub fn is_upgrade(status: u16) -> bool {
 pub trait LocalStream: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> LocalStream for T {}
 
-/// Serves one local connection: reads its request, forwards it, and either relays the
+/// Serves one local connection: reads its requests, forwards them, and either relays each
 /// response or splices an upgraded stream.
 ///
 /// # The request is parsed, not tunnelled
@@ -414,358 +420,261 @@ where
 /// ([`direct_url`]), since there is no proxy to route it there by header. The serving loop
 /// (`super::serve`) takes whichever the session has.
 pub(crate) async fn serve_connection_via<S, F>(
-    mut local: S,
+    local: S,
     spec: &ForwardSpec,
     auth: Option<&Arc<ProxyAuth>>,
     client: &ForwardClient,
-    mut on_event: F,
+    on_event: F,
 ) -> Result<(), Error>
 where
     S: LocalStream,
     F: FnMut(ForwardEvent),
 {
-    let head = match read_request_head(&mut local).await? {
-        Some(head) => head,
-        // A connection that closed before sending a request line. Browsers open and abandon
-        // speculative connections constantly, so this is normal traffic and not an error.
-        None => return Ok(()),
-    };
-
-    if !local_host_matches(&head.headers, spec.bind) {
-        let explanation = "the request Host must name the local forward and its port".to_string();
-        write_local_error(&mut local, 403, &explanation).await?;
-        on_event(ForwardEvent::Refused {
-            status: 403,
-            explanation,
-        });
-        return Ok(());
+    let events = Mutex::new(on_event);
+    let upgraded = Mutex::new(None);
+    let answered = AtomicBool::new(false);
+    let service = service_fn(|request| {
+        let result = forward_request(request, spec, auth, client, &events, &upgraded);
+        let answered = &answered;
+        Box::pin(async move {
+            let response = result.await;
+            if response.is_ok() {
+                answered.store(true, Ordering::Relaxed);
+            }
+            response
+        })
+    });
+    let mut builder = hyper::server::conn::http1::Builder::new();
+    builder
+        .timer(TokioTimer::new())
+        .header_read_timeout(HEADER_TIMEOUT)
+        .max_buf_size(MAX_REQUEST_HEAD_BYTES);
+    // The public primitive accepts borrowed streams. Hyper's automatic upgrade API
+    // requires 'static I/O, so take its buffered bytes and socket back explicitly.
+    let mut connection = builder.serve_connection(TokioIo::new(local), service);
+    let result = futures_util::future::poll_fn(|cx| connection.poll_without_shutdown(cx)).await;
+    let parts = connection.into_parts();
+    if let Err(error) = result {
+        // The next request's timer also bounds idle keep-alive. Closing an empty
+        // idle connection is normal; partial headers still report a timeout.
+        let idle =
+            error.is_timeout() && answered.load(Ordering::Relaxed) && parts.read_buf.is_empty();
+        if !idle {
+            return Err(Error::new(
+                ErrorKind::Protocol,
+                format!("the local HTTP connection failed: {error}"),
+            ));
+        }
     }
+    let upstream = upgraded.lock().expect("upgrade lock poisoned").take();
+    if let Some(mut upstream) = upstream {
+        // Replay read-ahead through the same bidirectional pump, so either peer can
+        // keep sending while the buffered client bytes wait for upstream capacity.
+        let (read, write) = tokio::io::split(parts.io.into_inner());
+        let read = tokio::io::AsyncReadExt::chain(std::io::Cursor::new(parts.read_buf), read);
+        let mut local = tokio::io::join(read, write);
+        splice(&mut local, &mut upstream).await?;
+    }
+    Ok(())
+}
 
-    // Minted per exchange rather than once at bind time. This call is the token refresh —
-    // see the module docs.
+// Bound both initial headers and idle keep-alive connections. Bodies get their own
+// deadline below, after Host validation, and cannot allocate past the fixed cap.
+const HEADER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+const MAX_REQUEST_BODY_BYTES: usize = 16 * 1024 * 1024;
+
+fn local_response(status: u16, text: String) -> http::Response<Full<Bytes>> {
+    let mut response = http::Response::new(Full::new(Bytes::from(text)));
+    *response.status_mut() =
+        http::StatusCode::from_u16(status).unwrap_or(http::StatusCode::BAD_GATEWAY);
+    response.headers_mut().insert(
+        http::header::CONTENT_TYPE,
+        http::HeaderValue::from_static("text/plain; charset=utf-8"),
+    );
+    response.headers_mut().insert(
+        http::header::CONNECTION,
+        http::HeaderValue::from_static("close"),
+    );
+    response
+}
+
+// Connection options name headers that belong to this hop, including custom ones.
+// Only a negotiated upgrade carries its connection and upgrade headers onward.
+fn strip_hop_headers(headers: &mut http::HeaderMap, upgrade: bool) {
+    let nominated = headers
+        .get_all(http::header::CONNECTION)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .filter_map(|name| http::HeaderName::from_bytes(name.trim().as_bytes()).ok())
+        .collect::<Vec<_>>();
+    for name in nominated {
+        if !upgrade || name != http::header::UPGRADE {
+            headers.remove(name);
+        }
+    }
+    for name in [
+        "connection",
+        "keep-alive",
+        "proxy-connection",
+        "transfer-encoding",
+        "te",
+        "trailer",
+        "upgrade",
+    ] {
+        if !upgrade || (name != "connection" && name != "upgrade") {
+            headers.remove(name);
+        }
+    }
+    if upgrade {
+        headers.insert(
+            http::header::CONNECTION,
+            http::HeaderValue::from_static("upgrade"),
+        );
+    }
+}
+
+async fn forward_request<F: FnMut(ForwardEvent)>(
+    request: http::Request<Incoming>,
+    spec: &ForwardSpec,
+    auth: Option<&Arc<ProxyAuth>>,
+    client: &ForwardClient,
+    events: &Mutex<F>,
+    upgraded: &Mutex<Option<reqwest::Upgraded>>,
+) -> Result<http::Response<Full<Bytes>>, Error> {
+    let headers = request
+        .headers()
+        .get_all(http::header::HOST)
+        .iter()
+        .map(|value| ("host".to_string(), value.to_str().unwrap_or("").to_string()))
+        .collect::<Vec<_>>();
+    if !local_host_matches(&headers, spec.bind) {
+        let explanation = "the request Host must name the local forward and its port".to_string();
+        events.lock().expect("event lock poisoned")(ForwardEvent::Refused {
+            status: 403,
+            explanation: explanation.clone(),
+        });
+        return Ok(local_response(403, explanation));
+    }
+    if request
+        .headers()
+        .get(http::header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .is_some_and(|length| length > MAX_REQUEST_BODY_BYTES as u64)
+    {
+        return Ok(local_response(
+            413,
+            "the local request body exceeds 16 MiB".into(),
+        ));
+    }
+    let (mut head, body) = request.into_parts();
+    let body = match tokio::time::timeout(
+        HEADER_TIMEOUT,
+        Limited::new(body, MAX_REQUEST_BODY_BYTES).collect(),
+    )
+    .await
+    {
+        Ok(Ok(body)) => body.to_bytes(),
+        Ok(Err(error)) if error.is::<http_body_util::LengthLimitError>() => {
+            return Ok(local_response(
+                413,
+                "the local request body exceeds 16 MiB".into(),
+            ));
+        }
+        Ok(Err(_)) => {
+            return Ok(local_response(
+                400,
+                "the local request body is malformed".into(),
+            ));
+        }
+        Err(_) => {
+            return Ok(local_response(
+                408,
+                "the local request body timed out".into(),
+            ));
+        }
+    };
+    let target = head
+        .uri
+        .path_and_query()
+        .map_or("/", |target| target.as_str());
+    // Minted per exchange, including each request on a kept-alive connection.
     let (minted, url) = match auth {
         Some(auth) => (
             hop_headers(auth, spec.guest_port).await?,
-            upstream_url(&spec.endpoint, &head.target),
+            upstream_url(&spec.endpoint, target),
         ),
         None => (
             Vec::new(),
-            direct_url(&spec.endpoint, spec.guest_port, &head.target)?,
+            direct_url(&spec.endpoint, spec.guest_port, target)?,
         ),
     };
-    let method = reqwest::Method::from_bytes(head.method.as_bytes()).map_err(|err| {
-        Error::new(
-            ErrorKind::InvalidArg,
-            format!(
-                "the local client sent an unusable method {:?}: {err}",
-                head.method
-            ),
-        )
-    })?;
-
+    let offered_upgrade = head.headers.contains_key(http::header::UPGRADE);
+    strip_hop_headers(&mut head.headers, offered_upgrade);
     let mut request = client
         .inner
-        .request(method, &url)
+        .request(head.method, &url)
         .timeout(spec.exchange_timeout);
-    for (name, value) in head
-        .headers
-        .iter()
-        .filter(|(name, _)| forwards_request_header(name))
-    {
-        request = request.header(name, value);
+    for (name, value) in &head.headers {
+        // Hyper decoded the local transfer framing; reqwest frames the collected bytes.
+        if forwards_request_header(name.as_str())
+            && name != http::header::TRANSFER_ENCODING
+            && name != http::header::CONTENT_LENGTH
+        {
+            request = request.header(name, value);
+        }
     }
     for (name, value) in &minted {
         request = request.header(name, value);
     }
-    if !head.body.is_empty() {
-        request = request.body(head.body.clone());
-    }
-
-    let response = request.send().await.map_err(|err| {
+    let response = request.body(body).send().await.map_err(|err| {
         Error::new(
             ErrorKind::Unexpected,
-            format!(
-                "forwarding {} {} to the endpoint failed: {err}",
-                head.method, head.target
-            ),
+            format!("forwarding the request to the endpoint failed: {err}"),
         )
     })?;
-    let status = response.status().as_u16();
-
-    if let Some(explanation) = refusal_explanation(status, spec.guest_port) {
-        on_event(ForwardEvent::Refused {
-            status,
+    let status = response.status();
+    if let Some(explanation) = refusal_explanation(status.as_u16(), spec.guest_port) {
+        events.lock().expect("event lock poisoned")(ForwardEvent::Refused {
+            status: status.as_u16(),
             explanation: explanation.clone(),
         });
-        write_local_error(&mut local, status, &explanation).await?;
-        return Ok(());
+        return Ok(local_response(status.as_u16(), explanation));
     }
-
-    if is_upgrade(status) {
-        // Relay the 101 verbatim first: the client is waiting for the handshake response,
-        // including whatever subprotocol the guest negotiated, before it will speak the
-        // upgraded protocol.
-        write_response_head(&mut local, status, response.headers()).await?;
-        let mut upstream = response.upgrade().await.map_err(|err| {
+    let mut headers = response.headers().clone();
+    let is_upgrade = is_upgrade(status.as_u16());
+    strip_hop_headers(&mut headers, is_upgrade);
+    let body = if is_upgrade {
+        let stream = response.upgrade().await.map_err(|err| {
             Error::new(
                 ErrorKind::Unexpected,
-                format!("the endpoint answered 101 but the connection did not upgrade: {err}"),
+                format!("the endpoint answered 101 but did not upgrade: {err}"),
             )
         })?;
-        on_event(ForwardEvent::Forwarded {
-            status,
-            upgraded: true,
-        });
-        splice(&mut local, &mut upstream).await?;
-        return Ok(());
-    }
-
-    let headers = response.headers().clone();
-    let body = response.bytes().await.map_err(|err| {
-        Error::new(
-            ErrorKind::Unexpected,
-            format!("reading the guest's response body failed: {err}"),
-        )
-    })?;
-    write_response(&mut local, status, &headers, &body).await?;
-    on_event(ForwardEvent::Forwarded {
-        status,
-        upgraded: false,
-    });
-    Ok(())
-}
-
-/// A request head read off a local connection.
-///
-/// The body is collected here rather than streamed because a `content-length` body is what a
-/// local client sends on this path — a `POST` to a dev server — and streaming it would mean
-/// holding a half-read request across the mint. Chunked request bodies are not supported; a
-/// caller sending one gets a named refusal rather than a truncated forward.
-#[derive(Clone, Debug)]
-struct RequestHead {
-    method: String,
-    target: String,
-    headers: Vec<(String, String)>,
-    body: Vec<u8>,
-}
-
-/// Reads one HTTP request head (and any `content-length` body) from a local stream.
-///
-/// `Ok(None)` for a connection that closed before a request line arrived, which browsers do
-/// constantly with speculative connections.
-async fn read_request_head<S>(local: &mut S) -> Result<Option<RequestHead>, Error>
-where
-    S: AsyncRead + Unpin + ?Sized,
-{
-    use tokio::io::AsyncReadExt as _;
-
-    let mut buffer = Vec::new();
-    let mut byte = [0_u8; 1];
-    // Byte at a time until the header terminator. Slow in principle and irrelevant in
-    // practice — a request head is a few hundred bytes — and it means never over-reading
-    // into a body whose length the headers have not been parsed to discover yet.
-    loop {
-        match local.read(&mut byte).await {
-            Ok(0) if buffer.is_empty() => return Ok(None),
-            Ok(0) => {
-                return Err(Error::new(
-                    ErrorKind::Protocol,
-                    "the local client closed the connection mid-request".to_string(),
-                ));
-            }
-            Ok(_) => {
-                buffer.push(byte[0]);
-                if buffer.len() > MAX_REQUEST_HEAD_BYTES {
-                    return Err(Error::new(
-                        ErrorKind::InvalidArg,
-                        format!(
-                            "the local client's request head exceeded {MAX_REQUEST_HEAD_BYTES} \
-                             bytes without terminating"
-                        ),
-                    ));
-                }
-                if buffer.ends_with(b"\r\n\r\n") {
-                    break;
-                }
-            }
-            Err(err) => {
-                return Err(Error::new(
-                    ErrorKind::Unexpected,
-                    format!("reading the local client's request failed: {err}"),
-                ));
-            }
-        }
-    }
-
-    let text = String::from_utf8(buffer).map_err(|err| {
-        Error::new(
-            ErrorKind::Protocol,
-            format!("the local client's request head is not utf-8: {err}"),
-        )
-    })?;
-    let mut lines = text.split("\r\n");
-    let request_line = lines.next().unwrap_or_default();
-    let mut parts = request_line.split_whitespace();
-    let method = parts.next().unwrap_or_default().to_string();
-    let target = parts.next().unwrap_or_default().to_string();
-    if method.is_empty() || target.is_empty() {
-        return Err(Error::new(
-            ErrorKind::Protocol,
-            format!("the local client sent an unparseable request line {request_line:?}"),
-        ));
-    }
-
-    let mut headers = Vec::new();
-    for line in lines {
-        if line.is_empty() {
-            continue;
-        }
-        let Some((name, value)) = line.split_once(':') else {
-            return Err(Error::new(
-                ErrorKind::Protocol,
-                format!("the local client sent an unparseable header line {line:?}"),
-            ));
-        };
-        headers.push((name.trim().to_string(), value.trim().to_string()));
-    }
-
-    if headers.iter().any(|(name, value)| {
-        name.eq_ignore_ascii_case("transfer-encoding") && value.contains("chunked")
-    }) {
-        return Err(Error::new(
-            ErrorKind::InvalidArg,
-            "the local client sent a chunked request body, which this forwarder does not \
-             re-frame. Send a content-length body, or report the client that needs chunked \
-             uploads so the forwarder can grow a streaming path."
-                .to_string(),
-        ));
-    }
-
-    let length: usize = headers
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
-        .and_then(|(_, value)| value.parse().ok())
-        .unwrap_or(0);
-
-    let mut body = vec![0_u8; length];
-    if length > 0 {
-        local.read_exact(&mut body).await.map_err(|err| {
+        *upgraded.lock().expect("upgrade lock poisoned") = Some(stream);
+        Bytes::new()
+    } else {
+        response.bytes().await.map_err(|err| {
             Error::new(
-                ErrorKind::Protocol,
-                format!("the local client announced {length} body bytes and sent fewer: {err}"),
+                ErrorKind::Unexpected,
+                format!("reading the guest's response body failed: {err}"),
             )
-        })?;
-    }
-
-    Ok(Some(RequestHead {
-        method,
-        target,
-        headers,
-        body,
-    }))
+        })?
+    };
+    let mut response = http::Response::new(Full::new(body));
+    *response.status_mut() = status;
+    *response.headers_mut() = headers;
+    events.lock().expect("event lock poisoned")(ForwardEvent::Forwarded {
+        status: status.as_u16(),
+        upgraded: is_upgrade,
+    });
+    Ok(response)
 }
 
 /// The cap on a request head, so a client that never sends the terminator cannot grow the
 /// buffer without bound. Generous: cookies and long URLs are ordinary.
 const MAX_REQUEST_HEAD_BYTES: usize = 64 * 1024;
-
-/// Headers a response must not carry back to the local client verbatim.
-///
-/// `content-length` and `transfer-encoding` are re-derived from the body actually written, so
-/// copying the upstream values would risk announcing a length that disagrees with the bytes
-/// — the failure that makes a browser hang waiting for a body that already ended.
-const RECOMPUTED_RESPONSE_HEADERS: [&str; 2] = ["content-length", "transfer-encoding"];
-
-/// Writes a status line and headers, without a body. Used for the 101 relay.
-async fn write_response_head<W>(
-    local: &mut W,
-    status: u16,
-    headers: &reqwest::header::HeaderMap,
-) -> Result<(), Error>
-where
-    W: AsyncWrite + Unpin + ?Sized,
-{
-    let mut head = format!("HTTP/1.1 {status} {}\r\n", reason_phrase(status));
-    for (name, value) in headers {
-        if let Ok(value) = value.to_str() {
-            head.push_str(&format!("{}: {}\r\n", name.as_str(), value));
-        }
-    }
-    head.push_str("\r\n");
-    local.write_all(head.as_bytes()).await.map_err(|err| {
-        Error::new(
-            ErrorKind::Unexpected,
-            format!("could not write the response head to the local client: {err}"),
-        )
-    })?;
-    local.flush().await.map_err(|err| {
-        Error::new(
-            ErrorKind::Unexpected,
-            format!("could not flush the response head: {err}"),
-        )
-    })
-}
-
-/// Writes a full response, re-deriving the framing headers from `body`.
-async fn write_response<W>(
-    local: &mut W,
-    status: u16,
-    headers: &reqwest::header::HeaderMap,
-    body: &[u8],
-) -> Result<(), Error>
-where
-    W: AsyncWrite + Unpin + ?Sized,
-{
-    let mut head = format!("HTTP/1.1 {status} {}\r\n", reason_phrase(status));
-    for (name, value) in headers {
-        if RECOMPUTED_RESPONSE_HEADERS
-            .iter()
-            .any(|skip| skip.eq_ignore_ascii_case(name.as_str()))
-        {
-            continue;
-        }
-        if let Ok(value) = value.to_str() {
-            head.push_str(&format!("{}: {}\r\n", name.as_str(), value));
-        }
-    }
-    head.push_str(&format!("content-length: {}\r\n\r\n", body.len()));
-
-    local.write_all(head.as_bytes()).await.map_err(|err| {
-        Error::new(
-            ErrorKind::Unexpected,
-            format!("could not write the response to the local client: {err}"),
-        )
-    })?;
-    local.write_all(body).await.map_err(|err| {
-        Error::new(
-            ErrorKind::Unexpected,
-            format!("could not write the response body to the local client: {err}"),
-        )
-    })?;
-    local.flush().await.map_err(|err| {
-        Error::new(
-            ErrorKind::Unexpected,
-            format!("could not flush the response: {err}"),
-        )
-    })
-}
-
-/// A reason phrase for the statuses this forwarder writes itself.
-///
-/// Only the ones it originates need to be right; everything else is relayed from upstream
-/// where the phrase is cosmetic (HTTP/1.1 clients read the code, not the phrase).
-fn reason_phrase(status: u16) -> &'static str {
-    match status {
-        101 => "Switching Protocols",
-        200 => "OK",
-        403 => "Forbidden",
-        404 => "Not Found",
-        500 => "Internal Server Error",
-        502 => "Bad Gateway",
-        504 => "Gateway Timeout",
-        _ => "Status",
-    }
-}
 
 /// Writes an HTTP error response to a local client whose exchange could not be proxied.
 ///
@@ -776,29 +685,27 @@ pub async fn write_local_error<W>(stream: &mut W, status: u16, body: &str) -> Re
 where
     W: AsyncWrite + Unpin + ?Sized,
 {
-    let reason = match status {
-        403 => "Forbidden",
-        502 => "Bad Gateway",
-        504 => "Gateway Timeout",
-        _ => "Bad Gateway",
-    };
-    let response = format!(
-        "HTTP/1.1 {status} {reason}\r\ncontent-type: text/plain; charset=utf-8\r\n\
-         content-length: {}\r\nconnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    stream.write_all(response.as_bytes()).await.map_err(|err| {
-        Error::new(
-            ErrorKind::Unexpected,
-            format!("could not answer the local client: {err}"),
-        )
-    })?;
-    stream.flush().await.map_err(|err| {
-        Error::new(
-            ErrorKind::Unexpected,
-            format!("could not flush the local client's response: {err}"),
-        )
-    })
+    // A synthetic request lets hyper serialize the response while retaining this
+    // write-only public API, including borrowed writers.
+    let reader =
+        std::io::Cursor::new(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+    let io = tokio::io::join(reader, stream);
+    let service = service_fn(|_| {
+        std::future::ready(Ok::<_, std::convert::Infallible>(local_response(
+            status,
+            body.to_string(),
+        )))
+    });
+    hyper::server::conn::http1::Builder::new()
+        .half_close(true)
+        .serve_connection(TokioIo::new(io), service)
+        .await
+        .map_err(|err| {
+            Error::new(
+                ErrorKind::Unexpected,
+                format!("could not answer the local client: {err}"),
+            )
+        })
 }
 
 #[cfg(test)]
@@ -806,6 +713,52 @@ mod tests {
     use super::*;
     use microvms_app::session::proxy::DEFAULT_AGENT_PORT;
     use microvms_app::testing::{CountingMinter, TestClock};
+    use tokio::io::AsyncWriteExt as _;
+
+    // A minimal reader for the canned test upstreams, independent of the relay.
+    struct RequestHead {
+        method: String,
+        target: String,
+        headers: Vec<(String, String)>,
+    }
+
+    async fn read_request_head<S: AsyncRead + Unpin>(
+        local: &mut S,
+    ) -> Result<Option<RequestHead>, std::io::Error> {
+        use tokio::io::AsyncReadExt as _;
+        let mut raw = Vec::new();
+        while !raw.ends_with(b"\r\n\r\n") {
+            let byte = match local.read_u8().await {
+                Ok(byte) => byte,
+                Err(err) if raw.is_empty() && err.kind() == std::io::ErrorKind::UnexpectedEof => {
+                    return Ok(None);
+                }
+                Err(err) => return Err(err),
+            };
+            raw.push(byte);
+        }
+        let text = String::from_utf8_lossy(&raw);
+        let mut lines = text.split("\r\n");
+        let mut first = lines.next().unwrap().split_whitespace();
+        let method = first.next().unwrap().to_string();
+        let target = first.next().unwrap().to_string();
+        let headers: Vec<(String, String)> = lines
+            .filter_map(|line| line.split_once(':'))
+            .map(|(name, value)| (name.to_string(), value.trim().to_string()))
+            .collect();
+        let length = headers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+            .and_then(|(_, value)| value.parse().ok())
+            .unwrap_or(0);
+        let mut body = vec![0; length];
+        local.read_exact(&mut body).await?;
+        Ok(Some(RequestHead {
+            method,
+            target,
+            headers,
+        }))
+    }
 
     /// A [`ProxyAuth`] over the shared counting minter, so a test can read the mint count and
     /// the scopes that were asked for.
@@ -883,7 +836,11 @@ mod tests {
         });
 
         client
-            .write_all(request.as_bytes())
+            .write_all(
+                request
+                    .replacen("HTTP/1.1\r\n", "HTTP/1.1\r\nconnection: close\r\n", 1)
+                    .as_bytes(),
+            )
             .await
             .expect("the request is written");
         client.flush().await.expect("flushed");
@@ -1321,55 +1278,6 @@ mod tests {
         assert_eq!(minter.requested().len(), 1);
     }
 
-    #[tokio::test]
-    async fn a_chunked_request_body_is_refused_by_name_rather_than_truncated() {
-        // This forwarder does not re-frame chunked bodies. Silently forwarding the head and
-        // dropping the body would corrupt an upload in a way the user cannot see.
-        let (mut client, mut server) = tokio::io::duplex(4096);
-        client
-            .write_all(b"POST /up HTTP/1.1\r\nhost: local\r\ntransfer-encoding: chunked\r\n\r\n")
-            .await
-            .expect("written");
-        client.flush().await.expect("flushed");
-
-        let error = read_request_head(&mut server)
-            .await
-            .expect_err("chunked is refused");
-        assert_eq!(error.kind(), ErrorKind::InvalidArg);
-        assert!(error.to_string().contains("chunked"), "{error}");
-    }
-
-    #[tokio::test]
-    async fn a_connection_that_closes_before_sending_anything_is_not_an_error() {
-        // Browsers open speculative connections and abandon them. Treating that as a failure
-        // would print an error per tab.
-        let (client, mut server) = tokio::io::duplex(4096);
-        drop(client);
-        let head = read_request_head(&mut server)
-            .await
-            .expect("an empty connection is fine");
-        assert!(head.is_none());
-    }
-
-    #[tokio::test]
-    async fn an_unterminated_request_head_is_capped_rather_than_buffered_without_bound() {
-        let (mut client, mut server) = tokio::io::duplex(1024 * 1024);
-        let writer = tokio::spawn(async move {
-            // Never sends the terminator.
-            let filler = vec![b'x'; MAX_REQUEST_HEAD_BYTES + 1024];
-            let _ = client.write_all(b"GET / HTTP/1.1\r\nx: ").await;
-            let _ = client.write_all(&filler).await;
-            let _ = client.flush().await;
-        });
-
-        let error = read_request_head(&mut server)
-            .await
-            .expect_err("the cap fires");
-        assert_eq!(error.kind(), ErrorKind::InvalidArg);
-        assert!(error.to_string().contains("without terminating"), "{error}");
-        writer.abort();
-    }
-
     #[test]
     fn only_a_101_counts_as_an_upgrade() {
         // A client may offer an upgrade the guest declines, and then the exchange is ordinary
@@ -1510,5 +1418,50 @@ mod tests {
         assert_eq!(from_guest, b"from-guest!");
         assert_eq!(a_to_b, 8);
         assert_eq!(b_to_a, 11);
+    }
+
+    #[test]
+    fn hop_headers_preserve_only_negotiated_upgrades() {
+        for upgrade in [false, true] {
+            let mut headers = http::HeaderMap::new();
+            for (name, value) in [
+                ("connection", "x-private, upgrade"),
+                ("upgrade", "example"),
+                ("x-private", "one hop only"),
+                ("x-end-to-end", "preserved"),
+                ("keep-alive", "timeout=5"),
+                ("proxy-connection", "keep-alive"),
+                ("transfer-encoding", "chunked"),
+                ("te", "trailers"),
+                ("trailer", "x-checksum"),
+            ] {
+                headers.insert(
+                    http::HeaderName::from_static(name),
+                    http::HeaderValue::from_static(value),
+                );
+            }
+            strip_hop_headers(&mut headers, upgrade);
+            assert_eq!(headers["x-end-to-end"], "preserved");
+            for name in [
+                "x-private",
+                "keep-alive",
+                "proxy-connection",
+                "transfer-encoding",
+                "te",
+                "trailer",
+            ] {
+                assert!(
+                    !headers.contains_key(name),
+                    "{name} crossed a hop (upgrade={upgrade})"
+                );
+            }
+            if upgrade {
+                assert_eq!(headers["connection"], "upgrade");
+                assert_eq!(headers["upgrade"], "example");
+            } else {
+                assert!(!headers.contains_key("connection"));
+                assert!(!headers.contains_key("upgrade"));
+            }
+        }
     }
 }

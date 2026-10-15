@@ -416,7 +416,9 @@ async fn get(local: SocketAddr, path: &str) -> String {
         return String::new();
     };
     client
-        .write_all(format!("GET {path} HTTP/1.1\r\nhost: {local}\r\n\r\n").as_bytes())
+        .write_all(
+            format!("GET {path} HTTP/1.1\r\nhost: {local}\r\nconnection: close\r\n\r\n").as_bytes(),
+        )
         .await
         .expect("written");
     let mut response = Vec::new();
@@ -717,4 +719,73 @@ fn the_bind_address_defaults_to_loopback_and_refuses_a_bad_one() {
     );
     let refused = bind_address(Some("localhost")).expect_err("not an address");
     assert!(refused.to_string().contains("\"localhost\""), "{refused}");
+}
+
+#[tokio::test]
+async fn a_completed_forward_expires_idle_without_losing_its_event() {
+    for malformed_next in [false, true] {
+        let (upstream, _) = upstream(1, 0).await;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local = listener.local_addr().unwrap();
+        let spec = ForwardSpec::new(local, 8080, format!("http://{upstream}"));
+        let (stop, task) = start_forward(listener, spec, Some(auth()));
+        let mut browser = TcpStream::connect(local).await.unwrap();
+        browser
+            .write_all(format!("GET /idle HTTP/1.1\r\nHost: {local}\r\n\r\n").as_bytes())
+            .await
+            .unwrap();
+        let mut head = Vec::new();
+        while !head.ends_with(b"\r\n\r\n") {
+            head.push(browser.read_u8().await.unwrap());
+        }
+        let text = String::from_utf8(head).unwrap();
+        assert!(text.starts_with("HTTP/1.1 200 OK"));
+        let length: usize = text
+            .lines()
+            .find_map(|line| line.strip_prefix("content-length: "))
+            .unwrap()
+            .parse()
+            .unwrap();
+        let mut body = vec![0; length];
+        browser.read_exact(&mut body).await.unwrap();
+        assert_eq!(body, b"GET /idle HTTP/1.1");
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), browser.read_u8())
+                .await
+                .is_err(),
+            "the connection stays open after its response"
+        );
+        if malformed_next {
+            browser.write_all(b"BROKEN\r\n\r\n").await.unwrap();
+        }
+        let mut tail = Vec::new();
+        tokio::time::timeout(BOUND, browser.read_to_end(&mut tail))
+            .await
+            .unwrap()
+            .unwrap();
+        if malformed_next {
+            assert!(tail.starts_with(b"HTTP/1.1 400 Bad Request"));
+        } else {
+            assert!(tail.is_empty());
+        }
+        stop.send(()).unwrap();
+        let (report, notices) = tokio::time::timeout(BOUND, task).await.unwrap().unwrap();
+        assert_eq!((report.served, report.refused), (1, 0));
+        assert!(matches!(
+            notices.first(),
+            Some(ForwardNotice::Event {
+                event: ForwardEvent::Forwarded {
+                    status: 200,
+                    upgraded: false
+                },
+                ..
+            })
+        ));
+        assert_eq!(
+            notices
+                .iter()
+                .any(|notice| matches!(notice, ForwardNotice::Failed { .. })),
+            malformed_next
+        );
+    }
 }
