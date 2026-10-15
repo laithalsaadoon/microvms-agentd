@@ -1,0 +1,71 @@
+# Each active stream must use its own spec deadline.
+[[fault]]
+id = "forward-stream-custom-timeouts"
+guard = "concurrent_streams_keep_their_own_body_deadlines"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_streams", "--", "--exact", "concurrent_streams_keep_their_own_body_deadlines"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "tokio::time::timeout(timeout, stream.next())", with = "tokio::time::timeout(DEFAULT_EXCHANGE_TIMEOUT, stream.next())" }
+
+# Empty decoded bodies complete even when Hyper never polls their body stream.
+[[fault]]
+id = "forward-stream-bodyless-completion"
+guard = "bodyless_responses_complete_without_polling_or_upstream_eof"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_streams", "--", "--exact", "bodyless_responses_complete_without_polling_or_upstream_eof"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "} else if response.content_length() == Some(0) {", with = "} else if false {" }
+
+# Cargo feature unification must not turn the relay into a gzip decoder.
+[[fault]]
+id = "forward-stream-encoded-wire"
+guard = "encoded_responses_keep_wire_bytes_headers_and_completion"
+run = ["cargo", "test", "-p", "microvms-edges", "--features", "reqwest/gzip", "--test", "forward_streams", "--", "--exact", "encoded_responses_keep_wire_bytes_headers_and_completion"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "            .no_gzip()\n", with = "" }
+
+# Encoded bodyless responses still complete when decompression is available.
+[[fault]]
+id = "forward-stream-encoded-bodyless"
+guard = "bodyless_responses_complete_without_polling_or_upstream_eof"
+run = ["cargo", "test", "-p", "microvms-edges", "--features", "reqwest/gzip", "--test", "forward_streams", "--", "--exact", "bodyless_responses_complete_without_polling_or_upstream_eof"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "            .no_gzip()\n", with = "" }
+
+# A client-level timer must not charge downstream backpressure to upstream reads.
+[[fault]]
+id = "forward-stream-local-backpressure"
+guard = "a_slow_local_reader_does_not_expire_ready_upstream_bytes"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_streams", "--", "--exact", "a_slow_local_reader_does_not_expire_ready_upstream_bytes"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = ".redirect(reqwest::redirect::Policy::none())", with = ".redirect(reqwest::redirect::Policy::none()).read_timeout(std::time::Duration::from_millis(500))" }
+
+# FAIL_TO_PASS: fails on e6efec0d6e59 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-first-event-arrives-while-the-upstream-body-is-still"
+guard = "first_event_arrives_while_the_upstream_body_is_still_open"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_streams", "--", "--exact", "first_event_arrives_while_the_upstream_body_is_still_open"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-first-event-arrives-while-the-upstream-body-is-still.patch"
+
+# FAIL_TO_PASS: fails on e6efec0d6e59 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-successful-reads-keep-a-stream-open-past-the-exchange"
+guard = "successful_reads_keep_a_stream_open_past_the_exchange_timeout"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_streams", "--", "--exact", "successful_reads_keep_a_stream_open_past_the_exchange_timeout"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-successful-reads-keep-a-stream-open-past-the-exchange.patch"
+
+# FAIL_TO_PASS: fails on e6efec0d6e59 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-response-head-and-body-gaps-each-have-a-deadline"
+guard = "response_head_and_body_gaps_each_have_a_deadline"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "forward_streams", "--", "--exact", "response_head_and_body_gaps_each_have_a_deadline"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-response-head-and-body-gaps-each-have-a-deadline.patch"

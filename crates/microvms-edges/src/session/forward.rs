@@ -74,21 +74,26 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use http_body_util::{BodyExt as _, Full, Limited};
-use hyper::body::{Bytes, Incoming};
+use futures_util::StreamExt as _;
+use http_body_util::combinators::UnsyncBoxBody;
+use http_body_util::{BodyExt as _, Full, Limited, StreamBody};
+use hyper::body::{Bytes, Frame, Incoming};
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioIo, TokioTimer};
 
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::mpsc;
 
 use microvms_app::error::{Error, ErrorKind};
 use microvms_app::session::proxy::{PROXY_AUTH_HEADER, PROXY_PORT_HEADER, ProxyAuth};
 
-/// How long one proxied exchange may take before it is abandoned.
+/// The limit for the response head and for each read of a proxied response body.
 ///
 /// Generous rather than tight: the thing on the other end is a developer's dev server, and a
-/// long-polling request or a slow first compile is normal traffic rather than a fault. The
+/// long-polling request or a slow first compile is normal traffic rather than a fault.
+/// Successful reads reset the body deadline, so a stream can outlive this duration. Time
+/// blocked by a slow local reader is excluded. The
 /// upgrade path is exempt — a WebSocket is idle by design, so once a connection is upgraded
 /// this timeout no longer applies to it.
 pub const DEFAULT_EXCHANGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
@@ -176,7 +181,9 @@ pub struct ForwardSpec {
     pub guest_port: u16,
     /// The VM's endpoint host, as `run` reported it.
     pub endpoint: String,
-    /// How long one non-upgraded exchange may take.
+    /// The response-head deadline and the maximum gap between response-body reads.
+    /// Successful body reads reset the deadline; local backpressure is excluded.
+    /// Upgrades have no read deadline.
     pub exchange_timeout: std::time::Duration,
 }
 
@@ -306,6 +313,12 @@ impl ForwardClient {
         reqwest::Client::builder()
             // Relay redirects to the local client without requesting their destination.
             .redirect(reqwest::redirect::Policy::none())
+            // Preserve encoded bytes and headers even if a downstream crate enables
+            // reqwest's decompression features through Cargo feature unification.
+            .no_gzip()
+            .no_brotli()
+            .no_zstd()
+            .no_deflate()
             .build()
             .map(|inner| Self { inner })
             .map_err(|err| {
@@ -424,13 +437,13 @@ pub(crate) async fn serve_connection_via<S, F>(
     spec: &ForwardSpec,
     auth: Option<&Arc<ProxyAuth>>,
     client: &ForwardClient,
-    on_event: F,
+    mut on_event: F,
 ) -> Result<(), Error>
 where
     S: LocalStream,
     F: FnMut(ForwardEvent),
 {
-    let events = Mutex::new(on_event);
+    let (events, mut pending_events) = mpsc::unbounded_channel();
     let upgraded = Mutex::new(None);
     let answered = AtomicBool::new(false);
     let service = service_fn(|request| {
@@ -452,7 +465,19 @@ where
     // The public primitive accepts borrowed streams. Hyper's automatic upgrade API
     // requires 'static I/O, so take its buffered bytes and socket back explicitly.
     let mut connection = builder.serve_connection(TokioIo::new(local), service);
-    let result = futures_util::future::poll_fn(|cx| connection.poll_without_shutdown(cx)).await;
+    let result = {
+        let polling = futures_util::future::poll_fn(|cx| connection.poll_without_shutdown(cx));
+        tokio::pin!(polling);
+        loop {
+            tokio::select! {
+                result = &mut polling => break result,
+                Some(event) = pending_events.recv() => on_event(event),
+            }
+        }
+    };
+    while let Ok(event) = pending_events.try_recv() {
+        on_event(event);
+    }
     let parts = connection.into_parts();
     if let Err(error) = result {
         // The next request's timer also bounds idle keep-alive. Closing an empty
@@ -483,8 +508,16 @@ where
 const HEADER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const MAX_REQUEST_BODY_BYTES: usize = 16 * 1024 * 1024;
 
-fn local_response(status: u16, text: String) -> http::Response<Full<Bytes>> {
-    let mut response = http::Response::new(Full::new(Bytes::from(text)));
+type ForwardBody = UnsyncBoxBody<Bytes, Error>;
+
+fn full_body(body: Bytes) -> ForwardBody {
+    Full::new(body)
+        .map_err(|never| match never {})
+        .boxed_unsync()
+}
+
+fn local_response(status: u16, text: String) -> http::Response<ForwardBody> {
+    let mut response = http::Response::new(full_body(Bytes::from(text)));
     *response.status_mut() =
         http::StatusCode::from_u16(status).unwrap_or(http::StatusCode::BAD_GATEWAY);
     response.headers_mut().insert(
@@ -534,14 +567,14 @@ fn strip_hop_headers(headers: &mut http::HeaderMap, upgrade: bool) {
     }
 }
 
-async fn forward_request<F: FnMut(ForwardEvent)>(
+async fn forward_request(
     request: http::Request<Incoming>,
     spec: &ForwardSpec,
     auth: Option<&Arc<ProxyAuth>>,
     client: &ForwardClient,
-    events: &Mutex<F>,
+    events: &mpsc::UnboundedSender<ForwardEvent>,
     upgraded: &Mutex<Option<reqwest::Upgraded>>,
-) -> Result<http::Response<Full<Bytes>>, Error> {
+) -> Result<http::Response<ForwardBody>, Error> {
     let headers = request
         .headers()
         .get_all(http::header::HOST)
@@ -550,7 +583,7 @@ async fn forward_request<F: FnMut(ForwardEvent)>(
         .collect::<Vec<_>>();
     if !local_host_matches(&headers, spec.bind) {
         let explanation = "the request Host must name the local forward and its port".to_string();
-        events.lock().expect("event lock poisoned")(ForwardEvent::Refused {
+        let _ = events.send(ForwardEvent::Refused {
             status: 403,
             explanation: explanation.clone(),
         });
@@ -612,10 +645,7 @@ async fn forward_request<F: FnMut(ForwardEvent)>(
     };
     let offered_upgrade = head.headers.contains_key(http::header::UPGRADE);
     strip_hop_headers(&mut head.headers, offered_upgrade);
-    let mut request = client
-        .inner
-        .request(head.method, &url)
-        .timeout(spec.exchange_timeout);
+    let mut request = client.inner.request(head.method, &url);
     for (name, value) in &head.headers {
         // Hyper decoded the local transfer framing; reqwest frames the collected bytes.
         if forwards_request_header(name.as_str())
@@ -628,15 +658,20 @@ async fn forward_request<F: FnMut(ForwardEvent)>(
     for (name, value) in &minted {
         request = request.header(name, value);
     }
-    let response = request.body(body).send().await.map_err(|err| {
-        Error::new(
-            ErrorKind::Unexpected,
-            format!("forwarding the request to the endpoint failed: {err}"),
-        )
-    })?;
+    // A head needs an absolute deadline so an upstream cannot keep it alive by
+    // trickling header bytes. Body reads have their own deadline below.
+    let response = tokio::time::timeout(spec.exchange_timeout, request.body(body).send())
+        .await
+        .map_err(|_| Error::new(ErrorKind::Unexpected, "the guest's response head timed out"))?
+        .map_err(|err| {
+            Error::new(
+                ErrorKind::Unexpected,
+                format!("forwarding the request to the endpoint failed: {err}"),
+            )
+        })?;
     let status = response.status();
     if let Some(explanation) = refusal_explanation(status.as_u16(), spec.guest_port) {
-        events.lock().expect("event lock poisoned")(ForwardEvent::Refused {
+        let _ = events.send(ForwardEvent::Refused {
             status: status.as_u16(),
             explanation: explanation.clone(),
         });
@@ -645,6 +680,10 @@ async fn forward_request<F: FnMut(ForwardEvent)>(
     let mut headers = response.headers().clone();
     let is_upgrade = is_upgrade(status.as_u16());
     strip_hop_headers(&mut headers, is_upgrade);
+    let event = ForwardEvent::Forwarded {
+        status: status.as_u16(),
+        upgraded: is_upgrade,
+    };
     let body = if is_upgrade {
         let stream = response.upgrade().await.map_err(|err| {
             Error::new(
@@ -653,23 +692,78 @@ async fn forward_request<F: FnMut(ForwardEvent)>(
             )
         })?;
         *upgraded.lock().expect("upgrade lock poisoned") = Some(stream);
-        Bytes::new()
+        let _ = events.send(event);
+        full_body(Bytes::new())
+    } else if response.content_length() == Some(0) {
+        // Reqwest's decoded-body size hint is already zero for HEAD, 204 and
+        // 304. Hyper need not poll these bodies, so report completion here.
+        let _ = events.send(event);
+        full_body(Bytes::new())
     } else {
-        response.bytes().await.map_err(|err| {
-            Error::new(
-                ErrorKind::Unexpected,
-                format!("reading the guest's response body failed: {err}"),
-            )
-        })?
+        streaming_body(response, events.clone(), event, spec.exchange_timeout)
     };
-    let mut response = http::Response::new(Full::new(body));
+    let mut response = http::Response::new(body);
     *response.status_mut() = status;
     *response.headers_mut() = headers;
-    events.lock().expect("event lock poisoned")(ForwardEvent::Forwarded {
-        status: status.as_u16(),
-        upgraded: is_upgrade,
-    });
     Ok(response)
+}
+
+// Report a successful exchange only once the upstream body has completed. The
+// channel keeps the response body independent of the caller's borrowed callback.
+fn streaming_body(
+    response: reqwest::Response,
+    events: mpsc::UnboundedSender<ForwardEvent>,
+    event: ForwardEvent,
+    timeout: std::time::Duration,
+) -> ForwardBody {
+    let remaining = response.content_length();
+    let stream = response.bytes_stream().boxed();
+    let state = (stream, remaining, Some(event), events, timeout);
+    let frames = futures_util::stream::unfold(
+        state,
+        |(mut stream, mut remaining, mut event, events, timeout)| async move {
+            // Start the deadline only when hyper asks for another chunk. A reqwest
+            // client read_timeout stays armed while a slow local reader applies
+            // backpressure, which can expire before already-ready data is polled.
+            match tokio::time::timeout(timeout, stream.next()).await {
+                Ok(Some(Ok(chunk))) => {
+                    if let Some(left) = remaining.as_mut() {
+                        *left = left.saturating_sub(chunk.len() as u64);
+                        if *left == 0
+                            && let Some(event) = event.take()
+                        {
+                            let _ = events.send(event);
+                        }
+                    }
+                    Some((
+                        Ok(Frame::data(chunk)),
+                        (stream, remaining, event, events, timeout),
+                    ))
+                }
+                Ok(Some(Err(error))) => Some((
+                    Err(Error::new(
+                        ErrorKind::Unexpected,
+                        format!("reading the guest's response body failed: {error}"),
+                    )),
+                    (stream, remaining, None, events, timeout),
+                )),
+                Err(_) => Some((
+                    Err(Error::new(
+                        ErrorKind::Unexpected,
+                        "reading the guest's response body timed out",
+                    )),
+                    (stream, remaining, None, events, timeout),
+                )),
+                Ok(None) => {
+                    if let Some(event) = event {
+                        let _ = events.send(event);
+                    }
+                    None
+                }
+            }
+        },
+    );
+    StreamBody::new(frames).boxed_unsync()
 }
 
 /// The cap on a request head, so a client that never sends the terminator cannot grow the
