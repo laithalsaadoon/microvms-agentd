@@ -9,8 +9,7 @@ pub const SETTING: &str = "AGENTD_DROP_EXEC_CAPABILITIES";
 // Preserve NET_ADMIN, CHOWN, SETUID and SETGID: routing and ordinary file/user
 // operations remain available. This is not an allow-list for daemon privileges.
 const DROP_BITS: [u32; 7] = [16, 17, 19, 21, 22, 38, 39];
-const DROP_MASK: u64 =
-    (1 << 16) | (1 << 17) | (1 << 19) | (1 << 21) | (1 << 22) | (1 << 38) | (1 << 39);
+const DROP_MASK: u64 = 0x00c0_006b_0000;
 
 /// Apply before tracing, the runtime, or any other thread is created. Capability
 /// sets belong to a thread; later threads inherit this verified reduction.
@@ -269,6 +268,10 @@ mod tests {
         let before = fake.value;
         assert!(apply(true, &mut fake).unwrap());
         assert_eq!(DROP_BITS, [16, 17, 19, 21, 22, 38, 39]);
+        assert_eq!(
+            DROP_MASK,
+            DROP_BITS.map(|bit| 1_u64 << bit).iter().sum::<u64>()
+        );
         assert_eq!(fake.value.effective, before.effective);
         assert_eq!(fake.value.permitted, before.permitted);
         assert_eq!(fake.value.inheritable, 0);
