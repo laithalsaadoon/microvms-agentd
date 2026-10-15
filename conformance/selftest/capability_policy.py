@@ -11,13 +11,14 @@ import json
 import os
 import runpy
 import sys
+import tempfile
 from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from harness.constants import REPO
-from harness.results import Results
+from harness.results import Results, run_section
 from lanes.capability_policy import (
     BLOCKING_BYTES,
     COMPAT_OUTPUT,
@@ -27,6 +28,7 @@ from lanes.capability_policy import (
     check_capability_policy,
     drive_capability_policy,
     policy_dockerfile,
+    probe_report,
 )
 
 
@@ -61,16 +63,25 @@ def good_report(repair: bool) -> dict:
         "compatExit": 0,
         "compatOutput": COMPAT_OUTPUT,
         "identitySteps": [
-            {"name": name, "outcome": "repaired"}
+            {
+                "name": name,
+                "outcome": "repaired" if repair or name == "machine-id" else "failed",
+            }
             for name in ("machine-id", "hostname", "boot-id")
-        ]
-        if repair
-        else [],
+        ],
         "repair": repair,
     }
 
 
 def check_policy_lane(results: Results) -> None:
+    # Captured 2026-10-15 at b86ebcf6bac50815221cee978e1e65cfa86a663a:
+    # the default-image report only, not a verdict for the whole live run.
+    replay = json.loads(
+        (Path(__file__).parent / "fixtures/capability-policy-default.json").read_text()
+    )
+    replayed = Results(probe=True)
+    check_capability_policy(replay, False, replayed)
+    results.check("policy accepts captured default-image evidence", not replayed.failed)
     for repair in (False, True):
         label = "repair" if repair else "default"
         good = good_report(repair)
@@ -125,6 +136,10 @@ def check_policy_lane(results: Results) -> None:
             (("compatOutput",), COMPAT_OUTPUT.replace("4242:4242", "0:0")),
             (("repair",), not repair),
             (("identitySteps",), None),
+            (("identitySteps",), []),
+            (("identitySteps",), [None]),
+            (("identitySteps", 0, "name"), "missing"),
+            (("identitySteps", 0, "outcome"), "failed"),
         ]
         if repair:
             cases += [
@@ -140,7 +155,6 @@ def check_policy_lane(results: Results) -> None:
                 ),
                 (("hook", "status", "CapEff"), good["baseline"]["before"]["CapEff"]),
                 (("identitySteps", 2, "outcome"), "failed"),
-                (("identitySteps",), []),
             ]
         for index, (path, value) in enumerate(cases):
             broken = copy.deepcopy(good)
@@ -153,10 +167,161 @@ def check_policy_lane(results: Results) -> None:
             results.check(
                 f"policy {label} rejects mutation {index}", bool(failed.failed)
             )
+    default = good_report(False)
+    default["identitySteps"][0]["outcome"] = "failed"
+    failed = Results(probe=True)
+    check_capability_policy(default, False, failed)
+    results.check("policy default requires repaired machine-id", bool(failed.failed))
+    improved = good_report(False)
+    improved["identitySteps"] = good_report(True)["identitySteps"]
+    accepted = Results(probe=True)
+    check_capability_policy(improved, False, accepted)
+    results.check(
+        "policy default permits additional identity repair", not accepted.failed
+    )
     check_policy_dispatch(results)
     check_policy_wiring(results)
     check_probe_seed(results)
     check_probe_reader(results)
+    check_probe_pid(results)
+    check_probe_diagnostics(results)
+
+
+def check_probe_pid(results: Results) -> None:
+    directory = REPO / "conformance/drivers"
+    with patch.object(sys, "path", [str(directory), *sys.path]):
+        module = runpy.run_path(str(directory / "capability_policy_probe.py"))
+    namespace = module["observe"].__globals__
+    with tempfile.TemporaryDirectory() as temporary:
+        baseline = Path(temporary) / "baseline.json"
+        hook = Path(temporary) / "hook.json"
+        with (
+            patch.dict(namespace, {"BASELINE": baseline, "HOOK": hook}),
+            patch.object(sys, "argv", ["probe", "bootstrap"]),
+            patch("os.getpid", return_value=73),
+            patch("os.execv") as execute,
+            patch.dict(namespace, {"seed_inheritance": lambda: None}),
+            patch.dict(namespace, {"status": lambda pid: {"pid": str(pid)}}),
+        ):
+            module["main"]()
+        saved = json.loads(baseline.read_text())
+        results.check(
+            "policy bootstrap records its PID before exec",
+            saved
+            == {
+                "daemonPid": 73,
+                "before": {"pid": "self"},
+                "seeded": {"pid": "self"},
+            }
+            and execute.call_args.args == ("/agentd", ["/agentd"]),
+        )
+        hook.write_text(json.dumps({"uid": 0}))
+
+        def tasks(path):
+            if path == Path("/proc"):
+                return iter([Path("/proc/73")])
+            if path == Path("/proc/73/task"):
+                return iter([path / "205", path / "73"])
+            raise AssertionError(f"unexpected process lookup: {path}")
+
+        with (
+            patch.dict(namespace, {"BASELINE": baseline, "HOOK": hook}),
+            patch("pathlib.Path.iterdir", tasks),
+            patch(
+                "pathlib.Path.readlink", side_effect=PermissionError("ptrace denied")
+            ),
+            patch.dict(namespace, {"status": lambda pid: {"pid": str(pid)}}),
+        ):
+            report, failure = None, None
+            try:
+                report = module["observe"]()
+            except Exception as error:  # noqa: BLE001 - assert the complete probe verdict
+                failure = error
+            results.check(
+                "policy observer uses recorded PID when executable reads are denied",
+                failure is None
+                and report
+                == {
+                    "baseline": saved,
+                    "daemonPid": 73,
+                    "daemon": {"pid": "73"},
+                    "threads": [
+                        {"tid": 73, "status": {"pid": "73/task/73"}},
+                        {"tid": 205, "status": {"pid": "73/task/205"}},
+                    ],
+                    "rootExec": {"uid": os.getuid(), "status": {"pid": "self"}},
+                    "hook": {"uid": 0},
+                },
+            )
+            for pid in (None, True, False, 0, -1, "73", 1.5, {}):
+                baseline.write_text(json.dumps({**saved, "daemonPid": pid}))
+                failure = None
+                try:
+                    module["observe"]()
+                except Exception as error:  # noqa: BLE001 - wrong exception is a failure
+                    failure = error
+                results.check(
+                    f"policy observer rejects invalid bootstrap PID {pid!r}",
+                    isinstance(failure, ValueError)
+                    and str(failure) == "invalid daemon PID in bootstrap baseline",
+                )
+            baseline.write_text(json.dumps({"before": {}, "seeded": {}}))
+            failure = None
+            try:
+                module["observe"]()
+            except Exception as error:  # noqa: BLE001 - wrong exception is a failure
+                failure = error
+            results.check(
+                "policy observer rejects missing bootstrap PID",
+                isinstance(failure, ValueError)
+                and str(failure) == "invalid daemon PID in bootstrap baseline",
+            )
+
+
+def check_probe_diagnostics(results: Results) -> None:
+    results.check(
+        "policy probe decodes successful evidence",
+        probe_report({"exitCode": 0, "stdout": '{"daemonPid":73}'})
+        == {"daemonPid": 73},
+    )
+    for code in (None, False, True, 1):
+        failure = None
+        try:
+            probe_report(
+                {
+                    "exitCode": code,
+                    "stderr": "x" * 2000 + "RuntimeError: no agentd process",
+                    "stdout": "y" * 2000 + "probe output",
+                }
+            )
+        except ValueError as error:
+            failure = str(error)
+        results.check(
+            f"policy probe reports bounded failure details for {code!r}",
+            failure is not None
+            and f"exitCode={code!r}" in failure
+            and "RuntimeError: no agentd process" in failure
+            and "probe output" in failure
+            and len(failure) <= 300,
+        )
+    rendered = Results(probe=True)
+    run_section(
+        rendered,
+        "policy probe diagnostics",
+        probe_report,
+        {
+            "exitCode": 1,
+            "stderr": "x" * 2000 + "RuntimeError: no agentd process",
+            "stdout": "y" * 2000 + "probe output",
+        },
+    )
+    results.check(
+        "policy section retains probe failure cause",
+        len(rendered.failed) == 1
+        and "exitCode=1" in rendered.failed[0][1]
+        and "RuntimeError: no agentd process" in rendered.failed[0][1]
+        and "probe output" in rendered.failed[0][1],
+    )
 
 
 def check_probe_seed(results: Results) -> None:

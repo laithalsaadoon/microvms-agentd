@@ -11,7 +11,7 @@ import sys
 import time
 from pathlib import Path
 
-from platform_probe import daemon_pid, status
+from platform_probe import status
 
 BASELINE = Path("/tmp/microvm-policy-baseline.json")
 HOOK = Path("/tmp/microvm-policy-hook.json")
@@ -43,10 +43,15 @@ def seed_inheritance() -> None:
 
 
 def observe() -> dict:
-    pid = daemon_pid()
+    baseline = json.loads(BASELINE.read_text())
+    pid = baseline.get("daemonPid")
+    if type(pid) is not int or pid <= 0:
+        raise ValueError("invalid daemon PID in bootstrap baseline")
+    # Exec preserves the bootstrap PID. Discovering it via /proc/*/exe would
+    # require ptrace authority that the daemon keeps and this child must lose.
     tasks = sorted(Path(f"/proc/{pid}/task").iterdir(), key=lambda p: int(p.name))
     return {
-        "baseline": json.loads(BASELINE.read_text()),
+        "baseline": baseline,
         "daemonPid": pid,
         "daemon": status(pid),
         "threads": [
@@ -86,7 +91,11 @@ def main() -> None:
     if mode == "bootstrap":
         before = status("self")
         seed_inheritance()
-        BASELINE.write_text(json.dumps({"before": before, "seeded": status("self")}))
+        BASELINE.write_text(
+            json.dumps(
+                {"daemonPid": os.getpid(), "before": before, "seeded": status("self")}
+            )
+        )
         os.execv("/agentd", ["/agentd"])
     elif mode == "hook":
         HOOK.write_text(json.dumps({"uid": os.getuid(), "status": status("self")}))
