@@ -114,7 +114,9 @@ as a live check, is still broken by hand, restored, and recorded in the PR.
 Locally, `mise run guards:fire -- --jobs 4` seeds faults in four scratch worktrees at
 once and reports what a serial run reports, in the same order; add `--venv-per-worker`
 to fire the binding entries too. On each push to main, CI's `guards` job fires every
-entry under strace and records what each one's runs read (`--record`). A pull request
+entry and records what its traced runs read (`--record`). A command that needs
+setuid privilege declares an `untraced` reason in its registry entries: its clean,
+seeded, and restored runs still execute. Its verdict is not eligible for reuse. A pull request
 restores main's latest records (every leg's, from one push) and keeps each recorded `fired` verdict whose inputs are
 all unchanged since the recorded commit (`--reuse`): it fires an entry whose registry
 entry, a file or directory its runs read, a tool they ran, the environment or
@@ -469,11 +471,10 @@ The release workflow publishes `microvms-protocol`, `microvms-domain`,
 
 crates.io trusted publishing can't create a crate, so a crate that's new to the
 publish set needs one manual publish before the first release tag that includes
-it. `microvms-domain`, `microvms-app` and `microvms-edges` are each one until
-that's done. From a clean checkout of main, before the release's version bump
-lands, run `cargo publish -p <crate> --locked` for each, in dependency order
-(the domain, then the app, then the edges), with a crates.io API token scoped to
-publishing new crates, then add each trusted publisher on crates.io (this repository, workflow `release.yml`, environment
+it. From a clean checkout of main, before you merge the release's version bump,
+run `cargo publish -p <crate> --locked` for each new crate, in dependency order,
+with a crates.io API token scoped to publishing new crates, then add each
+trusted publisher on crates.io (this repository, workflow `release.yml`, environment
 `release`). Without it, the release publishes the crates below it and fails at
 the new one. Publishing after the bump is the same failure the other way round:
 the release's version already exists, and `cargo publish --workspace` has no

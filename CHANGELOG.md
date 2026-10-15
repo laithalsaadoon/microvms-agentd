@@ -13,6 +13,129 @@ CONTRIBUTING.md, "Changelog", says how to write one.
 
 <!-- towncrier release notes start -->
 
+## [1.1.0] - 2026-10-15
+
+### Added
+
+- **An image can set the user an exec without `user` runs as (#595).** The daemon reads
+  `AGENTD_DEFAULT_USER` from the image's environment at startup: a user name, or a uid as
+  digits. A start request that omits `user`, from `exec` or `run --exec` alike, resolves it at
+  each start to a row of the guest's `/etc/passwd`, by name or by uid, so a user an earlier exec
+  created resolves on the next. The child gets that row's uid, primary gid, `HOME`, `USER` and
+  `LOGNAME`, a uid included. A request's own `user` still runs as given, `root` and `0`
+  included. If no row matches, digits included, each start without a `user` answers
+  `400 unknown_user`, and the detail mentions the variable. Uploads don't follow the variable:
+  what `PUT /v1/fs/tar` and `PUT /v1/fs/file` create stays root's. For a non-root default,
+  the shared client stages uploads privately and transfers their ownership to that user.
+  It then installs them with that user's privileges. Sync's in-guest deletions also run as that user. With the variable
+  unset, nothing changes. Workload hook handlers still run as root. The agent recipe's
+  `chown` of `/workspace` asks for uid 0 by number, so an image's default user can't make it
+  fail. An image that sets the variable needs a client at this release or later: older clients
+  leave uploads owned by root and send that `chown` with no `user`, so it runs as the default
+  user and fails.
+- **Opt-in exec capability policy (#599).** Images can set
+  `AGENTD_DROP_EXEC_CAPABILITIES=true` to clear inheritable and
+  ambient capabilities and remove selected high-privilege bounding bits before
+  the daemon starts threads. Daemon permitted and effective privileges remain
+  unchanged for operations such as identity repair. The mode defaults off and
+  refuses startup if parsing, reduction, or verification fails.
+- **Executions can opt into guest power-off after their original process group exits (#614).**
+  Use `exec --poweroff-on-exit`, Python `poweroff_on_exit=True`, or Node
+  `poweroffOnExit: true`. Clients require advertised daemon support; the daemon
+  requires its own `CAP_SYS_BOOT` and never elevates the workload. Power-off waits
+  until the group has no live members, ends other VM work too, and can race delivery
+  of the start response or result. Platform idle suspension can pause the monitor.
+  A terminal service state does not establish when billing stops.
+- **Image reuse supports guest identity repair in both bindings (#616).** Pass
+  `repairGuestIdentity` to JavaScript's `ensureImage`, or `repair_guest_identity` to
+  Python's `ensure_image` and `ensure_image_async`. The option joins the image's content-addressed
+  name, so repaired and unrepaired images are kept separate.
+- **The npm package reports which addon its loader loaded (#620).** The package now builds its
+  loader and declarations with @napi-rs/cli 3.10.8 in place of 3.8.2, and that loader exports
+  `__napiBindingTarget`, which `index.d.ts` declares: `'native'` when it loaded one of the
+  platform addons this package publishes. When `NAPI_RS_NATIVE_LIBRARY_PATH` points it at
+  another generated loader, the value is the one that loader reports. Platform selection is
+  unchanged.
+
+### Deprecated
+
+- **The identity-repair flag on an existing-image run is deprecated (#602).**
+  Passing `--repair-identity` with an existing image to `microvm run` is deprecated
+  starting in 1.1.0. This combination will be refused no earlier than 2.0.0, after at
+  least six calendar months and two minor releases from this announcement. Build the
+  image with `microvm build --repair-identity`, then run that image without the flag.
+
+### Removed
+
+- **Python 3.9 and 3.10 support ended (#624).** The Python package now requires
+  CPython 3.11 or newer. The Python support policy follows CPython's lifecycle:
+  minor releases may drop versions after CPython ends support for them. Python
+  3.9 and 3.10 users can keep installing the latest compatible 1.0.x release.
+
+### Fixed
+
+- **A resume past the suspended window reaches the service (#597).** `Sandbox::resume` refused
+  with `ERR_WINDOW_CLOSED` once `suspendedDurationSeconds` had passed since the sandbox's own
+  `suspend()`, before any call. The service didn't hold an explicit suspend to that window:
+  measured 2026-10-12 in us-east-1, two VMs suspended with `SuspendMicrovm`, under the idle
+  case's own policy, resumed about 910 s into a 60 s window, and a third at 1283 s, so the
+  client refused resumes the service honors. AWS doesn't promise that behavior, and the client
+  no longer depends on either answer. The window ends a VM the idle
+  policy suspended, and the service then refuses the resume with a `ValidationException`.
+  `ERR_WINDOW_CLOSED` now reports that refusal, for a VM `GetMicrovm` reports TERMINATING or
+  TERMINATED, with its state and `stateReason`, and the sandbox is TERMINATED after it. The
+  mapping is core's `ControlPlane::resume`, so `microvm resume`, which exited `ERR_PLATFORM`
+  (9) there, now exits `ERR_WINDOW_CLOSED` (8), and both bindings' `ControlPlane.resume` raise
+  the same code. A VM a terminate or its maximum duration ended gets the same refusal, so the
+  error names no cause, and it carries the service's refusal as its source.
+- **#599** Fix capability-policy conformance checks to account for default identity
+  repair and observe the daemon without requiring the child's dropped ptrace authority.
+- **An existing-image run warns about an ineffective identity-repair flag (#602).**
+  `microvm run --image <arn> --repair-identity` now warns on stderr that identity repair
+  applies only when `run` builds the image, and directs callers to rebuild with
+  `microvm build --repair-identity`. The command continues to use the existing image
+  unchanged, including under `--quiet` and `--json`.
+- **Resume observes platform idle suspension (#603).** `Sandbox::resume` now reads the service
+  state when its local state is RUNNING, so it can resume a VM suspended by the idle policy
+  and report `ERR_WINDOW_CLOSED` if the VM has ended.
+- **Uploads are writable by the image's default user (#604).** The shared client
+  stages uploads privately and transfers their ownership to that user. It then
+  installs them with that user's privileges. Non-root uploads refuse symbolic links in
+  destination paths; older root-default images retain direct uploads.
+- **Default-user uploads work without `find` (#604).** Destination checks use a
+  shell tree walk that includes hidden entries and filenames containing whitespace.
+  Inherited Bash glob settings no longer affect those checks.
+- **Exec cleanup includes workers whose main thread has exited (#605).**
+  Kill, reap, and timeout escalation no longer stop after SIGTERM when a zombie
+  thread-group leader still has live workers. These processes remain visible in
+  `/v1/procs` until their workers exit.
+- **Sandbox launches poll readiness sooner (#615).** `Sandbox.run` and its Python and
+  JavaScript bindings poll for RUNNING every second for the first three retries, then
+  back off to the usual five-second interval. Explicit control-plane wait intervals
+  retain their behavior.
+- **An image build on Windows writes the same artifact as on Linux and macOS (#621).** zip
+  recorded the host that ran the build in each entry's header, MS-DOS on Windows, so a Windows
+  build of the same inputs made different bytes, against the artifact's promise of identical
+  bytes on any host, and a reader that follows that record takes the entries' modes for DOS
+  attributes: zip 9's reader gives the daemon `0o664`, without its execute bit. Every entry now
+  records Unix as its host, whatever host builds it; Linux and macOS builds make the same bytes
+  as before.
+- **Port forwards handle HTTP/1 framing and keep-alive.** Chunked uploads and binary header values reach the upstream, conflicting content lengths receive 400, HEAD keeps its upstream length, and 204 carries no content length. Local request bodies are capped at 16 MiB; headers, idle connections, and unfinished bodies have a five-second deadline.
+- **Port forwards stream response bodies as they arrive.** Server-sent events and long downloads reach the local client before the body ends. The exchange timeout bounds the response head and each gap between body reads, so an active stream can stay open beyond that timeout.
+- **Tar extraction preserves a member linked to itself (#636).** Archives produced by
+  listing a file twice no longer remove that file and fail with a missing-source error.
+  The same-path case still checks that the source exists without traversing symlinks.
+
+### Security
+
+- **TLS connections use rustls 0.23.46 (#618).** The CLI and both bindings reach AWS endpoints
+  and a VM's tunnel through rustls, which 0.23.45 left open to RUSTSEC-2026-0349: a
+  network attacker who answers one handshake with a classical-only ServerHello makes later
+  connections to that host name send only a classical key share, and a server that accepts it
+  completes the handshake without post-quantum key exchange. The other three advisories fixed in
+  the same release (RUSTSEC-2026-0346, -0347 and -0348) need a custom session store, Encrypted
+  Client Hello or the `brotli` feature, which these packages don't use.
+
 ## [1.0.1] - 2026-10-12
 
 ### Fixed
