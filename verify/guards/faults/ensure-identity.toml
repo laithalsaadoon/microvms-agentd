@@ -1,0 +1,20 @@
+# The binding conversion tests see the core request before it makes any AWS call.
+[[fault]]
+id = "js-ensure-identity-dropped"
+guard = "sandbox::ensure_tests::ensure_identity_repair_reaches_core_without_changing_the_default"
+run = ["cargo", "test", "-p", "microvms-js", "--", "--exact", "sandbox::ensure_tests::ensure_identity_repair_reaches_core_without_changing_the_default"]
+expect = "test-failed"
+suite = "rust"
+message = "identity repair reaches core"
+note = "bindings/microvms-js/src/sandbox.rs::ensure_identity_repair_reaches_core_without_changing_the_default"
+transform = { file = "bindings/microvms-js/src/sandbox.rs", replace = "            request.repair_guest_identity = repair;", with = "            request.repair_guest_identity = repair && false;" }
+
+[[fault]]
+id = "py-ensure-identity-dropped"
+guard = "sandbox::ensure_tests::ensure_identity_repair_reaches_core_without_changing_the_default"
+run = ["cargo", "test", "-p", "microvms-py", "--", "--exact", "sandbox::ensure_tests::ensure_identity_repair_reaches_core_without_changing_the_default"]
+expect = "test-failed"
+suite = "rust"
+message = "identity repair reaches core"
+note = "bindings/microvms-py/src/sandbox.rs::ensure_identity_repair_reaches_core_without_changing_the_default"
+transform = { file = "bindings/microvms-py/src/sandbox.rs", replace = "    request.repair_guest_identity = repair_guest_identity;", with = "    request.repair_guest_identity = repair_guest_identity && false;" }

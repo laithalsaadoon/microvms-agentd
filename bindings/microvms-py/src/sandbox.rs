@@ -798,6 +798,7 @@ fn ensure_request(
     base_image: Option<PyBaseImage>,
     base_image_version: Option<String>,
     force: bool,
+    repair_guest_identity: bool,
     tags: Option<std::collections::BTreeMap<String, String>>,
     wait_timeout: Option<f64>,
 ) -> Result<microvms_core::control::EnsureImageRequest, Error> {
@@ -815,6 +816,7 @@ fn ensure_request(
     request.base_image = base_image.map(|base| base.inner);
     request.base_image_version = base_image_version;
     request.force = force;
+    request.repair_guest_identity = repair_guest_identity;
     if let Some(tags) = tags {
         request.tags = tags;
     }
@@ -1379,7 +1381,9 @@ impl PySandbox {
     /// with a line in `warnings`. `base_image` defaults to
     /// `BaseImage.from_dockerfile(dockerfile)`. `base_image_version` and `project_dir` are
     /// `build_image`'s, and both join the name's hash. `wait_timeout` is the build wait in seconds
-    /// (45 minutes by default). Every local check runs before the first AWS call.
+    /// (45 minutes by default). `repair_guest_identity` repairs identity during creation and
+    /// joins the name's hash. Every local check runs before
+    /// the first AWS call.
     #[pyo3(signature = (
         *,
         name_prefix,
@@ -1394,6 +1398,7 @@ impl PySandbox {
         base_image_version=None,
         project_dir=None,
         force=false,
+        repair_guest_identity=false,
         tags=None,
         wait_timeout=None,
     ))]
@@ -1416,6 +1421,7 @@ impl PySandbox {
         base_image_version: Option<String>,
         project_dir: Option<std::path::PathBuf>,
         force: bool,
+        repair_guest_identity: bool,
         tags: Option<std::collections::BTreeMap<String, String>>,
         wait_timeout: Option<f64>,
     ) -> PyCoreResult<PyEnsuredImage> {
@@ -1430,6 +1436,7 @@ impl PySandbox {
             base_image,
             base_image_version,
             force,
+            repair_guest_identity,
             tags,
             wait_timeout,
         )?;
@@ -1455,6 +1462,7 @@ impl PySandbox {
         base_image_version=None,
         project_dir=None,
         force=false,
+        repair_guest_identity=false,
         tags=None,
         wait_timeout=None,
     ))]
@@ -1476,6 +1484,7 @@ impl PySandbox {
         base_image_version: Option<String>,
         project_dir: Option<std::path::PathBuf>,
         force: bool,
+        repair_guest_identity: bool,
         tags: Option<std::collections::BTreeMap<String, String>>,
         wait_timeout: Option<f64>,
     ) -> PyCoreResult<PyEnsuredImage> {
@@ -1490,6 +1499,7 @@ impl PySandbox {
             base_image,
             base_image_version,
             force,
+            repair_guest_identity,
             tags,
             wait_timeout,
         )?;
@@ -2090,4 +2100,36 @@ pub(crate) fn egress_posture_for(
         region.as_ref().map(|region| &region.inner),
     )?
     .as_str())
+}
+
+#[cfg(test)]
+mod ensure_tests {
+    use super::*;
+
+    /// **Falsification**: discard the identity-repair option before handing the request to core.
+    #[test]
+    fn ensure_identity_repair_reaches_core_without_changing_the_default() {
+        for repair in [false, true] {
+            let request = ensure_request(
+                "task".into(),
+                Vec::new(),
+                "FROM base".into(),
+                "bucket".into(),
+                "role".into(),
+                None,
+                None,
+                None,
+                None,
+                false,
+                repair,
+                None,
+                None,
+            )
+            .unwrap();
+            assert_eq!(
+                request.repair_guest_identity, repair,
+                "identity repair reaches core"
+            );
+        }
+    }
 }

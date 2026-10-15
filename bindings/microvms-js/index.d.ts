@@ -1768,6 +1768,8 @@ export interface EnsureImageOptions {
   projectDir?: string
   /** Delete what exists under the name and build afresh. */
   force?: boolean
+  /** Repair guest identity during image creation. Part of the content-addressed name. */
+  repairGuestIdentity?: boolean
   tags?: Record<string, string>
   waitTimeoutSeconds?: number
 }

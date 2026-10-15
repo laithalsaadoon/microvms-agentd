@@ -510,8 +510,51 @@ pub struct EnsureImageOptions {
     pub project_dir: Option<String>,
     /// Delete what exists under the name and build afresh.
     pub force: Option<bool>,
+    /// Repair guest identity during image creation. Part of the content-addressed name.
+    pub repair_guest_identity: Option<bool>,
     pub tags: Option<std::collections::HashMap<String, String>>,
     pub wait_timeout_seconds: Option<f64>,
+}
+
+impl EnsureImageOptions {
+    fn into_request(
+        self,
+        size: Option<&SizeClass>,
+    ) -> Result<microvms_core::control::EnsureImageRequest, AsyncError> {
+        let options = self;
+        let mut request = microvms_core::control::EnsureImageRequest::new(
+            options.name_prefix,
+            options.binary.to_vec(),
+            options.dockerfile,
+            options.s3_bucket,
+            options.build_role_arn,
+        );
+        request.s3_key_prefix = options.s3_key_prefix;
+        if let Some(size) = size {
+            request.size = size.inner;
+        }
+        request.base_image = options.base_image.map(BaseImageInput::into_core);
+        request.base_image_version = options.base_image_version;
+        request.force = options.force.unwrap_or(false);
+        if let Some(repair) = options.repair_guest_identity {
+            request.repair_guest_identity = repair;
+        }
+        if let Some(tags) = options.tags {
+            request.tags = tags.into_iter().collect::<BTreeMap<_, _>>();
+        }
+        if let Some(timeout) = options.wait_timeout_seconds {
+            request.wait_timeout = Some(seconds_async(timeout)?);
+        }
+        if let Some(dir) = options.context_dir {
+            request.context =
+                Some(microvms_core::control::BuildContext::from_dir(dir).map_err(js_async)?);
+        }
+        if let Some(dir) = options.project_dir {
+            request.project_files =
+                Some(microvms_core::control::read_project_files(dir).map_err(js_async)?);
+        }
+        Ok(request)
+    }
 }
 
 /// What `ensureImage` returns: the ready image and how this call got it.
@@ -935,34 +978,7 @@ impl Sandbox {
     ) -> Result<EnsuredImage, AsyncError> {
         // IMAGE-12: a pass-through; the name, the context, the decisions and the race are
         // core's.
-        let mut request = microvms_core::control::EnsureImageRequest::new(
-            options.name_prefix,
-            options.binary.to_vec(),
-            options.dockerfile,
-            options.s3_bucket,
-            options.build_role_arn,
-        );
-        request.s3_key_prefix = options.s3_key_prefix;
-        if let Some(size) = size {
-            request.size = size.inner;
-        }
-        request.base_image = options.base_image.map(BaseImageInput::into_core);
-        request.base_image_version = options.base_image_version;
-        request.force = options.force.unwrap_or(false);
-        if let Some(tags) = options.tags {
-            request.tags = tags.into_iter().collect::<BTreeMap<_, _>>();
-        }
-        if let Some(timeout) = options.wait_timeout_seconds {
-            request.wait_timeout = Some(seconds_async(timeout)?);
-        }
-        if let Some(dir) = options.context_dir {
-            request.context =
-                Some(microvms_core::control::BuildContext::from_dir(dir).map_err(js_async)?);
-        }
-        if let Some(dir) = options.project_dir {
-            request.project_files =
-                Some(microvms_core::control::read_project_files(dir).map_err(js_async)?);
-        }
+        let request = options.into_request(size)?;
         let mut guard = self.inner.lock().await;
         let ensured = guard.ensure_image(request).await.map_err(js_async)?;
         Ok(EnsuredImage::from(ensured))
@@ -1190,5 +1206,41 @@ impl Sandbox {
         // The core answers a report rather than a `Result`, so the `Ok` here is this wrapper's
         // and never the core's — a teardown cannot reject, which is the whole point.
         Ok(TeardownReport::wrap(guard.terminate(opts).await))
+    }
+}
+
+#[cfg(test)]
+mod ensure_tests {
+    use super::*;
+
+    /// **Falsification**: discard the identity-repair option before handing the request to core.
+    #[test]
+    fn ensure_identity_repair_reaches_core_without_changing_the_default() {
+        for repair in [None, Some(false), Some(true)] {
+            let options = EnsureImageOptions {
+                name_prefix: "task".into(),
+                binary: Vec::new().into(),
+                dockerfile: "FROM base".into(),
+                context_dir: None,
+                s3_bucket: "bucket".into(),
+                s3_key_prefix: None,
+                build_role_arn: "role".into(),
+                base_image: None,
+                base_image_version: None,
+                project_dir: None,
+                force: None,
+                repair_guest_identity: repair,
+                tags: None,
+                wait_timeout_seconds: None,
+            };
+            let Ok(request) = options.into_request(None) else {
+                panic!("valid ensure options must convert to a core request");
+            };
+            assert_eq!(
+                request.repair_guest_identity,
+                repair.unwrap_or(false),
+                "identity repair reaches core"
+            );
+        }
     }
 }

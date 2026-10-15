@@ -2544,7 +2544,7 @@ class Sandbox:
         """
         The proxy endpoint, once launched.
         """
-    def ensure_image(self, /, *, name_prefix: str, binary: Sequence[int], dockerfile: str, s3_bucket: str, build_role_arn: str, context_dir: str |PathLike[str] |None = None, s3_key_prefix: str |None = None, size: SizeClass |None = None, base_image: BaseImage |None = None, base_image_version: str |None = None, project_dir: str |PathLike[str] |None = None, force: bool = False, tags: dict[str, str] |None = None, wait_timeout: float |None = None) -> EnsuredImage:
+    def ensure_image(self, /, *, name_prefix: str, binary: Sequence[int], dockerfile: str, s3_bucket: str, build_role_arn: str, context_dir: str |PathLike[str] |None = None, s3_key_prefix: str |None = None, size: SizeClass |None = None, base_image: BaseImage |None = None, base_image_version: str |None = None, project_dir: str |PathLike[str] |None = None, force: bool = False, repair_guest_identity: bool = False, tags: dict[str, str] |None = None, wait_timeout: float |None = None) -> EnsuredImage:
         """
         Builds or reuses the content-addressed image for a task: one call from build inputs
         to a ready image.
@@ -2569,9 +2569,11 @@ class Sandbox:
         with a line in `warnings`. `base_image` defaults to
         `BaseImage.from_dockerfile(dockerfile)`. `base_image_version` and `project_dir` are
         `build_image`'s, and both join the name's hash. `wait_timeout` is the build wait in seconds
-        (45 minutes by default). Every local check runs before the first AWS call.
+        (45 minutes by default). `repair_guest_identity` repairs identity during creation and
+        joins the name's hash. Every local check runs before
+        the first AWS call.
         """
-    async def ensure_image_async(self, /, *, name_prefix: str, binary: Sequence[int], dockerfile: str, s3_bucket: str, build_role_arn: str, context_dir: str |PathLike[str] |None = None, s3_key_prefix: str |None = None, size: SizeClass |None = None, base_image: BaseImage |None = None, base_image_version: str |None = None, project_dir: str |PathLike[str] |None = None, force: bool = False, tags: dict[str, str] |None = None, wait_timeout: float |None = None) -> EnsuredImage:
+    async def ensure_image_async(self, /, *, name_prefix: str, binary: Sequence[int], dockerfile: str, s3_bucket: str, build_role_arn: str, context_dir: str |PathLike[str] |None = None, s3_key_prefix: str |None = None, size: SizeClass |None = None, base_image: BaseImage |None = None, base_image_version: str |None = None, project_dir: str |PathLike[str] |None = None, force: bool = False, repair_guest_identity: bool = False, tags: dict[str, str] |None = None, wait_timeout: float |None = None) -> EnsuredImage:
         """
         The awaitable twin of `ensure_image`, with its keywords. A lifecycle transition:
         cancelling the awaitable leaves the build or reuse running to completion.

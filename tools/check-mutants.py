@@ -82,9 +82,9 @@ LEFT_OUT = {
     "asks whether the model checks itself",
     "model-conformance": "tests only: its library is empty, so there's nothing in it to "
     "mutate. Its tests hold the app to the model, and the app's mutants run the app's own tests",
-    "microvms-py": "no Rust tests: its suite is pytest, which cargo-mutants can't run, so "
+    "microvms-py": "its integration suite is pytest, which cargo-mutants can't run, so "
     "every mutant in it would be reported missed",
-    "microvms-js": "no Rust tests: its suite is `node --test`, which cargo-mutants can't run",
+    "microvms-js": "its integration suite is `node --test`, which cargo-mutants can't run",
 }
 
 # cargo-mutants 27.1.0's exit codes (src/exit_code.rs) and what each means for a PR. The ones
