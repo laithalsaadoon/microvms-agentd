@@ -1,8 +1,8 @@
 # microvms-agentd · State machines
 
-The diagrams project explicit enum-valued state fields. Model diagrams describe the model's transitions; implementation diagrams describe assignments in the app. The lifecycle model names its mirror explicitly, while the stream has its own private enum (`crates/model/src/client.rs:60-78`, `crates/microvms-app/src/session/exec.rs:872-887`).
+The diagrams project explicit enum-valued state fields. Model diagrams describe the model's transitions; implementation diagrams describe assignments in the app. The lifecycle model names its mirror explicitly, while the stream has its own private enum (`crates/model/src/client.rs:54-72`, `crates/microvms-app/src/session/exec.rs:872-887`).
 
-Transition labels use source event or function identifiers. Payloads and guards are explained beside each diagram; an unchanged enum value can still carry changed data (`crates/model/src/lib.rs:94-103`, `crates/model/src/client.rs:154-192`).
+Transition labels use source event or function identifiers. Payloads and guards are explained beside each diagram; an unchanged enum value can still carry changed data (`crates/model/src/lib.rs:94-103`, `crates/model/src/client.rs:151-189`).
 
 ## Boot
 
@@ -98,7 +98,7 @@ stateDiagram-v2
     Terminating --> Terminated: terminate
 ```
 
-Defined at: `crates/microvms-app/src/sandbox.rs:137-151`
+Defined at: `crates/microvms-app/src/sandbox.rs:136-150`
 
 ## OutputEnd
 

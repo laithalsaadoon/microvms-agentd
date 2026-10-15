@@ -57,7 +57,7 @@ Runs a task with a configured agent, waits for completion, and acknowledges the 
 
 Pairs the managed base with the first FROM reference in a task Dockerfile.
 
-`crates/microvms-app/src/control/artifact.rs:398`
+`crates/microvms-app/src/control/artifact.rs:403`
 
 ### control::EnsureImageRequest::new
 
@@ -83,7 +83,7 @@ pub fn wrap_dockerfile(task: &str, opts: &WrapOptions) -> Result<String, Error> 
 
 Appends the agentd startup instructions to a task Dockerfile using the supplied wrapping options.
 
-`crates/microvms-app/src/control/artifact.rs:606`
+`crates/microvms-app/src/control/artifact.rs:611`
 
 ### preflight::preflight
 
@@ -150,7 +150,7 @@ Constructs a session for a daemon reached directly, with no proxy authentication
 
 Creates an argv command request under the supplied idempotency key with the wire defaults for optional fields.
 
-`crates/protocol/src/exec.rs:521`
+`crates/protocol/src/exec.rs:534`
 
 ### provision::agentd
 
@@ -175,7 +175,7 @@ Returns the requested daemon binary from an override, the cache, or a verified r
 
 Reconstructs a sandbox for an existing VM from retained connection details and the lifecycle reported by the service.
 
-`crates/microvms-app/src/sandbox.rs:1361`
+`crates/microvms-app/src/sandbox.rs:1359`
 
 ### sandbox::Sandbox::detach
 
@@ -185,7 +185,7 @@ Reconstructs a sandbox for an existing VM from retained connection details and t
 
 Returns the details another process needs to adopt the VM and makes this sandbox inactive without stopping the VM.
 
-`crates/microvms-app/src/sandbox.rs:1500`
+`crates/microvms-app/src/sandbox.rs:1498`
 
 ### sandbox::Sandbox::ensure_image
 
@@ -198,7 +198,7 @@ Returns the details another process needs to adopt the VM and makes this sandbox
 
 Builds or reuses the content-addressed image selected by the request.
 
-`crates/microvms-app/src/sandbox.rs:947`
+`crates/microvms-app/src/sandbox.rs:946`
 
 ### sandbox::Sandbox::resume
 
@@ -208,7 +208,7 @@ Builds or reuses the content-addressed image selected by the request.
 
 Resumes a suspended VM within its allowed window and returns a usable session.
 
-`crates/microvms-app/src/sandbox.rs:1669`
+`crates/microvms-app/src/sandbox.rs:1667`
 
 ### sandbox::Sandbox::run
 
@@ -218,7 +218,7 @@ Resumes a suspended VM within its allowed window and returns a usable session.
 
 Launches a VM and returns its session, waiting for the running state and daemon readiness when requested.
 
-`crates/microvms-app/src/sandbox.rs:1112`
+`crates/microvms-app/src/sandbox.rs:1111`
 
 ### sandbox::Sandbox::suspend
 
@@ -228,7 +228,7 @@ Launches a VM and returns its session, waiting for the running state and daemon 
 
 Requests suspension and waits for SUSPENDED or TERMINATED, recording the resulting lifecycle on the sandbox.
 
-`crates/microvms-app/src/sandbox.rs:1585`
+`crates/microvms-app/src/sandbox.rs:1583`
 
 ### sandbox::Sandbox::terminate
 
@@ -238,7 +238,7 @@ Requests suspension and waits for SUSPENDED or TERMINATED, recording the resulti
 
 Attempts the configured teardown steps and returns a report containing any failures and remaining resources.
 
-`crates/microvms-app/src/sandbox.rs:1742`
+`crates/microvms-app/src/sandbox.rs:1775`
 
 ### session::ExecHandle::kill
 
@@ -291,7 +291,7 @@ Writes bytes to an execution started with stdin enabled and optionally sends EOF
 
 Reads a remote file into a byte vector.
 
-`crates/microvms-app/src/session/mod.rs:522`
+`crates/microvms-app/src/session/mod.rs:544`
 
 ### session::Session::download_tar
 
@@ -301,7 +301,7 @@ Reads a remote file into a byte vector.
 
 Downloads a remote directory tree as tar bytes.
 
-`crates/microvms-app/src/session/mod.rs:550`
+`crates/microvms-app/src/session/mod.rs:572`
 
 ### session::Session::run
 
@@ -311,7 +311,7 @@ Downloads a remote directory tree as tar bytes.
 
 Starts a command and returns its execution handle without waiting for completion.
 
-`crates/microvms-app/src/session/mod.rs:455`
+`crates/microvms-app/src/session/mod.rs:461`
 
 ### session::Session::run_to_completion
 
@@ -341,7 +341,7 @@ Starts a command and drives streaming, deadline handling, and acknowledgment to 
 
 Writes a remote file, creating parent directories and applying an optional mode expressed as an octal string.
 
-`crates/microvms-app/src/session/mod.rs:512`
+`crates/microvms-app/src/session/mod.rs:534`
 
 ### session::Session::upload_tar
 
@@ -351,7 +351,7 @@ Writes a remote file, creating parent directories and applying an optional mode 
 
 Uploads tar bytes for extraction under the requested remote directory.
 
-`crates/microvms-app/src/session/mod.rs:545`
+`crates/microvms-app/src/session/mod.rs:567`
 
 ## See also
 

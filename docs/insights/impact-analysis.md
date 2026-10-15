@@ -25,13 +25,13 @@ Defined at: `crates/protocol/src/lib.rs:29-34`.
 | Daemon route metadata and tunnel close codes | direct import | likely | `crates/agentd/src/routes.rs:18-20`, `crates/agentd/src/tunnel.rs:104` |
 | Client tunnel close-code interpretation | direct import | likely | `crates/microvms-edges/src/session/tunnel.rs:149-155` |
 | Daemon filesystem query handling | direct import | likely | `crates/agentd/src/fs.rs:95` |
-| Session request construction and response decoding | direct import | likely | `crates/microvms-app/src/session/mod.rs:455-464` |
+| Session request construction and response decoding | direct import | likely | `crates/microvms-app/src/session/mod.rs:461-486` |
 | File-read query encoding | direct import | likely | `crates/microvms-app/src/session/files.rs:46-53` |
 | Exec results and terminal-phase interpretation | direct import | likely | `crates/microvms-app/src/session/exec.rs:69-103` |
 | SSE event dispatch | runtime dispatch | likely | `crates/microvms-app/src/session/sse.rs:271-310` |
-| Python request builder and exported phase names | direct import | likely | `bindings/microvms-py/src/session.rs:801-802`, `bindings/microvms-py/src/session.rs:2165-2172` |
-| Node request builder and exported phase names | direct import | likely | `bindings/microvms-js/src/session.rs:287-303`, `bindings/microvms-js/src/session.rs:1204-1210` |
-| Client-default publication | indirect | likely | `crates/microvms-app/src/defaults.rs:125-141` |
+| Python request builder and exported phase names | direct import | likely | `bindings/microvms-py/src/session.rs:802-803`, `bindings/microvms-py/src/session.rs:2194-2201` |
+| Node request builder and exported phase names | direct import | likely | `bindings/microvms-js/src/session.rs:292-308`, `bindings/microvms-js/src/session.rs:1217-1223` |
+| Client-default publication | indirect | likely | `crates/microvms-app/src/defaults.rs:126-142` |
 | Model-to-client outcome conversion | test | likely | `crates/model-conformance/tests/tables.rs:380-401` |
 | Core's compatibility re-export | indirect | no | `crates/microvms-core/src/lib.rs:93-95` |
 | Committed schema artifact | config | yes | `crates/agentd/src/schema.rs:240-286`, `crates/agentd/tests/schema_artifact.rs:39-50` |
@@ -47,7 +47,7 @@ Defined at: `crates/protocol/src/lib.rs:29-34`.
   `crates/agentd/src/schema.rs:327-340`
 - Build exec requests through `StartRequest::new`. The type is non-exhaustive,
   and the constructor is the common source of request defaults.
-  `crates/protocol/src/exec.rs:218-219`, `crates/protocol/src/exec.rs:492-522`
+  `crates/protocol/src/exec.rs:218-219`, `crates/protocol/src/exec.rs:505-535`
 - Schema text is part of the checked artifact: the comparison is byte-for-byte,
   including whitespace. Regenerate it after a wire documentation change.
   `crates/agentd/tests/schema_artifact.rs:39-74`
@@ -63,7 +63,7 @@ Defined at: `crates/microvms-domain/src/error.rs:34`,
 | CLI kind-to-exit mapping | direct import | yes | `crates/microvms-cli/src/exit.rs:172-187` |
 | Python exception classes | direct import | yes | `bindings/microvms-py/src/errors.rs:131-146` |
 | Node error codes, causes, and retry helper | direct import | likely | `bindings/microvms-js/src/errors.rs:78-91`, `bindings/microvms-js/src/errors.rs:149-180` |
-| Control-plane and sandbox error producers | direct import | likely | `crates/microvms-app/src/control/transport.rs:36`, `crates/microvms-app/src/sandbox.rs:73` |
+| Control-plane and sandbox error producers | direct import | likely | `crates/microvms-app/src/control/transport.rs:36`, `crates/microvms-app/src/sandbox.rs:72` |
 | Session HTTP status conversion | direct import | likely | `crates/microvms-app/src/session/http.rs:108-134` |
 | Failure envelope's detailed kind | indirect | likely | `crates/microvms-cli/src/envelope.rs:367-383` |
 | Conformance envelope interpretation | indirect | likely | `conformance/harness/envelope.py:35-44`, `conformance/harness/envelope.py:70-89` |
@@ -161,11 +161,11 @@ Defined at: `crates/microvms-domain/src/sizing.rs:74-125`.
 | Control-plane run and image data | direct import | likely | `crates/microvms-app/src/control/mod.rs:318`, `crates/microvms-app/src/control/image.rs:72` |
 | Python size factories | direct import | likely | `bindings/microvms-py/src/cost.rs:463-491` |
 | Node size factories | direct import | likely | `bindings/microvms-js/src/cost.rs:363-401` |
-| Published client defaults | indirect | likely | `crates/microvms-app/src/defaults.rs:49-50`, `crates/microvms-app/src/defaults.rs:133` |
+| Published client defaults | indirect | likely | `crates/microvms-app/src/defaults.rs:49-50`, `crates/microvms-app/src/defaults.rs:134` |
 | Agent recipe sizes | direct import | likely | `crates/microvms-app/src/agents/mod.rs:44-52` |
 | CLI cost report | indirect | likely | `crates/microvms-cli/src/commands/cost.rs:33-34` |
 | Constants emission and independent size table | config | yes | `crates/microvms-domain/src/constants.rs:727-739`, `tools/check-model-drift.py:213-219` |
-| CLI domain and resource-request tests | test | yes | `crates/microvms-cli/src/cli.rs:2758-2775`, `crates/microvms-cli/src/cli.rs:3883-3901` |
+| CLI domain and resource-request tests | test | yes | `crates/microvms-cli/src/cli.rs:2767-2784`, `crates/microvms-cli/src/cli.rs:3892-3910` |
 | Binding sizing and billing tests | test | likely | `bindings/microvms-py/tests/test_smoke.py:406-430`, `bindings/microvms-js/__test__/smoke.mjs:315-340` |
 | Shared size and cost case runner | test | likely | `crates/microvms-core/tests/parity_cases.rs:34-58` |
 | Public capability mapping | config | likely | `verify/parity/capabilities.toml:748-779` |
@@ -226,7 +226,7 @@ Defined at: `crates/microvms-domain/src/cost.rs:1007-1021`.
 | CLI cost command | direct import | likely | `crates/microvms-cli/src/commands/cost.rs:18`, `crates/microvms-cli/src/commands/cost.rs:33-34` |
 | Python rate factory and report defaults | direct import | likely | `bindings/microvms-py/src/cost.rs:583`, `bindings/microvms-py/src/cost.rs:954` |
 | Node rate factory and report defaults | direct import | likely | `bindings/microvms-js/src/cost.rs:482`, `bindings/microvms-js/src/cost.rs:837` |
-| Completed-run cost attachment | direct import | likely | `crates/microvms-cli/src/commands/lifecycle.rs:1351-1384` |
+| Completed-run cost attachment | direct import | likely | `crates/microvms-cli/src/commands/lifecycle.rs:1361-1394` |
 | Shared cost case runner | test | likely | `crates/microvms-core/tests/parity_cases.rs:201-210` |
 | Report's preserved rate table | indirect | no | `crates/microvms-domain/src/cost.rs:1471-1496` |
 | Independent rate and storage-unit assertions | test | yes | `crates/microvms-domain/src/cost.rs:2648-2677` |

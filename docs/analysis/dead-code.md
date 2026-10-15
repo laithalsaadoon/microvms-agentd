@@ -11,7 +11,7 @@ Python's selected rules include unused-import diagnostics through the `F` family
 These checks complement source review but do not establish reachability across
 all features, platforms, or downstream applications.
 `.config/mise/tasks/lint.toml:48-53`
-`pyproject.toml:138-166`
+`pyproject.toml:130-158`
 
 ## Unreferenced exports
 
@@ -19,7 +19,7 @@ _none_
 
 `SessionBuilder::with_timeout` is used by the production session constructor when
 an attachment requests a timeout. Its declaration and caller are
-`crates/microvms-app/src/session/mod.rs:616-621` and
+`crates/microvms-app/src/session/mod.rs:638-643` and
 `crates/microvms-core/src/prelude.rs:350-368`.
 
 Runtime-exported functions remain part of their binding's public surface even
@@ -46,21 +46,21 @@ application module awaiting a caller.
 
 | Path | Symbol | Imported from |
 | --- | --- | --- |
-| `crates/microvms-cli/src/commands/lifecycle.rs:2527` | `ControlPlane as _DocsOnly` | `crates/microvms-cli/src/commands/lifecycle.rs:30` |
-| `crates/microvms-cli/src/commands/attached.rs:2880` | `ErrorKind as _DocsOnly` | `crates/microvms-cli/src/commands/attached.rs:41` |
+| `crates/microvms-cli/src/commands/lifecycle.rs:2539` | `ControlPlane as _DocsOnly` | `crates/microvms-cli/src/commands/lifecycle.rs:30` |
+| `crates/microvms-cli/src/commands/attached.rs:2881` | `ErrorKind as _DocsOnly` | `crates/microvms-cli/src/commands/attached.rs:41` |
 
 These aliases have no subsequent references. Both explicitly allow
 `unused_imports`, with a documentation-related reason, so they are intentional
 exceptions to the lint rather than evidence that the source types are unused.
-`crates/microvms-cli/src/commands/lifecycle.rs:2525-2527`
-`crates/microvms-cli/src/commands/attached.rs:2878-2880`
+`crates/microvms-cli/src/commands/lifecycle.rs:2537-2539`
+`crates/microvms-cli/src/commands/attached.rs:2879-2881`
 
 The lifecycle module links `ControlPlane` in its documentation. The attached
 commands also use `ErrorKind` directly when handling a timeout. Removing either
 underlying import solely because its `_DocsOnly` alias is unused would ignore
 these uses.
 `crates/microvms-cli/src/commands/lifecycle.rs:8`
-`crates/microvms-cli/src/commands/attached.rs:391`
+`crates/microvms-cli/src/commands/attached.rs:392`
 
 ## See also
 

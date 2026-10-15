@@ -23,8 +23,8 @@ implementation defects.
 | 3 | The CLI owns persistent ledger and history formats. Moving their reusable behavior below the CLI would let other adapters share it; preserve their different retention semantics. | wrong abstraction | L | `AGENTS.md:110-116`, `crates/microvms-cli/src/ledger.rs:28-48`, `crates/microvms-cli/src/history.rs:5-14` |
 | 4 | Default parity intentionally omits string, zero, and `None` defaults, while TypeScript defaults appear only in prose. Expand the contract representation before asserting option-level consistency. | missing tests | M | `tools/check-parity.py:72-86` |
 | 5 | Formal tasks deliberately omit strict verification; their success means no error-severity findings, not a fully verified specification. Reduce unresolved findings before strengthening the gate. | missing tests | L | `.config/mise/tasks/trace.toml:3-13`, `tools/check-spec.sh:4-9` |
-| 6 | *Judgment call:* formal requirements remain outside the local `check` task and need a separately installed checker. A reproducible optional verification environment would make this tier easier to run without changing the ordinary local gate. | missing tests | M | `.config/mise/tasks/trace.toml:11-28`, `.config/mise/tasks/check.toml:11-43`, `tools/check-spec.sh:15-24` |
-| 7 | The Maturin version is repeated in stub generation, binding builds, and proof-runner commands. A unit test checks that the binding builds and the release workflow use the stub generator's pin, and the proof runner's copy is outside that test. Add it, or centralize ownership, before the next upgrade. | duplicated logic | S | `tools/generate-py-stubs.py:84-89`, `.config/mise/tasks/test.toml:89-104`, `tools/fail-to-pass.py:101-108`, `tools/test_check_release_builds.py:91-105` |
+| 6 | *Judgment call:* formal requirements remain outside the local `check` task and need a separately installed checker. A reproducible optional verification environment would make this tier easier to run without changing the ordinary local gate. | missing tests | M | `.config/mise/tasks/trace.toml:11-28`, `.config/mise/tasks/check.toml:11-44`, `tools/check-spec.sh:15-24` |
+| 7 | The Maturin version is repeated in stub generation, binding builds, and proof-runner commands. A unit test checks that the binding builds and the release workflow use the stub generator's pin, and the proof runner's copy is outside that test. Add it, or centralize ownership, before the next upgrade. | duplicated logic | S | `tools/generate-py-stubs.py:84-89`, `.config/mise/tasks/test.toml:93-108`, `tools/fail-to-pass.py:101-108`, `tools/test_check_release_builds.py:95-109` |
 | 8 | The daemon port default is independently declared by control, session, and daemon configuration. Give the shared default an owner while preserving the existing public paths. | duplicated logic | S | `crates/microvms-app/src/control/mod.rs:118-119`, `crates/microvms-app/src/session/proxy.rs:84-85`, `crates/agentd/src/config.rs:118-121` |
 
 ## Explicit markers
@@ -68,7 +68,7 @@ Formal verification is deliberately separate from `check`, and the formal task
 itself stops short of strict verification. Those are distinct boundaries: making
 the checker easy to install does not resolve specification findings, and reducing
 findings does not make the tier part of the normal local workflow
-(`.config/mise/tasks/trace.toml:6-12`, `.config/mise/tasks/check.toml:11-43`).
+(`.config/mise/tasks/trace.toml:6-12`, `.config/mise/tasks/check.toml:11-44`).
 
 Shows up in:
 
@@ -84,12 +84,12 @@ The Python stub generator pins an exact Maturin release, and the binding builds
 and the proof runner repeat it. Upgrading Maturin means editing each copy
 (`tools/generate-py-stubs.py:84-89`). One unit test checks that the binding builds
 and the release workflow use the generator's pin
-(`tools/test_check_release_builds.py:91-105`), and the proof runner's copy isn't in
+(`tools/test_check_release_builds.py:95-109`), and the proof runner's copy isn't in
 that test's list.
 
 Shows up in:
 
-- `.config/mise/tasks/test.toml:89-104`: repeated Python build-tool version.
+- `.config/mise/tasks/test.toml:93-108`: repeated Python build-tool version.
 - `tools/fail-to-pass.py:101-108`: the binding build command repeated in the proof runner.
 
 Cost: S. Add the proof runner's copy to the agreement test, or derive it from the generator's pin.

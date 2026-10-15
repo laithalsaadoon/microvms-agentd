@@ -17,7 +17,7 @@ The shared wire contract defines execution, file-transfer, health, lifecycle-hoo
 
 ## agentd
 
-The guest daemon owns command execution, file transfer, lifecycle hooks, guest identity setup, and TCP relay handlers. `crates/agentd/src/lib.rs:37-54` Its router assembles the endpoint descriptions into the served application, while the schema module describes request and response shapes. `crates/agentd/src/routes.rs:29-58` `crates/agentd/src/schema.rs:2-12`
+The guest daemon owns command execution, file transfer, lifecycle hooks, guest identity setup, TCP relay handlers, and the optional guest power-off after an exec's process group ends. `crates/agentd/src/lib.rs:37-56` Its router assembles the endpoint descriptions into the served application, while the schema module describes request and response shapes. `crates/agentd/src/routes.rs:29-58` `crates/agentd/src/schema.rs:2-12`
 
 - `crates/agentd/src/exec.rs:2`
 - `crates/agentd/src/fs.rs:2`
@@ -27,6 +27,7 @@ The guest daemon owns command execution, file transfer, lifecycle hooks, guest i
 - `crates/agentd/src/identity.rs:2`
 - `crates/agentd/src/exec_start.rs:2`
 - `crates/agentd/src/state.rs:2`
+- `crates/agentd/src/poweroff.rs:2`
 
 ## microvms-domain
 
@@ -131,7 +132,7 @@ The portable model crate expresses daemon and client behavior as state machines 
 
 - `crates/model-conformance/src/lib.rs:2-14`
 - `crates/model-conformance/tests/client_lifecycle.rs:2`
-- `conformance/run_rs.py:90-94`
+- `conformance/run_rs.py:90-140`
 - `conformance/lanes/suite.py:2`
 - `conformance/selftest/suite.py:2`
 - `site/astro.config.ts:1`
