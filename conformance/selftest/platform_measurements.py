@@ -19,7 +19,9 @@ from lanes.platform_measurements import (
     SNAPSHOT_MARKER,
     STATUS_FIELDS,
     check_measurement,
+    check_poweroff,
     drive_platform_measurements,
+    measure_poweroff,
     measurement_dockerfile,
 )
 
@@ -146,6 +148,7 @@ def check_platform_measurements(results: Results) -> None:
         dropped.call_args.args == ((*DROPPED, SNAPSHOT_MARKER),),
     )
     check_measurement_selector(results, report, snapshot)
+    check_poweroff_measurements(results)
 
 
 def check_measurement_selector(results: Results, report: dict, snapshot: dict) -> None:
@@ -226,12 +229,124 @@ def check_measurement_selector(results: Results, report: dict, snapshot: dict) -
             ),
             patch("lanes.platform_measurements.launch_image", return_value=None),
             patch("lanes.platform_measurements.attach_args", return_value=[]),
+            patch(
+                "lanes.platform_measurements.measure_poweroff",
+                return_value={
+                    "before": "RUNNING",
+                    "states": [{"state": "TERMINATED", "seconds": 1}],
+                },
+            ),
             redirect_stdout(io.StringIO()),
         ):
             drive_platform_measurements(
-                Cli(), Path(__file__), None, lane_results, variant
+                Cli(),
+                Path(__file__),
+                SimpleNamespace(client=lambda _: None),
+                lane_results,
+                variant,
             )
         results.check(
             "measurement selector preserves the requested variant set",
             labels == expected and not lane_results.failed,
+        )
+
+
+def check_poweroff_measurements(results: Results) -> None:
+    class Plane:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def get_microvm(self, **_: str) -> dict:
+            self.calls += 1
+            return {"state": "RUNNING" if self.calls < 3 else "TERMINATED"}
+
+    class Cli:
+        region = "us-east-1"
+
+        def call(self, *_: str, **__: object) -> SimpleNamespace:
+            return SimpleNamespace(data={"stdout": json.dumps({"scheduled": True})})
+
+    launched = SimpleNamespace(
+        data={
+            "microvmId": "test",
+            "endpoint": "https://example.invalid",
+            "agentToken": "not-a-token",
+        }
+    )
+    with patch("lanes.platform_measurements.time.sleep"):
+        observed = measure_poweroff(Cli(), launched, Plane())
+    results.check(
+        "power-off records terminal timing while keeping billing unverified",
+        [row["state"] for row in observed["states"]] == ["RUNNING", "TERMINATED"]
+        and observed["terminalSeconds"] is not None
+        and observed["billingStop"].startswith("unverified:"),
+    )
+
+    positive = Results(probe=True)
+    check_poweroff(observed, positive)
+    results.check("power-off accepts observed states", not positive.failed)
+    for invalid in (
+        {},
+        {"before": "RUNNING", "states": [{"state": None, "seconds": 1}]},
+        {"before": "RUNNING", "states": [None]},
+        {"before": "RUNNING", "states": "RUNNING"},
+        *(
+            {"before": "RUNNING", "states": [{"state": "RUNNING", "seconds": value}]}
+            for value in (None, True, -1, float("nan"), float("inf"))
+        ),
+    ):
+        negative = Results(probe=True)
+        check_poweroff(invalid, negative)
+        results.check("power-off refuses missing states", bool(negative.failed))
+
+    class RefusedPlane:
+        def get_microvm(self, **_: str) -> dict:
+            return {"state": "RUNNING"}
+
+    class RefusedCli(Cli):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def call(self, *_: str, **__: object) -> SimpleNamespace:
+            self.calls += 1
+            response = (
+                {"scheduled": True} if self.calls == 1 else {"result": -1, "errno": 1}
+            )
+            return SimpleNamespace(data={"stdout": json.dumps(response), "exitCode": 0})
+
+    refused_cli = RefusedCli()
+    with (
+        patch("lanes.platform_measurements.time.sleep"),
+        patch("lanes.platform_measurements.time.monotonic", side_effect=[0, 7, 7, 7]),
+    ):
+        refused_poweroff = measure_poweroff(refused_cli, launched, RefusedPlane())
+    results.check(
+        "power-off records an explicit refusal without waiting out the poll bound",
+        refused_cli.calls == 2
+        and refused_poweroff["guestResult"] == {"result": -1, "errno": 1}
+        and refused_poweroff["terminalSeconds"] is None
+        and [row["state"] for row in refused_poweroff["states"]] == ["RUNNING"],
+    )
+
+    refusal_result = Results(probe=True)
+    check_poweroff(refused_poweroff, refusal_result)
+    results.check(
+        "power-off accepts a validated syscall refusal", not refusal_result.failed
+    )
+    for guest in (
+        None,
+        {},
+        {"errorType": "RuntimeError"},
+        {"result": 0, "errno": 1},
+        {"result": -1, "errno": 0},
+        {"result": -1, "errno": True},
+        {"result": -1, "errno": -1},
+        {"result": -1, "errno": "1"},
+    ):
+        inconclusive = {**refused_poweroff, "guestResult": guest}
+        negative = Results(probe=True)
+        check_poweroff(inconclusive, negative)
+        results.check(
+            "power-off refuses a running guest without syscall outcome evidence",
+            bool(negative.failed),
         )

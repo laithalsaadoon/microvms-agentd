@@ -102,6 +102,24 @@ terminal states, reporting `stateReason`. A VM that terminates before
 `RUNNING` failed startup; continuing to poll hides the useful error. Use the
 [AWS GetMicrovm documentation](https://docs.aws.amazon.com/lambda/latest/microvm-api/API_GetMicrovm.html) for the complete state enum.
 
+## Guest power-off ends a privileged VM
+
+Measured 2026-10-14, us-east-1, API `2025-09-09`, `al2023-1`, using the
+[targeted conformance probe at `fd548af`](https://github.com/laithalsaadoon/microvms-agentd/blob/fd548af/conformance/drivers/platform_probe.py).
+A root exec scheduled `reboot(LINUX_REBOOT_CMD_POWER_OFF)` after a three-second
+delay and returned before the syscall. Control-plane polling observed:
+
+| Image | Syscall or control-plane observation |
+|---|---|
+| Without identity repair | The syscall returned `-1` with `EPERM`. The VM was `RUNNING` at the final 7.672-second observation. |
+| With identity repair | The VM was `RUNNING` at 21.992 seconds and first observed `TERMINATED` at 24.430 seconds. |
+
+Times start when the client began the scheduling exec, not when the delayed
+syscall ran. The default capability set lacks `CAP_SYS_BOOT`. The repaired
+image has it. This measures the guest syscall and later service state,
+not a daemon option to power off after a workload exits. Billing cessation
+was not measured: `TERMINATED` alone does not establish when charges stop.
+
 ## The build log group survives Terraform
 
 Measured 2026-08-05. AWS creates `/aws/lambda-microvms/<image-name>` outside

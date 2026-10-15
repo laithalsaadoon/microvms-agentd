@@ -1,0 +1,10 @@
+[[family]]
+guard = "conformance/run_rs.py --self-test: conformance/selftest/platform_measurements.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "poweroff-measurement-absent"
+message = "FAIL  power-off refuses missing states"
+transform = { file = "conformance/lanes/platform_measurements.py", replace = 'control-plane state", observed', with = 'control-plane state", True' }
