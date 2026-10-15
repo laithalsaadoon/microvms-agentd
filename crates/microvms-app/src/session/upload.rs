@@ -285,6 +285,45 @@ mod tests {
         }
     }
 
+    /// A slow preparation may finish after its daemon timeout while the result is
+    /// still in transit; the client grace must leave time to collect it and install.
+    #[tokio::test(start_paused = true)]
+    async fn nonroot_uploads_wait_for_completion_during_the_client_grace() {
+        let during_grace = BUDGET + crate::session::DEFAULT_CLIENT_GRACE / 2;
+        let [started, finished, acked] = exec("/tmp/.microvms-upload-0123456789\n", 0);
+        let running = std::iter::repeat_with(|| {
+            Reply::ok(serde_json::json!({"exec_id":"x", "phase":"running"}))
+        })
+        .take(during_grace.as_secs() as usize);
+        let recorder = configured_recorder(
+            std::iter::once(configured())
+                .chain(exec("1000\n1001\n", 0))
+                .chain([started])
+                .chain(running)
+                .chain([finished, acked, Reply::Body(200, Vec::new())])
+                .chain(exec("", 0))
+                .chain(exec("", 0)),
+        );
+        let session = unprobed(&recorder);
+        let start = tokio::time::Instant::now();
+        session
+            .upload_file("/workspace/file", b"file", Some("0600"))
+            .await
+            .expect("the client grace permits collecting preparation and installing the file");
+        assert_eq!(start.elapsed(), during_grace);
+        let requests = recorder.requests();
+        let starts: Vec<serde_json::Value> = requests
+            .iter()
+            .filter(|request| request.method == "POST" && request.path == "/v1/exec/start")
+            .map(|request| serde_json::from_slice(&request.body).unwrap())
+            .collect();
+        assert_eq!(starts[1]["timeout_sec"], BUDGET.as_secs_f64());
+        let install = starts.last().expect("the file was installed");
+        assert_eq!(install["command"][4], "install-file");
+        assert_eq!(install["command"][6], "/workspace/file");
+        assert!(install["user"].is_null());
+    }
+
     /// A failed identity probe or refused destination must not reach either upload
     /// route. A failed upload removes the private stage and preserves its error.
     #[tokio::test]

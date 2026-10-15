@@ -190,3 +190,11 @@ run = [["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-p
 expect = "test-failed"
 suite = "bindings"
 transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "None => return Ok((ROOT_UID, ROOT_UID)),", with = "None => return Err(Error::invalid_arg(\"missing ownership marker\"))," }
+
+[[fault]]
+id = "upload-604-client-grace"
+guard = "session::upload::tests::nonroot_uploads_wait_for_completion_during_the_client_grace"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::upload::tests::nonroot_uploads_wait_for_completion_during_the_client_grace"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "run_sync(request, BUDGET + super::DEFAULT_CLIENT_GRACE)", with = "run_sync(request, BUDGET - super::DEFAULT_CLIENT_GRACE)" }
