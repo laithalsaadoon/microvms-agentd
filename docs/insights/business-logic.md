@@ -1,6 +1,6 @@
 # microvms-agentd · Business logic
 
-This index covers domain validation and calculations in `microvms-domain`, orchestration policies in `microvms-app`, and request and execution rules in `agentd`. It documents the checks this repository implements; service-side behavior beyond those checks is outside its scope. The sources separate pure sizing rules, image preflight, lifecycle transitions, and daemon handlers. `crates/microvms-domain/src/sizing.rs:153`, `crates/microvms-app/src/control/image.rs:273`, `crates/microvms-app/src/sandbox.rs:1585`, `crates/agentd/src/exec.rs:341`.
+This index covers domain validation and calculations in `microvms-domain`, orchestration policies in `microvms-app`, and request and execution rules in `agentd`. It documents the checks this repository implements; service-side behavior beyond those checks is outside its scope. The sources separate pure sizing rules, image preflight, lifecycle transitions, and daemon handlers. `crates/microvms-domain/src/sizing.rs:153`, `crates/microvms-app/src/control/image.rs:273`, `crates/microvms-app/src/sandbox.rs:1583`, `crates/agentd/src/exec.rs:341`.
 
 ## Validations
 
@@ -28,9 +28,9 @@ This index covers domain validation and calculations in `microvms-domain`, orche
 | Tag keys must be nonempty and at most 128 bytes; values may be empty and are limited to 256 bytes. Both use the shared tag-character predicate. | Image build | `crates/microvms-app/src/control/mod.rs:961` | Invalid-argument error identifying the key or value. |
 | A serialized run-hook payload must fit within 4096 bytes. | Launch | `crates/microvms-app/src/control/microvm.rs:201`, `crates/microvms-domain/src/constants.rs:80` | Invalid-argument error. |
 | A configured log stream requires a log group. Its caller-supplied prefix reserves room for the per-attempt suffix and cannot contain `:` or `*`. | Image build | `crates/microvms-app/src/control/image.rs:311`, `crates/microvms-app/src/control/mod.rs:837` | Invalid-argument error during preflight. |
-| Inheriting the work directory requires the base image or Dockerfile to declare one. | Image build | `crates/microvms-app/src/control/artifact.rs:854` | Invalid-argument error. |
-| A supplied Dockerfile must agree with the selected base image and daemon port; its keepalive interval must be below the stream idle timeout. | Image build | `crates/microvms-app/src/control/image.rs:279`, `crates/microvms-app/src/control/artifact.rs:940`, `crates/microvms-app/src/control/artifact.rs:1027` | Invalid-argument error during preflight. |
-| Dockerfile validation rejects a nonempty `ENTRYPOINT` and requires a nonempty `CMD`. | Image build | `crates/microvms-app/src/control/artifact.rs:1105` | Invalid-argument error; this predicate checks command shape. |
+| Inheriting the work directory requires the base image or Dockerfile to declare one. | Image build | `crates/microvms-app/src/control/artifact.rs:859` | Invalid-argument error. |
+| A supplied Dockerfile must agree with the selected base image and daemon port; its keepalive interval must be below the stream idle timeout. | Image build | `crates/microvms-app/src/control/image.rs:279`, `crates/microvms-app/src/control/artifact.rs:945`, `crates/microvms-app/src/control/artifact.rs:1032` | Invalid-argument error during preflight. |
+| Dockerfile validation rejects a nonempty `ENTRYPOINT` and requires a nonempty `CMD`. | Image build | `crates/microvms-app/src/control/artifact.rs:1110` | Invalid-argument error; this predicate checks command shape. |
 | A nonempty supplied daemon binary must pass the aarch64 binary check. | Image build | `crates/microvms-app/src/control/image.rs:355`, `crates/microvms-domain/src/provision.rs:48` | Precondition error during preflight. |
 | Keep-awake configuration requires an idle window of at least 60 seconds and a polling interval from one second through half that window. | Session | `crates/microvms-app/src/session/keepalive.rs:152` | Invalid-argument error before polling. |
 | Proxy-token refresh must occur before the 60-minute lifetime limit. | Session | `crates/microvms-app/src/session/proxy.rs:343` | Invalid-argument error at construction. |
@@ -39,10 +39,10 @@ This index covers domain validation and calculations in `microvms-domain`, orche
 
 | Rule | Domain | Citation | Failure mode |
 | --- | --- | --- | --- |
-| Exec start requires a valid request body and a nonempty exec ID. An explicit timeout must be positive, finite, and representable as a duration. | Execution | `crates/agentd/src/exec.rs:341`, `crates/agentd/src/exec.rs:1171` | HTTP 400 with a malformed-request error. |
+| Exec start requires a valid request body and a nonempty exec ID. An explicit timeout must be positive, finite, and representable as a duration. | Execution | `crates/agentd/src/exec.rs:341`, `crates/agentd/src/exec.rs:1191` | HTTP 400 with a malformed-request error. |
 | Direct execution requires a nonempty argument vector; named users, groups, and shells must resolve under the guest lookup rules. | Execution | `crates/agentd/src/exec_start.rs:235`, `crates/agentd/src/exec_start.rs:317`, `crates/agentd/src/exec_start.rs:342`, `crates/agentd/src/exec_start.rs:434` | HTTP 400 with the corresponding request error. |
 | A run-hook payload must be a JSON object with a nonempty string token; supplied environment values and identity fields must have their expected string shapes. | Bootstrap | `crates/protocol/src/hook.rs:175`, `crates/agentd/src/routes.rs:247` | HTTP 400 for an invalid payload. |
-| Archive extraction requires an absolute destination; escaping members, absolute or escaping links, device entries, and FIFOs are refused. | Files | `crates/agentd/src/fs.rs:1450`, `crates/agentd/src/fs.rs:714`, `crates/agentd/src/fs.rs:739`, `crates/agentd/src/fs.rs:755` | HTTP 400; configured archive-size and member limits return HTTP 413. `crates/agentd/src/fs.rs:158` |
+| Archive extraction requires an absolute destination; escaping members, absolute or escaping links, device entries, and FIFOs are refused. | Files | `crates/agentd/src/fs.rs:1473`, `crates/agentd/src/fs.rs:732`, `crates/agentd/src/fs.rs:757`, `crates/agentd/src/fs.rs:773` | HTTP 400; configured archive-size and member limits return HTTP 413. `crates/agentd/src/fs.rs:158` |
 | Protected requests require the installed bearer token. | Authorization | `crates/agentd/src/auth.rs:61` | HTTP 503 before bootstrap; HTTP 401 for missing or mismatched credentials after bootstrap. |
 
 ## Invariants
@@ -61,17 +61,17 @@ This index covers domain validation and calculations in `microvms-domain`, orche
 | Invariant | Where enforced | Citation |
 | --- | --- | --- |
 | Image creation uses the same preflight method available to callers. | `ControlPlane::create_image` | `crates/microvms-app/src/control/image.rs:188` |
-| Suspend is accepted locally only from `Running`; its settled result records either `Suspended` or `Terminated`. | `Sandbox::suspend` | `crates/microvms-app/src/sandbox.rs:1585` |
-| Resume requires `Suspended`, refuses a previously terminated VM, and rebinds the session after reaching `Running`. | `Sandbox::resume` | `crates/microvms-app/src/sandbox.rs:1669` |
-| Teardown records termination intent before calling the service. Waiting for completion changes the recorded lifecycle to `Terminated` only after that state is observed. | `Sandbox::terminate` | `crates/microvms-app/src/sandbox.rs:1758` |
+| Suspend is accepted locally only from `Running`; its settled result records either `Suspended` or `Terminated`. | `Sandbox::suspend` | `crates/microvms-app/src/sandbox.rs:1583` |
+| Resume requires `Suspended`, refuses a previously terminated VM, and rebinds the session after reaching `Running`. | `Sandbox::resume` | `crates/microvms-app/src/sandbox.rs:1667` |
+| Teardown records termination intent before calling the service. Waiting for completion changes the recorded lifecycle to `Terminated` only after that state is observed. | `Sandbox::terminate` | `crates/microvms-app/src/sandbox.rs:1791` |
 
 ### agentd
 
 | Invariant | Where enforced | Citation |
 | --- | --- | --- |
-| First bootstrap installs the token and launch state; identical token replays succeed without replacing them; conflicting replays fail. | State bootstrap and run-hook handler | `crates/agentd/src/state.rs:336`, `crates/agentd/src/routes.rs:277` |
-| When an exec ID is already present, a validated repeat start returns without spawning another process. | Exec start handler | `crates/agentd/src/exec.rs:382` |
-| TTL collection removes only acknowledged exec records; an unacknowledged record remains eligible for retrieval. | `collect_expired` | `crates/agentd/src/exec.rs:975` |
+| First bootstrap installs the token and launch state; identical token replays succeed without replacing them; conflicting replays fail. | State bootstrap and run-hook handler | `crates/agentd/src/state.rs:359`, `crates/agentd/src/routes.rs:277` |
+| When an exec ID is already present, a validated repeat start returns without spawning another process. | Exec start handler | `crates/agentd/src/exec.rs:391` |
+| TTL collection removes only acknowledged exec records; an unacknowledged record remains eligible for retrieval. | `collect_expired` | `crates/agentd/src/exec.rs:985` |
 
 ## Calculations
 
@@ -111,7 +111,7 @@ The report charges snapshot reads on launch, compute for a recorded running phas
 - **Session errors:** Transport, token-mint, not-bootstrapped, request-timeout, and server errors are retryable; authorization failures map to credential errors. `crates/microvms-domain/src/error.rs:379`.
 - **Proxy-token cache:** Minting is serialized and rechecks the cache under the lock; a refresh retains previously requested ports and adds the current port. Credential failures retain their classification. `crates/microvms-app/src/session/proxy.rs:502`.
 - **Keep-awake polling:** The loop stops on cancellation, a nonrunning probe, an enabled idle condition, or its duration limit; retryable errors consume the configured tolerance and other errors propagate. `crates/microvms-app/src/session/keepalive.rs:188`.
-- **Teardown:** `Sandbox::terminate` returns a report containing failures and undeleted resources, attempts VM termination before optional image deletion, and reports a requested log-group deletion for external cleanup. `crates/microvms-app/src/sandbox.rs:1742`.
+- **Teardown:** `Sandbox::terminate` returns a report containing failures and undeleted resources, attempts VM termination before optional image deletion, and reports a requested log-group deletion for external cleanup. `crates/microvms-app/src/sandbox.rs:1775`.
 - **Route authorization:** Route metadata places bearer-protected endpoints behind token middleware and keeps open endpoints and platform hooks on their declared path. `crates/agentd/src/routes.rs:52`.
 - **Child environment:** Execution composes the optional image environment, passwd-derived identity, launch environment, and request environment in that order, with later layers overriding earlier values. `crates/agentd/src/exec_start.rs:414`, `crates/agentd/src/exec_start.rs:206`.
 - **Response behavior:** The router installs the version-stamping middleware and panic-response layer around the combined routes. `crates/agentd/src/routes.rs:78`.

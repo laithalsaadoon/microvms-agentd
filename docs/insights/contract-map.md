@@ -2,7 +2,7 @@
 
 A contract here is a shared value shape or port that another source module interprets: domain enums, execution requests and results, and transport interfaces. Opaque service handles and simple re-exports are not included in the detailed inventory. The declaration boundaries are the domain, protocol, and application layers. `crates/microvms-domain/src/error.rs:118`, `crates/protocol/src/exec.rs:219`, `crates/microvms-app/src/control/transport.rs:248`.
 
-Sections are ordered by distinct directly consuming production source paths found in the current tree, with related wire shapes grouped together. Test fixtures, fuzz harnesses, and re-export-only references do not contribute to ordering. Consumer citations identify imports or use sites; assumptions cite the code that interprets the shape. The source paths identify the owning layer even when adapters import the public re-exports. `crates/microvms-core/src/lib.rs:97-100`, `crates/microvms-app/src/session/mod.rs:49-60`.
+Sections are ordered by distinct directly consuming production source paths found in the current tree, with related wire shapes grouped together. Test fixtures, fuzz harnesses, and re-export-only references do not contribute to ordering. Consumer citations identify imports or use sites; assumptions cite the code that interprets the shape. The source paths identify the owning layer even when adapters import the public re-exports. `crates/microvms-core/src/lib.rs:97-100`, `crates/microvms-app/src/session/mod.rs:50-61`.
 
 ## ErrorKind: coarse failure classes
 
@@ -26,11 +26,11 @@ Sections are ordered by distinct directly consuming production source paths foun
 - `crates/microvms-app/src/control/transport.rs:36`
 - `crates/microvms-app/src/entropy.rs:27`
 - `crates/microvms-app/src/names.rs:18`
-- `crates/microvms-app/src/sandbox.rs:73`
+- `crates/microvms-app/src/sandbox.rs:72`
 - `crates/microvms-app/src/session/exec.rs:39`
 - `crates/microvms-app/src/session/http.rs:133`
 - `crates/microvms-app/src/session/keepalive.rs:37`
-- `crates/microvms-app/src/session/mod.rs:62`
+- `crates/microvms-app/src/session/mod.rs:63`
 - `crates/microvms-app/src/session/proxy.rs:72`
 - `crates/microvms-app/src/session/sse.rs:26`
 - `crates/microvms-app/src/workspace.rs:32`
@@ -51,7 +51,7 @@ Sections are ordered by distinct directly consuming production source paths foun
 - `crates/microvms-edges/src/identity.rs:9`
 - `crates/microvms-edges/src/names.rs:14`
 - `crates/microvms-edges/src/provision.rs:88`
-- `crates/microvms-edges/src/session/forward.rs:79`
+- `crates/microvms-edges/src/session/forward.rs:88`
 - `crates/microvms-edges/src/session/http.rs:48`
 - `crates/microvms-edges/src/session/serve.rs:38`
 - `crates/microvms-edges/src/session/shell.rs:54`
@@ -121,13 +121,13 @@ Mitigation: review the enum, `ALL`, code strings, and adapter mappings together.
 - `crates/microvms-app/src/adapters.rs:27`
 - `crates/microvms-app/src/agents/mod.rs:49`
 - `crates/microvms-app/src/agents/profile.rs:18`
-- `crates/microvms-app/src/control/artifact.rs:430`
+- `crates/microvms-app/src/control/artifact.rs:435`
 - `crates/microvms-app/src/control/connector.rs:40`
 - `crates/microvms-app/src/control/mod.rs:115`
 - `crates/microvms-app/src/control/transport.rs:37`
 - `crates/microvms-app/src/names.rs:19`
 - `crates/microvms-app/src/preflight.rs:40`
-- `crates/microvms-app/src/sandbox.rs:74`
+- `crates/microvms-app/src/sandbox.rs:73`
 - `crates/microvms-cli/src/cli.rs:46`
 - `crates/microvms-cli/src/commands/agent.rs:645`
 - `crates/microvms-cli/src/commands/attached.rs:110`
@@ -193,7 +193,7 @@ Mitigation: update the mapping and binding constructors with the domain region c
 - `crates/microvms-app/src/session/exec.rs:39`
 - `crates/microvms-app/src/session/files.rs:18`
 - `crates/microvms-app/src/session/http.rs:33`
-- `crates/microvms-app/src/session/mod.rs:62`
+- `crates/microvms-app/src/session/mod.rs:63`
 - `crates/microvms-app/src/session/proxy.rs:72`
 - `crates/microvms-app/src/session/split.rs:57`
 - `crates/microvms-app/src/session/sse.rs:26`
@@ -315,20 +315,20 @@ Mitigation: keep the resource table, conversion methods, and adapter mappings co
 
 ## StartRequest: starting an exec
 
-**Producer:** `crates/protocol/src/exec.rs:217-292`
+**Producer:** `crates/protocol/src/exec.rs:217-299`
 
 **Consumer(s):**
 
-- `bindings/microvms-js/src/session.rs:287`
+- `bindings/microvms-js/src/session.rs:292`
 - `bindings/microvms-py/src/session.rs:588`
 - `crates/agentd/src/exec.rs:89`
 - `crates/agentd/src/exec_start.rs:63`
-- `crates/agentd/src/routes.rs:577`
+- `crates/agentd/src/routes.rs:594`
 - `crates/microvms-app/src/agents/mod.rs:510`
 - `crates/microvms-app/src/defaults.rs:37`
 - `crates/microvms-app/src/session/complete.rs:98`
-- `crates/microvms-app/src/session/mod.rs:455`
-- `crates/microvms-app/src/workspace.rs:372`
+- `crates/microvms-app/src/session/mod.rs:461`
+- `crates/microvms-app/src/workspace.rs:374`
 - `crates/microvms-core/src/lib.rs:192`
 
 **Shape:** Source documentation comments omitted.
@@ -355,6 +355,8 @@ pub struct StartRequest {
     pub stdin: bool,
     #[serde(default)]
     pub reap_group_on_exit: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub poweroff_on_exit: bool,
     #[serde(default)]
     pub inherit_image_env: bool,
 }
@@ -363,11 +365,11 @@ pub struct StartRequest {
 **Assumptions consumers make:**
 
 - The daemon interprets command elements as an argument vector when `shell` is false and rejects an empty vector in that branch. `crates/agentd/src/exec_start.rs:434-443`.
-- The Python adapter starts with `StartRequest::new` and sets fields through builders, preserving defaults for fields it does not select. `bindings/microvms-py/src/session.rs:789-812`.
+- The Python adapter starts with `StartRequest::new` and sets fields through builders, preserving defaults for fields it does not select. `bindings/microvms-py/src/session.rs:789-814`.
 - The application publishes client defaults by constructing a request with the same constructor. `crates/microvms-app/src/defaults.rs:35-53`.
 
-**Drift risk:** A new field needs consistent constructor defaults, adapter builders, and daemon interpretation. `crates/protocol/src/exec.rs:492-537`, `bindings/microvms-py/src/session.rs:789-812`.
-Mitigation: review the request declaration and all construction paths together, then regenerate the wire schema. `crates/agentd/src/routes.rs:577`.
+**Drift risk:** A new field needs consistent constructor defaults, adapter builders, and daemon interpretation. `crates/protocol/src/exec.rs:505-551`, `bindings/microvms-py/src/session.rs:789-814`.
+Mitigation: review the request declaration and all construction paths together, then regenerate the wire schema. `crates/agentd/src/routes.rs:594`.
 
 ## ExecResult: client completion state
 
@@ -379,9 +381,9 @@ Mitigation: review the request declaration and all construction paths together, 
 - `bindings/microvms-py/src/exec.rs:52`
 - `crates/microvms-app/src/agents/mod.rs:51`
 - `crates/microvms-app/src/session/complete.rs:16`
-- `crates/microvms-app/src/session/mod.rs:49`
+- `crates/microvms-app/src/session/mod.rs:50`
 - `crates/microvms-cli/src/commands/agent.rs:803`
-- `crates/microvms-cli/src/commands/attached.rs:354`
+- `crates/microvms-cli/src/commands/attached.rs:355`
 
 **Shape:**
 
@@ -403,10 +405,10 @@ pub struct ExecResult {
 **Assumptions consumers make:**
 
 - Completion accepts an acknowledgment as complete only when the phase is done and an outcome is present; otherwise it falls back to waiting. `crates/microvms-app/src/session/complete.rs:145-161`.
-- The CLI renders both the raw outcome and the derived POSIX status, notes, and synthesized flag. `crates/microvms-cli/src/commands/attached.rs:703-734`.
+- The CLI renders both the raw outcome and the derived POSIX status, notes, and synthesized flag. `crates/microvms-cli/src/commands/attached.rs:704-735`.
 - The Node wrapper exposes result fields through the application accessors. `bindings/microvms-js/src/exec.rs:102-126`.
 
-**Drift risk:** A new completion condition can be lost if an adapter renders only raw exit status. `crates/microvms-cli/src/commands/attached.rs:703-734`.
+**Drift risk:** A new completion condition can be lost if an adapter renders only raw exit status. `crates/microvms-cli/src/commands/attached.rs:704-735`.
 Mitigation: preserve both the outcome and application-derived status accessors in each adapter. `bindings/microvms-js/src/exec.rs:102-126`.
 
 ## ExecEvent: output, gaps, and termination
@@ -417,7 +419,7 @@ Mitigation: preserve both the outcome and application-derived status accessors i
 
 - `bindings/microvms-js/src/exec.rs:49`
 - `bindings/microvms-py/src/exec.rs:52`
-- `bindings/microvms-py/src/session.rs:863`
+- `bindings/microvms-py/src/session.rs:865`
 - `crates/microvms-app/src/session/complete.rs:17`
 - `crates/microvms-app/src/session/exec.rs:37`
 - `crates/microvms-app/src/session/split.rs:56`
@@ -457,16 +459,16 @@ Mitigation: review cursor advancement, gap handling, and adapter conversion toge
 
 ## PollResponse and Outcome: retained execution output
 
-**Producer:** `crates/protocol/src/exec.rs:424-431`, `crates/protocol/src/exec.rs:57-78`
+**Producer:** `crates/protocol/src/exec.rs:431-438`, `crates/protocol/src/exec.rs:57-78`
 
 **Consumer(s):**
 
 - `bindings/microvms-js/src/exec.rs:106`
 - `bindings/microvms-py/src/exec.rs:91`
 - `crates/agentd/src/exec.rs:88`
-- `crates/agentd/src/routes.rs:589`
+- `crates/agentd/src/routes.rs:608`
 - `crates/microvms-app/src/session/exec.rs:85`
-- `crates/microvms-cli/src/commands/attached.rs:714`
+- `crates/microvms-cli/src/commands/attached.rs:715`
 
 **Shape:**
 
@@ -509,9 +511,9 @@ pub struct Outcome {
 **Assumptions consumers make:**
 
 - The application renames `result` to `outcome` and sets `client_deadline` to `None` for responses read from the daemon. `crates/microvms-app/src/session/exec.rs:85-93`.
-- The daemon returns no result on a later poll of an acknowledged entry; the acknowledgment response itself can carry the released outcome. `crates/agentd/src/exec.rs:442-453`, `crates/agentd/src/exec.rs:912-919`.
+- The daemon returns no result on a later poll of an acknowledged entry; the acknowledgment response itself can carry the released outcome. `crates/agentd/src/exec.rs:452-463`, `crates/agentd/src/exec.rs:922-929`.
 
-**Drift risk:** Adding an outcome field changes the flattened poll payload as well as the terminal outcome shape. `crates/protocol/src/exec.rs:424-431`.
+**Drift risk:** Adding an outcome field changes the flattened poll payload as well as the terminal outcome shape. `crates/protocol/src/exec.rs:431-438`.
 Mitigation: preserve defaults for additive wire fields and review both schema and result conversion. `crates/protocol/src/exec.rs:63-66`, `crates/microvms-app/src/session/exec.rs:85-93`.
 
 ## control::Transport: control-plane calls
@@ -567,7 +569,7 @@ Mitigation: return raw replies for HTTP responses and reserve transport errors f
 
 **Consumer(s):**
 
-- `crates/microvms-app/src/session/mod.rs:162`
+- `crates/microvms-app/src/session/mod.rs:163`
 - `crates/microvms-edges/src/session/http.rs:20`
 
 **Shape:**
@@ -600,7 +602,7 @@ pub trait HttpBackend: Send + Sync {
 **Assumptions consumers make:**
 
 - The production backend captures the status and body without converting unsuccessful HTTP statuses into transport errors. `crates/microvms-edges/src/session/http.rs:116-136`.
-- The session interprets the response status after its backend returns. `crates/microvms-app/src/session/mod.rs:162-170`.
+- The session interprets the response status after its backend returns. `crates/microvms-app/src/session/mod.rs:163-171`.
 - The streaming backend disables the overall request timeout and uses the supplied idle timeout for arriving chunks. `crates/microvms-edges/src/session/http.rs:140-179`, `crates/microvms-edges/src/session/http.rs:249-277`.
 
 **Drift risk:** Replacing idle timeouts with total-duration timeouts can cut off an active stream. `crates/microvms-edges/src/session/http.rs:140-179`, `crates/microvms-edges/src/session/http.rs:249-277`.
@@ -611,8 +613,8 @@ Mitigation: retain separate collected-response and streaming implementations wit
 - `Error` carries a coarse kind, an optional wire kind, a message, and a source chain; adapters read it through methods. `crates/microvms-domain/src/error.rs:32-109`, `bindings/microvms-py/src/errors.rs:153-168`.
 - `Reply` preserves control-plane status, raw body, and the service error type for application classification. `crates/microvms-app/src/control/transport.rs:203-234`, `crates/microvms-edges/src/control/transport.rs:206-234`.
 - The CLI JSON envelope has stable success and failure fields read by the conformance client. `crates/microvms-cli/src/envelope.rs:355-383`, `conformance/harness/envelope.py:46-67`.
-- `TeardownReport` records cleanup outcomes and retained resource identifiers. `crates/microvms-app/src/sandbox.rs:518-551`, `crates/microvms-cli/src/commands/lifecycle.rs:1303-1323`.
-- `StdinRequest` carries optional base64 bytes and a signal; the application serializes it for the daemon. `crates/protocol/src/exec.rs:300-310`, `crates/microvms-app/src/session/exec.rs:760-773`.
+- `TeardownReport` records cleanup outcomes and retained resource identifiers. `crates/microvms-app/src/sandbox.rs:517-550`, `crates/microvms-cli/src/commands/lifecycle.rs:1313-1333`.
+- `StdinRequest` carries optional base64 bytes and a signal; the application serializes it for the daemon. `crates/protocol/src/exec.rs:307-317`, `crates/microvms-app/src/session/exec.rs:760-773`.
 
 ## See also
 

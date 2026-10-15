@@ -76,7 +76,7 @@ and client together. Formal requirement checks are separate from the local `chec
 traceability checks are included in it. Passing the local task does not establish that the
 formal verification tasks ran.
 `crates/model-conformance/src/lib.rs:2-14`, `.config/mise/tasks/trace.toml:3-39`,
-`.config/mise/tasks/check.toml:13-43`
+`.config/mise/tasks/check.toml:13-44`
 
 The fault registry records ways to make guards fail. Listing the registry checks that its
 entries still apply; firing the faults is a separate task. Review evidence should identify

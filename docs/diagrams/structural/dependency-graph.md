@@ -86,40 +86,40 @@ The `agentd-model` node's only normal dependency, `stateright`, appears here
 | aws-credential-types | 3 | Too few edges | `crates/microvms-edges/Cargo.toml:47` |
 | aws-sigv4 | 3 | Too few edges | `crates/microvms-edges/Cargo.toml:52` |
 | axum | 7 | Too few edges | `crates/agentd/Cargo.toml:25` |
-| backon | 2 | Too few edges | `crates/microvms-app/Cargo.toml:37`, `crates/microvms-edges/Cargo.toml:66` |
+| backon | 2 | Too few edges | `crates/microvms-app/Cargo.toml:37`, `crates/microvms-edges/Cargo.toml:69` |
 | bytes | 2 | Too few edges | `crates/agentd/Cargo.toml:50` |
-| const-hex | 11 | Too few edges | `crates/agentd/Cargo.toml:75`, `crates/microvms-app/Cargo.toml:48`, `crates/microvms-domain/Cargo.toml:50`, `crates/microvms-edges/Cargo.toml:107` |
-| getrandom | 3 | Too few edges | `crates/agentd/Cargo.toml:79`, `crates/microvms-edges/Cargo.toml:111` |
-| globset | 1 | Too few edges | `crates/microvms-edges/Cargo.toml:130` |
+| const-hex | 11 | Too few edges | `crates/agentd/Cargo.toml:79`, `crates/microvms-app/Cargo.toml:47`, `crates/microvms-domain/Cargo.toml:50`, `crates/microvms-edges/Cargo.toml:110` |
+| getrandom | 3 | Too few edges | `crates/agentd/Cargo.toml:83`, `crates/microvms-edges/Cargo.toml:114` |
+| globset | 1 | Too few edges | `crates/microvms-edges/Cargo.toml:133` |
 | http | 6 | Too few edges | `crates/microvms-edges/Cargo.toml:64` |
 | http-body-util | 2 | Too few edges | `crates/agentd/Cargo.toml:46` |
 | jiff | 1 | Too few edges | `crates/microvms-domain/Cargo.toml:41` |
-| nix | 5 | Too few edges | `crates/agentd/Cargo.toml:62` |
+| nix | 5 | Too few edges | `crates/agentd/Cargo.toml:63` |
 | notify | 1 | Too few edges | `crates/microvms-cli/Cargo.toml:89` |
-| percent-encoding | 2 | Too few edges | `crates/microvms-app/Cargo.toml:50` |
+| percent-encoding | 2 | Too few edges | `crates/microvms-app/Cargo.toml:49` |
 | ratatui | 2 | Too few edges | `crates/microvms-cli/Cargo.toml:50` |
 | reqwest | 5 | Too few edges | `crates/microvms-edges/Cargo.toml:58` |
 | rust_decimal | 1 | Too few edges | `crates/microvms-domain/Cargo.toml:38` |
 | rust_decimal_macros | 1 | Too few edges | `crates/microvms-domain/Cargo.toml:42` |
-| schemars | 6 | Too few edges | `crates/agentd/Cargo.toml:89`, `crates/protocol/Cargo.toml:24` |
-| sha2 | 5 | Too few edges | `crates/microvms-app/Cargo.toml:43`, `crates/microvms-edges/Cargo.toml:68` |
-| sigstore-trust-root | 1 | Too few edges | `crates/microvms-edges/Cargo.toml:84` |
-| sigstore-types | 1 | Too few edges | `crates/microvms-edges/Cargo.toml:85` |
-| sigstore-verify | 1 | Too few edges | `crates/microvms-edges/Cargo.toml:83` |
-| snow | 6 | Too few edges | `crates/agentd/Cargo.toml:103`, `crates/microvms-edges/Cargo.toml:118` |
+| schemars | 6 | Too few edges | `crates/agentd/Cargo.toml:93`, `crates/protocol/Cargo.toml:24` |
+| sha2 | 5 | Too few edges | `crates/microvms-app/Cargo.toml:42`, `crates/microvms-edges/Cargo.toml:71` |
+| sigstore-trust-root | 1 | Too few edges | `crates/microvms-edges/Cargo.toml:87` |
+| sigstore-types | 1 | Too few edges | `crates/microvms-edges/Cargo.toml:88` |
+| sigstore-verify | 1 | Too few edges | `crates/microvms-edges/Cargo.toml:86` |
+| snow | 6 | Too few edges | `crates/agentd/Cargo.toml:107`, `crates/microvms-edges/Cargo.toml:121` |
 | stateright | 11 | Too few edges | `crates/model/Cargo.toml:14` |
 | subtle | 1 | Too few edges | `crates/agentd/Cargo.toml:56` |
-| tar | 2 | Too few edges | `crates/agentd/Cargo.toml:55`, `crates/microvms-edges/Cargo.toml:131` |
-| tempfile | 6 | Too few edges | `crates/agentd/Cargo.toml:63` |
+| tar | 2 | Too few edges | `crates/agentd/Cargo.toml:55`, `crates/microvms-edges/Cargo.toml:134` |
+| tempfile | 6 | Too few edges | `crates/agentd/Cargo.toml:67` |
 | thiserror | 1 | Too few edges | `crates/microvms-domain/Cargo.toml:24` |
-| tokio-tungstenite | 2 | Too few edges | `crates/microvms-edges/Cargo.toml:101` |
-| tokio-util | 1 | Too few edges | `crates/agentd/Cargo.toml:67` |
+| tokio-tungstenite | 2 | Too few edges | `crates/microvms-edges/Cargo.toml:104` |
+| tokio-util | 1 | Too few edges | `crates/agentd/Cargo.toml:71` |
 | toml | 1 | Too few edges | `crates/microvms-cli/Cargo.toml:76` |
 | tower-http | 1 | Too few edges | `crates/agentd/Cargo.toml:34` |
-| tracing-subscriber | 1 | Too few edges | `crates/agentd/Cargo.toml:65` |
+| tracing-subscriber | 1 | Too few edges | `crates/agentd/Cargo.toml:69` |
 | unicode-width | 1 | Too few edges | `crates/microvms-cli/Cargo.toml:81` |
-| x25519-dalek | 3 | Too few edges | `crates/agentd/Cargo.toml:118`, `crates/microvms-domain/Cargo.toml:56` |
-| zip | 3 | Too few edges | `crates/microvms-app/Cargo.toml:41` |
+| x25519-dalek | 3 | Too few edges | `crates/agentd/Cargo.toml:122`, `crates/microvms-domain/Cargo.toml:56` |
+| zip | 3 | Too few edges | `crates/microvms-app/Cargo.toml:40` |
 
 ## Internal edges
 
@@ -157,9 +157,9 @@ readability.
 | futures-util | microvms-app | `crates/microvms-app/Cargo.toml:34` | `crates/microvms-app/src/control/services.rs:12` |
 | serde | microvms-app | `crates/microvms-app/Cargo.toml:26` | `crates/microvms-app/src/control/ops.rs:42` |
 | napi-derive | microvms-js | `bindings/microvms-js/Cargo.toml:44` | `bindings/microvms-js/src/hooks.rs:29` |
-| base64 | microvms-app | `crates/microvms-app/Cargo.toml:46` | `crates/microvms-app/src/session/sse.rs:24` |
+| base64 | microvms-app | `crates/microvms-app/Cargo.toml:45` | `crates/microvms-app/src/session/sse.rs:24` |
 | napi | microvms-js | `bindings/microvms-js/Cargo.toml:39` | `bindings/microvms-js/src/errors.rs:71` |
-| tracing | agentd | `crates/agentd/Cargo.toml:64` | `crates/agentd/src/main.rs:44` |
+| tracing | agentd | `crates/agentd/Cargo.toml:68` | `crates/agentd/src/main.rs:52` |
 
 `napi` with `napi8` enables native type tags for class arguments, class-valued object
 fields, and getter receivers. The supported Node versions provide this API level
