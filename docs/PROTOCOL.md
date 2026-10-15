@@ -455,20 +455,21 @@ cannot change this image-owned setting.
 Before tracing or the runtime starts any thread, the daemon clears its
 inheritable and ambient capability sets and removes `SYS_MODULE`, `SYS_RAWIO`,
 `SYS_PTRACE`, `SYS_ADMIN`, `SYS_BOOT`, `PERFMON`, and `BPF` from its bounding
-set. Each removal operates on one bit. The daemon verifies the result and
-refuses startup on a syscall failure, an unsupported required capability, or
-an unmet postcondition. It preserves its permitted and effective sets exactly
-and preserves every other bounding bit, including `NET_ADMIN`, `CHOWN`,
+set. It drops one bounding bit per call, then checks the result. The daemon
+refuses to start if a syscall fails. It also refuses to start if the kernel
+lacks a required bit or a final check fails. It keeps its permitted and
+effective sets as they were, and keeps every
+other bounding bit, including `NET_ADMIN`, `CHOWN`,
 `SETUID`, and `SETGID`.
 
-Later threads inherit the reduction. Workload hooks and commands inherit it
+Later threads inherit these sets. Workload hooks and commands inherit them
 across exec, even when they run as root. A command that mounts a filesystem or
 powers off the guest can fail. The daemon keeps its rights for tasks such as
 identity repair. NoNewPrivs, securebits, seccomp, and the public `Config` shape
 stay as they were.
 
-This is a restriction on privileges inherited by workload processes, not an
-isolation boundary between a root workload and the daemon. See
+This limits rights that workloads inherit. It does not isolate a root workload
+from the daemon. See
 [Trust](TRUST.md) for that boundary.
 
 ## Line-ranged text reads
