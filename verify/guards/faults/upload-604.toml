@@ -1,0 +1,200 @@
+# Upload ownership uses new private helpers, which cannot compile with the entire
+# new module reverted. These narrow faults keep the tests compiled while removing
+# the individual guarantees; the privileged tier exercises the shipped script.
+
+[[fault]]
+id = "upload-604-legacy-root"
+guard = "session::upload::tests::root_uploads_remain_direct_and_identity_is_probed_once"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::upload::tests::root_uploads_remain_direct_and_identity_is_probed_once"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "None => return Ok((ROOT_UID, ROOT_UID)),", with = "None => return Err(Error::invalid_arg(\"missing ownership marker\"))," }
+
+[[fault]]
+id = "upload-604-default-install"
+guard = "session::upload::tests::nonroot_uploads_stage_then_chown_as_root_then_install_as_default_user"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::upload::tests::nonroot_uploads_stage_then_chown_as_root_then_install_as_default_user"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "script(session, &[operation, staging, path], false).await?;", with = "script(session, &[operation, staging, path], true).await?;" }
+
+[[fault]]
+id = "upload-604-root-cleanup"
+guard = "session::upload::tests::refused_uploads_do_not_install_and_failed_writes_clean_the_stage"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::upload::tests::refused_uploads_do_not_install_and_failed_writes_clean_the_stage"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = " && !handoff_started {", with = " {" }
+
+[[fault]]
+id = "upload-604-real-ownership"
+guard = "private_tree_handoff_has_real_nonroot_ownership_and_preserves_link_targets"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "upload_ownership", "--", "--ignored", "--exact", "private_tree_handoff_has_real_nonroot_ownership_and_preserves_link_targets"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/session/upload.sh", replace = "        chown -hR \"$3:$4\" \"$2/payload\"", with = "        : # skipped payload ownership" }
+
+[[fault]]
+id = "upload-604-leaf-symlink"
+guard = "planted_destination_symlinks_and_swapped_directories_are_refused"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "upload_ownership", "--", "--ignored", "--exact", "planted_destination_symlinks_and_swapped_directories_are_refused"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/session/upload.sh", replace = "find \"$2/payload\" ! -type l -exec sh -c", with = "find \"$2/payload\" -type d -exec sh -c" }
+
+[[fault]]
+id = "upload-604-cleanup-refusal"
+guard = "cleanup_after_handoff_cannot_remove_a_substituted_root_directory"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "upload_ownership", "--", "--ignored", "--exact", "cleanup_after_handoff_cannot_remove_a_substituted_root_directory"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/session/upload.sh", replace = "    cleanup)\n        rm -rf -- \"$2\"", with = "    cleanup)\n        : # swallowed cleanup refusal" }
+
+[[fault]]
+id = "upload-604-writable-directory"
+guard = "upload_to_a_writable_root_owned_directory_keeps_its_ownership_and_mode"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "upload_ownership", "--", "--ignored", "--exact", "upload_to_a_writable_root_owned_directory_keeps_its_ownership_and_mode"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/session/upload.sh", replace = "cp -dR --remove-destination --", with = "cp -a --remove-destination --" }
+
+[[fault]]
+id = "upload-604-trusted-path"
+guard = "root_handoff_ignores_commands_planted_in_the_inherited_path"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "upload_ownership", "--", "--ignored", "--exact", "root_handoff_ignores_commands_planted_in_the_inherited_path"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/session/upload.sh", replace = "PATH=/usr/sbin:/usr/bin:/sbin:/bin\nexport PATH", with = "export PATH" }
+
+[[fault]]
+id = "upload-604-header"
+guard = "routes::tests::health_marks_a_configured_default_without_changing_its_body"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "routes::tests::health_marks_a_configured_default_without_changing_its_body"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/routes.rs", replace = "    if configured {", with = "    if false && configured {" }
+
+# Existing CLI transfer guards now include capability discovery. Refusing the
+# historical-root path must make each guard fail before its expected PUT.
+
+[[fault]]
+id = "upload-604-cli-tar"
+guard = "guards::files::a_tar_upload_sends_the_archive_bytes_unexamined_including_a_hostile_one"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::files::a_tar_upload_sends_the_archive_bytes_unexamined_including_a_hostile_one"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "None => return Ok((ROOT_UID, ROOT_UID)),", with = "None => return Err(Error::invalid_arg(\"missing ownership marker\"))," }
+
+[[fault]]
+id = "upload-604-cli-file"
+guard = "guards::files::a_single_file_upload_uses_the_file_route_and_carries_its_octal_mode"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::files::a_single_file_upload_uses_the_file_route_and_carries_its_octal_mode"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "None => return Ok((ROOT_UID, ROOT_UID)),", with = "None => return Err(Error::invalid_arg(\"missing ownership marker\"))," }
+
+[[fault]]
+id = "upload-604-cli-first-sync"
+guard = "guards::files::a_first_sync_uploads_everything_and_writes_the_guest_manifest"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::files::a_first_sync_uploads_everything_and_writes_the_guest_manifest"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "None => return Ok((ROOT_UID, ROOT_UID)),", with = "None => return Err(Error::invalid_arg(\"missing ownership marker\"))," }
+
+[[fault]]
+id = "upload-604-cli-edited-sync"
+guard = "guards::files::an_edit_uploads_only_the_change_and_deletes_what_vanished"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::files::an_edit_uploads_only_the_change_and_deletes_what_vanished"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "None => return Ok((ROOT_UID, ROOT_UID)),", with = "None => return Err(Error::invalid_arg(\"missing ownership marker\"))," }
+
+[[fault]]
+id = "upload-604-cli-hostile-manifest"
+guard = "guards::files::a_hostile_guest_manifest_cannot_order_deletions_outside_the_workspace"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::files::a_hostile_guest_manifest_cannot_order_deletions_outside_the_workspace"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "None => return Ok((ROOT_UID, ROOT_UID)),", with = "None => return Err(Error::invalid_arg(\"missing ownership marker\"))," }
+
+[[fault]]
+id = "upload-604-cli-disk-pressure"
+guard = "guards::files::a_disk_pressure_507_is_platform_with_the_remedy_not_retryable"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::files::a_disk_pressure_507_is_platform_with_the_remedy_not_retryable"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "None => return Ok((ROOT_UID, ROOT_UID)),", with = "None => return Err(Error::invalid_arg(\"missing ownership marker\"))," }
+
+[[fault]]
+id = "upload-604-cli-watch"
+guard = "guards::files::watch_resyncs_on_a_filesystem_event_and_the_interrupt_reports_totals"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::files::watch_resyncs_on_a_filesystem_event_and_the_interrupt_reports_totals"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "None => return Ok((ROOT_UID, ROOT_UID)),", with = "None => return Err(Error::invalid_arg(\"missing ownership marker\"))," }
+
+[[fault]]
+id = "upload-604-py-disk-pressure"
+guard = "bindings/microvms-py/tests/test_errors.py::test_a_disk_pressure_507_is_a_platform_error_and_not_retryable"
+run = [["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_errors.py::test_a_disk_pressure_507_is_a_platform_error_and_not_retryable"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "None => return Ok((ROOT_UID, ROOT_UID)),", with = "None => return Err(Error::invalid_arg(\"missing ownership marker\"))," }
+
+[[fault]]
+id = "upload-604-py-server-error"
+guard = "bindings/microvms-py/tests/test_errors.py::test_every_other_five_hundred_is_still_retryable"
+run = [["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_errors.py::test_every_other_five_hundred_is_still_retryable"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "None => return Ok((ROOT_UID, ROOT_UID)),", with = "None => return Err(Error::invalid_arg(\"missing ownership marker\"))," }
+
+# The destination alternatives must each refuse independently (mutation shard 3).
+[[fault]]
+id = "upload-604-invalid-destination"
+guard = "session::upload::tests::refused_uploads_do_not_install_and_failed_writes_clean_the_stage"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::upload::tests::refused_uploads_do_not_install_and_failed_writes_clean_the_stage"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "if !path.starts_with('/') || path == \"/\" || path.ends_with('/') {", with = "if !path.starts_with('/') && path == \"/\" || path.ends_with('/') {" }
+
+# A guest-controlled parent symlink must not redirect sync's rm with root privileges.
+[[fault]]
+id = "upload-604-default-delete"
+guard = "workspace::tests::a_hostile_deletion_path_is_refused_not_executed"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "workspace::tests::a_hostile_deletion_path_is_refused_not_executed"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/workspace.rs", replace = ".with_cwd(Some(REMOTE_WORKDIR.into()))\n                .with_timeout_sec(Some(delete_timeout.as_secs_f64()));", with = ".with_cwd(Some(REMOTE_WORKDIR.into()))\n                .with_user(Some(crate::session::ROOT_UID.into()))\n                .with_timeout_sec(Some(delete_timeout.as_secs_f64()));" }
+
+[[fault]]
+id = "upload-604-py-incremental-sync"
+guard = "bindings/microvms-py/tests/test_workspace.py::test_a_second_sync_after_one_edit_uploads_that_member_and_deletes_nothing"
+run = [["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_workspace.py::test_a_second_sync_after_one_edit_uploads_that_member_and_deletes_nothing"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "None => return Ok((ROOT_UID, ROOT_UID)),", with = "None => return Err(Error::invalid_arg(\"missing ownership marker\"))," }
+
+[[fault]]
+id = "upload-604-py-full-sync"
+guard = "bindings/microvms-py/tests/test_workspace.py::test_sync_dir_full_ignores_the_manifest"
+run = [["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_workspace.py::test_sync_dir_full_ignores_the_manifest"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "None => return Ok((ROOT_UID, ROOT_UID)),", with = "None => return Err(Error::invalid_arg(\"missing ownership marker\"))," }
+
+[[fault]]
+id = "upload-604-js-incremental-sync"
+guard = "a second syncDir after one edit uploads that member and deletes nothing"
+run = [["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"], ["node", "--test", "--test-reporter=tap", "--test-name-pattern", "a second syncDir after one edit uploads that member and deletes nothing", "bindings/microvms-js/__test__/workspace.mjs"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "None => return Ok((ROOT_UID, ROOT_UID)),", with = "None => return Err(Error::invalid_arg(\"missing ownership marker\"))," }
+
+[[fault]]
+id = "upload-604-client-grace"
+guard = "session::upload::tests::nonroot_uploads_wait_for_completion_during_the_client_grace"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::upload::tests::nonroot_uploads_wait_for_completion_during_the_client_grace"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "run_sync(request, BUDGET + super::DEFAULT_CLIENT_GRACE)", with = "run_sync(request, BUDGET - super::DEFAULT_CLIENT_GRACE)" }

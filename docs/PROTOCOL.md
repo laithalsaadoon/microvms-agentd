@@ -419,14 +419,31 @@ create belongs to root: files, directories, symlinks, and the parent
 directories made for them. Tar extraction masks each member's mode to `0755` at
 most, so it doesn't set a group or other write bit on a file or directory.
 `PUT /v1/fs/file` gives the file the `mode` the request sets, or `0644` without
-one, and the parent directories it creates are `0755`. The image's default user
-can read an uploaded tree, then, but can't write into the directories an upload
-created, or change a file unless its requested `mode` lets other users write.
-An exec that must write there runs with
-`user: 0`, or the image or an exec started with `user: 0` hands the tree to the
-default user first with `chown`. The agent recipe's `chown` of `/workspace`
-does that. A default with no passwd row doesn't refuse an upload, because an
-upload doesn't read the variable.
+one, and the parent directories it creates are `0755`. Direct uploads need a
+separate ownership transfer before a non-root default user can write into
+those directories.
+
+Health returns `microvms-default-user-configured: 1` when the image sets a default
+user. Clients use direct uploads when this header is absent, so older images
+work without a shell. With the header, the shared client runs `id -u; id -g` once per
+session to read the default user's UID and GID.
+
+For a non-root default, the client uploads into a private directory owned by
+root and runs `chown` there as `user: 0`. Only root can access the stage until
+the ownership transfer ends. The client then installs the contents as the
+default user. It refuses destination symlinks. Path traversal during install
+and sync deletion runs with the default user's permissions, even through a
+parent symlink. The client changes the owner of `/workspace` to the default
+user so the command-line tool and both bindings can write the project. Other destinations
+need write permission for that user. Root sessions use direct uploads.
+
+An invalid default stops the identity probe before upload. These operations
+need `/bin/sh` and the guest's `id`, `mktemp`, `chown`, `find`, `cp`, `mv`, `stat`,
+and `rm` in the system command directories. The helpers use a fixed system
+`PATH` and clear shell startup-file variables. The staging parent `/tmp` must
+belong to root. It must be sticky or writable only by root. After a lost handoff
+response, the client cleans up as the default user. An authorized root caller
+can inspect any remaining stage.
 
 ## Line-ranged text reads
 

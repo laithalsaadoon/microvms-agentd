@@ -28,7 +28,7 @@ traced requirement is missing a layer. Requirements are defined in
 | AGENTD-19 | 1 | waived | waived | 1 | 1 | waived |
 | AGENTD-20 | 1 | waived | 1 | 3 | 1 | waived |
 | AGENTD-21 | 1 | waived | 1 | 1 | 1 | waived |
-| AGENTD-22 | 1 | 1 | 1 | 3 | 3 | 1 |
+| AGENTD-22 | 1 | 1 | 1 | 4 | 3 | 1 |
 | AGENTD-23 | 1 | 1 | 1 | 2 | 2 | 1 |
 | AGENTD-24 | 1 | 1 | 1 | 2 | 1 | 1 |
 | ARCH-1 | waived | waived | waived | 1 | 2 | waived |
@@ -361,7 +361,7 @@ Where the image environment sets the default user, the agentd shall resolve the 
 - **model:** `crates/model/src/exec_start.rs`
 - **gherkin:** `crates/agentd/tests/features/exec_start.feature`
 - **fuzz:** `crates/agentd/src/exec_start_fuzz.rs`
-- **test:** `crates/agentd/src/config.rs`, `crates/agentd/src/exec.rs`, `crates/agentd/src/exec_start.rs`
+- **test:** `crates/agentd/src/config.rs`, `crates/agentd/src/exec.rs`, `crates/agentd/src/exec_start.rs`, `crates/agentd/src/routes.rs`
 - **impl:** `crates/agentd/src/config.rs`, `crates/agentd/src/exec.rs`, `crates/agentd/src/exec_start.rs`
 - **live:** `conformance/lanes/default_user.py`
 

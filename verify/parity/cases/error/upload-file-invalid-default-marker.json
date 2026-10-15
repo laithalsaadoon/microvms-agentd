@@ -1,0 +1,21 @@
+{
+  "capability": "upload-file",
+  "input": {
+    "path": "/workspace/file",
+    "response": {
+      "status": 200,
+      "body": "",
+      "headers": {
+        "microvms-default-user-configured": "unexpected"
+      }
+    }
+  },
+  "expect": {
+    "error": {
+      "code": "ERR_EXEC_FAILED",
+      "wire_kind": null,
+      "retryable": false
+    },
+    "upstream_requests": 1
+  }
+}

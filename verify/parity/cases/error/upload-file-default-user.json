@@ -1,0 +1,71 @@
+{
+  "capability": "upload-file",
+  "input": {
+    "path": "/workspace/file",
+    "response": [
+      {
+        "status": 200,
+        "body": "",
+        "headers": {
+          "microvms-default-user-configured": "1"
+        }
+      },
+      {
+        "status": 200,
+        "body": "{\"exec_id\": \"parity-upload\", \"phase\": \"running\"}"
+      },
+      {
+        "status": 200,
+        "body": "{\"exec_id\": \"parity-upload\", \"phase\": \"exited\"}"
+      },
+      {
+        "status": 200,
+        "body": "{\"exec_id\": \"parity-upload\", \"phase\": \"exited\", \"exit_code\": 0, \"signal\": null, \"stdout\": \"1000\\n1000\\n\", \"stderr\": \"\", \"truncated\": false, \"writers_may_be_alive\": false}"
+      },
+      {
+        "status": 200,
+        "body": "{\"exec_id\": \"parity-upload\", \"phase\": \"running\"}"
+      },
+      {
+        "status": 200,
+        "body": "{\"exec_id\": \"parity-upload\", \"phase\": \"exited\"}"
+      },
+      {
+        "status": 200,
+        "body": "{\"exec_id\": \"parity-upload\", \"phase\": \"exited\", \"exit_code\": 0, \"signal\": null, \"stdout\": \"/tmp/.microvms-upload-Parity123\\n\", \"stderr\": \"\", \"truncated\": false, \"writers_may_be_alive\": false}"
+      },
+      {
+        "status": 200,
+        "body": ""
+      },
+      {
+        "status": 200,
+        "body": "{\"exec_id\": \"parity-upload\", \"phase\": \"running\"}"
+      },
+      {
+        "status": 200,
+        "body": "{\"exec_id\": \"parity-upload\", \"phase\": \"exited\"}"
+      },
+      {
+        "status": 200,
+        "body": "{\"exec_id\": \"parity-upload\", \"phase\": \"exited\", \"exit_code\": 0, \"signal\": null, \"stdout\": \"\", \"stderr\": \"\", \"truncated\": false, \"writers_may_be_alive\": false}"
+      },
+      {
+        "status": 200,
+        "body": "{\"exec_id\": \"parity-upload\", \"phase\": \"running\"}"
+      },
+      {
+        "status": 200,
+        "body": "{\"exec_id\": \"parity-upload\", \"phase\": \"exited\"}"
+      },
+      {
+        "status": 200,
+        "body": "{\"exec_id\": \"parity-upload\", \"phase\": \"exited\", \"exit_code\": 0, \"signal\": null, \"stdout\": \"\", \"stderr\": \"\", \"truncated\": false, \"writers_may_be_alive\": false}"
+      }
+    ]
+  },
+  "expect": {
+    "ok": true,
+    "upstream_requests": 14
+  }
+}

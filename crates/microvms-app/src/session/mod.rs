@@ -37,6 +37,7 @@ pub mod keepalive;
 pub mod proxy;
 pub mod split;
 pub mod sse;
+mod upload;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -227,6 +228,7 @@ fn unauthenticated(mut request: HttpRequest) -> HttpRequest {
 #[derive(Clone)]
 pub struct Session {
     transport: Arc<Transport>,
+    upload_identity: Arc<tokio::sync::OnceCell<(u32, u32)>>,
     endpoint: String,
     port: u16,
     egress_posture: crate::control::EgressPosture,
@@ -515,7 +517,7 @@ impl Session {
         data: &[u8],
         mode: Option<&str>,
     ) -> Result<(), Error> {
-        files::upload_file(&self.transport, path, data, mode).await
+        upload::upload(self, path, data, mode, false).await
     }
 
     /// Reads one file.
@@ -543,7 +545,7 @@ impl Session {
 
     /// Extracts pre-built tar bytes under `remote`.
     pub async fn upload_tar(&self, remote: &str, archive: &[u8]) -> Result<(), Error> {
-        files::upload_tar(&self.transport, remote, archive).await
+        upload::upload(self, remote, archive, None, true).await
     }
 
     /// The raw tar bytes of a remote tree.
@@ -672,6 +674,7 @@ impl SessionBuilder {
             (None, None) => None,
         };
         Ok(Session {
+            upload_identity: Arc::new(tokio::sync::OnceCell::new()),
             transport: Arc::new(Transport {
                 backend,
                 agent_token: self.agent_token,
@@ -748,13 +751,24 @@ pub(crate) mod testing {
     pub struct Recorder {
         seen: Mutex<Vec<HttpRequest>>,
         replies: Mutex<std::collections::VecDeque<Reply>>,
+        // Keep headers separate: downstream callers can exhaustively match Reply.
+        headers: HashMap<String, String>,
     }
 
     impl Recorder {
         pub fn with(replies: impl IntoIterator<Item = Reply>) -> Arc<Self> {
+            Self::with_headers(replies, [])
+        }
+
+        /// Answer every buffered or streaming response with these headers.
+        pub fn with_headers(
+            replies: impl IntoIterator<Item = Reply>,
+            headers: impl IntoIterator<Item = (String, String)>,
+        ) -> Arc<Self> {
             Arc::new(Self {
                 seen: Mutex::new(Vec::new()),
                 replies: Mutex::new(replies.into_iter().collect()),
+                headers: headers.into_iter().collect(),
             })
         }
 
@@ -819,17 +833,17 @@ pub(crate) mod testing {
                 match reply {
                     Reply::Body(status, body) => Ok(HttpResponse {
                         status,
-                        headers: HashMap::new(),
+                        headers: self.headers.clone(),
                         body,
                     }),
                     Reply::Chunks(status, chunks) => Ok(HttpResponse {
                         status,
-                        headers: HashMap::new(),
+                        headers: self.headers.clone(),
                         body: chunks.concat(),
                     }),
                     Reply::Stalled(chunks) => Ok(HttpResponse {
                         status: 200,
-                        headers: HashMap::new(),
+                        headers: self.headers.clone(),
                         body: chunks.concat(),
                     }),
                     Reply::Cut(why) => Err(Error::wire(WireKind::Transport, why)),
@@ -851,7 +865,7 @@ pub(crate) mod testing {
                     Reply::Stalled(chunks) => {
                         let head = HttpResponse {
                             status: 200,
-                            headers: HashMap::new(),
+                            headers: self.headers.clone(),
                             body: Vec::new(),
                         };
                         let source: Box<dyn ChunkSource> =
@@ -861,7 +875,7 @@ pub(crate) mod testing {
                 };
                 let head = HttpResponse {
                     status,
-                    headers: HashMap::new(),
+                    headers: self.headers.clone(),
                     // A failing head carries its body, as the real backend does, so the
                     // typed error keeps the daemon's detail string.
                     body: if (200..300).contains(&status) {
@@ -904,6 +918,12 @@ pub(crate) mod testing {
             .with_clock(Arc::clone(&clock) as Arc<dyn Clock>)
             .try_build()
             .expect("builds");
+        // Existing transfer tests model a daemon with the historical root default.
+        // The ownership tests exercise the identity probe with an empty cache.
+        session
+            .upload_identity
+            .set((0, 0))
+            .expect("empty identity cache");
         (session, auth, clock)
     }
 

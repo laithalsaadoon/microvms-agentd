@@ -282,13 +282,16 @@ test('every thrown value is a real Error, so a stack and instanceof both work', 
 
 /** The status answered to one `uploadFile`, as the rejection it produces. */
 async function uploadRejection(status, body) {
-  const server = await startSseServer([[body]], { status });
+  const server = await startSseServer([[body]], { status, healthOk: true });
   try {
     const session = Session.direct(server.endpoint, 'agent-token');
-    return await session.uploadFile('/workspace/big.bin', new Uint8Array(Buffer.from('x'))).then(
+    const rejection = await session.uploadFile('/workspace/big.bin', new Uint8Array(Buffer.from('x'))).then(
       () => assert.fail(`a ${status} was not a rejection`),
       (error) => error,
     );
+    assert.equal(server.requestedMethods.at(-1), 'PUT');
+    assert.match(server.requestedPaths.at(-1), /^\/v1\/fs\/file\?/);
+    return rejection;
   } finally {
     await server.close();
   }

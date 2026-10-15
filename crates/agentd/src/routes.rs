@@ -176,7 +176,7 @@ fn handler_for(endpoint: &schema::Endpoint) -> axum::routing::MethodRouter<AppSt
         ("GET", "/v1/fs/tar") => get(fs::read_tar),
         ("PUT", "/v1/fs/tar") => axum::routing::put(fs::write_tar),
         ("GET", "/v1/tcp") => get(crate::tunnel::open),
-        ("GET", "/v1/health") => get(health),
+        ("GET", "/v1/health") => get(health_response),
         ("GET", "/v1/schema") => get(schema_route),
         (method, path) => panic!("{method} {path} is documented but has no handler"),
     }
@@ -411,6 +411,18 @@ async fn terminate_hook(State(state): State<AppState>) -> StatusCode {
 /// to the 8-hour `maximumDurationInSeconds` ceiling with nobody having asked for it.
 /// Nothing here is opt-in because nothing here perpetuates anything: two fields on a
 /// response the route already returned.
+async fn health_response(State(state): State<AppState>) -> Response {
+    let configured = state.config().default_user.is_some();
+    let mut response = health(State(state)).await.into_response();
+    if configured {
+        response.headers_mut().insert(
+            protocol::health::DEFAULT_USER_CONFIGURED_HEADER,
+            axum::http::HeaderValue::from_static("1"),
+        );
+    }
+    response
+}
+
 async fn health(State(state): State<AppState>) -> Json<Health> {
     let identity = state.identity_report();
     let (busy, execs) = exec::activity(&state).await;
@@ -976,6 +988,31 @@ mod tests {
             "no hook has fired on a fresh daemon"
         );
         assert_eq!(report.hooks_dropped, 0);
+    }
+
+    /// AGENTD-22: clients can distinguish configured defaults without requiring
+    /// a shell in historical root-default images, or exposing the account name.
+    #[tokio::test]
+    async fn health_marks_a_configured_default_without_changing_its_body() {
+        for user in [None, Some("root"), Some("1000"), Some("missing-user")] {
+            let state = AppState::new(Config {
+                default_user: user.map(str::to_string),
+                ..Config::default()
+            });
+            let response = health_response(State(state)).await;
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                response
+                    .headers()
+                    .get(protocol::health::DEFAULT_USER_CONFIGURED_HEADER)
+                    .map(|value| value.to_str().unwrap()),
+                user.map(|_| "1")
+            );
+            let bytes = axum::body::to_bytes(response.into_body(), 65536)
+                .await
+                .unwrap();
+            let _: Health = serde_json::from_slice(&bytes).unwrap();
+        }
     }
 
     /// Every one of the six hook handlers records its invocation, and health

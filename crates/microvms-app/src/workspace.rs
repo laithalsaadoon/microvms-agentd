@@ -367,11 +367,12 @@ impl Session {
                 .map(String::from)
                 .chain(doomed)
                 .collect();
-            // As root, by uid: the daemon wrote the tree as root, and an image's default user
-            // would be refused deleting it.
+            // Uploads belong to the image's default user. Use the same identity here:
+            // a workload-controlled parent symlink must not elevate this rm above
+            // that user's privileges. Peers with no configured default still
+            // execute as the daemon's historical root user.
             let request = protocol::exec::StartRequest::new(self.mint_exec_id(), command)
                 .with_cwd(Some(REMOTE_WORKDIR.into()))
-                .with_user(Some(crate::session::ROOT_UID.into()))
                 .with_timeout_sec(Some(delete_timeout.as_secs_f64()));
             let result = self.run_sync(request, delete_wait(delete_timeout)).await?;
             match result.outcome {
@@ -568,7 +569,9 @@ mod tests {
     /// **A deletion the guest's manifest orders runs only for a plain relative path.**
     ///
     /// The manifest is the VM's word, so `../../etc/passwd` in it is refused, counted and
-    /// never handed to the in-guest `rm`, which gets the one safe path, from the workspace.
+    /// never handed to the in-guest `rm`, which gets the one allowed path from the workspace.
+    /// A permitted nested path can have a workload-controlled parent symlink, so the start
+    /// must retain the image default identity rather than elevate to root.
     ///
     /// **Falsification**: hand every deletion path to the `rm`, and its argv carries the
     /// hostile one.
@@ -587,7 +590,7 @@ mod tests {
         };
         let baseline = files(&[
             ("kept.txt", "same"),
-            ("gone.txt", "x"),
+            ("sub/gone.txt", "x"),
             ("../../etc/passwd", "x"),
         ]);
 
@@ -609,14 +612,14 @@ mod tests {
         let body: serde_json::Value = serde_json::from_slice(&start.body).expect("JSON");
         assert_eq!(
             body["command"],
-            serde_json::json!(["rm", "-rf", "--", "gone.txt"]),
+            serde_json::json!(["rm", "-rf", "--", "sub/gone.txt"]),
             "the rm carries only the deletable path"
         );
         assert_eq!(body["cwd"], "/workspace");
         assert_eq!(body["timeout_sec"], 60.0);
-        assert_eq!(
-            body["user"], 0,
-            "the rm asks for root by uid, which an image's default user doesn't replace"
+        assert!(
+            body["user"].is_null(),
+            "manifest deletion must not elevate above the image default user"
         );
         assert_eq!((pass.deleted, pass.refused_deletions), (1, 1));
     }

@@ -5,6 +5,10 @@ description = "All six Rust tiers: unit, model, proptest, turmoil, panic, schema
 depends = ["parity:fixtures"]
 run = "cargo test --all"
 
+["test:upload-ownership"]
+description = "Linux upload handoff with root and non-root owners; requires passwordless sudo"
+run = "cargo test -p microvms-core --test upload_ownership -- --ignored"
+
 ["parity:fixtures"]
 description = "Build the portable peer used by every surface's verified tunnel cases"
 run = "cargo build -p microvms-core --example parity-tunnel-peer"

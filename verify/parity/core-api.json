@@ -1091,6 +1091,7 @@
     "microvms_core::protocol::fs::FileReadQuery::line_window": "method",
     "microvms_core::protocol::fs::FsQuery": "struct",
     "microvms_core::protocol::health": "module",
+    "microvms_core::protocol::health::DEFAULT_USER_CONFIGURED_HEADER": "constant",
     "microvms_core::protocol::health::DiskHealth": "struct",
     "microvms_core::protocol::health::HandlerOutcome": "struct",
     "microvms_core::protocol::health::HandlerOutcome::succeeded": "method",

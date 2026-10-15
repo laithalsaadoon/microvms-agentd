@@ -61,7 +61,7 @@ export function exitFrame(total, { exitCode = 0, signal = null } = {}) {
  * caller must `close()`, because a leaked listener makes the *next* test flaky — the worst
  * failure mode a helper can have.
  */
-export async function startSseServer(scripts, { status = 200, response: spec } = {}) {
+export async function startSseServer(scripts, { status = 200, response: spec, healthOk = false } = {}) {
   const requestedPaths = [];
   const requestedMethods = [];
   let attach = 0;
@@ -69,10 +69,18 @@ export async function startSseServer(scripts, { status = 200, response: spec } =
   const server = http.createServer((request, response) => {
     requestedPaths.push(request.url);
     requestedMethods.push(request.method);
+    if (healthOk && request.url === '/v1/health') {
+      request.resume();
+      request.on('end', () => {
+        response.writeHead(200, { 'content-length': 0 });
+        response.end();
+      });
+      return;
+    }
     // A script that ran out answers an empty body, which the core reads as a cut. Better than
     // hanging: a test that over-attaches should fail on its own assertion, not on a timeout.
     const frames = scripts[attach++] ?? [];
-    const wire = attach === 1 ? spec : undefined;
+    const wire = Array.isArray(spec) ? spec[attach - 1] : (attach === 1 ? spec : undefined);
     const body = wire
       ? (wire.body_bytes === undefined ? (wire.body ?? '') : 'x'.repeat(wire.body_bytes))
       : frames.join('');
