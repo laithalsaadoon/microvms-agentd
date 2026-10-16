@@ -26,7 +26,7 @@ min_version = "2026.8.1"
 # `aarch64-unknown-linux-musl`, and the build fails with "can't find crate for `std`".
 # `ci:parity` holds the version to the file's channel. Removing the entry entirely is worse:
 # cargo then leaves mise's PATH and every task fails with "command not found".
-rust = { version = "1.99.0", components = ["clippy", "rustfmt"], targets = ["aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl"] }
+rust = { version = "1.99.1", components = ["clippy", "rustfmt"], targets = ["aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl"] }
 # Every other tool is an exact version, and mise.lock records what each one resolved to (#315),
 # with each platform's checksum. They were `latest`, which meant a contributor's ruff or semgrep
 # was whatever that machine had last installed while CI fetched a newer one, and a finding could
