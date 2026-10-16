@@ -804,6 +804,25 @@ class AgentsMdTests(unittest.TestCase):
         self.healthy(**{"mise.toml": MISE + task, ".gitignore": "target/\n"})
         self.assert_fails_with("`sbom/tree.spdx.json` is no such path in this tree")
 
+    def test_an_ignored_interpreter_symlink_resolves_and_a_missing_path_still_fails(
+        self,
+    ):
+        # `test:typed` names the interpreter of the environment it generates, which
+        # `python -m venv --symlinks` makes a symlink. git refuses the symlink's directory
+        # form, `.venv-typed/bin/python/`, as "beyond a symbolic link" with exit 128, so
+        # asking about that form ended the whole check (#659).
+        task = '\n[tasks.typed]\nrun = "uv pip install --python .venv-typed/bin/python ty"\n'
+        self.healthy(**{"mise.toml": MISE + task, ".gitignore": ".venv-typed/\n"})
+        bin_dir = self.repo / ".venv-typed" / "bin"
+        bin_dir.mkdir(parents=True)
+        (bin_dir / "python").symlink_to(sys.executable)
+        self.assert_passes()
+        # A path that is neither in the tree nor ignored still fails.
+        self.healthy(
+            **{"mise.toml": MISE + task.replace(".venv-typed/", ".venv-gone/")}
+        )
+        self.assert_fails_with("`.venv-gone/bin/python` is no such path in this tree")
+
     def test_an_included_task_file_is_read_and_a_directory_include_is_refused(self):
         included = '[fuzz]\nrun = "cargo fuzz run crate/src/lib.rs"\n'
         config = '[task_config]\nincludes = ["tasks/fuzz.toml"]\n\n'

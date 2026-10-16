@@ -358,3 +358,14 @@ expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_an_empty_doc_set_still_holds_the_census ("
 transform = { file = "tools/check-agents-md.py", replace = "            *census(root, present)[0],\n", with = "" }
+
+# A symlink's directory form goes to `git check-ignore`, which exits 128 on it and ends the
+# check, so an ignored generated interpreter fails instead of passing (#659).
+[[fault]]
+id = "agents-md-census-symlink-directory-form"
+guard = "test_check_agents_md.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_agents_md.py", "-k", "test_an_ignored_interpreter_symlink_resolves_and_a_missing_path_still_fails"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_ignored_interpreter_symlink_resolves_and_a_missing_path_still_fails ("
+transform = { file = "tools/check-agents-md.py", replace = "            if (root / path.rstrip(\"/\")).is_symlink():\n", with = "            if False:\n" }
