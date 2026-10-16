@@ -1517,9 +1517,13 @@ def resolve_census(
 
     # A generated or local path passes when git ignores it: the path, its directory form, and
     # for a glob the glob itself (`bindings/microvms-js/*.node` against the same ignore line) or the
-    # directory it starts in (`site/dist/**/*.html`).
+    # directory it starts in (`site/dist/**/*.html`). A symlink in the tree, such as a generated
+    # environment's `bin/python`, has no directory form: git refuses `link/` as "beyond a symbolic
+    # link" and exits 128, even when `link` itself is ignored (#659).
     def forms(path: str) -> set[str]:
         if not is_glob(path):
+            if (root / path.rstrip("/")).is_symlink():
+                return {path.rstrip("/")}
             return {path, path.rstrip("/") + "/"}
         head = re.split(r"[*?\[{]", path, maxsplit=1)[0]
         head = head[: head.rfind("/") + 1]
