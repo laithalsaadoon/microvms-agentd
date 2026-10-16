@@ -24,7 +24,7 @@ implementation defects.
 | 4 | Default parity intentionally omits string, zero, and `None` defaults, while TypeScript defaults appear only in prose. Expand the contract representation before asserting option-level consistency. | missing tests | M | `tools/check-parity.py:72-86` |
 | 5 | Formal tasks deliberately omit strict verification; their success means no error-severity findings, not a fully verified specification. Reduce unresolved findings before strengthening the gate. | missing tests | L | `.config/mise/tasks/trace.toml:3-13`, `tools/check-spec.sh:4-9` |
 | 6 | *Judgment call:* formal requirements remain outside the local `check` task and need a separately installed checker. A reproducible optional verification environment would make this tier easier to run without changing the ordinary local gate. | missing tests | M | `.config/mise/tasks/trace.toml:11-28`, `.config/mise/tasks/check.toml:11-44`, `tools/check-spec.sh:15-24` |
-| 7 | The Maturin version is repeated in stub generation, binding builds, and proof-runner commands. A unit test checks that the binding builds and the release workflow use the stub generator's pin, and the proof runner's copy is outside that test. Add it, or centralize ownership, before the next upgrade. | duplicated logic | S | `tools/generate-py-stubs.py:84-89`, `.config/mise/tasks/test.toml:93-108`, `tools/fail-to-pass.py:101-108`, `tools/test_check_release_builds.py:95-109` |
+| 7 | The Maturin version is repeated in stub generation, binding builds, and proof-runner commands. A unit test checks that the binding builds and the release workflow use the stub generator's pin, and the proof runner's copy is outside that test. Add it, or centralize ownership, before the next upgrade. | duplicated logic | S | `tools/generate-py-stubs.py:84-89`, `.config/mise/tasks/test.toml:93-108`, `tools/fail-to-pass.py:101-108`, `tools/test_check_release_builds.py:265-279` |
 | 8 | The daemon port default is independently declared by control, session, and daemon configuration. Give the shared default an owner while preserving the existing public paths. | duplicated logic | S | `crates/microvms-app/src/control/mod.rs:118-119`, `crates/microvms-app/src/session/proxy.rs:84-85`, `crates/agentd/src/config.rs:118-121` |
 
 ## Explicit markers
@@ -84,7 +84,7 @@ The Python stub generator pins an exact Maturin release, and the binding builds
 and the proof runner repeat it. Upgrading Maturin means editing each copy
 (`tools/generate-py-stubs.py:84-89`). One unit test checks that the binding builds
 and the release workflow use the generator's pin
-(`tools/test_check_release_builds.py:95-109`), and the proof runner's copy isn't in
+(`tools/test_check_release_builds.py:265-279`), and the proof runner's copy isn't in
 that test's list.
 
 Shows up in:

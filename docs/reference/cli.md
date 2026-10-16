@@ -250,6 +250,7 @@ Flags:
 - `--from-offset`: Resume a stream at this byte offset. Only with --stream. `crates/microvms-cli/src/cli.rs:1464`.
 - `--stdin`: Give the command a stdin pipe and feed it this process's stdin, then close it. `crates/microvms-cli/src/cli.rs:1472`.
 - `--reap`: Signal the command's whole process group once its own child exits. `crates/microvms-cli/src/cli.rs:1484`.
+- `--poweroff-on-exit` powers off the guest after this exec's original process group exits. It needs a daemon that supports it and runs with CAP_SYS_BOOT. Other work in the guest ends too, and the start acknowledgment and the results can race the shutdown. It doesn't prevent idle suspend. `crates/microvms-cli/src/cli.rs:1490`.
 - `--kill-on-timeout`: On `ERR_TIMEOUT`, stop the exec rather than leaving it running. `crates/microvms-cli/src/cli.rs:1501`.
 - `--endpoint`: The VM's endpoint, as reported by `run`. `crates/microvms-cli/src/cli.rs:627`.
 - `--agent-token-file` reads the agent token from a protected file, or stdin with `-`. `crates/microvms-cli/src/cli.rs:637`.
