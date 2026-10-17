@@ -1,0 +1,8 @@
+{
+  "name": "microvms-formal-verification",
+  "private": true,
+  "license": "Apache-2.0",
+  "dependencies": {
+    "symspec": "2.0.0"
+  }
+}

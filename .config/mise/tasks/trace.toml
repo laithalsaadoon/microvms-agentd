@@ -1,30 +1,33 @@
 # The formal requirements, and the traceability matrix that ties them to tests.
 
+["spec:setup"]
+description = "Install the optional locked verifier and its checksum-pinned semantic model"
+# This tool needs Node 24; keep that requirement local to formal verification so
+# the published Node binding continues to be tested at its Node 22 floor.
+tools = { node = "24.22.0" }
+env = { SYMSPEC_MODEL_DIR = "{{config_root}}/verify/formal/model" }
+run = [
+  "npm ci --prefix verify/formal --ignore-scripts --no-audit --no-fund",
+  "verify/formal/node_modules/.bin/symspec download-model",
+]
+
+["spec:check"]
+description = "Verify the optional formal wrapper's version and verdict checks without installing it"
+run = "uv run --locked pytest -q -p no:cacheprovider tools/test_check_spec.py"
+
 [spec]
-description = "agentd.symspec.json: the daemon's six bootstrap and control-token requirements"
-# Covers `verify/spec/agentd.symspec.json` only (AGENTD-1..6); `spec:core` covers the core document.
-# Migrated from the v2 format to `docVersion: 3` on 2026-09-24, because symspec 1.x reads only
-# v3. `--strict` is not passed: in 1.x it is the full-verification gate (`data.verified`),
-# which fails on any requirement the decide tier could not compare, and neither document
-# passes it yet. The gate here is zero error-severity findings.
-#
-# Not in `check`'s dependency list: symspec is a global npm install plus a downloaded
-# embedding model, so a fresh clone should not fail on its absence.
+description = "Verify the daemon's bootstrap and control-token requirements"
+tools = { node = "24.22.0" }
+env = { SYMSPEC_MODEL_DIR = "{{config_root}}/verify/formal/model" }
+# Optional: run spec:setup first. Error-severity findings fail; strict coverage
+# remains a separate policy until every finding has been reconciled.
 run = "./tools/check-spec.sh verify/spec/agentd.symspec.json"
 
 ["spec:core"]
-description = "microvms-core's requirements: contradictions, coverage, and reachability"
-# The `symspec` on PATH, which must be 1.0 or later (the script refuses anything older by
-# name): `core.symspec.json` carries a state model, effects, and constraints, and the tier
-# that proves the constraints over *unbounded* runs is the reachability tier 0.x lacks. This
-# used to name a node path in one home directory, which broke when that checkout moved.
-#
-# `--reachability-timeout-ms 5000` rather than leaving it to inherit `--timeout-ms`, and the
-# flag's own help says why: Z3's cancellation is cooperative, so an unbounded reachability
-# query is an *uncancellable* one. This bound IS the cancellability mechanism.
-#
-# Out of `check`'s depends for the same reason `spec` is out. Verified 2026-09-24 with
-# symspec 1.2.1: 0 error findings (228 warn, 73 info) over 54 requirements.
+description = "Verify the client requirements: contradictions, coverage, and reachability"
+tools = { node = "24.22.0" }
+env = { SYMSPEC_MODEL_DIR = "{{config_root}}/verify/formal/model" }
+# Z3 cancellation is cooperative; an explicit reachability timeout is required.
 run = "./tools/check-spec.sh verify/spec/core.symspec.json --reachability-timeout-ms 5000"
 
 ["trace:check"]

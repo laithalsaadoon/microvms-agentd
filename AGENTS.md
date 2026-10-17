@@ -215,8 +215,8 @@ capabilities, or `verify/parity/capabilities.toml` says why one doesn't.
   job needs the gate, which `release:check` in `check` holds.
 - Rebuild the release CLI before targeted live checks. Verify cleanup of VMs,
   images, and service-created log groups independently.
-- `spec` and `spec:core` need a symspec 1.0 or later CLI on PATH, which
-  `tools/check-spec.sh` checks by name; formal requirements are separate from `check`. Portable state checks use `cargo test -p agentd-model`;
+- `spec` and `spec:core` use the optional environment installed by `spec:setup`, which
+  `tools/check-spec.sh` checks by version; formal requirements are separate from `check`. Portable state checks use `cargo test -p agentd-model`;
   `cargo test -p model-conformance` ties those models to the app.
 
 Publishing and version changes are documented in CONTRIBUTING.md. Do not
