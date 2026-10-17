@@ -1999,6 +1999,10 @@ mod tests {
 
     /// A sandbox over the contract recorder, plus the two handles a test asserts through.
     ///
+    /// Tests that reach daemon readiness pause Tokio time so a broken readiness condition
+    /// reaches its deadline without spending the bootstrap budget on wall-clock sleeps.
+    /// The separate `TestClock` continues to measure the scripted control-plane waits.
+    ///
     /// The recorder is T-W2-4's, deliberately: its answers are literal JSON in the service
     /// model's spelling rather than values serialized from this crate's types, so a member
     /// this lane misreads cannot be misread identically by the fake.
@@ -2049,7 +2053,7 @@ mod tests {
             );
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn sandbox_launch_polls_at_one_second_then_backs_off() {
         for pending_polls in 0..=6 {
             let (mut sandbox, recorder, clock) = planted();
@@ -2121,7 +2125,7 @@ mod tests {
         sandbox.detach().expect("hand the scripted VM off quietly");
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn vpc_egress_configuration_survives_the_sandbox_launch() {
         let (mut sandbox, recorder, _) = planted();
         answer_launch(&recorder);
@@ -2143,7 +2147,7 @@ mod tests {
     ///
     /// **Falsification**: drop `with_clock(self.control.shared_clock())` from `build_session`
     /// and the session takes the adapters' clock, whose wall reading is another instant.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_sandbox_session_reads_the_planes_clock() {
         let (mut sandbox, recorder, clock) = planted();
         answer_launch(&recorder);
@@ -2209,7 +2213,7 @@ mod tests {
     /// **Falsification**: mint any of the three from `OsEntropy` instead of
     /// `self.control.entropy()` and its assertion below reads a value the scripted source
     /// never produced.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_launch_draws_every_random_value_from_the_planes_entropy() {
         use crate::entropy::testing::SequenceEntropy;
         use base64::Engine as _;
@@ -2304,7 +2308,7 @@ mod tests {
         (sandbox, recorder, daemon)
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn launch_metrics_track_retries_running_and_ready_without_changing_on_clones() {
         use crate::clock::Clock;
         let recorder = Arc::new(FakeControlPlane::new());
@@ -2534,7 +2538,7 @@ mod tests {
     ///
     /// **Falsification**: drop the `resolve_image_arn` call from `Sandbox::run` and the calls
     /// start at `RunMicrovm`, whose body carries `wanted-image`.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_launch_by_bare_image_name_sends_the_listed_arn() {
         let (mut sandbox, recorder, _) = planted();
         answer_listing(&recorder);
@@ -2560,7 +2564,7 @@ mod tests {
     }
 
     /// **An image ARN launches with no listing call**, and is the ARN the sandbox records.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_launch_by_image_arn_makes_no_listing_call() {
         let (mut sandbox, recorder, _) = planted();
         answer_launch(&recorder);
@@ -2607,7 +2611,7 @@ mod tests {
     /// **A name no image carries is `ERR_PRECONDITION` before any launch, and the sandbox is
     /// left as it was**: nothing recorded (STATE-1 counts only an accepted launch), so the
     /// same sandbox launches once the caller passes an image that exists.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn an_unknown_image_name_is_refused_before_the_launch_and_the_sandbox_still_runs() {
         let (mut sandbox, recorder, _) = planted();
         recorder.answer(
@@ -2665,7 +2669,7 @@ mod tests {
     ///
     /// **Falsification** — 2026-09-24. Build the session without `with_egress_posture` and
     /// the `open` and `best-effort` rows read `unsealed`; restored.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_launched_session_reports_its_requests_posture() {
         use crate::control::EgressPosture;
         let arn = "arn:aws:lambda:us-east-1:123456789012:network-connector:isolated-vpc";
@@ -2738,7 +2742,7 @@ mod tests {
     ///
     /// **Falsification**: write the warning straight to stderr in `Drop` and the recorded
     /// list comes back empty (and the crate's `clippy.toml` refuses `std::io::stderr`).
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_dropped_live_sandbox_warns_through_the_planes_adapters() {
         let recorder = Arc::new(FakeControlPlane::new());
         let clock = Arc::new(TestClock::new());
@@ -2778,7 +2782,7 @@ mod tests {
     /// return and the "no warning after detach" assertion goes red; drop the
     /// `refuse_detached` guard from `suspend` and the zero-calls assertion goes red (the
     /// suspend reaches `SuspendMicrovm`). Both restored.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_detached_sandbox_hands_off_its_vm_and_stays_quiet() {
         let (mut sandbox, recorder, _clock) = launched().await;
         assert!(
@@ -2842,7 +2846,7 @@ mod tests {
     }
 
     /// Detach needs a live VM: nothing launched, or already torn down, is refused.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn detach_refuses_without_a_live_vm() {
         let (mut unlaunched, _recorder, _clock) = planted();
         let error = unlaunched.detach().expect_err("nothing launched");
@@ -3299,7 +3303,7 @@ mod tests {
     ///
     /// **Falsification**: drop the RUNNING branch from `Sandbox::wait_until_ready`, and the
     /// RUNNING VM is refused as not PENDING.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn wait_until_ready_finishes_whichever_wait_is_left() {
         let (mut pending, recorder, daemon) = adopted_with_a_daemon("PENDING").await;
         pending
@@ -3343,7 +3347,7 @@ mod tests {
 
     /// A VM adopted while PENDING finishes through `wait_until_running`, which counts the
     /// bootstrap exactly once and, like a launch, waits for the daemon to answer.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn an_adopted_pending_vm_counts_its_bootstrap_once_on_running() {
         let recorder = Arc::new(FakeControlPlane::new());
         let daemon = crate::testing::HealthyDaemon::new();
@@ -3445,7 +3449,7 @@ mod tests {
     /// the accepted launch, `token_installed` only from the RUNNING report. A client that
     /// set both at the launch call would pass an end-state assertion and be wrong about a
     /// VM that died during startup — which is the next test.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_launch_records_the_image_and_the_running_report_installs_the_token() {
         let (mut sandbox, recorder, _) = planted();
         assert_eq!(sandbox.lifecycle(), Lifecycle::Pending);
@@ -3485,7 +3489,7 @@ mod tests {
     /// Read off `runHookPayload` rather than off the request struct: a field on a struct
     /// proves nothing about what was emitted, which is the same argument the test above
     /// makes about the token.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_launch_env_reaches_the_run_hook_payload_on_the_wire() {
         let (mut sandbox, recorder, _) = planted();
         answer_launch(&recorder);
@@ -3527,7 +3531,7 @@ mod tests {
     /// `request.launch_env` instead of `request.effective_launch_env()` and the two
     /// `https_proxy` assertions go red while every other launch test stays green; restored
     /// after.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn the_advisory_deny_reaches_the_launch_environment_in_both_spellings() {
         let (mut sandbox, recorder, _) = planted();
         answer_launch(&recorder);
@@ -3616,7 +3620,7 @@ mod tests {
     /// **Falsification** — run 2026-08-16. Drop `wire.image_version = ...` from `run` and the
     /// pinned assertion goes red with the member absent, while every other launch test still
     /// passes — which is why this one is here.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_pinned_image_version_is_forwarded_to_the_launch_request() {
         let (mut sandbox, recorder, _) = planted();
         answer_launch(&recorder);
@@ -3820,7 +3824,7 @@ mod tests {
     ///
     /// **Falsification** — delete the `bootstrap_count > 0` branch from `run` and this test
     /// is red on both the count and the call total. Verified; see the packet's guard proofs.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_second_run_on_one_sandbox_is_refused_before_any_call() {
         let (mut sandbox, recorder, _) = launched().await;
         assert_eq!(sandbox.bootstrap_count(), 1);
@@ -3852,7 +3856,7 @@ mod tests {
 
     /// **STATE-4 and STATE-6.** A suspend from RUNNING moves to SUSPENDING before the wait,
     /// and the platform reporting SUSPENDED is what moves it to SUSPENDED.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_suspend_from_running_passes_through_suspending_to_suspended() {
         let (sandbox, recorder, _) = suspended().await;
         assert_eq!(sandbox.lifecycle(), Lifecycle::Suspended);
@@ -3876,7 +3880,7 @@ mod tests {
     ///
     /// TERMINATED is *wanted* by the suspend wait for a reason: a VM that dies mid-suspend
     /// is a state to report, not an exception out of the middle of a teardown.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_vm_that_dies_while_suspending_is_recorded_rather_than_raised() {
         let (mut sandbox, recorder, _) = launched().await;
         recorder
@@ -3905,7 +3909,7 @@ mod tests {
     /// **Falsification** — move `self.lifecycle = Lifecycle::Suspending` back above the
     /// `control.suspend` call and the first assertion here reads SUSPENDING, and the retry
     /// is refused by the STATE-5 guard.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_suspend_whose_call_fails_stays_running_and_can_be_retried() {
         let (mut sandbox, recorder, _) = planted();
         recorder
@@ -3962,7 +3966,7 @@ mod tests {
     /// **Falsification** — delete the `lifecycle != Running` branch from `suspend` and the
     /// SUSPENDED case emits a `SuspendMicrovm` call, turning the count assertion red.
     /// Verified; see the packet's guard proofs.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_suspend_from_a_non_running_state_reaches_no_control_plane_call() {
         // From SUSPENDED — the caller who believes they resumed.
         let (mut sandbox, recorder, _) = suspended().await;
@@ -3998,7 +4002,7 @@ mod tests {
     /// observable difference on a path where the endpoint URL does not change: a client that
     /// kept the token would produce identical requests until the pre-suspend token stopped
     /// validating, and that rejection reads exactly like a dead daemon.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_resume_reuses_the_token_redelivers_nothing_and_drops_the_proxy_token() {
         let (mut sandbox, recorder, _) = suspended().await;
 
@@ -4059,7 +4063,7 @@ mod tests {
     ///
     /// **Falsification** — delete the `proxy.invalidate()` line from `Session::rebind` and
     /// the mint count stays at 1 here. Verified; see the packet's guard proofs.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn the_request_after_a_resume_mints_a_fresh_proxy_token() {
         let (mut sandbox, recorder, _) = suspended().await;
         let auth = Arc::clone(
@@ -4093,7 +4097,7 @@ mod tests {
     /// A keepalive reads this receiver instead of the lock, so every transition must reach
     /// it: a suspend it missed would be undone by the keepalive's next poll auto-resuming
     /// the VM.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn the_lifecycle_watch_follows_every_transition() {
         let (mut sandbox, recorder, _clock) = planted();
         let watch = sandbox.watch_lifecycle();
@@ -4140,7 +4144,7 @@ mod tests {
     /// STATE-7 and STATE-8: idle suspension is learned from the service, then resumed
     /// without a second bootstrap. The cached proxy token is dropped as for an explicit
     /// suspend, and both the held VM and the lifecycle watch reflect the new state.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn resume_observes_platform_idle_suspension_and_resumes() {
         let (mut sandbox, recorder, _) = planted();
         recorder
@@ -4201,7 +4205,7 @@ mod tests {
     /// STATE-12 and STATE-11: an idle-suspended VM may already have ended before resume.
     /// The observation names its state and reason, records termination, and avoids a
     /// pointless resume call or a drop warning about a live VM.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn resume_observes_platform_termination_and_records_window_closed() {
         for state in ["TERMINATING", "TERMINATED"] {
             let (mut sandbox, recorder, _) = planted();
@@ -4252,7 +4256,7 @@ mod tests {
 
     /// STATE-7: a service that still reports RUNNING must not receive ResumeMicrovm.
     /// A failed observation also leaves the handle available for a later retry.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn resume_observes_running_and_propagates_observation_failures() {
         for (response, expected) in [
             (
@@ -4298,7 +4302,7 @@ mod tests {
 
     /// A transient service state must not strand a locally RUNNING handle: the next
     /// resume still observes the service and can resume once suspension completes.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn resume_retries_observation_after_transient_service_states() {
         for state in ["SUSPENDING", "PENDING", "RESUMING"] {
             let (mut sandbox, recorder, _) = planted();
@@ -4350,7 +4354,7 @@ mod tests {
     /// the numbers measured on 2026-10-12 in us-east-1: the service doesn't hold an explicit
     /// suspend to `suspendedDurationSeconds`, so a client that refused here refused a resume
     /// the service honors.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_resume_past_the_window_of_an_explicit_suspend_reaches_the_service_and_resumes() {
         let (mut sandbox, recorder, clock) = suspended_with_window(60).await;
         assert_eq!(sandbox.suspended_window(), Some(Duration::from_secs(60)));
@@ -4386,7 +4390,7 @@ mod tests {
     /// `GetMicrovm` reports TERMINATED. That's `ERR_WINDOW_CLOSED` naming the state and the
     /// `stateReason`, and the sandbox records the termination: a second resume is refused
     /// with no call (STATE-11), and dropping it warns about no live VM.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_resume_the_service_refuses_for_an_ended_vm_is_window_closed_and_recorded() {
         let (mut sandbox, recorder, _clock) = planted();
         // Every `GetMicrovm` answer queued up front, in the order the launch wait, the suspend
@@ -4460,7 +4464,7 @@ mod tests {
     /// A resume the service refuses while `GetMicrovm` still reports SUSPENDED is the
     /// service's answer, and the sandbox stays SUSPENDED: only a VM the service reports dead
     /// is recorded as terminated (STATE-12), so a retry reaches the service and resumes.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_resume_refused_for_a_live_vm_leaves_the_sandbox_suspended_and_resumable() {
         let (mut sandbox, recorder, _clock) = suspended().await;
         recorder
@@ -4487,7 +4491,7 @@ mod tests {
     /// **#195 at the sandbox.** A client-token launch that adopts an idle-suspended VM is
     /// resumed and reaches RUNNING with the token counted once. The same poll on a launch
     /// without a caller token is still a startup death (TRAP-8).
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_client_token_launch_resumes_the_vm_it_adopted() {
         let (mut sandbox, recorder, _) = planted();
         recorder
@@ -4539,7 +4543,7 @@ mod tests {
 
     /// **`wait: false`.** The launch returns once accepted, with an addressable session and
     /// the lifecycle still PENDING; `wait_until_running` finishes it, exactly once.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_launch_that_does_not_wait_is_finished_by_wait_until_running() {
         let (mut sandbox, recorder, _) = planted();
         answer_launch(&recorder);
@@ -4577,7 +4581,7 @@ mod tests {
     /// that called and read the answer would also fail, with whatever the service says about
     /// a terminated id — which is a different statement from "this VM is gone and even a
     /// successful call would hand you a different machine".
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_resume_after_terminate_records_zero_resume_calls() {
         let (mut sandbox, recorder, _) = launched().await;
         recorder.answer("TerminateMicrovm", Answer::ok(fake::empty_response()));
@@ -4609,7 +4613,7 @@ mod tests {
     /// The two are separate states rather than one because the default teardown does not
     /// wait — so TERMINATING is a state a report really ends in, and calling it TERMINATED
     /// would claim an observation nobody made.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_terminate_records_terminating_and_the_completion_report_marks_terminated() {
         let (mut sandbox, recorder, _) = launched().await;
         recorder.answer("TerminateMicrovm", Answer::ok(fake::empty_response()));
@@ -4647,7 +4651,7 @@ mod tests {
     /// image. This crate cannot delete it at all, so the assertion is that it is *named
     /// after* the image work rather than that a delete call went out — see
     /// `TeardownReport::undeleted`.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn teardown_deletes_the_vm_then_the_image_and_names_the_log_group_last() {
         let (mut sandbox, recorder, _) = planted();
         recorder
@@ -4737,7 +4741,7 @@ mod tests {
     ///
     /// The identifier rather than a flag is the whole point: a leak nobody can name is a leak
     /// nobody can clean up.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_failing_image_delete_names_what_it_left_behind() {
         let (mut sandbox, recorder, _) = planted();
         recorder
@@ -4800,7 +4804,7 @@ mod tests {
     /// Recording it is what stops a later resume from being offered against a VM the caller
     /// already tried to kill (STATE-11) — the alternative leaves the sandbox looking
     /// resumable, which is the worse of the two wrong answers.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_terminate_whose_call_fails_still_records_the_intent_and_the_leak() {
         let (mut sandbox, recorder, _) = launched().await;
         recorder.answer(
@@ -4915,7 +4919,7 @@ mod tests {
     }
 
     /// A sandbox's `Debug` does not print the agent token.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_sandbox_debug_does_not_print_the_agent_token() {
         let (mut sandbox, recorder, _) = planted();
         answer_launch(&recorder);
@@ -4944,7 +4948,7 @@ mod tests {
     /// test is not something this crate can do without a dependency — so what is pinned is
     /// the condition the warning branches on. Both halves, so the branch cannot be
     /// vacuously true.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_torn_down_sandbox_is_distinguishable_from_an_abandoned_one() {
         let (mut sandbox, recorder, _) = launched().await;
         assert!(
@@ -4964,7 +4968,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn stable_launch_key_and_payload_survive_a_fresh_supervisor() {
         let mut bodies = Vec::new();
         for _ in 0..2 {

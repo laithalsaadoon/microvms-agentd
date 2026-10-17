@@ -119,8 +119,11 @@ fn launch(
 /// launch region, and any connector beside `egress`, is refused before a control-plane call.
 #[test]
 fn posture_matches_the_launch() {
+    // A broken ready condition must fail the launch assertion without sleeping through
+    // the bootstrap budget in wall time, including when this runs under mutation testing.
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
+        .start_paused(true)
         .build()
         .expect("a runtime");
     bolero::check!()
