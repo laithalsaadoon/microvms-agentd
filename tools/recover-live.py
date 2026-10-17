@@ -1516,8 +1516,8 @@ def observation_image_arn(name: str, region: str, ownership: dict) -> str:
         source_arn,
     )
     require(namespace is not None, "observation_identity")
-    # Get accepts an ARN or ID, not a List name. This constructs only a read
-    # address; it does not add an original ARN or authority to ownership.
+    # Use Get's documented ARN address instead of assuming a List name is an ID.
+    # This read address adds no original ARN or authority to ownership.
     return namespace[1] + name
 
 

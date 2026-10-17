@@ -120,6 +120,22 @@ def test_derived_image_name_is_one_exact_service_name(census, name):
         recovery.observation_image_arn(name, REGION, census.owned)
 
 
+@pytest.mark.parametrize(
+    "source_name,target_name", [(NAME, "Mixed_Target9"), ("Mixed_Source9", CAPABILITY)]
+)
+def test_valid_uppercase_names_are_preserved_exactly(census, source_name, target_name):
+    owned = {
+        recovery.identity("image", REGION, source_name): (
+            "shared-image",
+            source_name,
+            arn(source_name),
+        )
+    }
+    assert recovery.observation_image_arn(target_name, REGION, owned) == arn(
+        target_name
+    )
+
+
 @pytest.mark.parametrize("name", [None, "", "a/b", "a:b", "a.b", "a" * 65, "name\n"])
 def test_source_image_suffix_is_one_exact_service_name(census, name):
     key = recovery.identity("image", REGION, NAME)
@@ -138,7 +154,16 @@ def test_unresolvable_namespace_is_incomplete_without_name_fallback(unlisted):
     calls = unlisted.plane.get_microvm_image.call_args_list
     assert len(calls) == 1
     assert calls[0].kwargs["imageIdentifier"] == unlisted.owned[key][2]
-    assert sum(row["code"] == "observation_identity" for row in value["errors"]) == 2
+    assert [
+        row for row in value["errors"] if row["code"] == "observation_identity"
+    ] == [
+        {
+            "section": "images",
+            "code": "observation_identity",
+            "imageSha256": recovery.identity("image", REGION, name),
+        }
+        for name in (CAPABILITY, EXPLICIT)
+    ]
     assert recovery.validate_observation(value) is value
 
 
