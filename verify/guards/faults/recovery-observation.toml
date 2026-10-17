@@ -19,7 +19,7 @@ suite = "script"
 [[family.fault]]
 id = "readonly-observation-verifier-first"
 message = "test_observation_reads_both_version_responses_and_never_cleanup_paths"
-transform = { file = "tools/recover-live.py", replace = "    region = manifest[\"region\"]\n    report.update(\n        sections=", with = "    region = manifest[\"region\"]\n    api.call(api.plane, \"list_microvm_images\")\n    report.update(\n        sections=" }
+transform = { file = "tools/recover-live.py", replace = "    region = manifest[\"region\"]\n    report.update(\n        schemaVersion=OBSERVATION_SCHEMA_VERSION,\n        sections=", with = "    region = manifest[\"region\"]\n    api.call(api.plane, \"list_microvm_images\")\n    report.update(\n        schemaVersion=OBSERVATION_SCHEMA_VERSION,\n        sections=" }
 
 [[family]]
 guard = "test_recover_live_observation.py"
@@ -29,7 +29,7 @@ suite = "script"
 [[family.fault]]
 id = "readonly-observation-pagination"
 message = "test_complete_version_pagination_reads_every_exact_pair"
-transform = { file = "tools/recover-live.py", replace = "continuation = page.get(\"nextToken\")", with = "continuation = None" }
+transform = { file = "tools/recover-live.py", replace = "                yield row\n            continuation = page.get(\"nextToken\")", with = "                yield row\n            continuation = None" }
 
 [[family]]
 guard = "test_recover_live_observation.py"
@@ -99,7 +99,7 @@ suite = "script"
 [[family.fault]]
 id = "readonly-observation-complete-coverage"
 message = "test_completed_observation_requires_full_reconciled_version_coverage"
-transform = { file = "tools/recover-live.py", replace = "set(coverage)", with = "set(listed_images)" }
+transform = { file = "tools/recover-live.py", replace = "valid(set(coverage) == set(listed_images))", with = "valid(True)" }
 
 [[family]]
 guard = "test_recover_live_observation.py"
