@@ -1,0 +1,23 @@
+diff --git a/crates/microvms-app/src/control/sweep.rs b/crates/microvms-app/src/control/sweep.rs
+index 59220c2b..5b179004 100644
+--- a/crates/microvms-app/src/control/sweep.rs
++++ b/crates/microvms-app/src/control/sweep.rs
+@@ -202,16 +202,12 @@ impl ControlPlane {
+                     return Ok(report);
+                 }
+             };
+-            // Confirmed terminations may disappear from later lists. Retain that evidence,
+-            // but never count an absent VM whose termination was not observed.
+             report.microvms_terminated = report
+                 .microvms_matched
+                 .iter()
+                 .filter(|id| {
+-                    report.microvms_terminated.contains(id)
+-                        || live
+-                            .iter()
+-                            .any(|vm| &vm.microvm_id == *id && vm.state == "TERMINATED")
++                    live.iter()
++                        .any(|vm| &vm.microvm_id == *id && vm.state == "TERMINATED")
+                 })
+                 .cloned()
+                 .collect();

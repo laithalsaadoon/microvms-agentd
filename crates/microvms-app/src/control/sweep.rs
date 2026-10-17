@@ -202,12 +202,16 @@ impl ControlPlane {
                     return Ok(report);
                 }
             };
+            // Confirmed terminations may disappear from later lists. Retain that evidence,
+            // but never count an absent VM whose termination was not observed.
             report.microvms_terminated = report
                 .microvms_matched
                 .iter()
                 .filter(|id| {
-                    live.iter()
-                        .any(|vm| &vm.microvm_id == *id && vm.state == "TERMINATED")
+                    report.microvms_terminated.contains(id)
+                        || live
+                            .iter()
+                            .any(|vm| &vm.microvm_id == *id && vm.state == "TERMINATED")
                 })
                 .cloned()
                 .collect();
@@ -462,6 +466,50 @@ mod tests {
                 .filter(|call| call.method == super::super::transport::Method::Delete)
                 .all(|call| !call.path.contains("keep") && !call.path.contains("foreign"))
         );
+    }
+
+    #[tokio::test]
+    async fn confirmed_terminations_survive_later_listing_omissions() {
+        let (fake, _, plane) = fixture();
+        fake.answer("ListMicrovmImages", Answer::ok(r#"{"items":[{"imageArn":"arn:a","name":"job-a","state":"CREATED"},{"imageArn":"arn:b","name":"job-b","state":"CREATED"}]}"#));
+        fake.answer("ListMicrovmImages", Answer::ok(EMPTY));
+        fake.answer("ListMicrovms", Answer::ok(r#"{"items":[{"microvmId":"mvm-a","imageArn":"arn:a","imageVersion":"1","state":"RUNNING"},{"microvmId":"mvm-b","imageArn":"arn:b","imageVersion":"1","state":"RUNNING"}]}"#));
+        fake.answer("ListMicrovms", Answer::ok(r#"{"items":[{"microvmId":"mvm-a","imageArn":"arn:a","imageVersion":"1","state":"TERMINATED"},{"microvmId":"mvm-b","imageArn":"arn:b","imageVersion":"1","state":"TERMINATING"}]}"#));
+        fake.answer("ListMicrovms", Answer::ok(r#"{"items":[{"microvmId":"mvm-b","imageArn":"arn:b","imageVersion":"1","state":"TERMINATED"}]}"#));
+        fake.answer(
+            "ListMicrovms",
+            Answer::failure(403, "both terminations were already confirmed"),
+        );
+        fake.answer("TerminateMicrovm", Answer::ok("{}"));
+        fake.answer("ListMicrovmImageVersions", Answer::ok(EMPTY));
+        fake.answer(
+            "DeleteMicrovmImage",
+            Answer::ok(r#"{"imageIdentifier":"arn:a","state":"DELETING"}"#),
+        );
+        fake.answer(
+            "DeleteMicrovmImage",
+            Answer::ok(r#"{"imageIdentifier":"arn:b","state":"DELETING"}"#),
+        );
+
+        let report = plane
+            .sweep(
+                "job-",
+                &SweepOptions {
+                    dry_run: false,
+                    ..SweepOptions::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(report.microvms_matched, ["mvm-a", "mvm-b"]);
+        assert_eq!(report.microvms_terminated, ["mvm-a", "mvm-b"]);
+        assert_eq!(report.images_deleted, ["arn:a", "arn:b"]);
+        assert!(report.images_in_use.is_empty());
+        assert!(report.failures.is_empty());
+        assert_eq!(fake.call_count("ListMicrovms"), 3);
+        assert_eq!(fake.call_count("TerminateMicrovm"), 2);
+        assert_eq!(fake.call_count("DeleteMicrovmImage"), 2);
     }
 
     #[tokio::test]
