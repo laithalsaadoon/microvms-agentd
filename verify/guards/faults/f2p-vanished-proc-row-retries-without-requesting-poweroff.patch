@@ -1,0 +1,14 @@
+diff --git a/crates/agentd/src/poweroff.rs b/crates/agentd/src/poweroff.rs
+index 0f5c80b1..65eb0eca 100644
+--- a/crates/agentd/src/poweroff.rs
++++ b/crates/agentd/src/poweroff.rs
+@@ -170,9 +170,6 @@ fn snapshot(root: &Path) -> io::Result<Option<BTreeMap<u32, Process>>> {
+             // A process can fork a successor after enumeration and disappear
+             // before this read. Absence is inconclusive, never proof of exit.
+             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+-            // An already-open procfs stat returns ESRCH if its process exits
+-            // before read. Retry the entire snapshot just as for a vanished path.
+-            Err(error) if error.raw_os_error() == Some(nix::libc::ESRCH) => return Ok(None),
+             Err(error) => return Err(error),
+         };
+         processes.insert(pid, process(&stat)?);

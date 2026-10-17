@@ -1,0 +1,1 @@
+- **Guest shutdown retries a procfs observation when a process disappears during its stat read.** A vanished row remains inconclusive, so shutdown still waits for a complete observation of an exited process group.

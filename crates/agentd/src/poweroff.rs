@@ -170,6 +170,9 @@ fn snapshot(root: &Path) -> io::Result<Option<BTreeMap<u32, Process>>> {
             // A process can fork a successor after enumeration and disappear
             // before this read. Absence is inconclusive, never proof of exit.
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            // An already-open procfs stat returns ESRCH if its process exits
+            // before read. Retry the entire snapshot just as for a vanished path.
+            Err(error) if error.raw_os_error() == Some(nix::libc::ESRCH) => return Ok(None),
             Err(error) => return Err(error),
         };
         processes.insert(pid, process(&stat)?);
@@ -312,6 +315,77 @@ mod tests {
             group_empty(dir.path(), 7).unwrap_err().kind(),
             io::ErrorKind::NotFound
         );
+    }
+
+    /// AGENTD-25: a process disappearing after its stat was opened is inconclusive.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn vanished_proc_row_retries_without_requesting_poweroff() {
+        use std::io::Read;
+        use std::os::fd::AsRawFd;
+        use std::os::unix::fs::symlink;
+        use std::process::{Command, Stdio};
+
+        // Keep the child alive until its stat is open, then reap it. Linux retains
+        // the open procfs file but returns ESRCH on reads, unlike an absent path.
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut stale = std::fs::File::open(format!("/proc/{}/stat", child.id())).unwrap();
+        drop(child.stdin.take());
+        assert!(child.wait().unwrap().success());
+        assert_eq!(
+            stale
+                .read_to_string(&mut String::new())
+                .unwrap_err()
+                .raw_os_error(),
+            Some(nix::libc::ESRCH)
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let row = dir.path().join("7");
+        std::fs::create_dir(&row).unwrap();
+        symlink(
+            format!("/proc/self/fd/{}", stale.as_raw_fd()),
+            row.join("stat"),
+        )
+        .unwrap();
+        let root = dir.path().to_owned();
+        let (probed, mut probes) = tokio::sync::mpsc::unbounded_channel();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = calls.clone();
+        let poweroff = Poweroff::testing(
+            Arc::new(|| Ok(())),
+            Arc::new(move || {
+                observed.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }),
+            Arc::new(move |pgid| {
+                let result = group_empty(&root, pgid);
+                let _ = probed.send(
+                    result
+                        .as_ref()
+                        .map(|empty| *empty)
+                        .map_err(|error| (error.kind(), error.raw_os_error())),
+                );
+                result
+            }),
+        );
+        let monitor = tokio::spawn(async move { poweroff.after_group_exit(7).await });
+        let first = tokio::time::timeout(Duration::from_secs(5), probes.recv())
+            .await
+            .expect("the vanished row is probed")
+            .expect("the monitor reports its probe");
+        assert_eq!(first, Ok(false), "a vanished row is not a completed group");
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        std::fs::remove_dir_all(row).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), monitor)
+            .await
+            .expect("the monitor retries the inconclusive observation")
+            .unwrap()
+            .unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]
