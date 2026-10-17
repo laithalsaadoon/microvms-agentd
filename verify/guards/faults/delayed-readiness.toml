@@ -1,0 +1,72 @@
+# The delayed-ready lane cannot infer a runtime cap from a fast hook or a missing field.
+
+[[family]]
+guard = "conformance/selftest/delayed_readiness.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "delayed-readiness-delay-shortened"
+message = "FAIL  delayed readiness fixture sleeps only"
+transform = { file = "conformance/fixtures/delayed_ready.py", replace = "DELAY_SECONDS = 310", with = "DELAY_SECONDS = 1" }
+
+[[family.fault]]
+id = "delayed-readiness-elapsed-ignored"
+message = "FAIL  delayed readiness refuses invalid elapsed 0"
+transform = { file = "conformance/lanes/delayed_readiness.py", replace = "310 <= value < requested", with = "0 <= value < requested" }
+
+[[family.fault]]
+id = "delayed-readiness-timeout-ignored"
+message = "FAIL  delayed readiness refuses absent requestedTimeout from FAILED"
+transform = { file = "conformance/lanes/delayed_readiness.py", replace = "requested != HOOK_TIMEOUT_SECONDS", with = "False" }
+
+[[family.fault]]
+id = "delayed-readiness-echo-ignored"
+message = "FAIL  delayed readiness refuses absent echoedTimeouts"
+transform = { file = "conformance/lanes/delayed_readiness.py", replace = "or report.get(\"echoedTimeouts\") != [HOOK_TIMEOUT_SECONDS]", with = "or False" }
+
+[[family.fault]]
+id = "delayed-readiness-begin-ignored"
+message = "FAIL  delayed readiness refuses absent records from FAILED"
+transform = { file = "conformance/lanes/delayed_readiness.py", replace = "or starts == 0", with = "or False" }
+
+[[family.fault]]
+id = "delayed-readiness-reason-ignored"
+message = "FAIL  delayed readiness refuses inconclusive reasons"
+transform = { file = "conformance/lanes/delayed_readiness.py", replace = "\"Ready hook invocation timed out after PT5M\" in reason", with = "True" }
+
+[[family.fault]]
+id = "delayed-readiness-late-end-rejected"
+message = "FAIL  delayed readiness recognizes a service cap with a late end marker"
+transform = { file = "conformance/lanes/delayed_readiness.py", replace = "report.get(\"state\") in {\"FAILED\", \"CREATE_FAILED\"}", with = "report.get(\"state\") in {\"FAILED\", \"CREATE_FAILED\"} and not ends" }
+
+[[family.fault]]
+id = "delayed-readiness-cap-timing-ignored"
+message = "FAIL  delayed readiness refuses invalid elapsed 0 from FAILED"
+transform = { file = "conformance/lanes/delayed_readiness.py", replace = "if not all(", with = "if report.get(\"state\") not in {\"FAILED\", \"CREATE_FAILED\"} and not all(" }
+
+[[family]]
+guard = "delayed_readiness_recipe_passes_create_image_preflight"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "delayed_readiness", "--", "--exact", "delayed_readiness_recipe_passes_create_image_preflight"]
+expect = "test-failed"
+suite = "rust"
+
+[[family.fault]]
+id = "delayed-readiness-preflight-port"
+message = "the live delayed-ready recipe must pass image preflight"
+transform = { file = "conformance/lanes/delayed_readiness.py", replace = "conformance_dockerfile(resolve_base_ref())", with = "conformance_dockerfile(resolve_base_ref()) + 'ENV AGENTD_PORT=9001\\n'" }
+
+[[family.fault]]
+id = "delayed-readiness-preflight-entrypoint"
+message = "the live delayed-ready recipe must pass image preflight"
+transform = { file = "conformance/lanes/delayed_readiness.py", replace = "conformance_dockerfile(resolve_base_ref())", with = "conformance_dockerfile(resolve_base_ref()) + 'ENTRYPOINT [\"/ready-entrypoint\"]\\n'" }
+
+[[fault]]
+id = "delayed-readiness-launcher-newlines"
+guard = "delayed_readiness_launcher_preserves_daemon_bootstrap"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "delayed_readiness", "--", "--exact", "delayed_readiness_launcher_preserves_daemon_bootstrap"]
+expect = "test-failed"
+message = "the launcher must start the relay and exec the real daemon with actual newlines"
+suite = "rust"
+transform = { file = "conformance/lanes/delayed_readiness.py", replace = "printf '#!/bin/sh\\\\n", with = "printf '#!/bin/sh\\\\\\\\n" }

@@ -32,6 +32,7 @@ from lanes.caller_artifact import drive_caller_artifact
 from lanes.capability_policy import drive_capability_policy
 from lanes.closed_output import drive_closed_output, drive_closed_output_bdd
 from lanes.default_user import drive_default_user
+from lanes.delayed_readiness import drive_delayed_readiness
 from lanes.ensure_image import drive_ensure_image
 from lanes.exec import (
     drive_exec,
@@ -458,6 +459,15 @@ def run_suite(args: argparse.Namespace) -> int:
                 results,
             )
             run_section(results, "poweroff", drive_poweroff, cli, binary, aws, results)
+            run_section(
+                results,
+                "delayed_readiness",
+                drive_delayed_readiness,
+                cli,
+                binary,
+                aws,
+                results,
+            )
             # Version skew (#298) beside them: this tree's CLI builds an image around the
             # previous release's daemon, and the previous release's CLI launches the suite's
             # image, so an upgrade of either side alone is run end to end.
