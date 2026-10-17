@@ -7,7 +7,7 @@
 
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -94,27 +94,31 @@ test('BIND-19 a recorded cache entry is served and a changed one is fetched agai
     mkdirSync(entry, { recursive: true });
     const data = elf(0xb7, 'cached');
     writeFileSync(join(entry, 'agentd'), data);
-    writeFileSync(
-      join(entry, 'agentd.verified.json'),
-      JSON.stringify({
-        version,
-        sha256: createHash('sha256').update(data).digest('hex'),
-        verification: 'attestation',
-      }),
-    );
+    const record = JSON.stringify({
+      version,
+      sha256: createHash('sha256').update(data).digest('hex'),
+      verification: 'attestation',
+    });
+    writeFileSync(join(entry, 'agentd.verified.json'), record);
     const report = await provisionAgentdReport({ version, stateDir: dir });
     assert.equal(report.source, 'cache');
     assert.equal(report.verification, 'attestation');
 
-    writeFileSync(join(entry, 'agentd'), elf(0xb7, 'changed'));
-    await withoutGitHub(() =>
-      assert.rejects(provisionAgentd({ version, stateDir: dir }), (error) => {
-        assert.equal(codeOf(error), 'ERR_PRECONDITION');
-        assert.match(error.message, /could not download agentd/);
-        return true;
-      }),
-    );
-    assert.equal(existsSync(join(entry, 'agentd')), false);
+    // Retain invalid bytes until a verified replacement is ready: unlinking here
+    // could remove another caller's install while that caller writes its record.
+    const changed = elf(0xb7, 'changed');
+    writeFileSync(join(entry, 'agentd'), changed);
+    await withoutGitHub(async () => {
+      for (const provision of [provisionAgentd, provisionAgentdReport]) {
+        await assert.rejects(provision({ version, stateDir: dir }), (error) => {
+          assert.equal(codeOf(error), 'ERR_PRECONDITION');
+          assert.match(error.message, /could not download agentd/);
+          return true;
+        });
+        assert.deepEqual(readFileSync(join(entry, 'agentd')), changed);
+        assert.equal(readFileSync(join(entry, 'agentd.verified.json'), 'utf8'), record);
+      }
+    });
   }));
 
 test('BIND-18 a fetch that cannot run rejects naming the tag and every way out', () =>

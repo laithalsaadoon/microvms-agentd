@@ -58,8 +58,8 @@ traced requirement is missing a layer. Requirements are defined in
 | BIND-15 | 1 | 1 | waived | 6 | 6 | 1 |
 | BIND-16 | 1 | 1 | waived | 5 | 5 | 1 |
 | BIND-17 | 1 | 1 | 1 | 2 | 4 | 1 |
-| BIND-18 | 1 | 1 | 1 | 5 | 3 | 1 |
-| BIND-19 | 1 | 1 | 1 | 2 | 1 | 1 |
+| BIND-18 | 1 | 1 | 1 | 6 | 3 | 1 |
+| BIND-19 | 1 | 1 | 1 | 3 | 1 | 1 |
 | BIND-20 | 1 | 1 | 1 | 6 | 4 | 1 |
 | BIND-21 | 1 | waived | 1 | 1 | 1 | 1 |
 | BIND-22 | waived | waived | 1 | 1 | 1 | waived |
@@ -693,7 +693,7 @@ If a fetched agentd release asset fails its attestation or SHA256SUMS verificati
 - **model:** `crates/model/src/provision.rs`
 - **gherkin:** `crates/microvms-core/tests/features/provision.feature`
 - **fuzz:** `crates/microvms-edges/src/provision_fuzz.rs`
-- **test:** `bindings/microvms-js/__test__/provision.mjs`, `crates/microvms-app/src/provision.rs`, `crates/microvms-edges/src/provision.rs`, `crates/microvms-edges/src/provision/release.rs`, `crates/model-conformance/tests/tables.rs`
+- **test:** `bindings/microvms-js/__test__/provision.mjs`, `crates/microvms-app/src/provision.rs`, `crates/microvms-edges/src/provision.rs`, `crates/microvms-edges/src/provision/release.rs`, `crates/microvms-edges/tests/provision_concurrent.rs`, `crates/model-conformance/tests/tables.rs`
 - **impl:** `crates/microvms-app/src/provision.rs`, `crates/microvms-edges/src/provision.rs`, `crates/microvms-edges/src/provision/release.rs`
 - **live:** `conformance/lanes/quickstart.py`
 
@@ -704,7 +704,7 @@ If a cached agentd binary does not match the digest recorded when its release as
 - **model:** `crates/model/src/provision.rs`
 - **gherkin:** `crates/microvms-core/tests/features/provision.feature`
 - **fuzz:** `crates/microvms-edges/src/provision_fuzz.rs`
-- **test:** `bindings/microvms-js/__test__/provision.mjs`, `crates/microvms-edges/src/provision.rs`
+- **test:** `bindings/microvms-js/__test__/provision.mjs`, `crates/microvms-edges/src/provision.rs`, `crates/microvms-edges/tests/provision_concurrent.rs`
 - **impl:** `crates/microvms-edges/src/provision.rs`
 - **live:** `conformance/lanes/quickstart.py`
 
