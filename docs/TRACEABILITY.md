@@ -733,7 +733,7 @@ If the far end of an identity-verified tunnel does not complete the handshake ag
 
 ## BIND-22
 
-If a daemon event stream carries bytes that are not well-formed server-sent events, then the microvms-core shall drop the frame or end the stream with an error, without a panic and without holding more than 4 MiB of bytes that no frame terminator ends between reads.
+If a daemon event stream carries bytes that are not well-formed server-sent events, then the microvms-core shall drop the frame or end the stream with an error, without panicking, while retaining at most 4 MiB of unterminated bytes between reads.
 
 - **model:** waived: one stream read by one parser has no interleavings to explore; its input space is bytes
 - **gherkin:** waived: hostile bytes aren't a scenario a caller drives; the parser's tests feed it directly
@@ -766,7 +766,7 @@ If a frame of an identity-verified tunnel does not authenticate at the frame's p
 
 ## BIND-25
 
-When a caller awaits the awaitable twin of a Python binding method that calls AWS or the daemon, the Python binding shall run the future that the method's blocking spelling runs, with the same arguments, as a task on the binding's shared runtime, and answer that future's result or its error class.
+When a caller awaits the awaitable twin of a Python binding method that calls AWS or the daemon, the Python binding shall run the future used by the method's blocking spelling, with the same arguments, as a task on the binding's shared runtime, returning that future's result on success, propagating its error class on failure.
 
 - **model:** waived: one future behind two spellings has no state of its own to explore; the future's states are core's, which its models hold
 - **gherkin:** waived: no Gherkin tier drives the bindings; the Python suite calls each twin beside its blocking spelling and compares the answers
@@ -865,7 +865,7 @@ If a command is interrupted after a MicroVM has launched, then the CLI crate sha
 
 ## CLI-7
 
-If a reader closes the CLI's stdout or stderr, then the CLI crate shall exit with a status from its exit table and neither panic nor terminate by signal.
+If a reader closes the CLI's stdout or stderr, then the CLI crate shall exit with a status from its exit table, without panicking, without terminating by signal.
 
 - **model:** `crates/model/src/output.rs`
 - **gherkin:** `crates/microvms-cli/tests/features/closed_output.feature`
@@ -876,7 +876,7 @@ If a reader closes the CLI's stdout or stderr, then the CLI crate shall exit wit
 
 ## CLI-8
 
-If the reader of stdout or stderr closes after a command has started, then the CLI crate shall perform every teardown and ledger write that command owes and exit with the code of the command's own outcome, except for a streaming command whose stdout reader closes.
+If the reader of stdout or stderr closes after a command has started, then the CLI crate shall perform every teardown the command owes, perform every ledger write the command owes, then exit with the code of the command's own outcome, except for a streaming command whose stdout reader closes.
 
 - **model:** `crates/model/src/output.rs`
 - **gherkin:** `crates/microvms-cli/tests/features/closed_output.feature`
@@ -1074,7 +1074,7 @@ The microvms-core shall name an ensured image by its prefix and twelve hex chara
 
 ## IMAGE-7
 
-When a caller supplies a build context directory, the microvms-core shall add each regular file that Dockerfile.dockerignore, or else .dockerignore, does not exclude to an artifact zip with fixed entry dates and modes, skipping each symlink with a warning.
+When a caller supplies a build context directory, the microvms-core shall add each regular file that the selected ignore file does not exclude to an artifact zip with fixed entry dates and modes, selecting Dockerfile.dockerignore when present and .dockerignore otherwise, skipping each symlink with a warning.
 
 - **model:** waived: reading a directory has no states; the ignore rules are fuzzed against moby's own regex translation instead
 - **gherkin:** `crates/microvms-core/tests/features/ensure_image.feature`
@@ -1096,7 +1096,7 @@ When the ensure-image decision proceeds to a build attempt, the microvms-core sh
 
 ## IMAGE-9
 
-When a describe finds the ensured image ready or building and the caller has not forced a rebuild, the microvms-core shall return the image once it is ready, marked reused, with no upload and no create.
+When a describe finds the ensured image (ready or building) and the caller has not forced a rebuild, the microvms-core shall return the image once it is ready, marked reused, with no upload and no create.
 
 - **model:** `crates/model/src/image.rs`
 - **gherkin:** `crates/microvms-core/tests/features/ensure_image.feature`
@@ -1107,7 +1107,7 @@ When a describe finds the ensured image ready or building and the caller has not
 
 ## IMAGE-10
 
-If the ensured image has failed or the caller forces a rebuild, then the microvms-core shall delete the image and wait for the name to be free before building, deleting a ready image only under a forced rebuild.
+If the ensured image has failed or the caller forces a rebuild, then the microvms-core shall delete the image, wait for the name to be free before building, delete a ready image only under a forced rebuild.
 
 - **model:** `crates/model/src/image.rs`
 - **gherkin:** `crates/microvms-core/tests/features/ensure_image.feature`
@@ -1316,7 +1316,7 @@ Where guest identity repair is requested, the microvms-core shall set the additi
 
 ## TRAP-4
 
-The microvms-core shall derive each platform network connector value as a fully-qualified connector ARN for the request region from an enumerated ingress or egress intent, and accept a caller-supplied connector ARN only as a customer-managed egress connector in the request region when the platform egress intent is absent.
+The microvms-core shall derive each platform network connector value as a fully-qualified connector ARN for the request region from an enumerated connector intent, and accept a caller-supplied connector ARN only as a customer-managed egress connector in the request region when the platform egress intent is absent.
 
 - **model:** waived: a derivation from a closed enum and a shape check on caller ARNs, not a state
 - **gherkin:** `crates/microvms-core/tests/features/egress_posture.feature`

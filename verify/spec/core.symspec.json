@@ -32,12 +32,12 @@
       "priority": "critical",
       "refines": [],
       "satisfies": [],
-      "sentence": "When a describe finds the ensured image ready or building and the caller has not forced a rebuild, the microvms-core shall return the image once it is ready, marked reused, with no upload and no create.",
+      "sentence": "When a describe finds the ensured image (ready or building) and the caller has not forced a rebuild, the microvms-core shall return the image once it is ready, marked reused, with no upload and no create.",
       "status": "approved",
       "systemName": "microvms-core",
       "systemResponse": "return the image once it is ready, marked reused, with no upload and no create",
-      "trigger": "a describe finds the ensured image ready or building and the caller has not forced a rebuild",
-      "updatedAt": "2026-09-24T23:00:00.000Z",
+      "trigger": "a describe finds the ensured image (ready or building) and the caller has not forced a rebuild",
+      "updatedAt": "2026-10-17T06:36:58.373Z",
       "verificationMethod": "test",
       "verifies": []
     },
@@ -299,12 +299,12 @@
       "priority": "critical",
       "refines": [],
       "satisfies": [],
-      "sentence": "If the ensured image has failed or the caller forces a rebuild, then the microvms-core shall delete the image and wait for the name to be free before building, deleting a ready image only under a forced rebuild.",
+      "sentence": "If the ensured image has failed or the caller forces a rebuild, then the microvms-core shall delete the image, wait for the name to be free before building, delete a ready image only under a forced rebuild.",
       "status": "approved",
       "systemName": "microvms-core",
-      "systemResponse": "delete the image and wait for the name to be free before building, deleting a ready image only under a forced rebuild",
+      "systemResponse": "delete the image, wait for the name to be free before building, delete a ready image only under a forced rebuild",
       "trigger": "the ensured image has failed or the caller forces a rebuild",
-      "updatedAt": "2026-09-24T23:00:00.000Z",
+      "updatedAt": "2026-10-17T06:36:58.373Z",
       "verificationMethod": "test",
       "verifies": []
     },
@@ -590,12 +590,12 @@
       "priority": "high",
       "refines": [],
       "satisfies": [],
-      "sentence": "When a caller supplies a build context directory, the microvms-core shall add each regular file that Dockerfile.dockerignore, or else .dockerignore, does not exclude to an artifact zip with fixed entry dates and modes, skipping each symlink with a warning.",
+      "sentence": "When a caller supplies a build context directory, the microvms-core shall add each regular file that the selected ignore file does not exclude to an artifact zip with fixed entry dates and modes, selecting Dockerfile.dockerignore when present and .dockerignore otherwise, skipping each symlink with a warning.",
       "status": "approved",
       "systemName": "microvms-core",
-      "systemResponse": "add each regular file that Dockerfile.dockerignore, or else .dockerignore, does not exclude to an artifact zip with fixed entry dates and modes, skipping each symlink with a warning",
+      "systemResponse": "add each regular file that the selected ignore file does not exclude to an artifact zip with fixed entry dates and modes, selecting Dockerfile.dockerignore when present and .dockerignore otherwise, skipping each symlink with a warning",
       "trigger": "a caller supplies a build context directory",
-      "updatedAt": "2026-09-24T23:00:00.000Z",
+      "updatedAt": "2026-10-17T06:36:58.373Z",
       "verificationMethod": "test",
       "verifies": []
     },
@@ -826,12 +826,12 @@
         "497ae4df-3012-468f-8574-25ce6a45e268"
       ],
       "satisfies": [],
-      "sentence": "If a reader closes the CLI's stdout or stderr, then the CLI crate shall exit with a status from its exit table and neither panic nor terminate by signal.",
+      "sentence": "If a reader closes the CLI's stdout or stderr, then the CLI crate shall exit with a status from its exit table, without panicking, without terminating by signal.",
       "status": "approved",
       "systemName": "CLI crate",
-      "systemResponse": "exit with a status from its exit table and neither panic nor terminate by signal",
+      "systemResponse": "exit with a status from its exit table, without panicking, without terminating by signal",
       "trigger": "a reader closes the CLI's stdout or stderr",
-      "updatedAt": "2026-09-24T12:21:46.000Z",
+      "updatedAt": "2026-10-17T06:36:58.373Z",
       "verificationMethod": "test",
       "verifies": []
     },
@@ -1169,12 +1169,12 @@
       "priority": "high",
       "refines": [],
       "satisfies": [],
-      "sentence": "If a daemon event stream carries bytes that are not well-formed server-sent events, then the microvms-core shall drop the frame or end the stream with an error, without a panic and without holding more than 4 MiB of bytes that no frame terminator ends between reads.",
+      "sentence": "If a daemon event stream carries bytes that are not well-formed server-sent events, then the microvms-core shall drop the frame or end the stream with an error, without panicking, while retaining at most 4 MiB of unterminated bytes between reads.",
       "status": "draft",
       "systemName": "microvms-core",
-      "systemResponse": "drop the frame or end the stream with an error, without a panic and without holding more than 4 MiB of bytes that no frame terminator ends between reads",
+      "systemResponse": "drop the frame or end the stream with an error, without panicking, while retaining at most 4 MiB of unterminated bytes between reads",
       "trigger": "a daemon event stream carries bytes that are not well-formed server-sent events",
-      "updatedAt": "2026-09-29T05:00:00.000Z",
+      "updatedAt": "2026-10-17T06:36:58.373Z",
       "verificationMethod": "test",
       "verifies": []
     },
@@ -1206,11 +1206,11 @@
       "priority": "high",
       "refines": [],
       "satisfies": [],
-      "sentence": "The microvms-core shall derive each platform network connector value as a fully-qualified connector ARN for the request region from an enumerated ingress or egress intent, and accept a caller-supplied connector ARN only as a customer-managed egress connector in the request region when the platform egress intent is absent.",
+      "sentence": "The microvms-core shall derive each platform network connector value as a fully-qualified connector ARN for the request region from an enumerated connector intent, and accept a caller-supplied connector ARN only as a customer-managed egress connector in the request region when the platform egress intent is absent.",
       "status": "approved",
       "systemName": "microvms-core",
-      "systemResponse": "derive each platform network connector value as a fully-qualified connector ARN for the request region from an enumerated ingress or egress intent, and accept a caller-supplied connector ARN only as a customer-managed egress connector in the request region when the platform egress intent is absent",
-      "updatedAt": "2026-10-14T00:00:00.000Z",
+      "systemResponse": "derive each platform network connector value as a fully-qualified connector ARN for the request region from an enumerated connector intent, and accept a caller-supplied connector ARN only as a customer-managed egress connector in the request region when the platform egress intent is absent",
+      "updatedAt": "2026-10-17T06:36:58.373Z",
       "verificationMethod": "test",
       "verificationNote": "amended 2026-09-30 (#301): the sentence accepted only enumerated intents, and launches have also taken customer-managed Lambda VPC egress connector ARNs (egressNetworkConnectors), which core checks for the account-scoped connector shape in the request region, refuses beside INTERNET_EGRESS, and holds to the NetworkConnectorList ceiling before any call",
       "verifies": []
@@ -1454,12 +1454,12 @@
       "priority": "high",
       "refines": [],
       "satisfies": [],
-      "sentence": "When a caller awaits the awaitable twin of a Python binding method that calls AWS or the daemon, the Python binding shall run the future that the method's blocking spelling runs, with the same arguments, as a task on the binding's shared runtime, and answer that future's result or its error class.",
+      "sentence": "When a caller awaits the awaitable twin of a Python binding method that calls AWS or the daemon, the Python binding shall run the future used by the method's blocking spelling, with the same arguments, as a task on the binding's shared runtime, returning that future's result on success, propagating its error class on failure.",
       "status": "draft",
       "systemName": "Python binding",
-      "systemResponse": "run the future that the method's blocking spelling runs, with the same arguments, as a task on the binding's shared runtime, and answer that future's result or its error class",
+      "systemResponse": "run the future used by the method's blocking spelling, with the same arguments, as a task on the binding's shared runtime, returning that future's result on success, propagating its error class on failure",
       "trigger": "a caller awaits the awaitable twin of a Python binding method that calls AWS or the daemon",
-      "updatedAt": "2026-10-10T06:00:00.000Z",
+      "updatedAt": "2026-10-17T06:36:58.373Z",
       "verificationMethod": "test",
       "verifies": []
     },
@@ -1749,12 +1749,12 @@
         "497ae4df-3012-468f-8574-25ce6a45e268"
       ],
       "satisfies": [],
-      "sentence": "If the reader of stdout or stderr closes after a command has started, then the CLI crate shall perform every teardown and ledger write that command owes and exit with the code of the command's own outcome, except for a streaming command whose stdout reader closes.",
+      "sentence": "If the reader of stdout or stderr closes after a command has started, then the CLI crate shall perform every teardown the command owes, perform every ledger write the command owes, then exit with the code of the command's own outcome, except for a streaming command whose stdout reader closes.",
       "status": "approved",
       "systemName": "CLI crate",
-      "systemResponse": "perform every teardown and ledger write that command owes and exit with the code of the command's own outcome, except for a streaming command whose stdout reader closes",
+      "systemResponse": "perform every teardown the command owes, perform every ledger write the command owes, then exit with the code of the command's own outcome, except for a streaming command whose stdout reader closes",
       "trigger": "the reader of stdout or stderr closes after a command has started",
-      "updatedAt": "2026-09-24T12:21:46.000Z",
+      "updatedAt": "2026-10-17T06:36:58.373Z",
       "verificationMethod": "test",
       "verifies": []
     },
@@ -1844,6 +1844,50 @@
       }
     ]
   },
+  "terms": [
+    {
+      "aliases": [
+        "ARN"
+      ],
+      "canonical": "Amazon Resource Name"
+    },
+    {
+      "aliases": [
+        "AWS"
+      ],
+      "canonical": "Amazon Web Services"
+    },
+    {
+      "aliases": [
+        "CLI"
+      ],
+      "canonical": "command-line interface"
+    },
+    {
+      "aliases": [
+        "ELF"
+      ],
+      "canonical": "Executable and Linkable Format"
+    },
+    {
+      "aliases": [
+        "OS"
+      ],
+      "canonical": "operating system"
+    },
+    {
+      "aliases": [
+        "POSIX"
+      ],
+      "canonical": "Portable Operating System Interface"
+    },
+    {
+      "aliases": [
+        "VM"
+      ],
+      "canonical": "virtual machine"
+    }
+  ],
   "waivers": [
     {
       "code": "GTWR_R6_MISSING_UNITS",
