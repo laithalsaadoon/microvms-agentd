@@ -9,7 +9,7 @@ import json
 import runpy
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -318,6 +318,11 @@ def test_observation_reads_both_version_responses_and_never_cleanup_paths(
     census.plane.get_microvm_image_version.assert_called_once_with(
         imageIdentifier=ARN, imageVersion=VERSION
     )
+    census.plane.list_microvm_images.assert_called_once_with()
+    census.plane.list_microvms.assert_called_once_with()
+    census.logs.describe_log_groups.assert_called_once_with(
+        logGroupNamePrefix=recovery.SERVICE_PREFIX
+    )
     forbidden.assert_not_called()
     census.plane.delete_microvm_image.assert_not_called()
     census.logs.delete_log_group.assert_not_called()
@@ -326,6 +331,66 @@ def test_observation_reads_both_version_responses_and_never_cleanup_paths(
         secret not in serialized
         for secret in (NAME, ARN, VERSION, GROUP, "000000000000")
     )
+
+
+def test_observation_discards_stale_attempt_evidence(census):
+    value = report()
+    for key in ("images", "microvms", "logGroups", "versions", "versionCoverage"):
+        value[key] = [{"stale": "prior-attempt"}]
+    value["errors"] = [{"section": "versions", "code": "api_failed"}]
+    value["sections"] = {"stale": "incomplete"}
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    assert value["status"] == "completed"
+    assert value["errors"] == []
+    assert "prior-attempt" not in json.dumps(value)
+    assert "stale" not in json.dumps(value)
+    assert recovery.validate_observation(value) is value
+
+
+def test_regional_vm_census_preserves_hashes_and_classified_states(census):
+    records = [
+        {"microvmId": "synthetic-vm-running", "state": "RUNNING"},
+        {"microvmId": "synthetic-vm-missing"},
+        {"microvmId": "synthetic-vm-null", "state": None},
+        {"microvmId": "synthetic-vm-unknown", "state": "synthetic-provider-state"},
+    ]
+    census.plane.list_microvms.return_value = {"items": records}
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    assert value["microvms"] == [
+        {
+            "sha256": recovery.identity("microvm", REGION, row["microvmId"]),
+            "state": state,
+        }
+        for row, state in zip(records, ["RUNNING", "missing", "null", "malformed"])
+    ]
+    assert "synthetic-vm" not in json.dumps(value)
+    assert "synthetic-provider-state" not in json.dumps(value)
+    assert value["status"] == "completed"
+    assert recovery.validate_observation(value) is value
+
+
+@pytest.mark.parametrize("remaining", [-0.5, 0, 0.5, 10, 120, 200])
+def test_independent_verifier_uses_remaining_shared_budget(
+    census, monkeypatch, remaining
+):
+    census.api.clock = lambda: 100
+    census.api.deadline = 100 + remaining
+    run = Mock(wraps=recovery.subprocess.run)
+    monkeypatch.setattr(recovery.subprocess, "run", run)
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    if remaining > 0:
+        run.assert_called_once()
+        assert run.call_args.kwargs["timeout"] == min(120, remaining)
+        assert value["status"] == "completed"
+    else:
+        run.assert_not_called()
+        assert value["status"] == "incomplete"
+        assert value["errors"][0] == {
+            "section": "independentVerifier",
+            "code": "deadline",
+        }
 
 
 def test_observation_does_not_drop_deleted_or_unknown_state_versions(census):
@@ -565,20 +630,40 @@ def test_observation_interruption_stops_reads_and_retains_prior_evidence(
     assert recovery.validate_observation(value) is value
 
 
-@pytest.mark.parametrize("count", [1001, 9000])
-def test_oversize_independent_verifier_retains_bounded_census_and_incomplete_receipt(
-    census, monkeypatch, tmp_path, count
-):
+def unclassified_verifier_output(count):
     stdout = "\n".join(
         "UNCLASSIFIED (not deleted, not provably ours): log group "
         f"/aws/lambda-microvms/synthetic-unclassified-{index}"
         for index in range(count)
     )
-    stdout += (
+    return stdout + (
         f"\naccount {REGION}: clean of everything this project can name; {count} "
         "log group(s) under /aws/lambda-microvms/ belong to no known prefix and no "
         "ledger record and were left alone (listed above; --strict fails on them)\n"
     )
+
+
+def test_independent_verifier_accepts_maximum_rows(census, monkeypatch):
+    def verifier(command, **kwargs):
+        census.events.append("verifier")
+        return subprocess.CompletedProcess(
+            command, 0, unclassified_verifier_output(1000), ""
+        )
+
+    monkeypatch.setattr(recovery.subprocess, "run", verifier)
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    assert value["status"] == "completed"
+    assert len(value["independentVerifier"]["resources"]) == 1000
+    assert len(value["versions"]) == 1
+    assert recovery.validate_observation(value) is value
+
+
+@pytest.mark.parametrize("count", [1001, 9000])
+def test_oversize_independent_verifier_retains_bounded_census_and_incomplete_receipt(
+    census, monkeypatch, tmp_path, count
+):
+    stdout = unclassified_verifier_output(count)
     parsed = recovery.captured_verifier(
         subprocess.CompletedProcess([], 0, stdout, ""), REGION
     )
@@ -1027,6 +1112,7 @@ def test_observed_disagreement_is_evidence_not_a_recovery_default(census):
         **census.version,
         "state": "FAILED",
         "status": "INACTIVE",
+        "createdAt": CREATED + timedelta(seconds=1),
         "logging": {"disabled": {}},
     }
     value = report()
@@ -1036,12 +1122,59 @@ def test_observed_disagreement_is_evidence_not_a_recovery_default(census):
     assert (
         row["stateMatches"]
         is row["availabilityMatches"]
+        is row["createdAtMatches"]
         is row["loggingMatches"]
         is False
     )
     assert row["listed"]["logging"]["kind"] == "cloudWatch"
     assert row["observed"]["logging"]["kind"] == "disabled"
     assert value["recoveryAccepted"] is value["mutationsPerformed"] is False
+
+
+@pytest.mark.parametrize(
+    "source,match",
+    [
+        ("state", "stateMatches"),
+        ("status", "availabilityMatches"),
+        ("createdAt", "createdAtMatches"),
+        ("logging", "loggingMatches"),
+    ],
+)
+@pytest.mark.parametrize("uncertainty", ["missing", "null", "malformed"])
+def test_unknown_version_metadata_never_becomes_an_equality_claim(
+    census, source, match, uncertainty
+):
+    record = copy.deepcopy(census.version)
+    if uncertainty == "missing":
+        del record[source]
+    else:
+        record[source] = None if uncertainty == "null" else "synthetic-unknown-value"
+    census.plane.list_microvm_image_versions.return_value = {"items": [record]}
+    census.plane.get_microvm_image_version.return_value = copy.deepcopy(record)
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    assert value["status"] == "completed"
+    assert value["versions"][0][match] is None
+    assert "synthetic-unknown-value" not in json.dumps(value)
+    assert recovery.validate_observation(value) is value
+
+
+@pytest.mark.parametrize("identity_field", ["imageArn", "imageVersion"])
+def test_version_identity_disagreement_is_retained_without_acceptance(
+    census, identity_field
+):
+    census.plane.get_microvm_image_version.return_value = {
+        **census.version,
+        identity_field: "synthetic-other-identity",
+    }
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    row = value["versions"][0]
+    assert row["identityMatches"] is False
+    assert row["getOutcome"] == "observed"
+    assert value["status"] == "completed"
+    assert value["recoveryAccepted"] is False
+    assert "synthetic-other-identity" not in json.dumps(value)
 
 
 def test_core_observe_mode_runs_verifier_and_read_only_api_without_cleanup(
