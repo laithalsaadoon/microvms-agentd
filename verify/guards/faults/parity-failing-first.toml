@@ -232,3 +232,13 @@ transform = { file = "tools/fail-to-pass.py", replace = 'if any(arg.startswith(p
 id = "f2p-ordinary-test-module-attribute"
 message = "FAIL: test_reverse_fix_keeps_multiline_test_module_attributes ("
 transform = { file = "tools/fail-to-pass.py", replace = "if m[\"ruleId\"] == \"attribute\"\n    }\n    return [", with = "if False\n    }\n    return [" }
+
+[[family.fault]]
+id = "f2p-ordinary-leading-separator"
+message = "FAIL: test_a_new_neighbor_does_not_select_an_unchanged_test ("
+transform = { file = "tools/fail-to-pass.py", replace = 'while not lines[first].strip():', with = 'while False:' }
+
+[[family.fault]]
+id = "f2p-ordinary-leading-docs"
+message = "FAIL: test_changed_docs_after_a_separator_stay_with_their_test ("
+transform = { file = "tools/fail-to-pass.py", replace = "while not lines[first].strip():\n        first += 1", with = "while not lines[first].strip():\n        first += 2" }

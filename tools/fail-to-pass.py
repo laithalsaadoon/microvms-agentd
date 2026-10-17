@@ -477,6 +477,10 @@ def with_attributes(lines: list[str], first: int, attributes: dict[int, int]) ->
             first -= 1
         else:
             break
+    # Internal blank gaps join attributes and docs; leading separators belong to neither test.
+    # The declaration we started from is nonblank, so this cannot run past it.
+    while not lines[first].strip():
+        first += 1
     return first
 
 

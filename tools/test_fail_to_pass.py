@@ -413,6 +413,26 @@ class CheckTests(Fixture):
         self.assertIn("the_answer_is_42_now", done.stdout)
         self.assertNotIn("  the_answer_is_42, in", done.stdout)
 
+    def test_a_new_neighbor_does_not_select_an_unchanged_test(self):
+        self.fix()
+        self.write(TESTS, "#[test]\nfn new_regression() {}\n\n" + TEST_FILE)
+        self.entry("new_regression")
+        done = self.run_script("check")
+        self.assertExit(done, 0)
+        self.assertNotIn("  the_answer_is_42, in", done.stdout)
+
+    def test_changed_docs_after_a_separator_stay_with_their_test(self):
+        source = "\n// documented behavior\n\n" + TEST_FILE
+        self.write(TESTS, source)
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "documented test")
+        git(self.root, "update-ref", "refs/remotes/origin/main", "HEAD")
+        self.fix()
+        self.write(TESTS, source.replace("documented behavior", "changed behavior"))
+        done = self.run_script("check")
+        self.assertExit(done, 1)
+        self.assertIn("  the_answer_is_42, in", done.stdout)
+
     def test_a_changed_attribute_changes_its_test(self):
         self.fix()
         self.write(TESTS, TEST_FILE.replace("#[test]\n", "#[test]\n#[ignore]\n"))
