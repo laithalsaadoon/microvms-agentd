@@ -99,6 +99,11 @@ message = "FAIL: test_duration_observation_exact_role_value_and_interruption"
 transform = { file = "tools/recover-live.py", replace = "            except (Refused, InterruptedError):", with = "            except Refused:" }
 
 [[family.fault]]
+id = "recovery-core-repository-endpoint"
+message = "FAIL: test_github_api_uses_canonical_repository_and_preserves_suffix"
+transform = { file = "tools/recover-live.py", replace = '        endpoint = f"repos/{self.repository}" + (f"/{suffix}" if suffix else "")', with = '        endpoint = f"repos/{self.repository}/{suffix}"' }
+
+[[family.fault]]
 id = "recovery-core-total-budget"
 message = "FAIL: test_total_deadline_includes_successful_provenance_before_aws"
 transform = { file = "tools/recover-live.py", replace = "            require(time.monotonic() < deadline, \"deadline\")", with = "            require(True, \"deadline\")" }

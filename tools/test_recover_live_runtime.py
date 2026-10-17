@@ -387,6 +387,32 @@ class RuntimeTests(unittest.TestCase):
         )
         self.assertNotIn(fixtures.SHARED, json.dumps(value))
 
+    def test_github_api_uses_canonical_repository_and_preserves_suffix(self):
+        clock = fixtures.Clock()
+        client = recovery.Github("Owner/Repository", deadline=10, clock=clock)
+        for suffix, endpoint in (
+            ("", "repos/Owner/Repository"),
+            ("actions/runs/9", "repos/Owner/Repository/actions/runs/9"),
+            (
+                "contents/.github/workflows/live-conformance.yml?ref=abc",
+                "repos/Owner/Repository/contents/.github/workflows/live-conformance.yml?ref=abc",
+            ),
+        ):
+            with self.subTest(suffix=suffix):
+                with patch.object(
+                    recovery.subprocess,
+                    "run",
+                    return_value=subprocess.CompletedProcess([], 0, '{"id": 7}', ""),
+                ) as run:
+                    self.assertEqual(client.api(suffix), {"id": 7})
+                    run.assert_called_once_with(
+                        ["gh", "api", endpoint],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                        check=False,
+                    )
+
     def test_github_captured_commands_are_exact_and_share_deadline(self):
         clock = fixtures.Clock()
         client = recovery.Github("owner/repository", deadline=10, clock=clock)

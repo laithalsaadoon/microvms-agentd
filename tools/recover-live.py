@@ -353,7 +353,9 @@ class Github:
         return done.stdout
 
     def api(self, suffix: str) -> dict:
-        return json.loads(self.command(["api", f"repos/{self.repository}/{suffix}"]))
+        # GitHub's repository metadata route does not accept a trailing slash.
+        endpoint = f"repos/{self.repository}" + (f"/{suffix}" if suffix else "")
+        return json.loads(self.command(["api", endpoint]))
 
     def log(self, manifest: dict) -> str:
         return self.command(
