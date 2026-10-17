@@ -1,0 +1,124 @@
+# Python wake lifetime: retain callback admission through wake and original-waker drop.
+# The base lacks the new inline Rust tests; reversing the full source removes them.
+# These focused faults preserve the tests. Parametrized Python guards name exact nodes,
+# since the emitter cannot find its source-level selector in the pytest report.
+
+[[fault]]
+id = "py-wake-close-disabled"
+guard = "bindings/microvms-py/tests/test_errors.py::test_finishing_an_await_drains_the_inflight_python_wake[cancel]"
+run = [["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_errors.py::test_finishing_an_await_drains_the_inflight_python_wake[cancel]"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "bindings/microvms-py/src/runtime.rs", replace = "        if !self.quiescent.load(Ordering::Acquire) {", with = "        if false && !self.quiescent.load(Ordering::Acquire) {" }
+
+[[fault]]
+id = "py-wake-drain-holds-gil"
+guard = "bindings/microvms-py/tests/test_errors.py::test_finishing_an_await_drains_the_inflight_python_wake[cancel]"
+run = [["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_errors.py::test_finishing_an_await_drains_the_inflight_python_wake[cancel]"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "bindings/microvms-py/src/runtime.rs", replace = "            Python::attach(|py| py.detach(|| self.close_detached()));", with = "            Python::attach(|_| self.close_detached());" }
+
+[[fault]]
+id = "py-wake-register-after-shutdown"
+guard = "bindings/microvms-py/tests/test_errors.py::test_async_shutdown_retires_pending_wakes_and_refuses_later_awaits"
+run = [["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_errors.py::test_async_shutdown_retires_pending_wakes_and_refuses_later_awaits"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "bindings/microvms-py/src/runtime.rs", replace = "    if registry.closed {", with = "    if false && registry.closed {" }
+
+[[fault]]
+id = "py-wake-shutdown-holds-gil"
+guard = "bindings/microvms-py/tests/test_errors.py::test_finishing_an_await_drains_the_inflight_python_wake[shutdown]"
+run = [["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_errors.py::test_finishing_an_await_drains_the_inflight_python_wake[shutdown]"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "bindings/microvms-py/src/runtime.rs", replace = "fn close_async_wakes(py: Python<'_>) {\n    py.detach(|| {", with = "fn close_async_wakes(py: Python<'_>) {\n    let _ = py;\n    std::thread::scope(|_| {" }
+
+[[fault]]
+id = "py-wake-publish-before-drain"
+guard = "runtime::tests::concurrent_closers_wait_until_the_admitted_wake_finishes"
+run = [["cargo", "test", "-p", "microvms-py", "--lib", "runtime::tests::concurrent_closers_wait_until_the_admitted_wake_finishes", "--", "--exact"]]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "bindings/microvms-py/src/runtime.rs", replace = "        while state.active != 0 {", with = "        while false && state.active != 0 {" }
+
+[[fault]]
+id = "py-wake-drop-after-drain"
+guard = "runtime::tests::concurrent_closers_wait_for_the_last_original_waker_drop"
+run = [["cargo", "test", "-p", "microvms-py", "--lib", "runtime::tests::concurrent_closers_wait_for_the_last_original_waker_drop", "--", "--exact"]]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "bindings/microvms-py/src/runtime.rs", replace = "        drop(self.waker.take());", with = "        let _held = self.waker.take();" }
+
+[[fault]]
+id = "py-credential-fatal-stderr"
+guard = "bindings/microvms-py/tests/test_errors.py::test_malformed_credential_values_never_reach_exception_causes"
+run = [["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_errors.py::test_malformed_credential_values_never_reach_exception_causes"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "bindings/microvms-py/tests/test_errors.py", replace = "        raise AssertionError(\"malformed credentials must fail before a request\")\n\"\"\"", with = "        raise AssertionError(\"malformed credentials must fail before a request\")\nimport sys\nprint(\"Fatal Python error: seeded child diagnostic\", file=sys.stderr)\n\"\"\"" }
+
+[[fault]]
+id = "py-wake-event-unfenced"
+guard = "bindings/microvms-py/tests/test_errors.py::test_cancelling_a_direct_receiver_drains_its_python_wake[event]"
+run = [["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_errors.py::test_cancelling_a_direct_receiver_drains_its_python_wake[event]"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "bindings/microvms-py/src/exec.rs", replace = "let received = runtime::fenced(async { self.receiver.lock().await.recv().await })?.await?;", with = "let received = self.receiver.lock().await.recv().await;" }
+
+[[fault]]
+id = "py-wake-chunk-unfenced"
+guard = "bindings/microvms-py/tests/test_errors.py::test_cancelling_a_direct_receiver_drains_its_python_wake[chunk]"
+run = [["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_errors.py::test_cancelling_a_direct_receiver_drains_its_python_wake[chunk]"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "bindings/microvms-py/src/process.rs", replace = "let received = runtime::fenced(async { self.receiver.lock().await.recv().await })?.await?;", with = "let received = self.receiver.lock().await.recv().await;" }
+
+[[fault]]
+id = "py-wake-callback-unfenced"
+guard = "bindings/microvms-py/tests/test_errors.py::test_cancelling_a_direct_receiver_drains_its_python_wake[callback]"
+run = [["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_errors.py::test_cancelling_a_direct_receiver_drains_its_python_wake[callback]"]]
+expect = "test-failed"
+suite = "bindings"
+patch = "verify/guards/faults/python-wake-callback-unfenced.patch"
+
+[[fault]]
+id = "py-context-keep-awake-shadows-body"
+guard = "bindings/microvms-py/tests/test_errors.py::test_context_exit_preserves_exception_precedence_after_shutdown[True-keep_awake]"
+run = [["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_errors.py::test_context_exit_preserves_exception_precedence_after_shutdown[True-keep_awake]"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "bindings/microvms-py/src/keepalive.rs", replace = "let stopped = runtime::spawn(self.stop_op()).await;\n        if exc_type.is_none() {\n            stopped??;", with = "let stopped = runtime::spawn(self.stop_op()).await?;\n        if exc_type.is_none() {\n            stopped?;" }
+
+[[fault]]
+id = "py-context-tunnel-shadows-body"
+guard = "bindings/microvms-py/tests/test_errors.py::test_context_exit_preserves_exception_precedence_after_shutdown[True-tunnel]"
+run = [["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_errors.py::test_context_exit_preserves_exception_precedence_after_shutdown[True-tunnel]"]]
+expect = "test-failed"
+suite = "bindings"
+patch = "verify/guards/faults/py-context-tunnel-shadows-body.patch"
+
+[[fault]]
+id = "py-context-port-forward-shadows-body"
+guard = "bindings/microvms-py/tests/test_errors.py::test_context_exit_preserves_exception_precedence_after_shutdown[True-port_forward]"
+run = [["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_errors.py::test_context_exit_preserves_exception_precedence_after_shutdown[True-port_forward]"]]
+expect = "test-failed"
+suite = "bindings"
+patch = "verify/guards/faults/py-context-port-forward-shadows-body.patch"
+
+[[fault]]
+id = "py-context-sandbox-propagates-teardown"
+guard = "bindings/microvms-py/tests/test_errors.py::test_context_exit_preserves_exception_precedence_after_shutdown[False-sandbox]"
+run = [["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_errors.py::test_context_exit_preserves_exception_precedence_after_shutdown[False-sandbox]"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "bindings/microvms-py/src/sandbox.rs", replace = "    async fn __aexit__(\n        &self,\n        exc_type: Option<Py<PyAny>>,\n        exc_value: Option<Py<PyAny>>,\n        traceback: Option<Py<PyAny>>,\n    ) -> bool {\n        let _ = (exc_type, exc_value, traceback);\n        let _ = runtime::spawn_shielded(self.terminate_op(TeardownOpts::default())).await;\n        false\n    }\n", with = "    async fn __aexit__(\n        &self,\n        exc_type: Option<Py<PyAny>>,\n        exc_value: Option<Py<PyAny>>,\n        traceback: Option<Py<PyAny>>,\n    ) -> PyCoreResult<bool> {\n        let _ = (exc_type, exc_value, traceback);\n        let _ = runtime::spawn_shielded(self.terminate_op(TeardownOpts::default())).await?;\n        Ok(false)\n    }\n" }
+
+[[fault]]
+id = "py-context-agent-vm-propagates-teardown"
+guard = "bindings/microvms-py/tests/test_errors.py::test_context_exit_preserves_exception_precedence_after_shutdown[False-agent_vm]"
+run = [["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_errors.py::test_context_exit_preserves_exception_precedence_after_shutdown[False-agent_vm]"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "bindings/microvms-py/src/agents.rs", replace = "    async fn __aexit__(\n        &self,\n        exc_type: Option<Py<PyAny>>,\n        exc_value: Option<Py<PyAny>>,\n        traceback: Option<Py<PyAny>>,\n    ) -> bool {\n        let _ = (exc_type, exc_value, traceback);\n        let opts = microvms_core::sandbox::TeardownOpts::default();\n        let _ = runtime::spawn_shielded(self.sandbox().terminate_op(opts)).await;\n        false\n    }\n", with = "    async fn __aexit__(\n        &self,\n        exc_type: Option<Py<PyAny>>,\n        exc_value: Option<Py<PyAny>>,\n        traceback: Option<Py<PyAny>>,\n    ) -> PyCoreResult<bool> {\n        let _ = (exc_type, exc_value, traceback);\n        let opts = microvms_core::sandbox::TeardownOpts::default();\n        let _ = runtime::spawn_shielded(self.sandbox().terminate_op(opts)).await?;\n        Ok(false)\n    }\n" }

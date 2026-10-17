@@ -579,7 +579,7 @@ struct NextEvent {
 #[pymethods]
 impl NextEvent {
     async fn recv(&self) -> PyResult<StreamEvent> {
-        let received = self.receiver.lock().await.recv().await;
+        let received = runtime::fenced(async { self.receiver.lock().await.recv().await })?.await?;
         match received {
             Some(Ok(event)) => Ok(event.into()),
             Some(Err(error)) => Err(Python::attach(|py| to_py_err(py, &error))),
@@ -686,7 +686,7 @@ impl PyExecHandle {
 
     /// The awaitable twin of `poll`.
     async fn poll_async(&self) -> PyCoreResult<PyExecResult> {
-        Ok(runtime::spawn(self.poll_op()).await?)
+        Ok(runtime::spawn(self.poll_op()).await??)
     }
 
     /// Polls until the exec is done, or raises `TimeoutError`.
@@ -704,7 +704,7 @@ impl PyExecHandle {
     #[pyo3(signature = (timeout=DEFAULT_WAIT))]
     async fn wait_async(&self, timeout: f64) -> PyCoreResult<PyExecResult> {
         let timeout = seconds(timeout)?;
-        Ok(runtime::spawn(self.wait_op(timeout)).await?)
+        Ok(runtime::spawn(self.wait_op(timeout)).await??)
     }
 
     /// An iterator over output as it arrives, reconnecting at the last good offset.
@@ -762,7 +762,7 @@ impl PyExecHandle {
     #[pyo3(signature = (data, *, eof=false))]
     async fn write_stdin_async(&self, data: Py<PyBytes>, eof: bool) -> PyCoreResult<PyStdinAck> {
         let data = Python::attach(|py| pyo3::pybacked::PyBackedBytes::from(data.into_bound(py)));
-        Ok(runtime::spawn(self.write_stdin_op(data, eof)).await?)
+        Ok(runtime::spawn(self.write_stdin_op(data, eof)).await??)
     }
 
     /// Sends EOF. Nothing else closes stdin: the daemon's copy of the pipe outlives the
@@ -773,7 +773,7 @@ impl PyExecHandle {
 
     /// The awaitable twin of `close_stdin`.
     async fn close_stdin_async(&self) -> PyCoreResult<PyStdinAck> {
-        Ok(runtime::spawn(self.close_stdin_op()).await?)
+        Ok(runtime::spawn(self.close_stdin_op()).await??)
     }
 
     /// Releases the buffered output and starts the TTL clock.
@@ -783,7 +783,7 @@ impl PyExecHandle {
 
     /// The awaitable twin of `ack`.
     async fn ack_async(&self) -> PyCoreResult<PyExecResult> {
-        Ok(runtime::spawn(self.ack_op()).await?)
+        Ok(runtime::spawn(self.ack_op()).await??)
     }
 
     /// Signals the whole process group. `False` means nothing was signalled because the
@@ -794,7 +794,7 @@ impl PyExecHandle {
 
     /// The awaitable twin of `kill`.
     async fn kill_async(&self) -> PyCoreResult<bool> {
-        Ok(runtime::spawn(self.kill_op()).await?)
+        Ok(runtime::spawn(self.kill_op()).await??)
     }
 
     /// Wait, then ack, returning the result that carries the output.
@@ -813,7 +813,7 @@ impl PyExecHandle {
     #[pyo3(signature = (timeout=DEFAULT_WAIT))]
     async fn wait_and_ack_async(&self, timeout: f64) -> PyCoreResult<PyExecResult> {
         let timeout = seconds(timeout)?;
-        Ok(runtime::spawn(self.wait_and_ack_op(timeout)).await?)
+        Ok(runtime::spawn(self.wait_and_ack_op(timeout)).await??)
     }
 
     fn __repr__(&self) -> String {

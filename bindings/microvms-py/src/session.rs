@@ -870,10 +870,10 @@ fn completion_plan(
     client_grace_sec: f64,
 ) -> PyResult<CompletionPlan> {
     let options = CompletionOptions {
-        client_grace: seconds(client_grace_sec).map_err(CoreError)?,
+        client_grace: seconds(client_grace_sec).map_err(CoreError::from)?,
         ..CompletionOptions::default()
     };
-    Ok(CompletionPlan::new(request, options).map_err(CoreError)?)
+    Ok(CompletionPlan::new(request, options).map_err(CoreError::from)?)
 }
 
 /// Hands one chunk to `on_output` under the GIL and answers whether the drive reads on. The
@@ -978,7 +978,7 @@ impl PySession {
             port,
             timeout,
         ))
-        .await?;
+        .await??;
         Ok(Self {
             held: Held::Owned(session),
         })
@@ -1024,7 +1024,7 @@ impl PySession {
 
     /// The awaitable twin of `discovery`.
     async fn discovery_async(&self) -> PyCoreResult<Option<PyDiscovery>> {
-        Ok(runtime::spawn(self.discovery_op()).await?)
+        Ok(runtime::spawn(self.discovery_op()).await??)
     }
 
     /// Unauthenticated liveness.
@@ -1034,7 +1034,7 @@ impl PySession {
 
     /// The awaitable twin of `health`.
     async fn health_async(&self) -> PyCoreResult<PyHealth> {
-        Ok(runtime::spawn(self.health_op()).await?)
+        Ok(runtime::spawn(self.health_op()).await??)
     }
 
     /// Keeps the VM awake by polling health from this process until stopped.
@@ -1107,7 +1107,7 @@ impl PySession {
     #[pyo3(signature = (timeout=DEFAULT_BOOTSTRAP_TIMEOUT))]
     async fn wait_until_ready_async(&self, timeout: f64) -> PyCoreResult<PyHealth> {
         let timeout = seconds(timeout)?;
-        Ok(runtime::spawn(self.wait_until_ready_op(timeout)).await?)
+        Ok(runtime::spawn(self.wait_until_ready_op(timeout)).await??)
     }
 
     /// Starts a command and returns its handle. Does not wait.
@@ -1249,7 +1249,7 @@ impl PySession {
             inherit_image_env,
         );
         Ok(PyExecHandle::wrap(
-            runtime::spawn(self.start_op(request)).await?,
+            runtime::spawn(self.start_op(request)).await??,
         ))
     }
 
@@ -1317,7 +1317,7 @@ impl PySession {
     ) -> PyResult<crate::process::PyExecProcess> {
         let (options, policy) =
             split_options(offset, reconnect, max_reconnects, idle_timeout, gap_policy)
-                .map_err(CoreError)?;
+                .map_err(CoreError::from)?;
         let request = start_request(
             command,
             shell,
@@ -1332,7 +1332,7 @@ impl PySession {
             poweroff_on_exit,
             inherit_image_env,
         );
-        let handle = runtime::block_on(py, self.start_op(request)).map_err(CoreError)?;
+        let handle = runtime::block_on(py, self.start_op(request)).map_err(CoreError::from)?;
         crate::process::PyExecProcess::start(py, handle, options, policy)
     }
 
@@ -1389,7 +1389,7 @@ impl PySession {
             idle_timeout,
             gap_policy.as_deref(),
         )
-        .map_err(CoreError)?;
+        .map_err(CoreError::from)?;
         let request = start_request(
             command,
             shell,
@@ -1405,8 +1405,8 @@ impl PySession {
             inherit_image_env,
         );
         let handle = runtime::spawn(self.start_op(request))
-            .await
-            .map_err(CoreError)?;
+            .await?
+            .map_err(CoreError::from)?;
         Python::attach(|py| crate::process::PyExecProcess::start(py, handle, options, policy))
     }
 
@@ -1530,7 +1530,7 @@ impl PySession {
             inherit_image_env,
         );
         let timeout = seconds(timeout)?;
-        Ok(runtime::spawn(self.run_sync_op(request, timeout)).await?)
+        Ok(runtime::spawn(self.run_sync_op(request, timeout)).await??)
     }
 
     /// Start, stream, and collect one command: exactly one `ExecResult` back (BIND-6..10).
@@ -1604,7 +1604,7 @@ impl PySession {
         let plan = completion_plan(&request, client_grace_sec)?;
         // Started under the sandbox lock and driven after it is released: the callback runs
         // Python, and Python that reaches back into this sandbox must not find the lock held.
-        let handle = runtime::block_on(py, self.start_op(request)).map_err(CoreError)?;
+        let handle = runtime::block_on(py, self.start_op(request)).map_err(CoreError::from)?;
         let raised: Arc<std::sync::Mutex<Option<PyErr>>> = Arc::default();
         let sink = on_output.map(|callback| {
             let raised = Arc::clone(&raised);
@@ -1623,7 +1623,7 @@ impl PySession {
         {
             return Err(error);
         }
-        Ok(PyExecResult::wrap(result.map_err(CoreError)?))
+        Ok(PyExecResult::wrap(result.map_err(CoreError::from)?))
     }
 
     /// The awaitable twin of `run_to_completion`, with its keywords.
@@ -1713,7 +1713,7 @@ impl PySession {
         let raised: Arc<std::sync::Mutex<Option<PyErr>>> = Arc::default();
         let mut open = true;
         let result = loop {
-            let next = std::future::poll_fn(|cx| {
+            let next = runtime::fenced(std::future::poll_fn(|cx| {
                 if let std::task::Poll::Ready(result) = std::pin::Pin::new(&mut drive).poll(cx) {
                     return std::task::Poll::Ready(Ok(result));
                 }
@@ -1728,10 +1728,10 @@ impl PySession {
                     }
                 }
                 std::task::Poll::Pending
-            })
-            .await;
+            }))?
+            .await?;
             match next {
-                Ok(result) => break result,
+                Ok(result) => break result?,
                 Err(None) => open = false,
                 Err(Some((event, reply))) => {
                     let flow = match &on_output {
@@ -1749,7 +1749,7 @@ impl PySession {
         {
             return Err(error);
         }
-        Ok(PyExecResult::wrap(result.map_err(CoreError)?))
+        Ok(PyExecResult::wrap(result.map_err(CoreError::from)?))
     }
 
     /// Signals an exec's whole process group. Returns whether anything was signalled.
@@ -1759,7 +1759,7 @@ impl PySession {
 
     /// The awaitable twin of `kill`.
     async fn kill_async(&self, exec_id: String) -> PyCoreResult<bool> {
-        Ok(runtime::spawn(self.kill_op(exec_id)).await?)
+        Ok(runtime::spawn(self.kill_op(exec_id)).await??)
     }
 
     /// Process accounting: every registered exec with its group's live pids.
@@ -1773,7 +1773,7 @@ impl PySession {
 
     /// The awaitable twin of `procs`.
     async fn procs_async(&self) -> PyCoreResult<Vec<PyProcGroup>> {
-        Ok(runtime::spawn(self.procs_op()).await?)
+        Ok(runtime::spawn(self.procs_op()).await??)
     }
 
     /// Writes one file, creating parents. `mode` is an **octal string** (`"0755"`), which
@@ -1800,7 +1800,7 @@ impl PySession {
         data: Py<PyBytes>,
         mode: Option<String>,
     ) -> PyCoreResult<()> {
-        Ok(runtime::spawn(self.upload_file_op(path, backed(data), mode)).await?)
+        Ok(runtime::spawn(self.upload_file_op(path, backed(data), mode)).await??)
     }
 
     /// Reads one file, or lines `start_line` through `end_line` of it.
@@ -1832,7 +1832,7 @@ impl PySession {
         start_line: Option<u64>,
         end_line: Option<u64>,
     ) -> PyCoreResult<Py<PyBytes>> {
-        let bytes = runtime::spawn(self.download_file_op(path, start_line, end_line)).await?;
+        let bytes = runtime::spawn(self.download_file_op(path, start_line, end_line)).await??;
         Ok(Python::attach(|py| PyBytes::new(py, &bytes).unbind()))
     }
 
@@ -1866,7 +1866,7 @@ impl PySession {
         local_dir: std::path::PathBuf,
         globs: Vec<String>,
     ) -> PyCoreResult<Vec<crate::workspace::PyDownloadedFile>> {
-        Ok(runtime::spawn(self.download_dir_op(remote, local_dir, globs)).await?)
+        Ok(runtime::spawn(self.download_dir_op(remote, local_dir, globs)).await??)
     }
 
     /// Syncs `local_dir` into the VM's `/workspace` once, uploading only what changed.
@@ -1903,7 +1903,7 @@ impl PySession {
         delete_timeout: Option<f64>,
     ) -> PyCoreResult<crate::workspace::PySyncReport> {
         let delete_timeout = sync_delete_timeout(delete_timeout)?;
-        Ok(runtime::spawn(self.sync_dir_op(local_dir, full, delete_timeout)).await?)
+        Ok(runtime::spawn(self.sync_dir_op(local_dir, full, delete_timeout)).await??)
     }
 
     /// Whether a path exists, distinguishing absence from every other refusal.
@@ -1916,7 +1916,7 @@ impl PySession {
 
     /// The awaitable twin of `file_exists`.
     async fn file_exists_async(&self, path: String) -> PyCoreResult<bool> {
-        Ok(runtime::spawn(self.file_exists_op(path)).await?)
+        Ok(runtime::spawn(self.file_exists_op(path)).await??)
     }
 
     /// Extracts pre-built tar bytes under `remote`.
@@ -1933,7 +1933,7 @@ impl PySession {
 
     /// The awaitable twin of `upload_tar`.
     async fn upload_tar_async(&self, remote: String, archive: Py<PyBytes>) -> PyCoreResult<()> {
-        Ok(runtime::spawn(self.upload_tar_op(remote, backed(archive))).await?)
+        Ok(runtime::spawn(self.upload_tar_op(remote, backed(archive))).await??)
     }
 
     /// The raw tar bytes of a remote tree.
@@ -1948,7 +1948,7 @@ impl PySession {
 
     /// The awaitable twin of `download_tar`.
     async fn download_tar_async(&self, remote: String) -> PyCoreResult<Py<PyBytes>> {
-        let bytes = runtime::spawn(self.download_tar_op(remote)).await?;
+        let bytes = runtime::spawn(self.download_tar_op(remote)).await??;
         Ok(Python::attach(|py| PyBytes::new(py, &bytes).unbind()))
     }
 
@@ -1978,7 +1978,7 @@ impl PySession {
         &self,
         port: u16,
     ) -> PyCoreResult<std::collections::HashMap<String, String>> {
-        Ok(runtime::spawn(self.connect_headers_op(port)).await?)
+        Ok(runtime::spawn(self.connect_headers_op(port)).await??)
     }
 
     /// The three WebSocket subprotocols for `port`, in the order a handshake offers them.
@@ -2000,7 +2000,7 @@ impl PySession {
 
     /// The awaitable twin of `connect_subprotocols`.
     async fn connect_subprotocols_async(&self, port: u16) -> PyCoreResult<Option<Vec<String>>> {
-        Ok(runtime::spawn(self.connect_subprotocols_op(port)).await?)
+        Ok(runtime::spawn(self.connect_subprotocols_op(port)).await??)
     }
 
     /// Serves a local TCP port as a tunnel to `guest_port` in the VM, on a background task,
@@ -2045,7 +2045,7 @@ impl PySession {
     ) -> PyCoreResult<crate::serve::PyTunnel> {
         let bind = serve::bind_address(bind.as_deref())?;
         let identity = verify_identity.map(|identity| identity.inner);
-        Ok(runtime::spawn(self.tunnel_op(bind, guest_port, identity, max_connections)).await?)
+        Ok(runtime::spawn(self.tunnel_op(bind, guest_port, identity, max_connections)).await??)
     }
 
     /// Serves a local port as an HTTP and WebSocket forward to `guest_port` in the VM, on a
@@ -2079,7 +2079,7 @@ impl PySession {
         max_connections: Option<u32>,
     ) -> PyCoreResult<crate::serve::PyPortForward> {
         let bind = serve::bind_address(bind.as_deref())?;
-        Ok(runtime::spawn(self.port_forward_op(bind, guest_port, max_connections)).await?)
+        Ok(runtime::spawn(self.port_forward_op(bind, guest_port, max_connections)).await??)
     }
 
     /// How many proxy tokens this session has minted, or `None` for a direct session.

@@ -746,7 +746,7 @@ impl PyControlPlane {
     /// The awaitable twin of `ControlPlane(region)`.
     #[staticmethod]
     async fn create_async(region: PyRegion) -> PyCoreResult<PyControlPlane> {
-        Ok(runtime::spawn(open(region.inner)).await?)
+        Ok(runtime::spawn(open(region.inner)).await??)
     }
 
     /// The region this plane addresses.
@@ -764,7 +764,7 @@ impl PyControlPlane {
 
     /// The awaitable twin of `get`.
     async fn get_async(&self, microvm_id: String) -> PyCoreResult<PyMicrovm> {
-        Ok(runtime::spawn(self.get_op(microvm_id)).await?)
+        Ok(runtime::spawn(self.get_op(microvm_id)).await??)
     }
 
     /// `ListMicrovms`, every page, optionally narrowed to one image and version.
@@ -793,7 +793,7 @@ impl PyControlPlane {
             image_identifier,
             image_version,
         };
-        Ok(runtime::spawn(self.list_op(filter)).await?)
+        Ok(runtime::spawn(self.list_op(filter)).await??)
     }
 
     /// `SuspendMicrovm`. Returns once accepted; `wait_for_state` for SUSPENDED.
@@ -804,7 +804,7 @@ impl PyControlPlane {
     /// The awaitable twin of `suspend`. A lifecycle call: cancelling the awaitable leaves the
     /// request running to its answer.
     async fn suspend_async(&self, microvm_id: String) -> PyCoreResult<()> {
-        Ok(runtime::spawn_shielded(self.suspend_op(microvm_id)).await?)
+        Ok(runtime::spawn_shielded(self.suspend_op(microvm_id)).await??)
     }
 
     /// `ResumeMicrovm`. Returns once accepted; `wait_for_state` for RUNNING. A VM that ended
@@ -815,7 +815,7 @@ impl PyControlPlane {
 
     /// The awaitable twin of `resume`. A lifecycle call, as `suspend_async` is.
     async fn resume_async(&self, microvm_id: String) -> PyCoreResult<()> {
-        Ok(runtime::spawn_shielded(self.resume_op(microvm_id)).await?)
+        Ok(runtime::spawn_shielded(self.resume_op(microvm_id)).await??)
     }
 
     /// `TerminateMicrovm`. Returns once accepted; `wait_for_state` for TERMINATED.
@@ -825,7 +825,7 @@ impl PyControlPlane {
 
     /// The awaitable twin of `terminate`. A lifecycle call, as `suspend_async` is.
     async fn terminate_async(&self, microvm_id: String) -> PyCoreResult<()> {
-        Ok(runtime::spawn_shielded(self.terminate_op(microvm_id)).await?)
+        Ok(runtime::spawn_shielded(self.terminate_op(microvm_id)).await??)
     }
 
     /// Polls `GetMicrovm` until the state is one of `wanted`.
@@ -866,7 +866,7 @@ impl PyControlPlane {
     ) -> PyCoreResult<PyMicrovm> {
         let opts = state_wait_opts(timeout, poll_interval)?;
         let op = self.wait_for_state_op(microvm_id, wanted, fail_on.unwrap_or_default(), opts);
-        Ok(runtime::spawn(op).await?)
+        Ok(runtime::spawn(op).await??)
     }
 
     /// Discover prefix-matched images and VMs. Set dry_run=False to clean them up.
@@ -890,7 +890,7 @@ impl PyControlPlane {
         keep: Option<Vec<String>>,
         dry_run: Option<bool>,
     ) -> PyCoreResult<PySweepReport> {
-        Ok(runtime::spawn_shielded(self.sweep_op(prefix, keep, dry_run)).await?)
+        Ok(runtime::spawn_shielded(self.sweep_op(prefix, keep, dry_run)).await??)
     }
 
     /// `ListMicrovmImages`, every page: every image in the account and region.
@@ -900,7 +900,7 @@ impl PyControlPlane {
 
     /// The awaitable twin of `list_images`.
     async fn list_images_async(&self) -> PyCoreResult<Vec<PyImageSummary>> {
-        Ok(runtime::spawn(self.list_images_op()).await?)
+        Ok(runtime::spawn(self.list_images_op()).await??)
     }
 
     /// Deletes the image, its extra versions first, retrying while it refuses (an image still
@@ -934,7 +934,7 @@ impl PyControlPlane {
         backoff: Option<f64>,
     ) -> PyCoreResult<bool> {
         let (attempts, backoff) = delete_budget(attempts, backoff)?;
-        Ok(runtime::spawn_shielded(self.delete_image_op(identifier, attempts, backoff)).await)
+        runtime::spawn_shielded(self.delete_image_op(identifier, attempts, backoff)).await
     }
 
     /// `ListMicrovmImageVersions`, every page: each version, its status, and its build
@@ -955,7 +955,7 @@ impl PyControlPlane {
         &self,
         identifier: String,
     ) -> PyCoreResult<Vec<PyImageVersion>> {
-        Ok(runtime::spawn(self.list_image_versions_op(identifier)).await?)
+        Ok(runtime::spawn(self.list_image_versions_op(identifier)).await??)
     }
 
     /// `UpdateMicrovmImageVersion`: `status` is `"ACTIVE"` or `"INACTIVE"`.
@@ -987,7 +987,7 @@ impl PyControlPlane {
     ) -> PyCoreResult<PyImageVersion> {
         let status: ops::VersionStatus = status.parse()?;
         let op = self.set_image_version_status_op(identifier, version, status);
-        Ok(runtime::spawn_shielded(op).await?)
+        Ok(runtime::spawn_shielded(op).await??)
     }
 
     /// `ListMicrovmImageBuilds` for one version, every page: one build per Graviton
@@ -1010,7 +1010,7 @@ impl PyControlPlane {
         identifier: String,
         version: String,
     ) -> PyCoreResult<Vec<PyImageBuild>> {
-        Ok(runtime::spawn(self.list_image_builds_op(identifier, version)).await?)
+        Ok(runtime::spawn(self.list_image_builds_op(identifier, version)).await??)
     }
 
     /// `GetMicrovmImageBuild`: one build, with the snapshot sizes the listing doesn't carry.
@@ -1034,7 +1034,7 @@ impl PyControlPlane {
         version: String,
         build_id: String,
     ) -> PyCoreResult<PyImageBuild> {
-        Ok(runtime::spawn(self.get_image_build_op(identifier, version, build_id)).await?)
+        Ok(runtime::spawn(self.get_image_build_op(identifier, version, build_id)).await??)
     }
 
     fn __repr__(&self) -> String {

@@ -1,0 +1,22 @@
+--- a/bindings/microvms-py/src/session.rs
++++ b/bindings/microvms-py/src/session.rs
+@@ -1713,7 +1713,7 @@
+         let raised: Arc<std::sync::Mutex<Option<PyErr>>> = Arc::default();
+         let mut open = true;
+         let result = loop {
+-            let next = runtime::fenced(std::future::poll_fn(|cx| {
++            let next = std::future::poll_fn(|cx| {
+                 if let std::task::Poll::Ready(result) = std::pin::Pin::new(&mut drive).poll(cx) {
+                     return std::task::Poll::Ready(Ok(result));
+                 }
+@@ -1728,8 +1728,8 @@
+                     }
+                 }
+                 std::task::Poll::Pending
+-            }))?
+-            .await?;
++            })
++            .await;
+             match next {
+                 Ok(result) => break result?,
+                 Err(None) => open = false,

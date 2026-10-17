@@ -192,6 +192,7 @@ mod microvms {
         use pyo3::types::PyModuleMethods;
         module.add("__version__", microvms_core::VERSION)?;
         super::errors::register(module)?;
+        super::runtime::register_shutdown(module)?;
         Ok(())
     }
 }

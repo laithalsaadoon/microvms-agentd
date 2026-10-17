@@ -175,9 +175,11 @@ pub(crate) fn preflight(py: Python<'_>, region: Option<PyRegion>) -> PyPreflight
 /// The awaitable twin of `preflight`. Never raises either; read `report.ok`.
 #[pyfunction]
 #[pyo3(signature = (region=None))]
-pub(crate) async fn preflight_async(region: Option<PyRegion>) -> PyPreflightReport {
+pub(crate) async fn preflight_async(
+    region: Option<PyRegion>,
+) -> crate::errors::PyCoreResult<PyPreflightReport> {
     let region = region.map(|region| region.inner);
-    PyPreflightReport {
-        inner: runtime::spawn(microvms_core::preflight::preflight(region)).await,
-    }
+    Ok(PyPreflightReport {
+        inner: runtime::spawn(microvms_core::preflight::preflight(region)).await?,
+    })
 }

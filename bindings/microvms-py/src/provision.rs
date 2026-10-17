@@ -101,7 +101,7 @@ fn provision(
     binary: Option<PathBuf>,
 ) -> PyCoreResult<Provisioned> {
     py.detach(|| provision_now(version, state_dir, binary))
-        .map_err(CoreError)
+        .map_err(CoreError::from)
 }
 
 /// The chain itself, blocking: both spellings call it, the awaitable one on the shared
@@ -125,8 +125,8 @@ async fn provision_async(
     binary: Option<PathBuf>,
 ) -> PyCoreResult<Provisioned> {
     crate::runtime::spawn_blocking(move || provision_now(version, state_dir, binary))
-        .await
-        .map_err(CoreError)
+        .await?
+        .map_err(CoreError::from)
 }
 
 /// The `agentd` daemon binary for `version` (default: this client's own), as bytes.

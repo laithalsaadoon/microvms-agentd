@@ -1,0 +1,1602 @@
+diff --git b/bindings/microvms-py/src/agents.rs a/bindings/microvms-py/src/agents.rs
+index 7379434d..df20176d 100644
+--- b/bindings/microvms-py/src/agents.rs
++++ a/bindings/microvms-py/src/agents.rs
+@@ -78,7 +78,7 @@ impl PyAgentSpec {
+     #[new]
+     #[pyo3(signature = (agent, *, model=None, cli_version=None))]
+     fn new(agent: &str, model: Option<String>, cli_version: Option<String>) -> PyCoreResult<Self> {
+-        let agent: Agent = agent.parse().map_err(CoreError::from)?;
++        let agent: Agent = agent.parse().map_err(CoreError)?;
+         Ok(Self::build(agent, model, cli_version))
+     }
+
+@@ -235,7 +235,7 @@ pub async fn mint_bedrock_token_async(
+     region: PyRegion,
+     ttl_seconds: Option<f64>,
+ ) -> PyCoreResult<PyBearerToken> {
+-    Ok(runtime::spawn(mint_op(region.inner, ttl_seconds)?).await??)
++    Ok(runtime::spawn(mint_op(region.inner, ttl_seconds)?).await?)
+ }
+
+ /// Mint with explicit STS credentials and their expiry without changing process env.
+@@ -281,7 +281,7 @@ pub fn installed_agents(py: Python<'_>, session: &PySession) -> PyCoreResult<Vec
+ /// The awaitable twin of `installed_agents`.
+ #[pyfunction]
+ pub async fn installed_agents_async(session: Py<PySession>) -> PyCoreResult<Vec<PyAgentSpec>> {
+-    Ok(runtime::spawn(installed_agents_op(session.get())).await??)
++    Ok(runtime::spawn(installed_agents_op(session.get())).await?)
+ }
+
+ fn installed_agents_op(
+@@ -321,7 +321,7 @@ pub async fn install_agent_access_async(
+     agents: Vec<PyAgentSpec>,
+     token: PyBearerToken,
+ ) -> PyCoreResult<()> {
+-    Ok(runtime::spawn(install_access_op(session.get(), agents, &token)).await??)
++    Ok(runtime::spawn(install_access_op(session.get(), agents, &token)).await?)
+ }
+
+ fn install_access_op(
+@@ -385,7 +385,7 @@ pub async fn prompt_agent_async(
+ ) -> PyCoreResult<PyExecHandle> {
+     let options = prompt_options(exec_id, timeout_sec, permission_mode, reap_group_on_exit)?;
+     let op = prompt_agent_op(session.get(), agent.inner, task, options);
+-    Ok(runtime::spawn(op).await??)
++    Ok(runtime::spawn(op).await?)
+ }
+
+ fn prompt_agent_op(
+@@ -774,7 +774,7 @@ impl PyAgentVm {
+         agents: Option<Vec<PyAgentSpec>>,
+     ) -> PyCoreResult<PyAgentVm> {
+         let open = Self::open_op(region.inner, specs_or_default(agents))?;
+-        Ok(runtime::spawn(open).await??)
++        Ok(runtime::spawn(open).await?)
+     }
+
+     /// Adopts the agent VM registered as `name` in `registry`; see `Sandbox.from_name`.
+@@ -815,7 +815,7 @@ impl PyAgentVm {
+             specs_or_default(agents),
+             port,
+         );
+-        Ok(runtime::spawn(op).await??)
++        Ok(runtime::spawn(op).await?)
+     }
+
+     /// An agent VM for a VM another process launched; see `Sandbox.adopt`.
+@@ -863,7 +863,7 @@ impl PyAgentVm {
+             agent_token,
+             port,
+         );
+-        Ok(runtime::spawn(op).await??)
++        Ok(runtime::spawn(op).await?)
+     }
+
+     /// The specs this VM carries, in profile order.
+@@ -938,7 +938,7 @@ impl PyAgentVm {
+         build_role_arn: String,
+         size: Option<PySizeClass>,
+     ) -> PyCoreResult<Option<String>> {
+-        Ok(runtime::spawn(self.find_image_op(binary, build_role_arn, size)).await??)
++        Ok(runtime::spawn(self.find_image_op(binary, build_role_arn, size)).await?)
+     }
+
+     /// Builds or reuses this VM's image, named per `image_name`: returned at once when ready,
+@@ -977,7 +977,7 @@ impl PyAgentVm {
+         s3_key_prefix: Option<String>,
+     ) -> PyCoreResult<PyEnsuredImage> {
+         let op = self.ensure_image_op(binary, build_role_arn, s3_bucket, size, s3_key_prefix);
+-        Ok(runtime::spawn(op).await??)
++        Ok(runtime::spawn(op).await?)
+     }
+
+     /// The artifact bytes to upload to `s3://<bucket>/<image_name>.zip` before `build_image`.
+@@ -1025,7 +1025,7 @@ impl PyAgentVm {
+         size: Option<PySizeClass>,
+     ) -> PyCoreResult<PyImage> {
+         let op = self.build_image_op(binary, code_artifact_uri, build_role_arn, size);
+-        Ok(runtime::spawn_shielded(op).await??)
++        Ok(runtime::spawn_shielded(op).await?)
+     }
+
+     /// Launches with egress and waits for the daemon to answer.
+@@ -1180,7 +1180,7 @@ impl PyAgentVm {
+                 ready_timeout,
+             },
+         )?;
+-        Ok(runtime::spawn_shielded(self.launch_op(request)).await??)
++        Ok(runtime::spawn_shielded(self.launch_op(request)).await?)
+     }
+
+     /// Hands the VM off to another process; see `Sandbox.detach`. The adopter passes the
+@@ -1213,7 +1213,7 @@ impl PyAgentVm {
+         ttl_seconds: Option<f64>,
+     ) -> PyCoreResult<PyBearerToken> {
+         let op = self.install_access_op(token, ttl_seconds)?;
+-        Ok(runtime::spawn(op).await??)
++        Ok(runtime::spawn(op).await?)
+     }
+
+     /// Starts one task for `agent` and returns its handle. Does not wait.
+@@ -1256,7 +1256,7 @@ impl PyAgentVm {
+     ) -> PyCoreResult<PyExecHandle> {
+         let options = prompt_options(exec_id, timeout_sec, permission_mode, reap_group_on_exit)?;
+         let op = self.prompt_op(&agent, task, options)?;
+-        Ok(runtime::spawn(op).await??)
++        Ok(runtime::spawn(op).await?)
+     }
+
+     /// Start, wait, ack: one task's whole result. `timeout` defaults to 900 seconds,
+@@ -1300,7 +1300,7 @@ impl PyAgentVm {
+     ) -> PyCoreResult<PyExecResult> {
+         let options = prompt_options(exec_id, Some(timeout), permission_mode, reap_group_on_exit)?;
+         let op = self.prompt_sync_op(&agent, task, options)?;
+-        Ok(runtime::spawn(op).await??)
++        Ok(runtime::spawn(op).await?)
+     }
+
+     /// Tears down, best-effort, never raising; see `Sandbox.terminate`.
+@@ -1356,7 +1356,7 @@ impl PyAgentVm {
+             delete_backoff,
+             wait_for_terminated,
+         )?;
+-        runtime::spawn_shielded(self.sandbox().terminate_op(opts)).await
++        Ok(runtime::spawn_shielded(self.sandbox().terminate_op(opts)).await)
+     }
+
+     fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+diff --git b/bindings/microvms-py/src/control.rs a/bindings/microvms-py/src/control.rs
+index 8d5ba1e1..c28184ef 100644
+--- b/bindings/microvms-py/src/control.rs
++++ a/bindings/microvms-py/src/control.rs
+@@ -746,7 +746,7 @@ impl PyControlPlane {
+     /// The awaitable twin of `ControlPlane(region)`.
+     #[staticmethod]
+     async fn create_async(region: PyRegion) -> PyCoreResult<PyControlPlane> {
+-        Ok(runtime::spawn(open(region.inner)).await??)
++        Ok(runtime::spawn(open(region.inner)).await?)
+     }
+
+     /// The region this plane addresses.
+@@ -764,7 +764,7 @@ impl PyControlPlane {
+
+     /// The awaitable twin of `get`.
+     async fn get_async(&self, microvm_id: String) -> PyCoreResult<PyMicrovm> {
+-        Ok(runtime::spawn(self.get_op(microvm_id)).await??)
++        Ok(runtime::spawn(self.get_op(microvm_id)).await?)
+     }
+
+     /// `ListMicrovms`, every page, optionally narrowed to one image and version.
+@@ -793,7 +793,7 @@ impl PyControlPlane {
+             image_identifier,
+             image_version,
+         };
+-        Ok(runtime::spawn(self.list_op(filter)).await??)
++        Ok(runtime::spawn(self.list_op(filter)).await?)
+     }
+
+     /// `SuspendMicrovm`. Returns once accepted; `wait_for_state` for SUSPENDED.
+@@ -804,7 +804,7 @@ impl PyControlPlane {
+     /// The awaitable twin of `suspend`. A lifecycle call: cancelling the awaitable leaves the
+     /// request running to its answer.
+     async fn suspend_async(&self, microvm_id: String) -> PyCoreResult<()> {
+-        Ok(runtime::spawn_shielded(self.suspend_op(microvm_id)).await??)
++        Ok(runtime::spawn_shielded(self.suspend_op(microvm_id)).await?)
+     }
+
+     /// `ResumeMicrovm`. Returns once accepted; `wait_for_state` for RUNNING. A VM that ended
+@@ -815,7 +815,7 @@ impl PyControlPlane {
+
+     /// The awaitable twin of `resume`. A lifecycle call, as `suspend_async` is.
+     async fn resume_async(&self, microvm_id: String) -> PyCoreResult<()> {
+-        Ok(runtime::spawn_shielded(self.resume_op(microvm_id)).await??)
++        Ok(runtime::spawn_shielded(self.resume_op(microvm_id)).await?)
+     }
+
+     /// `TerminateMicrovm`. Returns once accepted; `wait_for_state` for TERMINATED.
+@@ -825,7 +825,7 @@ impl PyControlPlane {
+
+     /// The awaitable twin of `terminate`. A lifecycle call, as `suspend_async` is.
+     async fn terminate_async(&self, microvm_id: String) -> PyCoreResult<()> {
+-        Ok(runtime::spawn_shielded(self.terminate_op(microvm_id)).await??)
++        Ok(runtime::spawn_shielded(self.terminate_op(microvm_id)).await?)
+     }
+
+     /// Polls `GetMicrovm` until the state is one of `wanted`.
+@@ -866,7 +866,7 @@ impl PyControlPlane {
+     ) -> PyCoreResult<PyMicrovm> {
+         let opts = state_wait_opts(timeout, poll_interval)?;
+         let op = self.wait_for_state_op(microvm_id, wanted, fail_on.unwrap_or_default(), opts);
+-        Ok(runtime::spawn(op).await??)
++        Ok(runtime::spawn(op).await?)
+     }
+
+     /// Discover prefix-matched images and VMs. Set dry_run=False to clean them up.
+@@ -890,7 +890,7 @@ impl PyControlPlane {
+         keep: Option<Vec<String>>,
+         dry_run: Option<bool>,
+     ) -> PyCoreResult<PySweepReport> {
+-        Ok(runtime::spawn_shielded(self.sweep_op(prefix, keep, dry_run)).await??)
++        Ok(runtime::spawn_shielded(self.sweep_op(prefix, keep, dry_run)).await?)
+     }
+
+     /// `ListMicrovmImages`, every page: every image in the account and region.
+@@ -900,7 +900,7 @@ impl PyControlPlane {
+
+     /// The awaitable twin of `list_images`.
+     async fn list_images_async(&self) -> PyCoreResult<Vec<PyImageSummary>> {
+-        Ok(runtime::spawn(self.list_images_op()).await??)
++        Ok(runtime::spawn(self.list_images_op()).await?)
+     }
+
+     /// Deletes the image, its extra versions first, retrying while it refuses (an image still
+@@ -934,7 +934,7 @@ impl PyControlPlane {
+         backoff: Option<f64>,
+     ) -> PyCoreResult<bool> {
+         let (attempts, backoff) = delete_budget(attempts, backoff)?;
+-        runtime::spawn_shielded(self.delete_image_op(identifier, attempts, backoff)).await
++        Ok(runtime::spawn_shielded(self.delete_image_op(identifier, attempts, backoff)).await)
+     }
+
+     /// `ListMicrovmImageVersions`, every page: each version, its status, and its build
+@@ -955,7 +955,7 @@ impl PyControlPlane {
+         &self,
+         identifier: String,
+     ) -> PyCoreResult<Vec<PyImageVersion>> {
+-        Ok(runtime::spawn(self.list_image_versions_op(identifier)).await??)
++        Ok(runtime::spawn(self.list_image_versions_op(identifier)).await?)
+     }
+
+     /// `UpdateMicrovmImageVersion`: `status` is `"ACTIVE"` or `"INACTIVE"`.
+@@ -987,7 +987,7 @@ impl PyControlPlane {
+     ) -> PyCoreResult<PyImageVersion> {
+         let status: ops::VersionStatus = status.parse()?;
+         let op = self.set_image_version_status_op(identifier, version, status);
+-        Ok(runtime::spawn_shielded(op).await??)
++        Ok(runtime::spawn_shielded(op).await?)
+     }
+
+     /// `ListMicrovmImageBuilds` for one version, every page: one build per Graviton
+@@ -1010,7 +1010,7 @@ impl PyControlPlane {
+         identifier: String,
+         version: String,
+     ) -> PyCoreResult<Vec<PyImageBuild>> {
+-        Ok(runtime::spawn(self.list_image_builds_op(identifier, version)).await??)
++        Ok(runtime::spawn(self.list_image_builds_op(identifier, version)).await?)
+     }
+
+     /// `GetMicrovmImageBuild`: one build, with the snapshot sizes the listing doesn't carry.
+@@ -1034,7 +1034,7 @@ impl PyControlPlane {
+         version: String,
+         build_id: String,
+     ) -> PyCoreResult<PyImageBuild> {
+-        Ok(runtime::spawn(self.get_image_build_op(identifier, version, build_id)).await??)
++        Ok(runtime::spawn(self.get_image_build_op(identifier, version, build_id)).await?)
+     }
+
+     fn __repr__(&self) -> String {
+diff --git b/bindings/microvms-py/src/errors.rs a/bindings/microvms-py/src/errors.rs
+index 1fa43317..e58c51ad 100644
+--- b/bindings/microvms-py/src/errors.rs
++++ a/bindings/microvms-py/src/errors.rs
+@@ -19,9 +19,8 @@
+ //!
+ //! # No binding-local validation anywhere in this file
+ //!
+-//! Domain errors originate in `microvms-core`. This module does not decide whether an input
+-//! is invalid: it translates a refusal the core already made. The async bridge can also
+-//! forward a native Python error when interpreter shutdown has closed it. A gap in
++//! Every error here originates in `microvms-core`. There is no path where this module
++//! decides something is invalid: it translates a refusal the core already made. A gap in
+ //! the core stays a gap and gets noted in the packet (the kickoff rule), because a check
+ //! added here would be the copy most callers hit and the copy nothing else tests.
+
+@@ -179,25 +178,16 @@ pub(crate) fn to_py_err(py: Python<'_>, error: &Error) -> PyErr {
+     raised
+ }
+
+-/// A core [`Error`] or a native bridge error on its way to Python.
++/// A core [`Error`] on its way to Python.
+ ///
+ /// `From<Error> for PyErr` is impossible — both types are foreign to this crate — so the
+-/// `?` operator needs a local wrapper. It also preserves Python's own `RuntimeError` for
+-/// async admission after shutdown, without reclassifying it as a domain failure.
+-pub(crate) enum CoreError {
+-    Core(Error),
+-    Python(PyErr),
+-}
++/// `?` operator needs a local newtype. Every fallible binding method returns
++/// `Result<T, CoreError>`, and PyO3 converts through the impl below.
++pub(crate) struct CoreError(pub(crate) Error);
+
+ impl From<Error> for CoreError {
+     fn from(error: Error) -> Self {
+-        Self::Core(error)
+-    }
+-}
+-
+-impl From<PyErr> for CoreError {
+-    fn from(error: PyErr) -> Self {
+-        Self::Python(error)
++        CoreError(error)
+     }
+ }
+
+@@ -206,10 +196,7 @@ impl From<CoreError> for PyErr {
+         // `Python::attach` rather than a threaded-through token: this runs during `?`
+         // conversion where no token is in scope, and the conversion is always on a
+         // thread that is about to return into Python.
+-        match error {
+-            CoreError::Core(error) => Python::attach(|py| to_py_err(py, &error)),
+-            CoreError::Python(error) => error,
+-        }
++        Python::attach(|py| to_py_err(py, &error.0))
+     }
+ }
+
+diff --git b/bindings/microvms-py/src/exec.rs a/bindings/microvms-py/src/exec.rs
+index 952af9a4..e2db0f10 100644
+--- b/bindings/microvms-py/src/exec.rs
++++ a/bindings/microvms-py/src/exec.rs
+@@ -579,7 +579,7 @@ struct NextEvent {
+ #[pymethods]
+ impl NextEvent {
+     async fn recv(&self) -> PyResult<StreamEvent> {
+-        let received = runtime::fenced(async { self.receiver.lock().await.recv().await })?.await?;
++        let received = self.receiver.lock().await.recv().await;
+         match received {
+             Some(Ok(event)) => Ok(event.into()),
+             Some(Err(error)) => Err(Python::attach(|py| to_py_err(py, &error))),
+@@ -686,7 +686,7 @@ impl PyExecHandle {
+
+     /// The awaitable twin of `poll`.
+     async fn poll_async(&self) -> PyCoreResult<PyExecResult> {
+-        Ok(runtime::spawn(self.poll_op()).await??)
++        Ok(runtime::spawn(self.poll_op()).await?)
+     }
+
+     /// Polls until the exec is done, or raises `TimeoutError`.
+@@ -704,7 +704,7 @@ impl PyExecHandle {
+     #[pyo3(signature = (timeout=DEFAULT_WAIT))]
+     async fn wait_async(&self, timeout: f64) -> PyCoreResult<PyExecResult> {
+         let timeout = seconds(timeout)?;
+-        Ok(runtime::spawn(self.wait_op(timeout)).await??)
++        Ok(runtime::spawn(self.wait_op(timeout)).await?)
+     }
+
+     /// An iterator over output as it arrives, reconnecting at the last good offset.
+@@ -762,7 +762,7 @@ impl PyExecHandle {
+     #[pyo3(signature = (data, *, eof=false))]
+     async fn write_stdin_async(&self, data: Py<PyBytes>, eof: bool) -> PyCoreResult<PyStdinAck> {
+         let data = Python::attach(|py| pyo3::pybacked::PyBackedBytes::from(data.into_bound(py)));
+-        Ok(runtime::spawn(self.write_stdin_op(data, eof)).await??)
++        Ok(runtime::spawn(self.write_stdin_op(data, eof)).await?)
+     }
+
+     /// Sends EOF. Nothing else closes stdin: the daemon's copy of the pipe outlives the
+@@ -773,7 +773,7 @@ impl PyExecHandle {
+
+     /// The awaitable twin of `close_stdin`.
+     async fn close_stdin_async(&self) -> PyCoreResult<PyStdinAck> {
+-        Ok(runtime::spawn(self.close_stdin_op()).await??)
++        Ok(runtime::spawn(self.close_stdin_op()).await?)
+     }
+
+     /// Releases the buffered output and starts the TTL clock.
+@@ -783,7 +783,7 @@ impl PyExecHandle {
+
+     /// The awaitable twin of `ack`.
+     async fn ack_async(&self) -> PyCoreResult<PyExecResult> {
+-        Ok(runtime::spawn(self.ack_op()).await??)
++        Ok(runtime::spawn(self.ack_op()).await?)
+     }
+
+     /// Signals the whole process group. `False` means nothing was signalled because the
+@@ -794,7 +794,7 @@ impl PyExecHandle {
+
+     /// The awaitable twin of `kill`.
+     async fn kill_async(&self) -> PyCoreResult<bool> {
+-        Ok(runtime::spawn(self.kill_op()).await??)
++        Ok(runtime::spawn(self.kill_op()).await?)
+     }
+
+     /// Wait, then ack, returning the result that carries the output.
+@@ -813,7 +813,7 @@ impl PyExecHandle {
+     #[pyo3(signature = (timeout=DEFAULT_WAIT))]
+     async fn wait_and_ack_async(&self, timeout: f64) -> PyCoreResult<PyExecResult> {
+         let timeout = seconds(timeout)?;
+-        Ok(runtime::spawn(self.wait_and_ack_op(timeout)).await??)
++        Ok(runtime::spawn(self.wait_and_ack_op(timeout)).await?)
+     }
+
+     fn __repr__(&self) -> String {
+diff --git b/bindings/microvms-py/src/keepalive.rs a/bindings/microvms-py/src/keepalive.rs
+index d6f04e19..0a416d5d 100644
+--- b/bindings/microvms-py/src/keepalive.rs
++++ a/bindings/microvms-py/src/keepalive.rs
+@@ -157,7 +157,7 @@ impl PyKeepAwake {
+     /// The awaitable twin of `stop`. The stop is asked for before the first await, so
+     /// cancelling this still stops the keepalive; only the wait for its report is given up.
+     async fn stop_async(&self) -> PyCoreResult<PyKeepAwakeReport> {
+-        Ok(runtime::spawn(self.stop_op()).await??)
++        Ok(runtime::spawn(self.stop_op()).await?)
+     }
+
+     /// Waits for the keepalive to end on its own (`while_busy` or `max_duration`).
+@@ -177,7 +177,7 @@ impl PyKeepAwake {
+     #[pyo3(signature = (timeout=None))]
+     async fn wait_async(&self, timeout: Option<f64>) -> PyCoreResult<Option<PyKeepAwakeReport>> {
+         let timeout = timeout.map(crate::exec::seconds).transpose()?;
+-        Ok(runtime::spawn(self.wait_op(timeout)).await??)
++        Ok(runtime::spawn(self.wait_op(timeout)).await?)
+     }
+
+     fn __enter__(slf: Py<Self>) -> Py<Self> {
+@@ -217,7 +217,7 @@ impl PyKeepAwake {
+         let _ = (exc_value, traceback);
+         let stopped = runtime::spawn(self.stop_op()).await;
+         if exc_type.is_none() {
+-            stopped??;
++            stopped?;
+         }
+         Ok(false)
+     }
+diff --git b/bindings/microvms-py/src/lib.rs a/bindings/microvms-py/src/lib.rs
+index e81dddfb..2b6ed33e 100644
+--- b/bindings/microvms-py/src/lib.rs
++++ a/bindings/microvms-py/src/lib.rs
+@@ -192,7 +192,6 @@ mod microvms {
+         use pyo3::types::PyModuleMethods;
+         module.add("__version__", microvms_core::VERSION)?;
+         super::errors::register(module)?;
+-        super::runtime::register_shutdown(module)?;
+         Ok(())
+     }
+ }
+diff --git b/bindings/microvms-py/src/names.rs a/bindings/microvms-py/src/names.rs
+index 8e318d68..4de87971 100644
+--- b/bindings/microvms-py/src/names.rs
++++ a/bindings/microvms-py/src/names.rs
+@@ -46,7 +46,7 @@ impl PyNameRecord {
+                 agent_token,
+                 region.inner.as_str(),
+             )
+-            .map_err(CoreError::from)?,
++            .map_err(CoreError)?,
+         })
+     }
+
+@@ -55,7 +55,7 @@ impl PyNameRecord {
+     fn for_sandbox(py: Python<'_>, name: &str, sandbox: &PySandbox) -> PyCoreResult<Self> {
+         let inner = sandbox
+             .read(py, |sandbox| sandbox.name_record(name))
+-            .map_err(CoreError::from)?;
++            .map_err(CoreError)?;
+         Ok(Self { inner })
+     }
+
+@@ -67,17 +67,17 @@ impl PyNameRecord {
+             .and_then(|json| json.call_method1("dumps", (record,)))
+             .and_then(|dumped| dumped.extract())
+             .map_err(|_| {
+-                CoreError::from(microvms_core::error::Error::invalid_arg(
++                CoreError(microvms_core::error::Error::invalid_arg(
+                     "a name record dict must be JSON-serializable",
+                 ))
+             })?;
+         let value: serde_json::Value = serde_json::from_str(&text).map_err(|_| {
+-            CoreError::from(microvms_core::error::Error::invalid_arg(
++            CoreError(microvms_core::error::Error::invalid_arg(
+                 "a name record dict must be JSON-serializable",
+             ))
+         })?;
+         Ok(Self {
+-            inner: NameRecord::from_json(value).map_err(CoreError::from)?,
++            inner: NameRecord::from_json(value).map_err(CoreError)?,
+         })
+     }
+
+@@ -138,7 +138,7 @@ impl PyNameRecord {
+         Ok(self
+             .inner
+             .tunnel_identity()
+-            .map_err(CoreError::from)?
++            .map_err(CoreError)?
+             .map(Into::into))
+     }
+
+@@ -213,13 +213,13 @@ impl PyNameRegistry {
+         Ok(self
+             .store
+             .get(name)
+-            .map_err(CoreError::from)?
++            .map_err(CoreError)?
+             .map(|inner| PyNameRecord { inner }))
+     }
+
+     /// Writes `record` under its name, replacing any earlier record, owner-only on Unix.
+     fn put(&self, record: &PyNameRecord) -> PyCoreResult<()> {
+-        self.store.put(&record.inner).map_err(CoreError::from)
++        self.store.put(&record.inner).map_err(CoreError)
+     }
+
+     /// Names the VM `sandbox` addresses and writes the record; returns it.
+@@ -236,7 +236,7 @@ impl PyNameRegistry {
+
+     /// Removes `name`, answering whether a record was there.
+     fn delete(&self, name: &str) -> PyCoreResult<bool> {
+-        self.store.delete(name).map_err(CoreError::from)
++        self.store.delete(name).map_err(CoreError)
+     }
+
+     /// Every readable record, sorted by name.
+@@ -244,7 +244,7 @@ impl PyNameRegistry {
+         Ok(self
+             .store
+             .list()
+-            .map_err(CoreError::from)?
++            .map_err(CoreError)?
+             .into_iter()
+             .map(|inner| PyNameRecord { inner })
+             .collect())
+@@ -253,9 +253,7 @@ impl PyNameRegistry {
+     /// Removes every name registered to `microvm_id` and returns them — the step after a
+     /// terminate, so no name outlives its VM.
+     fn release_by_vm(&self, microvm_id: &str) -> PyCoreResult<Vec<String>> {
+-        self.store
+-            .release_by_vm(microvm_id)
+-            .map_err(CoreError::from)
++        self.store.release_by_vm(microvm_id).map_err(CoreError)
+     }
+
+     /// Registers a record this registry didn't write, once the VM has answered one
+@@ -285,7 +283,7 @@ impl PyNameRegistry {
+         session: Py<crate::session::PySession>,
+     ) -> PyCoreResult<bool> {
+         let op = self.import_op(record.get().inner.clone(), session.get());
+-        Ok(crate::runtime::spawn(op).await??)
++        Ok(crate::runtime::spawn(op).await?)
+     }
+
+     fn __repr__(&self) -> String {
+diff --git b/bindings/microvms-py/src/preflight.rs a/bindings/microvms-py/src/preflight.rs
+index af2c1a72..c40287c0 100644
+--- b/bindings/microvms-py/src/preflight.rs
++++ a/bindings/microvms-py/src/preflight.rs
+@@ -175,11 +175,9 @@ pub(crate) fn preflight(py: Python<'_>, region: Option<PyRegion>) -> PyPreflight
+ /// The awaitable twin of `preflight`. Never raises either; read `report.ok`.
+ #[pyfunction]
+ #[pyo3(signature = (region=None))]
+-pub(crate) async fn preflight_async(
+-    region: Option<PyRegion>,
+-) -> crate::errors::PyCoreResult<PyPreflightReport> {
++pub(crate) async fn preflight_async(region: Option<PyRegion>) -> PyPreflightReport {
+     let region = region.map(|region| region.inner);
+-    Ok(PyPreflightReport {
+-        inner: runtime::spawn(microvms_core::preflight::preflight(region)).await?,
+-    })
++    PyPreflightReport {
++        inner: runtime::spawn(microvms_core::preflight::preflight(region)).await,
++    }
+ }
+diff --git b/bindings/microvms-py/src/process.rs a/bindings/microvms-py/src/process.rs
+index 90517f80..1fc047c6 100644
+--- b/bindings/microvms-py/src/process.rs
++++ a/bindings/microvms-py/src/process.rs
+@@ -108,7 +108,7 @@ struct NextChunk {
+ #[pymethods]
+ impl NextChunk {
+     async fn recv(&self) -> PyResult<Py<PyBytes>> {
+-        let received = runtime::fenced(async { self.receiver.lock().await.recv().await })?.await?;
++        let received = self.receiver.lock().await.recv().await;
+         Python::attach(|py| match received {
+             Some(Ok(chunk)) => Ok(PyBytes::new(py, &chunk).unbind()),
+             Some(Err(error)) => Err(to_py_err(py, &error)),
+@@ -263,7 +263,7 @@ impl PyExecProcess {
+             .map(seconds)
+             .transpose()?
+             .unwrap_or(DEFAULT_EXEC_WAIT);
+-        Ok(runtime::spawn(self.wait_op(timeout)).await??)
++        Ok(runtime::spawn(self.wait_op(timeout)).await?)
+     }
+
+     /// Signals the whole process group. Idempotent: `False` means nothing was signalled
+@@ -275,7 +275,7 @@ impl PyExecProcess {
+
+     /// The awaitable twin of `kill`.
+     async fn kill_async(&self) -> PyCoreResult<bool> {
+-        Ok(runtime::spawn(self.kill_op()).await??)
++        Ok(runtime::spawn(self.kill_op()).await?)
+     }
+
+     fn __repr__(&self) -> String {
+diff --git b/bindings/microvms-py/src/provision.rs a/bindings/microvms-py/src/provision.rs
+index 9e299d35..e36d5cdc 100644
+--- b/bindings/microvms-py/src/provision.rs
++++ a/bindings/microvms-py/src/provision.rs
+@@ -101,7 +101,7 @@ fn provision(
+     binary: Option<PathBuf>,
+ ) -> PyCoreResult<Provisioned> {
+     py.detach(|| provision_now(version, state_dir, binary))
+-        .map_err(CoreError::from)
++        .map_err(CoreError)
+ }
+
+ /// The chain itself, blocking: both spellings call it, the awaitable one on the shared
+@@ -125,8 +125,8 @@ async fn provision_async(
+     binary: Option<PathBuf>,
+ ) -> PyCoreResult<Provisioned> {
+     crate::runtime::spawn_blocking(move || provision_now(version, state_dir, binary))
+-        .await?
+-        .map_err(CoreError::from)
++        .await
++        .map_err(CoreError)
+ }
+
+ /// The `agentd` daemon binary for `version` (default: this client's own), as bytes.
+diff --git b/bindings/microvms-py/src/runtime.rs a/bindings/microvms-py/src/runtime.rs
+index 64e4ad9b..53e33db2 100644
+--- b/bindings/microvms-py/src/runtime.rs
++++ a/bindings/microvms-py/src/runtime.rs
+@@ -67,30 +67,15 @@
+ //! needs workers that run while no Python thread is blocked on anything. The `LazyLock`
+ //! holds only a runtime and calls no Python during initialization, so it is not the
+ //! `OnceLock`-against-the-GIL deadlock PyO3's FAQ warns about.
+-//!
+-//! # Python wake lifetime and interpreter shutdown
+-//!
+-//! A task can publish its result before its worker finishes waking the coroutine. Every
+-//! future polled by Python therefore uses a fenced waker: completion or cancellation closes
+-//! admission and waits for existing wake callbacks to finish, with the GIL released. The
+-//! direct channel receivers use the same fence as spawned tasks.
+-//!
+-//! A Python `atexit` callback closes and drains the remaining fences before interpreter
+-//! finalization, including coroutines callers retained without completing or cancelling.
+-//! It leaves Rust-only shielded work running and does not stop the runtime. Later async
+-//! operations raise `RuntimeError`; blocking operations retain their existing behavior.
+
+ use std::future::Future;
+ use std::pin::Pin;
+-use std::sync::atomic::{AtomicBool, Ordering};
+-use std::sync::{Arc, Condvar, LazyLock, Mutex, Weak};
+-use std::task::{Context, Poll, Wake, Waker};
++use std::sync::LazyLock;
++use std::task::{Context, Poll};
+
+ use pyo3::prelude::*;
+ use tokio::task::JoinHandle;
+
+-use crate::errors::{CoreError, PyCoreResult};
+-
+ /// The process's runtime. See the module docs for why one, why multi-thread, and why
+ /// `LazyLock` is safe here.
+ static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
+@@ -101,230 +86,6 @@ static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
+         .expect("a multi-thread tokio runtime is buildable on every platform this loads on")
+ });
+
+-#[derive(Default)]
+-struct WakeRegistry {
+-    closed: bool,
+-    fences: Vec<Weak<WakeFence>>,
+-}
+-
+-static WAKES: Mutex<WakeRegistry> = Mutex::new(WakeRegistry {
+-    closed: false,
+-    fences: Vec::new(),
+-});
+-
+-#[derive(Default)]
+-struct WakeState {
+-    closed: bool,
+-    active: usize,
+-    waker: Option<Waker>,
+-}
+-
+-#[derive(Default)]
+-struct WakeFence {
+-    state: Mutex<WakeState>,
+-    drained: Condvar,
+-    // Admission closes under the mutex. This separate flag becomes true only after
+-    // every admitted callback and original waker has finished, including its drop.
+-    quiescent: AtomicBool,
+-    #[cfg(test)]
+-    drain_arrivals: std::sync::atomic::AtomicUsize,
+-}
+-
+-fn closed_error() -> CoreError {
+-    pyo3::exceptions::PyRuntimeError::new_err("the MicroVMs asynchronous runtime is shutting down")
+-        .into()
+-}
+-
+-fn register_wake() -> PyCoreResult<Arc<WakeFence>> {
+-    let mut registry = WAKES
+-        .lock()
+-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+-    if registry.closed {
+-        return Err(closed_error());
+-    }
+-    registry.fences.retain(|fence| fence.strong_count() != 0);
+-    let fence = Arc::new(WakeFence::default());
+-    registry.fences.push(Arc::downgrade(&fence));
+-    Ok(fence)
+-}
+-
+-/// Keeps the original waker's destruction inside the admission counted by the fence.
+-struct ActiveWake<'a> {
+-    fence: &'a WakeFence,
+-    waker: Option<Waker>,
+-}
+-
+-impl Drop for ActiveWake<'_> {
+-    fn drop(&mut self) {
+-        // A waker can own Python references. Never destroy it under the state lock,
+-        // and do not publish quiescence before its last callback reference is gone.
+-        drop(self.waker.take());
+-        let mut state = self
+-            .fence
+-            .state
+-            .lock()
+-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+-        state.active -= 1;
+-        if state.active == 0 {
+-            self.fence.drained.notify_all();
+-        }
+-    }
+-}
+-
+-impl WakeFence {
+-    fn update(&self, waker: &Waker) -> bool {
+-        Python::attach(|py| {
+-            py.detach(|| {
+-                let mut state = self
+-                    .state
+-                    .lock()
+-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+-                if state.closed {
+-                    return false;
+-                }
+-                state.active += 1;
+-                let old = ActiveWake {
+-                    fence: self,
+-                    waker: state.waker.replace(waker.clone()),
+-                };
+-                drop(state);
+-                drop(old);
+-                true
+-            })
+-        })
+-    }
+-
+-    fn close_detached(&self) {
+-        let mut state = self
+-            .state
+-            .lock()
+-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+-        state.closed = true;
+-        // Removing the stored original waker is itself in flight until its drop
+-        // finishes, so concurrent closers cannot return before it is destroyed.
+-        let old = state.waker.take().map(|waker| {
+-            state.active += 1;
+-            ActiveWake {
+-                fence: self,
+-                waker: Some(waker),
+-            }
+-        });
+-        drop(state);
+-        drop(old);
+-        let mut state = self
+-            .state
+-            .lock()
+-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+-        #[cfg(test)]
+-        self.drain_arrivals.fetch_add(1, Ordering::Release);
+-        // A deadline would allow an admitted callback to touch the finalized interpreter.
+-        // Even a caller-supplied loop callback must finish before this drain can return.
+-        while state.active != 0 {
+-            state = self
+-                .drained
+-                .wait(state)
+-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+-        }
+-        self.quiescent.store(true, Ordering::Release);
+-    }
+-
+-    fn close(&self) {
+-        if !self.quiescent.load(Ordering::Acquire) {
+-            // A worker may be inside Python::attach or waiting to acquire the GIL.
+-            // Waiting while attached would deadlock with that worker.
+-            Python::attach(|py| py.detach(|| self.close_detached()));
+-        }
+-    }
+-}
+-
+-impl Wake for WakeFence {
+-    fn wake(self: Arc<Self>) {
+-        self.wake_by_ref();
+-    }
+-
+-    fn wake_by_ref(self: &Arc<Self>) {
+-        let mut state = self
+-            .state
+-            .lock()
+-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+-        if state.closed || state.waker.is_none() {
+-            return;
+-        }
+-        state.active += 1;
+-        let active = ActiveWake {
+-            fence: self,
+-            waker: state.waker.clone(),
+-        };
+-        drop(state);
+-        // Python's callback must run outside the lock. The guard stays alive through
+-        // its attach/release and original-waker drop, including unwinding.
+-        active.waker.as_ref().unwrap().wake_by_ref();
+-    }
+-}
+-
+-/// Run before interpreter finalization, while detaching can still let a Python wake finish.
+-#[pyfunction]
+-fn close_async_wakes(py: Python<'_>) {
+-    py.detach(|| {
+-        let fences = {
+-            let mut registry = WAKES
+-                .lock()
+-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+-            registry.closed = true;
+-            std::mem::take(&mut registry.fences)
+-        };
+-        for fence in fences.into_iter().filter_map(|fence| fence.upgrade()) {
+-            fence.close_detached();
+-        }
+-    });
+-}
+-
+-pub(crate) fn register_shutdown(module: &Bound<'_, pyo3::types::PyModule>) -> PyResult<()> {
+-    module.py().import("atexit")?.call_method1(
+-        "register",
+-        (pyo3::wrap_pyfunction!(close_async_wakes, module)?,),
+-    )?;
+-    Ok(())
+-}
+-
+-/// Prevent a polled Rust future from retaining Python's waker after completion or drop.
+-pub(crate) struct Fenced<F: Future> {
+-    future: Pin<Box<F>>,
+-    fence: Arc<WakeFence>,
+-}
+-
+-pub(crate) fn fenced<F: Future>(future: F) -> PyCoreResult<Fenced<F>> {
+-    Ok(Fenced {
+-        future: Box::pin(future),
+-        fence: register_wake()?,
+-    })
+-}
+-
+-impl<F: Future> Future for Fenced<F> {
+-    type Output = PyCoreResult<F::Output>;
+-
+-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+-        if !self.fence.update(cx.waker()) {
+-            return Poll::Ready(Err(closed_error()));
+-        }
+-        let waker = Waker::from(Arc::clone(&self.fence));
+-        let polled = self.future.as_mut().poll(&mut Context::from_waker(&waker));
+-        match polled {
+-            Poll::Pending => Poll::Pending,
+-            Poll::Ready(output) => {
+-                self.fence.close();
+-                Poll::Ready(Ok(output))
+-            }
+-        }
+-    }
+-}
+-
+-impl<F: Future> Drop for Fenced<F> {
+-    fn drop(&mut self) {
+-        self.fence.close();
+-    }
+-}
+-
+ /// Runs `future` to completion with the GIL released.
+ ///
+ /// The `Send + 'static` bounds on the future are what make the detach sound: nothing
+@@ -374,7 +135,10 @@ where
+     F: Future + Send + 'static,
+     F::Output: Send + 'static,
+ {
+-    spawned(|| RUNTIME.spawn(future), true)
++    Spawned {
++        task: RUNTIME.spawn(future),
++        abort_on_drop: true,
++    }
+ }
+
+ /// [`spawn`] for a lifecycle transition: dropping the awaitable leaves the task running to
+@@ -384,7 +148,10 @@ where
+     F: Future + Send + 'static,
+     F::Output: Send + 'static,
+ {
+-    spawned(|| RUNTIME.spawn(future), false)
++    Spawned {
++        task: RUNTIME.spawn(future),
++        abort_on_drop: false,
++    }
+ }
+
+ /// Runs a blocking core call on the shared runtime's blocking pool and returns the awaitable
+@@ -396,49 +163,31 @@ where
+     F: FnOnce() -> T + Send + 'static,
+     T: Send + 'static,
+ {
+-    spawned(|| RUNTIME.spawn_blocking(call), false)
+-}
+-
+-fn spawned<T>(start: impl FnOnce() -> JoinHandle<T>, abort_on_drop: bool) -> Spawned<T> {
+-    let task = register_wake()
+-        .map(|fence| Fenced {
+-            future: Box::pin(start()),
+-            fence,
+-        })
+-        .map_err(Some);
+     Spawned {
+-        task,
+-        abort_on_drop,
++        task: RUNTIME.spawn_blocking(call),
++        abort_on_drop: false,
+     }
+ }
+
+ /// A task on the shared runtime, awaited from a pyo3 coroutine. See [`spawn`].
+ ///
+-/// Its output carries either the task's result or a Python bridge shutdown error.
+-/// A task that panicked re-raises the panic here, on the
++/// Its output is the task's own. A task that panicked re-raises the panic here, on the
+ /// coroutine's poll, where pyo3 turns it into `PanicException` exactly as it does for a panic in
+ /// a blocking method; the runtime is never shut down, so the only cancellation a task meets is
+ /// [`Spawned`]'s own abort, which happens after nothing can await it any more.
+ pub(crate) struct Spawned<T> {
+-    task: Result<Fenced<JoinHandle<T>>, Option<CoreError>>,
++    task: JoinHandle<T>,
+     abort_on_drop: bool,
+ }
+
+ impl<T> Future for Spawned<T> {
+-    type Output = PyCoreResult<T>;
++    type Output = T;
+
+-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+-        let task = match &mut self.task {
+-            Ok(task) => task,
+-            Err(error) => {
+-                return Poll::Ready(Err(error.take().expect("a rejected task is polled once")));
+-            }
+-        };
+-        match Pin::new(task).poll(cx) {
++    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<T> {
++        match Pin::new(&mut self.task).poll(cx) {
+             Poll::Pending => Poll::Pending,
+-            Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
+-            Poll::Ready(Ok(Ok(output))) => Poll::Ready(Ok(output)),
+-            Poll::Ready(Ok(Err(error))) => match error.try_into_panic() {
++            Poll::Ready(Ok(output)) => Poll::Ready(output),
++            Poll::Ready(Err(error)) => match error.try_into_panic() {
+                 Ok(payload) => std::panic::resume_unwind(payload),
+                 Err(error) => {
+                     panic!("a task on the shared runtime ended without a result: {error}")
+@@ -451,11 +200,8 @@ impl<T> Future for Spawned<T> {
+ impl<T> Drop for Spawned<T> {
+     fn drop(&mut self) {
+         // Aborting a finished task is a no-op, so this needs no "did it finish" check.
+-        if let Ok(task) = &self.task {
+-            task.fence.close();
+-            if self.abort_on_drop {
+-                task.future.as_ref().get_ref().abort();
+-            }
++        if self.abort_on_drop {
++            self.task.abort();
+         }
+     }
+ }
+@@ -521,123 +267,3 @@ where
+         Ok(self.coroutine)
+     }
+ }
+-
+-#[cfg(test)]
+-mod tests {
+-    use super::*;
+-    use std::sync::mpsc;
+-    use std::time::{Duration, Instant};
+-
+-    fn wait_for_drainers(fence: &WakeFence, expected: usize) {
+-        let deadline = Instant::now() + Duration::from_secs(5);
+-        while fence.drain_arrivals.load(Ordering::Acquire) < expected {
+-            assert!(Instant::now() < deadline, "closers did not reach the drain");
+-            std::thread::yield_now();
+-        }
+-    }
+-
+-    struct BlockingWake {
+-        entered: mpsc::Sender<()>,
+-        release: Mutex<mpsc::Receiver<()>>,
+-    }
+-
+-    impl Wake for BlockingWake {
+-        fn wake(self: Arc<Self>) {
+-            self.wake_by_ref();
+-        }
+-
+-        fn wake_by_ref(self: &Arc<Self>) {
+-            self.entered.send(()).unwrap();
+-            self.release.lock().unwrap().recv().unwrap();
+-        }
+-    }
+-
+-    #[test]
+-    fn concurrent_closers_wait_until_the_admitted_wake_finishes() {
+-        let (entered, did_enter) = mpsc::channel();
+-        let (release, released) = mpsc::channel();
+-        let fence = Arc::new(WakeFence::default());
+-        fence.state.lock().unwrap().waker = Some(Waker::from(Arc::new(BlockingWake {
+-            entered,
+-            release: Mutex::new(released),
+-        })));
+-        let wake = Arc::clone(&fence);
+-        let worker = std::thread::spawn(move || wake.wake_by_ref());
+-        did_enter.recv_timeout(Duration::from_secs(5)).unwrap();
+-
+-        let (finished, did_finish) = mpsc::channel();
+-        let closers: Vec<_> = (0..2)
+-            .map(|_| {
+-                let fence = Arc::clone(&fence);
+-                let finished = finished.clone();
+-                std::thread::spawn(move || {
+-                    fence.close_detached();
+-                    finished.send(()).unwrap();
+-                })
+-            })
+-            .collect();
+-        wait_for_drainers(&fence, 2);
+-        // The handshake proves both closers arrived; the bounded observation checks
+-        // that neither returns while the admitted callback is deliberately held.
+-        let before_release = did_finish.recv_timeout(Duration::from_millis(100));
+-        let published_early = fence.quiescent.load(Ordering::Acquire);
+-        release.send(()).unwrap();
+-        worker.join().unwrap();
+-        for closer in closers {
+-            closer.join().unwrap();
+-        }
+-        assert_eq!(before_release, Err(mpsc::RecvTimeoutError::Timeout));
+-        assert!(!published_early);
+-        assert!(fence.quiescent.load(Ordering::Acquire));
+-    }
+-
+-    struct BlockingDrop {
+-        entered: mpsc::Sender<()>,
+-        release: Mutex<mpsc::Receiver<()>>,
+-    }
+-
+-    #[expect(
+-        clippy::manual_noop_waker,
+-        reason = "the test observes this waker's blocking destructor rather than its wake"
+-    )]
+-    impl Wake for BlockingDrop {
+-        fn wake(self: Arc<Self>) {}
+-    }
+-
+-    impl Drop for BlockingDrop {
+-        fn drop(&mut self) {
+-            self.entered.send(()).unwrap();
+-            self.release.lock().unwrap().recv().unwrap();
+-        }
+-    }
+-
+-    #[test]
+-    fn concurrent_closers_wait_for_the_last_original_waker_drop() {
+-        let (entered, did_enter) = mpsc::channel();
+-        let (release, released) = mpsc::channel();
+-        let fence = Arc::new(WakeFence::default());
+-        fence.state.lock().unwrap().waker = Some(Waker::from(Arc::new(BlockingDrop {
+-            entered,
+-            release: Mutex::new(released),
+-        })));
+-        let first = Arc::clone(&fence);
+-        let first = std::thread::spawn(move || first.close_detached());
+-        did_enter.recv_timeout(Duration::from_secs(5)).unwrap();
+-        let (finished, did_finish) = mpsc::channel();
+-        let second = Arc::clone(&fence);
+-        let second = std::thread::spawn(move || {
+-            second.close_detached();
+-            finished.send(()).unwrap();
+-        });
+-        wait_for_drainers(&fence, 1);
+-        // The first closer is held in waker destruction; the second reached its drain.
+-        let before_release = did_finish.recv_timeout(Duration::from_millis(100));
+-        let published_early = fence.quiescent.load(Ordering::Acquire);
+-        release.send(()).unwrap();
+-        first.join().unwrap();
+-        second.join().unwrap();
+-        assert_eq!(before_release, Err(mpsc::RecvTimeoutError::Timeout));
+-        assert!(!published_early);
+-        assert!(fence.quiescent.load(Ordering::Acquire));
+-    }
+-}
+diff --git b/bindings/microvms-py/src/sandbox.rs a/bindings/microvms-py/src/sandbox.rs
+index bbc2c3aa..2f594250 100644
+--- b/bindings/microvms-py/src/sandbox.rs
++++ a/bindings/microvms-py/src/sandbox.rs
+@@ -764,7 +764,7 @@ fn project_files(
+ ) -> PyCoreResult<Option<microvms_core::control::ProjectFiles>> {
+     dir.map(microvms_core::control::read_project_files)
+         .transpose()
+-        .map_err(crate::errors::CoreError::from)
++        .map_err(crate::errors::CoreError)
+ }
+
+ /// The core request for `build_image`'s keywords: each one set on core's own request type,
+@@ -973,7 +973,7 @@ impl PySandbox {
+     /// The awaitable twin of `Sandbox(region)`: resolves credentials on the shared runtime.
+     #[staticmethod]
+     async fn create_async(region: PyRegion) -> PyCoreResult<PySandbox> {
+-        Ok(runtime::spawn(open(region.inner)).await??)
++        Ok(runtime::spawn(open(region.inner)).await?)
+     }
+
+     /// The lifecycle state: `"PENDING"`, `"RUNNING"`, `"SUSPENDING"`, `"SUSPENDED"`,
+@@ -1053,7 +1053,7 @@ impl PySandbox {
+             agent_token,
+             port,
+         ))
+-        .await??;
++        .await?;
+         Ok(PySandbox::own(adopted))
+     }
+
+@@ -1089,7 +1089,7 @@ impl PySandbox {
+         let sandbox = runtime::spawn(async move {
+             Sandbox::from_name(&store, &name, Some(region.inner), port).await
+         })
+-        .await??;
++        .await?;
+         Ok(PySandbox::own(sandbox))
+     }
+
+@@ -1110,7 +1110,7 @@ impl PySandbox {
+     fn detach(&self, py: Python<'_>) -> PyCoreResult<PyDetached> {
+         let inner = runtime::lock_now(py, &self.inner)
+             .detach()
+-            .map_err(CoreError::from)?;
++            .map_err(CoreError)?;
+         Ok(PyDetached { inner })
+     }
+
+@@ -1359,7 +1359,7 @@ impl PySandbox {
+     ) -> PyCoreResult<PyImage> {
+         // PyO3 polls this coroutine on the event-loop thread. Project files can live on a
+         // slow filesystem, so read them on the blocking pool before creating the image.
+-        let project_files = runtime::spawn_blocking(move || project_files(project_dir)).await??;
++        let project_files = runtime::spawn_blocking(move || project_files(project_dir)).await?;
+         let request = create_image_request(ImageRequestArgs {
+             name: &name,
+             binary,
+@@ -1379,7 +1379,7 @@ impl PySandbox {
+             log_stream,
+             token_scope,
+         });
+-        Ok(runtime::spawn_shielded(self.build_image_op(request)).await??)
++        Ok(runtime::spawn_shielded(self.build_image_op(request)).await?)
+     }
+
+     /// Builds or reuses the content-addressed image for a task: one call from build inputs
+@@ -1528,7 +1528,7 @@ impl PySandbox {
+             tags,
+             wait_timeout,
+         )?;
+-        Ok(runtime::spawn(self.ensure_image_op(request, context_dir, project_dir)).await??)
++        Ok(runtime::spawn(self.ensure_image_op(request, context_dir, project_dir)).await?)
+     }
+
+     /// Every local guard `build_image` runs, with zero calls: raises the refusal `build_image`
+@@ -1623,7 +1623,7 @@ impl PySandbox {
+         &self,
+         base_image_arn: String,
+     ) -> PyCoreResult<Vec<PyManagedBaseVersion>> {
+-        Ok(runtime::spawn(self.managed_base_versions_op(base_image_arn)).await??)
++        Ok(runtime::spawn(self.managed_base_versions_op(base_image_arn)).await?)
+     }
+
+     /// The artifact bytes to upload to `code_artifact_uri`.
+@@ -1668,10 +1668,7 @@ impl PySandbox {
+         request.project_files = project_files(project_dir)?;
+         request.inherit_workdir = inherit_workdir;
+         let bytes = self.read(py, |sandbox| sandbox.build_artifact_for(&request));
+-        Ok(PyBytes::new(
+-            py,
+-            &bytes.map_err(crate::errors::CoreError::from)?,
+-        ))
++        Ok(PyBytes::new(py, &bytes.map_err(crate::errors::CoreError)?))
+     }
+
+     /// Launches a MicroVM and returns its session. By default it waits for RUNNING
+@@ -1889,7 +1886,7 @@ impl PySandbox {
+             log_stream,
+             disable_logging,
+         })?;
+-        Ok(runtime::spawn_shielded(self.run_op(request)).await??)
++        Ok(runtime::spawn_shielded(self.run_op(request)).await?)
+     }
+
+     /// Finishes a `run(wait=False)`: waits for RUNNING and for the daemon to answer, and
+@@ -1909,7 +1906,7 @@ impl PySandbox {
+     #[pyo3(signature = (*, timeout=None))]
+     async fn wait_until_running_async(&self, timeout: Option<f64>) -> PyCoreResult<PySession> {
+         let timeout = running_timeout(timeout)?;
+-        Ok(runtime::spawn(self.wait_until_running_op(timeout)).await??)
++        Ok(runtime::spawn(self.wait_until_running_op(timeout)).await?)
+     }
+
+     /// Freezes the VM and waits for the platform to report it.
+@@ -1931,7 +1928,7 @@ impl PySandbox {
+     /// The awaitable twin of `suspend`. A lifecycle transition: cancelling the awaitable
+     /// leaves the suspend running to completion.
+     async fn suspend_async(&self) -> PyCoreResult<String> {
+-        Ok(runtime::spawn_shielded(self.suspend_op()).await??)
++        Ok(runtime::spawn_shielded(self.suspend_op()).await?)
+     }
+
+     /// Thaws the VM and returns a usable session.
+@@ -1965,7 +1962,7 @@ impl PySandbox {
+     /// The awaitable twin of `resume`. A lifecycle transition: cancelling the awaitable leaves
+     /// the resume running to completion.
+     async fn resume_async(&self) -> PyCoreResult<PySession> {
+-        Ok(runtime::spawn_shielded(self.resume_op()).await??)
++        Ok(runtime::spawn_shielded(self.resume_op()).await?)
+     }
+
+     /// Tears down, best-effort, **never raising**.
+@@ -2039,7 +2036,7 @@ impl PySandbox {
+             delete_backoff,
+             wait_for_terminated,
+         )?;
+-        runtime::spawn_shielded(self.terminate_op(opts)).await
++        Ok(runtime::spawn_shielded(self.terminate_op(opts)).await)
+     }
+
+     /// `with sandbox as s:` — returns the sandbox itself.
+diff --git b/bindings/microvms-py/src/serve.rs a/bindings/microvms-py/src/serve.rs
+index ab9f7ec5..4f9f5ac4 100644
+--- b/bindings/microvms-py/src/serve.rs
++++ a/bindings/microvms-py/src/serve.rs
+@@ -45,7 +45,7 @@ impl PyTunnelIdentity {
+     fn new(host_seed: &str, vm_public_key: &str) -> PyCoreResult<Self> {
+         Ok(Self {
+             inner: TunnelIdentity::from_encoded_parts(host_seed, vm_public_key)
+-                .map_err(CoreError::from)?,
++                .map_err(CoreError)?,
+         })
+     }
+
+@@ -76,7 +76,7 @@ impl PyTunnelIdentity {
+
+ /// `stop()`'s grace, from its `timeout` keyword.
+ fn grace(timeout: Option<f64>) -> PyCoreResult<Option<std::time::Duration>> {
+-    timeout.map(seconds).transpose().map_err(CoreError::from)
++    timeout.map(seconds).transpose().map_err(CoreError)
+ }
+
+ /// A connection that didn't end clean.
+@@ -311,7 +311,7 @@ impl PyTunnel {
+     #[pyo3(signature = (timeout=None))]
+     async fn stop_async(&self, timeout: Option<f64>) -> PyCoreResult<PyTunnelReport> {
+         let grace = grace(timeout)?;
+-        Ok(runtime::spawn(self.stop_op(grace)).await??)
++        Ok(runtime::spawn(self.stop_op(grace)).await?)
+     }
+
+     fn __enter__(slf: Py<Self>) -> Py<Self> {
+@@ -352,7 +352,7 @@ impl PyTunnel {
+         let _ = (exc_value, traceback);
+         let stopped = runtime::spawn(self.stop_op(None)).await;
+         if exc_type.is_none() {
+-            stopped??;
++            stopped?;
+         }
+         Ok(false)
+     }
+@@ -426,7 +426,7 @@ impl PyPortForward {
+     #[pyo3(signature = (timeout=None))]
+     async fn stop_async(&self, timeout: Option<f64>) -> PyCoreResult<PyPortForwardReport> {
+         let grace = grace(timeout)?;
+-        Ok(runtime::spawn(self.stop_op(grace)).await??)
++        Ok(runtime::spawn(self.stop_op(grace)).await?)
+     }
+
+     fn __enter__(slf: Py<Self>) -> Py<Self> {
+@@ -467,7 +467,7 @@ impl PyPortForward {
+         let _ = (exc_value, traceback);
+         let stopped = runtime::spawn(self.stop_op(None)).await;
+         if exc_type.is_none() {
+-            stopped??;
++            stopped?;
+         }
+         Ok(false)
+     }
+diff --git b/bindings/microvms-py/src/session.rs a/bindings/microvms-py/src/session.rs
+index 6008cc6c..47a371de 100644
+--- b/bindings/microvms-py/src/session.rs
++++ a/bindings/microvms-py/src/session.rs
+@@ -870,10 +870,10 @@ fn completion_plan(
+     client_grace_sec: f64,
+ ) -> PyResult<CompletionPlan> {
+     let options = CompletionOptions {
+-        client_grace: seconds(client_grace_sec).map_err(CoreError::from)?,
++        client_grace: seconds(client_grace_sec).map_err(CoreError)?,
+         ..CompletionOptions::default()
+     };
+-    Ok(CompletionPlan::new(request, options).map_err(CoreError::from)?)
++    Ok(CompletionPlan::new(request, options).map_err(CoreError)?)
+ }
+
+ /// Hands one chunk to `on_output` under the GIL and answers whether the drive reads on. The
+@@ -978,7 +978,7 @@ impl PySession {
+             port,
+             timeout,
+         ))
+-        .await??;
++        .await?;
+         Ok(Self {
+             held: Held::Owned(session),
+         })
+@@ -1024,7 +1024,7 @@ impl PySession {
+
+     /// The awaitable twin of `discovery`.
+     async fn discovery_async(&self) -> PyCoreResult<Option<PyDiscovery>> {
+-        Ok(runtime::spawn(self.discovery_op()).await??)
++        Ok(runtime::spawn(self.discovery_op()).await?)
+     }
+
+     /// Unauthenticated liveness.
+@@ -1034,7 +1034,7 @@ impl PySession {
+
+     /// The awaitable twin of `health`.
+     async fn health_async(&self) -> PyCoreResult<PyHealth> {
+-        Ok(runtime::spawn(self.health_op()).await??)
++        Ok(runtime::spawn(self.health_op()).await?)
+     }
+
+     /// Keeps the VM awake by polling health from this process until stopped.
+@@ -1107,7 +1107,7 @@ impl PySession {
+     #[pyo3(signature = (timeout=DEFAULT_BOOTSTRAP_TIMEOUT))]
+     async fn wait_until_ready_async(&self, timeout: f64) -> PyCoreResult<PyHealth> {
+         let timeout = seconds(timeout)?;
+-        Ok(runtime::spawn(self.wait_until_ready_op(timeout)).await??)
++        Ok(runtime::spawn(self.wait_until_ready_op(timeout)).await?)
+     }
+
+     /// Starts a command and returns its handle. Does not wait.
+@@ -1249,7 +1249,7 @@ impl PySession {
+             inherit_image_env,
+         );
+         Ok(PyExecHandle::wrap(
+-            runtime::spawn(self.start_op(request)).await??,
++            runtime::spawn(self.start_op(request)).await?,
+         ))
+     }
+
+@@ -1317,7 +1317,7 @@ impl PySession {
+     ) -> PyResult<crate::process::PyExecProcess> {
+         let (options, policy) =
+             split_options(offset, reconnect, max_reconnects, idle_timeout, gap_policy)
+-                .map_err(CoreError::from)?;
++                .map_err(CoreError)?;
+         let request = start_request(
+             command,
+             shell,
+@@ -1332,7 +1332,7 @@ impl PySession {
+             poweroff_on_exit,
+             inherit_image_env,
+         );
+-        let handle = runtime::block_on(py, self.start_op(request)).map_err(CoreError::from)?;
++        let handle = runtime::block_on(py, self.start_op(request)).map_err(CoreError)?;
+         crate::process::PyExecProcess::start(py, handle, options, policy)
+     }
+
+@@ -1389,7 +1389,7 @@ impl PySession {
+             idle_timeout,
+             gap_policy.as_deref(),
+         )
+-        .map_err(CoreError::from)?;
++        .map_err(CoreError)?;
+         let request = start_request(
+             command,
+             shell,
+@@ -1405,8 +1405,8 @@ impl PySession {
+             inherit_image_env,
+         );
+         let handle = runtime::spawn(self.start_op(request))
+-            .await?
+-            .map_err(CoreError::from)?;
++            .await
++            .map_err(CoreError)?;
+         Python::attach(|py| crate::process::PyExecProcess::start(py, handle, options, policy))
+     }
+
+@@ -1530,7 +1530,7 @@ impl PySession {
+             inherit_image_env,
+         );
+         let timeout = seconds(timeout)?;
+-        Ok(runtime::spawn(self.run_sync_op(request, timeout)).await??)
++        Ok(runtime::spawn(self.run_sync_op(request, timeout)).await?)
+     }
+
+     /// Start, stream, and collect one command: exactly one `ExecResult` back (BIND-6..10).
+@@ -1604,7 +1604,7 @@ impl PySession {
+         let plan = completion_plan(&request, client_grace_sec)?;
+         // Started under the sandbox lock and driven after it is released: the callback runs
+         // Python, and Python that reaches back into this sandbox must not find the lock held.
+-        let handle = runtime::block_on(py, self.start_op(request)).map_err(CoreError::from)?;
++        let handle = runtime::block_on(py, self.start_op(request)).map_err(CoreError)?;
+         let raised: Arc<std::sync::Mutex<Option<PyErr>>> = Arc::default();
+         let sink = on_output.map(|callback| {
+             let raised = Arc::clone(&raised);
+@@ -1623,7 +1623,7 @@ impl PySession {
+         {
+             return Err(error);
+         }
+-        Ok(PyExecResult::wrap(result.map_err(CoreError::from)?))
++        Ok(PyExecResult::wrap(result.map_err(CoreError)?))
+     }
+
+     /// The awaitable twin of `run_to_completion`, with its keywords.
+@@ -1713,7 +1713,7 @@ impl PySession {
+         let raised: Arc<std::sync::Mutex<Option<PyErr>>> = Arc::default();
+         let mut open = true;
+         let result = loop {
+-            let next = runtime::fenced(std::future::poll_fn(|cx| {
++            let next = std::future::poll_fn(|cx| {
+                 if let std::task::Poll::Ready(result) = std::pin::Pin::new(&mut drive).poll(cx) {
+                     return std::task::Poll::Ready(Ok(result));
+                 }
+@@ -1728,10 +1728,10 @@ impl PySession {
+                     }
+                 }
+                 std::task::Poll::Pending
+-            }))?
+-            .await?;
++            })
++            .await;
+             match next {
+-                Ok(result) => break result?,
++                Ok(result) => break result,
+                 Err(None) => open = false,
+                 Err(Some((event, reply))) => {
+                     let flow = match &on_output {
+@@ -1749,7 +1749,7 @@ impl PySession {
+         {
+             return Err(error);
+         }
+-        Ok(PyExecResult::wrap(result.map_err(CoreError::from)?))
++        Ok(PyExecResult::wrap(result.map_err(CoreError)?))
+     }
+
+     /// Signals an exec's whole process group. Returns whether anything was signalled.
+@@ -1759,7 +1759,7 @@ impl PySession {
+
+     /// The awaitable twin of `kill`.
+     async fn kill_async(&self, exec_id: String) -> PyCoreResult<bool> {
+-        Ok(runtime::spawn(self.kill_op(exec_id)).await??)
++        Ok(runtime::spawn(self.kill_op(exec_id)).await?)
+     }
+
+     /// Process accounting: every registered exec with its group's live pids.
+@@ -1773,7 +1773,7 @@ impl PySession {
+
+     /// The awaitable twin of `procs`.
+     async fn procs_async(&self) -> PyCoreResult<Vec<PyProcGroup>> {
+-        Ok(runtime::spawn(self.procs_op()).await??)
++        Ok(runtime::spawn(self.procs_op()).await?)
+     }
+
+     /// Writes one file, creating parents. `mode` is an **octal string** (`"0755"`), which
+@@ -1800,7 +1800,7 @@ impl PySession {
+         data: Py<PyBytes>,
+         mode: Option<String>,
+     ) -> PyCoreResult<()> {
+-        Ok(runtime::spawn(self.upload_file_op(path, backed(data), mode)).await??)
++        Ok(runtime::spawn(self.upload_file_op(path, backed(data), mode)).await?)
+     }
+
+     /// Reads one file, or lines `start_line` through `end_line` of it.
+@@ -1832,7 +1832,7 @@ impl PySession {
+         start_line: Option<u64>,
+         end_line: Option<u64>,
+     ) -> PyCoreResult<Py<PyBytes>> {
+-        let bytes = runtime::spawn(self.download_file_op(path, start_line, end_line)).await??;
++        let bytes = runtime::spawn(self.download_file_op(path, start_line, end_line)).await?;
+         Ok(Python::attach(|py| PyBytes::new(py, &bytes).unbind()))
+     }
+
+@@ -1866,7 +1866,7 @@ impl PySession {
+         local_dir: std::path::PathBuf,
+         globs: Vec<String>,
+     ) -> PyCoreResult<Vec<crate::workspace::PyDownloadedFile>> {
+-        Ok(runtime::spawn(self.download_dir_op(remote, local_dir, globs)).await??)
++        Ok(runtime::spawn(self.download_dir_op(remote, local_dir, globs)).await?)
+     }
+
+     /// Syncs `local_dir` into the VM's `/workspace` once, uploading only what changed.
+@@ -1903,7 +1903,7 @@ impl PySession {
+         delete_timeout: Option<f64>,
+     ) -> PyCoreResult<crate::workspace::PySyncReport> {
+         let delete_timeout = sync_delete_timeout(delete_timeout)?;
+-        Ok(runtime::spawn(self.sync_dir_op(local_dir, full, delete_timeout)).await??)
++        Ok(runtime::spawn(self.sync_dir_op(local_dir, full, delete_timeout)).await?)
+     }
+
+     /// Whether a path exists, distinguishing absence from every other refusal.
+@@ -1916,7 +1916,7 @@ impl PySession {
+
+     /// The awaitable twin of `file_exists`.
+     async fn file_exists_async(&self, path: String) -> PyCoreResult<bool> {
+-        Ok(runtime::spawn(self.file_exists_op(path)).await??)
++        Ok(runtime::spawn(self.file_exists_op(path)).await?)
+     }
+
+     /// Extracts pre-built tar bytes under `remote`.
+@@ -1933,7 +1933,7 @@ impl PySession {
+
+     /// The awaitable twin of `upload_tar`.
+     async fn upload_tar_async(&self, remote: String, archive: Py<PyBytes>) -> PyCoreResult<()> {
+-        Ok(runtime::spawn(self.upload_tar_op(remote, backed(archive))).await??)
++        Ok(runtime::spawn(self.upload_tar_op(remote, backed(archive))).await?)
+     }
+
+     /// The raw tar bytes of a remote tree.
+@@ -1948,7 +1948,7 @@ impl PySession {
+
+     /// The awaitable twin of `download_tar`.
+     async fn download_tar_async(&self, remote: String) -> PyCoreResult<Py<PyBytes>> {
+-        let bytes = runtime::spawn(self.download_tar_op(remote)).await??;
++        let bytes = runtime::spawn(self.download_tar_op(remote)).await?;
+         Ok(Python::attach(|py| PyBytes::new(py, &bytes).unbind()))
+     }
+
+@@ -1978,7 +1978,7 @@ impl PySession {
+         &self,
+         port: u16,
+     ) -> PyCoreResult<std::collections::HashMap<String, String>> {
+-        Ok(runtime::spawn(self.connect_headers_op(port)).await??)
++        Ok(runtime::spawn(self.connect_headers_op(port)).await?)
+     }
+
+     /// The three WebSocket subprotocols for `port`, in the order a handshake offers them.
+@@ -2000,7 +2000,7 @@ impl PySession {
+
+     /// The awaitable twin of `connect_subprotocols`.
+     async fn connect_subprotocols_async(&self, port: u16) -> PyCoreResult<Option<Vec<String>>> {
+-        Ok(runtime::spawn(self.connect_subprotocols_op(port)).await??)
++        Ok(runtime::spawn(self.connect_subprotocols_op(port)).await?)
+     }
+
+     /// Serves a local TCP port as a tunnel to `guest_port` in the VM, on a background task,
+@@ -2045,7 +2045,7 @@ impl PySession {
+     ) -> PyCoreResult<crate::serve::PyTunnel> {
+         let bind = serve::bind_address(bind.as_deref())?;
+         let identity = verify_identity.map(|identity| identity.inner);
+-        Ok(runtime::spawn(self.tunnel_op(bind, guest_port, identity, max_connections)).await??)
++        Ok(runtime::spawn(self.tunnel_op(bind, guest_port, identity, max_connections)).await?)
+     }
+
+     /// Serves a local port as an HTTP and WebSocket forward to `guest_port` in the VM, on a
+@@ -2079,7 +2079,7 @@ impl PySession {
+         max_connections: Option<u32>,
+     ) -> PyCoreResult<crate::serve::PyPortForward> {
+         let bind = serve::bind_address(bind.as_deref())?;
+-        Ok(runtime::spawn(self.port_forward_op(bind, guest_port, max_connections)).await??)
++        Ok(runtime::spawn(self.port_forward_op(bind, guest_port, max_connections)).await?)
+     }
+
+     /// How many proxy tokens this session has minted, or `None` for a direct session.

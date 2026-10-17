@@ -1,0 +1,148 @@
+--- a/bindings/microvms-py/src/serve.rs
++++ b/bindings/microvms-py/src/serve.rs
+@@ -283,143 +283,143 @@
+ }
+
+ #[pymethods]
+ impl PyTunnel {
+     /// The local address to connect to, `host:port`, with the port the OS picked.
+     #[getter]
+     fn local_address(&self) -> String {
+         self.task.local_address().to_string()
+     }
+
+     /// Whether the tunnel is still serving.
+     #[getter]
+     fn running(&self) -> bool {
+         self.task.is_running()
+     }
+
+     /// Stops accepting, waits for the connections still open to end, and returns the report.
+     ///
+     /// With `timeout`, connections still open after that many seconds are cut and listed as
+     /// `"failed"`. Without it, a client that keeps its connection open keeps this waiting.
+     /// Callable again, with the same report.
+     #[pyo3(signature = (timeout=None))]
+     fn stop(&self, py: Python<'_>, timeout: Option<f64>) -> PyCoreResult<PyTunnelReport> {
+         let grace = grace(timeout)?;
+         Ok(runtime::block_on(py, self.stop_op(grace))?)
+     }
+
+     /// The awaitable twin of `stop`.
+     #[pyo3(signature = (timeout=None))]
+     async fn stop_async(&self, timeout: Option<f64>) -> PyCoreResult<PyTunnelReport> {
+         let grace = grace(timeout)?;
+         Ok(runtime::spawn(self.stop_op(grace)).await??)
+     }
+
+     fn __enter__(slf: Py<Self>) -> Py<Self> {
+         slf
+     }
+
+     /// Stops the tunnel, waiting for its open connections. An error stopping it doesn't mask
+     /// an exception already in flight.
+     #[pyo3(signature = (exc_type=None, exc_value=None, traceback=None))]
+     fn __exit__(
+         &self,
+         py: Python<'_>,
+         exc_type: Option<Py<PyAny>>,
+         exc_value: Option<Py<PyAny>>,
+         traceback: Option<Py<PyAny>>,
+     ) -> PyCoreResult<bool> {
+         let _ = (exc_value, traceback);
+         let stopped = self.stop(py, None);
+         if exc_type.is_none() {
+             stopped?;
+         }
+         Ok(false)
+     }
+
+     /// `async with session.tunnel(...) as t:`.
+     async fn __aenter__(slf: Py<Self>) -> Py<Self> {
+         slf
+     }
+
+     /// `__exit__`, awaited.
+     #[pyo3(signature = (exc_type=None, exc_value=None, traceback=None))]
+     async fn __aexit__(
+         &self,
+         exc_type: Option<Py<PyAny>>,
+         exc_value: Option<Py<PyAny>>,
+         traceback: Option<Py<PyAny>>,
+     ) -> PyCoreResult<bool> {
+         let _ = (exc_value, traceback);
+-        let stopped = runtime::spawn(self.stop_op(None)).await;
++        let stopped = runtime::spawn(self.stop_op(None)).await?;
+         if exc_type.is_none() {
+-            stopped??;
++            stopped?;
+         }
+         Ok(false)
+     }
+
+     fn __repr__(&self) -> String {
+         format!(
+             "Tunnel(local_address={:?}, running={})",
+             self.task.local_address().to_string(),
+             self.task.is_running()
+         )
+     }
+ }
+
+ /// A running port-forward. Use as a context manager, or call `stop()`.
+ ///
+ /// Keep a reference: dropping this object stops the forward and cuts its open connections.
+ #[pyclass(frozen, name = "PortForward", module = "microvms")]
+ pub struct PyPortForward {
+     /// An `Arc` so `stop_async` can own the loop it stops.
+     task: Arc<Serving<ForwardSummary>>,
+ }
+
+ impl PyPortForward {
+     pub(crate) fn new(task: Serving<ForwardSummary>) -> Self {
+         Self {
+             task: Arc::new(task),
+         }
+     }
+
+     fn stop_op(
+         &self,
+         grace: Option<std::time::Duration>,
+     ) -> impl std::future::Future<Output = Result<PyPortForwardReport, microvms_core::Error>>
+     + Send
+     + 'static {
+         let task = Arc::clone(&self.task);
+         async move {
+             task.stop(grace)
+                 .await
+                 .map(|inner| PyPortForwardReport { inner })
+         }
+     }
+ }
+
+ #[pymethods]
+ impl PyPortForward {
+     /// The local address to connect to, `host:port`, with the port the OS picked.
+     #[getter]
+     fn local_address(&self) -> String {
+         self.task.local_address().to_string()
+     }
+
+     /// Whether the forward is still serving.
+     #[getter]
+     fn running(&self) -> bool {
+         self.task.is_running()
+     }
+
+     /// Stops accepting, waits for the connections still open to end, and returns the report.
+     ///
+     /// With `timeout`, connections still open after that many seconds are cut and listed as
+     /// `"failed"`. Without it, a client that keeps its connection open keeps this waiting.
+     /// Callable again, with the same report.
+     #[pyo3(signature = (timeout=None))]
+     fn stop(&self, py: Python<'_>, timeout: Option<f64>) -> PyCoreResult<PyPortForwardReport> {
+         let grace = grace(timeout)?;
+         Ok(runtime::block_on(py, self.stop_op(grace))?)
+     }
+
+     /// The awaitable twin of `stop`.

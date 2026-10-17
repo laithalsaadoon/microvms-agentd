@@ -67,14 +67,29 @@
 //! needs workers that run while no Python thread is blocked on anything. The `LazyLock`
 //! holds only a runtime and calls no Python during initialization, so it is not the
 //! `OnceLock`-against-the-GIL deadlock PyO3's FAQ warns about.
+//!
+//! # Python wake lifetime and interpreter shutdown
+//!
+//! A task can publish its result before its worker finishes waking the coroutine. Every
+//! future polled by Python therefore uses a fenced waker: completion or cancellation closes
+//! admission and waits for existing wake callbacks to finish, with the GIL released. The
+//! direct channel receivers use the same fence as spawned tasks.
+//!
+//! A Python `atexit` callback closes and drains the remaining fences before interpreter
+//! finalization, including coroutines callers retained without completing or cancelling.
+//! It leaves Rust-only shielded work running and does not stop the runtime. Later async
+//! operations raise `RuntimeError`; blocking operations retain their existing behavior.
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::LazyLock;
-use std::task::{Context, Poll};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, LazyLock, Mutex, Weak};
+use std::task::{Context, Poll, Wake, Waker};
 
 use pyo3::prelude::*;
 use tokio::task::JoinHandle;
+
+use crate::errors::{CoreError, PyCoreResult};
 
 /// The process's runtime. See the module docs for why one, why multi-thread, and why
 /// `LazyLock` is safe here.
@@ -85,6 +100,230 @@ static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
         .build()
         .expect("a multi-thread tokio runtime is buildable on every platform this loads on")
 });
+
+#[derive(Default)]
+struct WakeRegistry {
+    closed: bool,
+    fences: Vec<Weak<WakeFence>>,
+}
+
+static WAKES: Mutex<WakeRegistry> = Mutex::new(WakeRegistry {
+    closed: false,
+    fences: Vec::new(),
+});
+
+#[derive(Default)]
+struct WakeState {
+    closed: bool,
+    active: usize,
+    waker: Option<Waker>,
+}
+
+#[derive(Default)]
+struct WakeFence {
+    state: Mutex<WakeState>,
+    drained: Condvar,
+    // Admission closes under the mutex. This separate flag becomes true only after
+    // every admitted callback and original waker has finished, including its drop.
+    quiescent: AtomicBool,
+    #[cfg(test)]
+    drain_arrivals: std::sync::atomic::AtomicUsize,
+}
+
+fn closed_error() -> CoreError {
+    pyo3::exceptions::PyRuntimeError::new_err("the MicroVMs asynchronous runtime is shutting down")
+        .into()
+}
+
+fn register_wake() -> PyCoreResult<Arc<WakeFence>> {
+    let mut registry = WAKES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if registry.closed {
+        return Err(closed_error());
+    }
+    registry.fences.retain(|fence| fence.strong_count() != 0);
+    let fence = Arc::new(WakeFence::default());
+    registry.fences.push(Arc::downgrade(&fence));
+    Ok(fence)
+}
+
+/// Keeps the original waker's destruction inside the admission counted by the fence.
+struct ActiveWake<'a> {
+    fence: &'a WakeFence,
+    waker: Option<Waker>,
+}
+
+impl Drop for ActiveWake<'_> {
+    fn drop(&mut self) {
+        // A waker can own Python references. Never destroy it under the state lock,
+        // and do not publish quiescence before its last callback reference is gone.
+        drop(self.waker.take());
+        let mut state = self
+            .fence
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.active -= 1;
+        if state.active == 0 {
+            self.fence.drained.notify_all();
+        }
+    }
+}
+
+impl WakeFence {
+    fn update(&self, waker: &Waker) -> bool {
+        Python::attach(|py| {
+            py.detach(|| {
+                let mut state = self
+                    .state
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if state.closed {
+                    return false;
+                }
+                state.active += 1;
+                let old = ActiveWake {
+                    fence: self,
+                    waker: state.waker.replace(waker.clone()),
+                };
+                drop(state);
+                drop(old);
+                true
+            })
+        })
+    }
+
+    fn close_detached(&self) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.closed = true;
+        // Removing the stored original waker is itself in flight until its drop
+        // finishes, so concurrent closers cannot return before it is destroyed.
+        let old = state.waker.take().map(|waker| {
+            state.active += 1;
+            ActiveWake {
+                fence: self,
+                waker: Some(waker),
+            }
+        });
+        drop(state);
+        drop(old);
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        #[cfg(test)]
+        self.drain_arrivals.fetch_add(1, Ordering::Release);
+        // A deadline would allow an admitted callback to touch the finalized interpreter.
+        // Even a caller-supplied loop callback must finish before this drain can return.
+        while state.active != 0 {
+            state = self
+                .drained
+                .wait(state)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        self.quiescent.store(true, Ordering::Release);
+    }
+
+    fn close(&self) {
+        if !self.quiescent.load(Ordering::Acquire) {
+            // A worker may be inside Python::attach or waiting to acquire the GIL.
+            // Waiting while attached would deadlock with that worker.
+            Python::attach(|py| py.detach(|| self.close_detached()));
+        }
+    }
+}
+
+impl Wake for WakeFence {
+    fn wake(self: Arc<Self>) {
+        self.wake_by_ref();
+    }
+
+    fn wake_by_ref(self: &Arc<Self>) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.closed || state.waker.is_none() {
+            return;
+        }
+        state.active += 1;
+        let active = ActiveWake {
+            fence: self,
+            waker: state.waker.clone(),
+        };
+        drop(state);
+        // Python's callback must run outside the lock. The guard stays alive through
+        // its attach/release and original-waker drop, including unwinding.
+        active.waker.as_ref().unwrap().wake_by_ref();
+    }
+}
+
+/// Run before interpreter finalization, while detaching can still let a Python wake finish.
+#[pyfunction]
+fn close_async_wakes(py: Python<'_>) {
+    py.detach(|| {
+        let fences = {
+            let mut registry = WAKES
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            registry.closed = true;
+            std::mem::take(&mut registry.fences)
+        };
+        for fence in fences.into_iter().filter_map(|fence| fence.upgrade()) {
+            fence.close_detached();
+        }
+    });
+}
+
+pub(crate) fn register_shutdown(module: &Bound<'_, pyo3::types::PyModule>) -> PyResult<()> {
+    module.py().import("atexit")?.call_method1(
+        "register",
+        (pyo3::wrap_pyfunction!(close_async_wakes, module)?,),
+    )?;
+    Ok(())
+}
+
+/// Prevent a polled Rust future from retaining Python's waker after completion or drop.
+pub(crate) struct Fenced<F: Future> {
+    future: Pin<Box<F>>,
+    fence: Arc<WakeFence>,
+}
+
+pub(crate) fn fenced<F: Future>(future: F) -> PyCoreResult<Fenced<F>> {
+    Ok(Fenced {
+        future: Box::pin(future),
+        fence: register_wake()?,
+    })
+}
+
+impl<F: Future> Future for Fenced<F> {
+    type Output = PyCoreResult<F::Output>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if !self.fence.update(cx.waker()) {
+            return Poll::Ready(Err(closed_error()));
+        }
+        let waker = Waker::from(Arc::clone(&self.fence));
+        let polled = self.future.as_mut().poll(&mut Context::from_waker(&waker));
+        match polled {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(output) => {
+                self.fence.close();
+                Poll::Ready(Ok(output))
+            }
+        }
+    }
+}
+
+impl<F: Future> Drop for Fenced<F> {
+    fn drop(&mut self) {
+        self.fence.close();
+    }
+}
 
 /// Runs `future` to completion with the GIL released.
 ///
@@ -135,10 +374,7 @@ where
     F: Future + Send + 'static,
     F::Output: Send + 'static,
 {
-    Spawned {
-        task: RUNTIME.spawn(future),
-        abort_on_drop: true,
-    }
+    spawned(|| RUNTIME.spawn(future), true)
 }
 
 /// [`spawn`] for a lifecycle transition: dropping the awaitable leaves the task running to
@@ -148,10 +384,7 @@ where
     F: Future + Send + 'static,
     F::Output: Send + 'static,
 {
-    Spawned {
-        task: RUNTIME.spawn(future),
-        abort_on_drop: false,
-    }
+    spawned(|| RUNTIME.spawn(future), false)
 }
 
 /// Runs a blocking core call on the shared runtime's blocking pool and returns the awaitable
@@ -163,31 +396,49 @@ where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
+    spawned(|| RUNTIME.spawn_blocking(call), false)
+}
+
+fn spawned<T>(start: impl FnOnce() -> JoinHandle<T>, abort_on_drop: bool) -> Spawned<T> {
+    let task = register_wake()
+        .map(|fence| Fenced {
+            future: Box::pin(start()),
+            fence,
+        })
+        .map_err(Some);
     Spawned {
-        task: RUNTIME.spawn_blocking(call),
-        abort_on_drop: false,
+        task,
+        abort_on_drop,
     }
 }
 
 /// A task on the shared runtime, awaited from a pyo3 coroutine. See [`spawn`].
 ///
-/// Its output is the task's own. A task that panicked re-raises the panic here, on the
+/// Its output carries either the task's result or a Python bridge shutdown error.
+/// A task that panicked re-raises the panic here, on the
 /// coroutine's poll, where pyo3 turns it into `PanicException` exactly as it does for a panic in
 /// a blocking method; the runtime is never shut down, so the only cancellation a task meets is
 /// [`Spawned`]'s own abort, which happens after nothing can await it any more.
 pub(crate) struct Spawned<T> {
-    task: JoinHandle<T>,
+    task: Result<Fenced<JoinHandle<T>>, Option<CoreError>>,
     abort_on_drop: bool,
 }
 
 impl<T> Future for Spawned<T> {
-    type Output = T;
+    type Output = PyCoreResult<T>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<T> {
-        match Pin::new(&mut self.task).poll(cx) {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let task = match &mut self.task {
+            Ok(task) => task,
+            Err(error) => {
+                return Poll::Ready(Err(error.take().expect("a rejected task is polled once")));
+            }
+        };
+        match Pin::new(task).poll(cx) {
             Poll::Pending => Poll::Pending,
-            Poll::Ready(Ok(output)) => Poll::Ready(output),
-            Poll::Ready(Err(error)) => match error.try_into_panic() {
+            Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
+            Poll::Ready(Ok(Ok(output))) => Poll::Ready(Ok(output)),
+            Poll::Ready(Ok(Err(error))) => match error.try_into_panic() {
                 Ok(payload) => std::panic::resume_unwind(payload),
                 Err(error) => {
                     panic!("a task on the shared runtime ended without a result: {error}")
@@ -200,8 +451,11 @@ impl<T> Future for Spawned<T> {
 impl<T> Drop for Spawned<T> {
     fn drop(&mut self) {
         // Aborting a finished task is a no-op, so this needs no "did it finish" check.
-        if self.abort_on_drop {
-            self.task.abort();
+        if let Ok(task) = &self.task {
+            task.fence.close();
+            if self.abort_on_drop {
+                task.future.as_ref().get_ref().abort();
+            }
         }
     }
 }
@@ -265,5 +519,125 @@ where
 
     fn into_pyobject(self, _py: Python<'py>) -> Result<Self::Output, Self::Error> {
         Ok(self.coroutine)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    fn wait_for_drainers(fence: &WakeFence, expected: usize) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while fence.drain_arrivals.load(Ordering::Acquire) < expected {
+            assert!(Instant::now() < deadline, "closers did not reach the drain");
+            std::thread::yield_now();
+        }
+    }
+
+    struct BlockingWake {
+        entered: mpsc::Sender<()>,
+        release: Mutex<mpsc::Receiver<()>>,
+    }
+
+    impl Wake for BlockingWake {
+        fn wake(self: Arc<Self>) {
+            self.wake_by_ref();
+        }
+
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.entered.send(()).unwrap();
+            self.release.lock().unwrap().recv().unwrap();
+        }
+    }
+
+    #[test]
+    fn concurrent_closers_wait_until_the_admitted_wake_finishes() {
+        let (entered, did_enter) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        let fence = Arc::new(WakeFence::default());
+        fence.state.lock().unwrap().waker = Some(Waker::from(Arc::new(BlockingWake {
+            entered,
+            release: Mutex::new(released),
+        })));
+        let wake = Arc::clone(&fence);
+        let worker = std::thread::spawn(move || wake.wake_by_ref());
+        did_enter.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        let (finished, did_finish) = mpsc::channel();
+        let closers: Vec<_> = (0..2)
+            .map(|_| {
+                let fence = Arc::clone(&fence);
+                let finished = finished.clone();
+                std::thread::spawn(move || {
+                    fence.close_detached();
+                    finished.send(()).unwrap();
+                })
+            })
+            .collect();
+        wait_for_drainers(&fence, 2);
+        // The handshake proves both closers arrived; the bounded observation checks
+        // that neither returns while the admitted callback is deliberately held.
+        let before_release = did_finish.recv_timeout(Duration::from_millis(100));
+        let published_early = fence.quiescent.load(Ordering::Acquire);
+        release.send(()).unwrap();
+        worker.join().unwrap();
+        for closer in closers {
+            closer.join().unwrap();
+        }
+        assert_eq!(before_release, Err(mpsc::RecvTimeoutError::Timeout));
+        assert!(!published_early);
+        assert!(fence.quiescent.load(Ordering::Acquire));
+    }
+
+    struct BlockingDrop {
+        entered: mpsc::Sender<()>,
+        release: Mutex<mpsc::Receiver<()>>,
+    }
+
+    #[expect(
+        clippy::manual_noop_waker,
+        reason = "the test observes this waker's blocking destructor rather than its wake"
+    )]
+    impl Wake for BlockingDrop {
+        fn wake(self: Arc<Self>) {}
+    }
+
+    impl Drop for BlockingDrop {
+        fn drop(&mut self) {
+            self.entered.send(()).unwrap();
+            self.release.lock().unwrap().recv().unwrap();
+        }
+    }
+
+    #[test]
+    fn concurrent_closers_wait_for_the_last_original_waker_drop() {
+        let (entered, did_enter) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        let fence = Arc::new(WakeFence::default());
+        fence.state.lock().unwrap().waker = Some(Waker::from(Arc::new(BlockingDrop {
+            entered,
+            release: Mutex::new(released),
+        })));
+        let first = Arc::clone(&fence);
+        let first = std::thread::spawn(move || first.close_detached());
+        did_enter.recv_timeout(Duration::from_secs(5)).unwrap();
+        let (finished, did_finish) = mpsc::channel();
+        let second = Arc::clone(&fence);
+        let second = std::thread::spawn(move || {
+            second.close_detached();
+            finished.send(()).unwrap();
+        });
+        wait_for_drainers(&fence, 1);
+        // The first closer is held in waker destruction; the second reached its drain.
+        let before_release = did_finish.recv_timeout(Duration::from_millis(100));
+        let published_early = fence.quiescent.load(Ordering::Acquire);
+        release.send(()).unwrap();
+        first.join().unwrap();
+        second.join().unwrap();
+        assert_eq!(before_release, Err(mpsc::RecvTimeoutError::Timeout));
+        assert!(!published_early);
+        assert!(fence.quiescent.load(Ordering::Acquire));
     }
 }
