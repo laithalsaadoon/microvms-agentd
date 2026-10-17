@@ -354,6 +354,11 @@ def typescript(project: dict) -> Inventory:
                         "extends": stable(item.get("extendedTypes", [])),
                         "implements": stable(item.get("implementedTypes", [])),
                         "flags": stable(item.get("flags", {})),
+                        **(
+                            {"indexSignatures": stable(item["indexSignatures"])}
+                            if item.get("indexSignatures")
+                            else {}
+                        ),
                         "members": {
                             member["name"]: {
                                 "kind": TS_KINDS.get(member["kind"]),

@@ -16,3 +16,21 @@ expect = "exit-nonzero"
 message = "test_visit_preserves_struct_declaration_and_canonical_or_fallback_origin"
 suite = "script"
 transform = { file = "tools/rustdoc_walk.py", replace = "self.add(Entry(path, what, declaration=self.declaration(doc, item, origin)))", with = "self.add(Entry(path, what))" }
+
+[[fault]]
+id = "rustdoc-repeated-parameter-collapsed"
+guard = "tools/test_rustdoc_declarations.py::Declarations::test_repeated_parameter_names_keep_each_position_and_reject_earlier_type_change"
+run = ["uv", "run", "--locked", "pytest", "-q", "tools/test_rustdoc_declarations.py::Declarations::test_repeated_parameter_names_keep_each_position_and_reject_earlier_type_change"]
+expect = "exit-nonzero"
+message = "test_repeated_parameter_names_keep_each_position_and_reject_earlier_type_change"
+suite = "script"
+transform = { file = "tools/rustdoc_walk.py", replace = '''f"#{position}" if names[name] > 1 else name: {''', with = '''name: {''' }
+
+[[fault]]
+id = "rustdoc-enum-order-dropped"
+guard = "tools/test_rustdoc_declarations.py::Declarations::test_enum_order_and_explicit_discriminants_reject_stale_inventory"
+run = ["uv", "run", "--locked", "pytest", "-q", "tools/test_rustdoc_declarations.py::Declarations::test_enum_order_and_explicit_discriminants_reject_stale_inventory"]
+expect = "exit-nonzero"
+message = "test_enum_order_and_explicit_discriminants_reject_stale_inventory"
+suite = "script"
+transform = { file = "tools/rustdoc_walk.py", replace = "\"position\": position,\n                    **variant_shape(variant),", with = "**variant_shape(variant)," }

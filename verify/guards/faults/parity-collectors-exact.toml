@@ -23,3 +23,12 @@ expect = "exit-nonzero"
 message = "test_export_omissions_refuse_a_partial_inventory_and_name_missing_exports"
 suite = "script"
 transform = { file = "tools/check-parity.py", replace = "    missing = set(extra[\"exports\"]) - reported\n", with = "    missing = set()\n" }
+
+[[fault]]
+id = "parity-collectors-typescript-index-signatures"
+guard = "tools/test_parity_index_signatures.py::TypeScriptIndexSignatures::test_real_index_signature_changes_reject_reviewed_shapes"
+run = ["uv", "run", "--locked", "pytest", "-q", "tools/test_parity_index_signatures.py::TypeScriptIndexSignatures::test_real_index_signature_changes_reject_reviewed_shapes"]
+expect = "exit-nonzero"
+message = "test_real_index_signature_changes_reject_reviewed_shapes"
+suite = "script"
+transform = { file = "tools/parity_inventory.py", replace = '''{"indexSignatures": stable(item["indexSignatures"])}''', with = '''{}''' }

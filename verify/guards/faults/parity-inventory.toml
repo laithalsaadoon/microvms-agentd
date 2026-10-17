@@ -83,7 +83,7 @@ transform = { file = "tools/parity_inventory.py", replace = "    for alias in du
 [[family.fault]]
 id = "parity-inventory-typescript-flags"
 message = "test_typescript_static_readonly_and_abstract_flags_are_held"
-transform = { file = "tools/parity_inventory.py", replace = "\"flags\": stable(item.get(\"flags\", {})),\n                        \"members\": {", with = "\"flags\": {},\n                        \"members\": {" }
+transform = { file = "tools/parity_inventory.py", replace = "\"implements\": stable(item.get(\"implementedTypes\", [])),\n                        \"flags\": stable(item.get(\"flags\", {})),", with = "\"implements\": stable(item.get(\"implementedTypes\", [])),\n                        \"flags\": {}," }
 
 [[family.fault]]
 id = "parity-inventory-python-property"

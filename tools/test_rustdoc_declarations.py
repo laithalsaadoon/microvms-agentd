@@ -13,6 +13,12 @@ walk = SimpleNamespace(
         run_name="tools.rustdoc_walk",
     )
 )
+inventory = SimpleNamespace(
+    **runpy.run_path(
+        str(Path(__file__).with_name("parity_inventory.py")),
+        run_name="tools.parity_inventory",
+    )
+)
 
 
 def item(what, inner, *, name="Item", identity=1, attrs=()):
@@ -148,6 +154,57 @@ class Declarations(unittest.TestCase):
         return self.walker.declaration(
             self.doc, item(what, inner, **kwargs), "crate::Item"
         )
+
+    def assert_inventory_change(self, before, after, expected):
+        baseline = inventory.core({"declarations": {"Item": before}})
+        observed = {surface: baseline for surface in ("core", "cli", "py", "ts")}
+        manifest = {
+            "schema": 1,
+            "shapes": copy.deepcopy(observed),
+            "contracts": [
+                {
+                    "id": name,
+                    "kind": name.split(":")[0],
+                    **{surface: [name] for surface in observed},
+                }
+                for name in baseline
+            ],
+            "exemptions": {},
+        }
+        self.assertEqual(inventory.problems(manifest, observed, set()), [])
+        observed["core"] = inventory.core({"declarations": {"Item": after}})
+        self.assertEqual(inventory.problems(manifest, observed, set()), expected)
+
+    def test_repeated_parameter_names_keep_each_position_and_reject_earlier_type_change(
+        self,
+    ):
+        for repeated in ("_", "value"):
+            with self.subTest(name=repeated):
+                inputs = [
+                    [repeated, {"primitive": "u8"}],
+                    ["unique", {"primitive": "str"}],
+                    ["self", reference()],
+                    [repeated, {"primitive": "bool"}],
+                ]
+                before = self.declaration("function", {"sig": {"inputs": inputs}})
+                self.assertEqual(
+                    before["parameters"],
+                    {
+                        "#0": {"position": 0, "type": {"primitive": "u8"}},
+                        "unique": {"position": 1, "type": {"primitive": "str"}},
+                        "#3": {"position": 3, "type": {"primitive": "bool"}},
+                    },
+                )
+                inputs[0][1] = {"primitive": "u16"}
+                after = self.declaration("function", {"sig": {"inputs": inputs}})
+                self.assert_inventory_change(
+                    before,
+                    after,
+                    [
+                        "inventory core: callable:Item changed shape",
+                        "inventory core: option:Item(#0) changed shape",
+                    ],
+                )
 
     def test_function_keeps_parameter_positions_receiver_return_generics_and_header(
         self,
@@ -316,12 +373,14 @@ class Declarations(unittest.TestCase):
                 "origin": "crate::Item",
                 "attributes": [],
                 "variants": {
-                    "Empty": {"kind": "plain", "discriminant": None},
+                    "Empty": {"position": 0, "kind": "plain", "discriminant": None},
                     "Value": {
+                        "position": 1,
                         "kind": "plain",
                         "discriminant": {"value": "7", "expr": "7"},
                     },
                     "Tuple": {
+                        "position": 2,
                         "kind": "tuple",
                         "discriminant": None,
                         "fields": {
@@ -331,6 +390,7 @@ class Declarations(unittest.TestCase):
                         },
                     },
                     "Record": {
+                        "position": 3,
                         "kind": "struct",
                         "discriminant": None,
                         "fields": {
@@ -341,6 +401,50 @@ class Declarations(unittest.TestCase):
                     },
                 },
             },
+        )
+
+    def test_enum_order_and_explicit_discriminants_reject_stale_inventory(self):
+        self.doc["index"].update(
+            {
+                "20": item("variant", {"kind": "plain"}, name="First"),
+                "21": item("variant", {"kind": "plain"}, name="Second"),
+                "22": item(
+                    "variant",
+                    {"kind": "plain", "discriminant": {"value": "7", "expr": "3 + 4"}},
+                    name="Explicit",
+                ),
+                "23": item("variant", {"kind": "plain"}, name="AfterExplicit"),
+            }
+        )
+        before = self.declaration("enum", {"variants": [20, 21, 22, 23]})
+        self.assertEqual(
+            before["variants"],
+            {
+                "First": {"position": 0, "kind": "plain", "discriminant": None},
+                "Second": {"position": 1, "kind": "plain", "discriminant": None},
+                "Explicit": {
+                    "position": 2,
+                    "kind": "plain",
+                    "discriminant": {"value": "7", "expr": "3 + 4"},
+                },
+                "AfterExplicit": {"position": 3, "kind": "plain", "discriminant": None},
+            },
+        )
+        for ordering in ([21, 20, 22, 23], [20, 21, 23, 22]):
+            with self.subTest(ordering=ordering):
+                self.assert_inventory_change(
+                    before,
+                    self.declaration("enum", {"variants": ordering}),
+                    ["inventory core: type:Item changed shape"],
+                )
+        self.doc["index"]["22"]["inner"]["variant"]["discriminant"] = {
+            "value": "8",
+            "expr": "4 + 4",
+        }
+        self.assert_inventory_change(
+            before,
+            self.declaration("enum", {"variants": [20, 21, 22, 23]}),
+            ["inventory core: type:Item changed shape"],
         )
 
     def test_traits_keep_bounds_and_explicit_or_default_safety_flags(self):

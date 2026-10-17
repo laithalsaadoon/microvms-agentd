@@ -1,0 +1,612 @@
+{
+  "children": [
+    {
+      "id": 31,
+      "name": "TableClass",
+      "variant": "declaration",
+      "kind": 128,
+      "flags": {},
+      "children": [
+        {
+          "id": 32,
+          "name": "constructor",
+          "variant": "declaration",
+          "kind": 512,
+          "flags": {},
+          "signatures": [
+            {
+              "id": 33,
+              "name": "TableClass",
+              "variant": "signature",
+              "kind": 16384,
+              "flags": {},
+              "type": {
+                "type": "reference",
+                "target": 31,
+                "name": "TableClass"
+              }
+            }
+          ]
+        }
+      ],
+      "groups": [
+        {
+          "title": "Constructors",
+          "children": [
+            32
+          ]
+        }
+      ],
+      "sources": [
+        {
+          "fileName": "index.d.ts",
+          "line": 38,
+          "character": 21
+        }
+      ],
+      "indexSignatures": [
+        {
+          "id": 34,
+          "name": "__index",
+          "variant": "signature",
+          "kind": 8192,
+          "flags": {
+            "isReadonly": true
+          },
+          "sources": [
+            {
+              "fileName": "index.d.ts",
+              "line": 39,
+              "character": 2
+            }
+          ],
+          "parameters": [
+            {
+              "id": 35,
+              "name": "name",
+              "variant": "param",
+              "kind": 32768,
+              "flags": {},
+              "type": {
+                "type": "intrinsic",
+                "name": "string"
+              }
+            }
+          ],
+          "type": {
+            "type": "reference",
+            "target": 1,
+            "name": "Entry"
+          }
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "name": "ChangedKey",
+      "variant": "declaration",
+      "kind": 256,
+      "flags": {},
+      "sources": [
+        {
+          "fileName": "index.d.ts",
+          "line": 14,
+          "character": 17
+        }
+      ],
+      "indexSignatures": [
+        {
+          "id": 9,
+          "name": "__index",
+          "variant": "signature",
+          "kind": 8192,
+          "flags": {
+            "isReadonly": true
+          },
+          "sources": [
+            {
+              "fileName": "index.d.ts",
+              "line": 15,
+              "character": 2
+            }
+          ],
+          "parameters": [
+            {
+              "id": 10,
+              "name": "name",
+              "variant": "param",
+              "kind": 32768,
+              "flags": {},
+              "type": {
+                "type": "intrinsic",
+                "name": "symbol"
+              }
+            }
+          ],
+          "type": {
+            "type": "reference",
+            "target": 1,
+            "name": "Entry"
+          }
+        },
+        {
+          "id": 11,
+          "name": "__index",
+          "variant": "signature",
+          "kind": 8192,
+          "flags": {
+            "isReadonly": true
+          },
+          "sources": [
+            {
+              "fileName": "index.d.ts",
+              "line": 16,
+              "character": 2
+            }
+          ],
+          "parameters": [
+            {
+              "id": 12,
+              "name": "index",
+              "variant": "param",
+              "kind": 32768,
+              "flags": {},
+              "type": {
+                "type": "intrinsic",
+                "name": "number"
+              }
+            }
+          ],
+          "type": {
+            "type": "reference",
+            "target": 1,
+            "name": "Entry"
+          }
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "name": "ChangedValue",
+      "variant": "declaration",
+      "kind": 256,
+      "flags": {},
+      "sources": [
+        {
+          "fileName": "index.d.ts",
+          "line": 19,
+          "character": 17
+        }
+      ],
+      "indexSignatures": [
+        {
+          "id": 14,
+          "name": "__index",
+          "variant": "signature",
+          "kind": 8192,
+          "flags": {
+            "isReadonly": true
+          },
+          "sources": [
+            {
+              "fileName": "index.d.ts",
+              "line": 20,
+              "character": 2
+            }
+          ],
+          "parameters": [
+            {
+              "id": 15,
+              "name": "name",
+              "variant": "param",
+              "kind": 32768,
+              "flags": {},
+              "type": {
+                "type": "intrinsic",
+                "name": "string"
+              }
+            }
+          ],
+          "type": {
+            "type": "union",
+            "types": [
+              {
+                "type": "reference",
+                "target": 1,
+                "name": "Entry"
+              },
+              {
+                "type": "intrinsic",
+                "name": "undefined"
+              }
+            ]
+          }
+        },
+        {
+          "id": 16,
+          "name": "__index",
+          "variant": "signature",
+          "kind": 8192,
+          "flags": {
+            "isReadonly": true
+          },
+          "sources": [
+            {
+              "fileName": "index.d.ts",
+              "line": 21,
+              "character": 2
+            }
+          ],
+          "parameters": [
+            {
+              "id": 17,
+              "name": "index",
+              "variant": "param",
+              "kind": 32768,
+              "flags": {},
+              "type": {
+                "type": "intrinsic",
+                "name": "number"
+              }
+            }
+          ],
+          "type": {
+            "type": "reference",
+            "target": 1,
+            "name": "Entry"
+          }
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "name": "Deleted",
+      "variant": "declaration",
+      "kind": 256,
+      "flags": {},
+      "sources": [
+        {
+          "fileName": "index.d.ts",
+          "line": 29,
+          "character": 17
+        }
+      ],
+      "indexSignatures": [
+        {
+          "id": 24,
+          "name": "__index",
+          "variant": "signature",
+          "kind": 8192,
+          "flags": {
+            "isReadonly": true
+          },
+          "sources": [
+            {
+              "fileName": "index.d.ts",
+              "line": 30,
+              "character": 2
+            }
+          ],
+          "parameters": [
+            {
+              "id": 25,
+              "name": "index",
+              "variant": "param",
+              "kind": 32768,
+              "flags": {},
+              "type": {
+                "type": "intrinsic",
+                "name": "number"
+              }
+            }
+          ],
+          "type": {
+            "type": "reference",
+            "target": 1,
+            "name": "Entry"
+          }
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "name": "Entry",
+      "variant": "declaration",
+      "kind": 256,
+      "flags": {},
+      "children": [
+        {
+          "id": 2,
+          "name": "value",
+          "variant": "declaration",
+          "kind": 1024,
+          "flags": {},
+          "sources": [
+            {
+              "fileName": "index.d.ts",
+              "line": 5,
+              "character": 2
+            }
+          ],
+          "type": {
+            "type": "intrinsic",
+            "name": "string"
+          }
+        }
+      ],
+      "groups": [
+        {
+          "title": "Properties",
+          "children": [
+            2
+          ]
+        }
+      ],
+      "sources": [
+        {
+          "fileName": "index.d.ts",
+          "line": 4,
+          "character": 17
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "name": "Reordered",
+      "variant": "declaration",
+      "kind": 256,
+      "flags": {},
+      "sources": [
+        {
+          "fileName": "index.d.ts",
+          "line": 33,
+          "character": 17
+        }
+      ],
+      "indexSignatures": [
+        {
+          "id": 27,
+          "name": "__index",
+          "variant": "signature",
+          "kind": 8192,
+          "flags": {
+            "isReadonly": true
+          },
+          "sources": [
+            {
+              "fileName": "index.d.ts",
+              "line": 34,
+              "character": 2
+            }
+          ],
+          "parameters": [
+            {
+              "id": 28,
+              "name": "index",
+              "variant": "param",
+              "kind": 32768,
+              "flags": {},
+              "type": {
+                "type": "intrinsic",
+                "name": "number"
+              }
+            }
+          ],
+          "type": {
+            "type": "reference",
+            "target": 1,
+            "name": "Entry"
+          }
+        },
+        {
+          "id": 29,
+          "name": "__index",
+          "variant": "signature",
+          "kind": 8192,
+          "flags": {
+            "isReadonly": true
+          },
+          "sources": [
+            {
+              "fileName": "index.d.ts",
+              "line": 35,
+              "character": 2
+            }
+          ],
+          "parameters": [
+            {
+              "id": 30,
+              "name": "name",
+              "variant": "param",
+              "kind": 32768,
+              "flags": {},
+              "type": {
+                "type": "intrinsic",
+                "name": "string"
+              }
+            }
+          ],
+          "type": {
+            "type": "reference",
+            "target": 1,
+            "name": "Entry"
+          }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Table",
+      "variant": "declaration",
+      "kind": 256,
+      "flags": {},
+      "sources": [
+        {
+          "fileName": "index.d.ts",
+          "line": 8,
+          "character": 17
+        }
+      ],
+      "indexSignatures": [
+        {
+          "id": 4,
+          "name": "__index",
+          "variant": "signature",
+          "kind": 8192,
+          "flags": {
+            "isReadonly": true
+          },
+          "comment": {
+            "summary": [
+              {
+                "kind": "text",
+                "text": "Entries indexed by name."
+              }
+            ]
+          },
+          "sources": [
+            {
+              "fileName": "index.d.ts",
+              "line": 10,
+              "character": 2
+            }
+          ],
+          "parameters": [
+            {
+              "id": 5,
+              "name": "name",
+              "variant": "param",
+              "kind": 32768,
+              "flags": {},
+              "type": {
+                "type": "intrinsic",
+                "name": "string"
+              }
+            }
+          ],
+          "type": {
+            "type": "reference",
+            "target": 1,
+            "name": "Entry"
+          }
+        },
+        {
+          "id": 6,
+          "name": "__index",
+          "variant": "signature",
+          "kind": 8192,
+          "flags": {
+            "isReadonly": true
+          },
+          "sources": [
+            {
+              "fileName": "index.d.ts",
+              "line": 11,
+              "character": 2
+            }
+          ],
+          "parameters": [
+            {
+              "id": 7,
+              "name": "index",
+              "variant": "param",
+              "kind": 32768,
+              "flags": {},
+              "type": {
+                "type": "intrinsic",
+                "name": "number"
+              }
+            }
+          ],
+          "type": {
+            "type": "reference",
+            "target": 1,
+            "name": "Entry"
+          }
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "name": "Writable",
+      "variant": "declaration",
+      "kind": 256,
+      "flags": {},
+      "sources": [
+        {
+          "fileName": "index.d.ts",
+          "line": 24,
+          "character": 17
+        }
+      ],
+      "indexSignatures": [
+        {
+          "id": 19,
+          "name": "__index",
+          "variant": "signature",
+          "kind": 8192,
+          "flags": {},
+          "sources": [
+            {
+              "fileName": "index.d.ts",
+              "line": 25,
+              "character": 2
+            }
+          ],
+          "parameters": [
+            {
+              "id": 20,
+              "name": "name",
+              "variant": "param",
+              "kind": 32768,
+              "flags": {},
+              "type": {
+                "type": "intrinsic",
+                "name": "string"
+              }
+            }
+          ],
+          "type": {
+            "type": "reference",
+            "target": 1,
+            "name": "Entry"
+          }
+        },
+        {
+          "id": 21,
+          "name": "__index",
+          "variant": "signature",
+          "kind": 8192,
+          "flags": {
+            "isReadonly": true
+          },
+          "sources": [
+            {
+              "fileName": "index.d.ts",
+              "line": 26,
+              "character": 2
+            }
+          ],
+          "parameters": [
+            {
+              "id": 22,
+              "name": "index",
+              "variant": "param",
+              "kind": 32768,
+              "flags": {},
+              "type": {
+                "type": "intrinsic",
+                "name": "number"
+              }
+            }
+          ],
+          "type": {
+            "type": "reference",
+            "target": 1,
+            "name": "Entry"
+          }
+        }
+      ]
+    }
+  ]
+}

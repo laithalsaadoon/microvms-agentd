@@ -37,7 +37,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
@@ -287,13 +287,18 @@ class _Walk:
             }
 
         if what == "function":
+            inputs = inner.get("sig", {}).get("inputs", [])
+            names = Counter(name for name, _ in inputs)
             return {
                 "origin": origin,
                 "parameters": {
-                    name: {"position": position, "type": stable_type(type_, doc)}
-                    for position, (name, type_) in enumerate(
-                        inner.get("sig", {}).get("inputs", [])
-                    )
+                    # Repeated wildcard names are legal Rust. A positional key cannot
+                    # collide with an identifier and retains every argument's type.
+                    f"#{position}" if names[name] > 1 else name: {
+                        "position": position,
+                        "type": stable_type(type_, doc),
+                    }
+                    for position, (name, type_) in enumerate(inputs)
                     if name != "self"
                 },
                 "returns": stable_type(inner.get("sig", {}).get("output"), doc),
@@ -349,9 +354,13 @@ class _Walk:
         elif what == "union":
             result["fields"] = fields(inner["fields"])
         elif what == "enum":
+            # Declaration order controls implicit discriminants and derived ordering.
             result["variants"] = {
-                doc["index"][str(variant)]["name"]: variant_shape(variant)
-                for variant in inner["variants"]
+                doc["index"][str(variant)]["name"]: {
+                    "position": position,
+                    **variant_shape(variant),
+                }
+                for position, variant in enumerate(inner["variants"])
             }
         elif what == "type_alias":
             result["type"] = stable_type(inner["type"], doc)
