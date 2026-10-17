@@ -33,6 +33,7 @@ depends = [
   "background:check",
   "box:check",
   "trace:check",
+  "spec:check",
   "ratchet:check",
   "guards:list",
   "fail-to-pass:check",

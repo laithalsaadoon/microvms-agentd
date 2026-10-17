@@ -628,12 +628,6 @@ jobs:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
         run: mise run ci:build
 
-# The requirements-verification job (symspec over verify/spec/*.symspec.json) ran here
-# while symspec was on npm. The tool this repo actually needs is the v5 line
-# (1.0.0-alpha.0) — the only version that can read core.symspec.json's state
-# model and reachability tier — and it is not published anywhere yet; it runs
-# from a local checkout via `mise run spec:core`. A CI job that installed the
-# 0.1.0 registry package would verify the six-requirement daemon draft and skip
-# the 51 requirements that matter, which is worse than no job: green next to
-# the word "requirements" reads as "the requirements were verified". The job
-# returns when symspec 1.x is installable from a registry or vendorable.
+# Formal verification remains optional. `mise run spec:setup` installs its locked
+# environment; `spec` and `spec:core` run it. Strict coverage is enabled separately
+# after the requirements findings have been reconciled.

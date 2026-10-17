@@ -71,3 +71,7 @@ __fuzz__/
 # uploads the job's copy as an artifact.
 mutants.out/
 mutants.out.old/
+
+# Optional formal verifier assets; package-lock.json is committed.
+/verify/formal/model/
+/verify/formal/node_modules/

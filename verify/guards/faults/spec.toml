@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+# The optional verifier must be exactly the installed, locked version.
+[[fault]]
+id = "spec-unpinned-version"
+guard = "test_check_spec.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_spec.py", "-k", "test_an_unexpected_version_is_refused"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_unexpected_version_is_refused ("
+transform = { file = "tools/check-spec.sh", replace = 'if [[ $version != "symspec v2.0.0" ]]; then', with = 'if false; then' }
+
+# A verifier failure must fail the caller, including strict coverage's exit 3.
+[[fault]]
+id = "spec-verdict-discarded"
+guard = "test_check_spec.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_spec.py", "-k", "test_arguments_assets_and_nonzero_verdict_are_preserved"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_arguments_assets_and_nonzero_verdict_are_preserved ("
+transform = { file = "tools/check-spec.sh", replace = 'exec "$verifier" check "$doc" "$@"', with = '"$verifier" check "$doc" "$@" || true' }

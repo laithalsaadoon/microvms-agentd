@@ -331,9 +331,17 @@ manages VPC connectors. Document the package's supported workflows and limits.
 To check implemented constraints against the latest SDK without creating AWS
 resources, run `uv run --upgrade --script tools/check-model-drift.py`.
 
-The `spec` and `spec:core` tasks are separate from `check`. They need a
-symspec 1.0 or later CLI on PATH; `tools/check-spec.sh` refuses an absent or
-older one by name. A passing `check` does not verify those documents.
+The `spec` and `spec:core` tasks are separate from `check`. Install their optional environment with `mise run spec:setup`, then run both
+commands. The setup uses Node 24.22.0 for these tasks only, installs symspec 2.0.0
+and its dependencies from `verify/formal/package-lock.json`, and downloads its
+checksum-pinned semantic model into the ignored `verify/formal/model/` directory.
+The verifier and its dependencies keep their package licenses;
+symspec is Apache-2.0 and its semantic model is MIT. The model revision and asset
+checksums are part of the pinned verifier. Setup needs network access; later
+checks use the local assets. To reproduce from scratch, remove
+`verify/formal/node_modules/` and `verify/formal/model/`, then run setup again.
+`tools/check-spec.sh` refuses a missing or different verifier. A passing `check`
+does not verify those documents.
 `cargo test -p agentd-model` runs the portable state-machine checks, and
 `cargo test -p model-conformance` checks the app against them.
 
