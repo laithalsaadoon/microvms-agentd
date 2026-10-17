@@ -709,6 +709,103 @@ class TypeScriptDefaultTests(unittest.TestCase):
                     self.read(self.tagged(*parts)), {"run(value)": expected}
                 )
 
+    def test_fenced_tags_match_markdown_backtick_lengths(self):
+        for value in (
+            "```json\n0\n```",
+            "```json\n0\n  ````  ",
+            "````json\n0\n````",
+        ):
+            with self.subTest(value=value):
+                self.assertEqual(self.read(self.tagged(value)), {"run(value)": "0"})
+
+    def test_complete_fenced_scalars_accept_supported_lines_and_spacing(self):
+        for newline in ("\n", "\r\n", "\r"):
+            for info in ("", "json", "json extra-info"):
+                for indent in range(4):
+                    with self.subTest(newline=newline, info=info, indent=indent):
+                        value = newline.join(
+                            ["```" + info, "0", " " * indent + "``` \t"]
+                        )
+                        self.assertEqual(
+                            self.read(self.tagged(value)), {"run(value)": "0"}
+                        )
+
+    def test_fenced_tags_reject_malformed_openers_and_line_boundaries(self):
+        for value in (
+            "```json`invalid\n0\n```",
+            "``` `\n0\n```",
+            "```json\n0\n    ```",
+            "```json\n0\n\t```",
+            "```json\u20280\u2028```",
+            "```json\u00850\u0085```",
+            "```json\x0b0\x0b```",
+        ):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                    PARITY["ParityError"], "malformed @defaultValue"
+                ):
+                    self.read(self.tagged(value))
+
+    def test_native_initializer_cannot_be_replaced_by_a_documentation_tag(self):
+        for tag in ("3", "0", "invalid"):
+            with self.subTest(tag=tag):
+                parameter = self.tagged(tag)
+                parameter["defaultValue"] = "3"
+                self.assertEqual(self.read(parameter), {"run(value)": "3"})
+
+    def test_callable_reference_cycles_keep_other_signature_branches(self):
+        reference = {"type": "reference", "target": 1}
+        surface = PARITY["ts_surface"](
+            {
+                "kind": 1,
+                "name": "Documentation",
+                "children": [
+                    {"kind": 32, "name": "run", "type": reference},
+                    {
+                        "kind": 2097152,
+                        "name": "Recursive",
+                        "id": 1,
+                        "type": {
+                            "type": "union",
+                            "types": [
+                                reference,
+                                {
+                                    "type": "reflection",
+                                    "declaration": {
+                                        "signatures": [
+                                            {
+                                                "parameters": [
+                                                    {
+                                                        "name": "count",
+                                                        "flags": {"isOptional": True},
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                },
+                            ],
+                        },
+                    },
+                ],
+            }
+        )
+        self.assertEqual(surface.defaults, {"run(count)": "undefined"})
+
+    def test_fenced_tags_require_a_complete_closing_fence(self):
+        for value in (
+            "```json\n0\nnot-a-closing-fence",
+            "```json\n0\n``` trailing garbage",
+            "```json\n0\n```\ntrailing garbage",
+            "```json\n0",
+            "````json\n0\n```",
+        ):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                    PARITY["ParityError"], "malformed @defaultValue"
+                ):
+                    self.read(self.tagged(value))
+
     def test_invalid_tag_values_report_the_reason(self):
         for value, reason in [
             ("invalid", "malformed @defaultValue"),
@@ -883,6 +980,30 @@ class DefaultTests(FixtureCase):
         self.manifest["data"]["clientDefaults"]["execWaitSeconds"] = 300.0
         problems = self.problems()
         self.assertFalse([problem for problem in problems if "attach" in problem])
+
+    def test_ellipsis_is_only_a_python_named_constant_marker(self):
+        self.flag("ls", "format")["default"] = "..."
+        self.table = self.table.replace(
+            'exempt = "a terminal-only rendering selection"\nvalue = "table"',
+            'core = "label"',
+        )
+        self.assertProblem(
+            "default table-format: cli: ls --format defaults to ..., but "
+            'clientDefaults.label is "run"'
+        )
+        surfaces = {
+            "cli": PARITY["cli_surface"](self.manifest),
+            "py": PARITY["py_surface"](self.griffe),
+            "ts": PARITY["ts_surface"](self.typedoc),
+        }
+        surfaces["ts"].defaults["Sandbox.run(image)"] = "..."
+        self.assertIn(
+            "default absent: ts: Sandbox.run(image) defaults to ..., but "
+            "clientDefaults.image is null",
+            PARITY["default_problems"](
+                PARITY["parse_table"](self.table)["default"], surfaces, set()
+            ),
+        )
 
     def test_a_row_naming_a_default_the_surface_does_not_state_fails(self):
         self.flag("run", "timeout")["default"] = None
@@ -1287,6 +1408,53 @@ class ReaderTests(unittest.TestCase):
                 f"{project['name']}.AliasOptions.local": "undefined",
                 f"{project['name']}.AliasOptions.local.enabled": "true",
                 f"{project['name']}.DEFAULT_COUNT": "7",
+            },
+        )
+
+    def test_typescript_callable_values_read_inputs_but_not_return_records(self):
+        declarations_text = """\
+export interface OutputOnly {
+  ignored?: number;
+  callback: (hidden?: number) => void;
+}
+export declare function anchor(count?: number): OutputOnly;
+export declare function factory(): (hidden?: number) => void;
+export declare const run: (count?: number) => OutputOnly;
+export type Runner = (count?: number) => OutputOnly;
+export type RunnerAlias = Runner;
+export declare const aliased: RunnerAlias;
+export type UnionRunner = Runner | ((other?: boolean) => OutputOnly);
+export declare const union: UnionRunner;
+export declare const constants: readonly number[];
+export interface Callable { (enabled?: boolean): OutputOnly; }
+export declare const callableInterface: Callable;
+export declare class Box {
+  run: (count?: number) => OutputOnly;
+  aliased: Runner;
+}
+export declare namespace nested {
+  export const run: (options: { enabled?: boolean }) => OutputOnly;
+}
+"""
+        with tempfile.TemporaryDirectory() as scratch:
+            declarations = Path(scratch) / "index.d.ts"
+            declarations.write_text(declarations_text, encoding="utf-8")
+            surface = PARITY["ts_surface"](
+                PARITY["run_typedoc"](declarations, Path(scratch))
+            )
+        self.assertEqual(
+            surface.defaults,
+            {
+                "anchor(count)": "undefined",
+                "run(count)": "undefined",
+                "aliased(count)": "undefined",
+                "union(count)": "undefined",
+                "union(other)": "undefined",
+                "Callable(enabled)": "undefined",
+                "callableInterface(enabled)": "undefined",
+                "Box.run(count)": "undefined",
+                "Box.aliased(count)": "undefined",
+                "nested.run(options).enabled": "undefined",
             },
         )
 

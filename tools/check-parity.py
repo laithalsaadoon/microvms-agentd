@@ -260,15 +260,24 @@ def record_ts_defaults(project: dict[str, Any], surface: Surface) -> None:
     """
     nodes: dict[int, tuple[str, dict[str, Any]]] = {}
     callables: list[tuple[str, dict[str, Any]]] = []
+    callable_types: list[tuple[str, dict[str, Any]]] = []
 
-    def index(node: dict[str, Any], prefix: str) -> None:
+    def index(
+        node: dict[str, Any], prefix: str, parent_kind: int | None = None
+    ) -> None:
         name = prefix + node["name"]
         if isinstance(node.get("id"), int):
             nodes[node["id"]] = (name, node)
         for signature in node.get("signatures") or []:
             callables.append((name, signature))
+        # Callable variables and properties carry their signatures in a reflected type.
+        # Keep the declaration's public owner and leave signature return types unread.
+        if node.get("kind") == TS_VARIABLE or (
+            node.get("kind") == TS_PROPERTY and parent_kind == TS_CLASS
+        ):
+            callable_types.append((name, node.get("type") or {}))
         for child in node.get("children") or []:
-            index(child, name + "." if node.get("kind") != 1 else "")
+            index(child, name + "." if node.get("kind") != 1 else "", node.get("kind"))
 
     def default(node: dict[str, Any], name: str) -> None:
         tags = [
@@ -279,12 +288,21 @@ def record_ts_defaults(project: dict[str, Any], surface: Surface) -> None:
         if len(tags) > 1:
             raise ParityError(f"ts: {name} has duplicate @defaultValue tags")
         value = node.get("defaultValue")
-        if tags:
+        if tags and value is None:
             value = "".join(
                 part["text"] for part in tags[0].get("content") or []
             ).strip()
             if value.startswith("```"):
-                lines = value.splitlines()
+                lines = re.split(r"\r\n?|\n", value)
+                fence = re.match(r"`{3,}", value)[0]
+                # A complete backtick-wrapped scalar follows CommonMark 4.5's info and
+                # closing-run rules: https://spec.commonmark.org/0.31.2/#fenced-code-blocks
+                if (
+                    len(lines) < 3
+                    or "`" in lines[0][len(fence) :]
+                    or re.fullmatch(r" {0,3}" + fence + r"`*[ \t]*", lines[-1]) is None
+                ):
+                    raise ParityError(f"ts: {name} has a malformed @defaultValue")
                 value = "\n".join(lines[1:-1]).strip()
             if value != "undefined":
                 try:
@@ -342,9 +360,26 @@ def record_ts_defaults(project: dict[str, Any], surface: Surface) -> None:
             default(parameter, name)
             input_type(parameter.get("type"), name)
 
+    def callable_type(value: dict[str, Any], owner: str, seen: set[int]) -> None:
+        declaration = value.get("declaration") or {}
+        for signature in declaration.get("signatures") or []:
+            input_parameters(signature, owner)
+        target = value.get("target")
+        if isinstance(target, int) and target in nodes and target not in seen:
+            seen.add(target)
+            _, node = nodes[target]
+            for signature in node.get("signatures") or []:
+                input_parameters(signature, owner)
+            callable_type(node.get("type") or {}, owner, seen)
+        for nested in value.get("types") or []:
+            callable_type(nested, owner, seen)
+
     index(project, "")
     for owner, signature in callables:
         input_parameters(signature, owner)
+    for owner, value in callable_types:
+        # Each exported owner consumes its alias independently; cycles stop within it.
+        callable_type(value, owner, set())
 
 
 def read_ts_children(
@@ -715,7 +750,7 @@ def default_problems(
                     problems.append(
                         f"{where}: {key}: {name} defaults to {text}, but its exemption pins {row['value']}"
                     )
-                if not resolved or text == "...":
+                if not resolved or (key == "py" and text == "..."):
                     continue
                 compared += 1
                 if differs(text, value, key):

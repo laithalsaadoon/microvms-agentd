@@ -230,3 +230,61 @@ transform = { file = "tools/check-parity.py", replace = "    index(project, \"\"
 id = "default-typescript-callable-record"
 message = "test_the_typescript_reader_over_typedoc"
 transform = { file = "tools/check-parity.py", replace = "        for signature in node.get(\"signatures\") or []:\n            input_parameters(signature, name)\n", with = "        for signature in []:\n            input_parameters(signature, name)\n" }
+
+[[family.fault]]
+id = "default-ellipsis-python-only"
+message = "test_ellipsis_is_only_a_python_named_constant_marker"
+transform = { file = "tools/check-parity.py", replace = '                if not resolved or (key == "py" and text == "..."):', with = '                if not resolved or text == "...":' }
+
+[[family.fault]]
+id = "default-typescript-native-tag-precedence"
+message = "test_native_initializer_cannot_be_replaced_by_a_documentation_tag"
+transform = { file = "tools/check-parity.py", replace = '        if tags and value is None:', with = '        if tags:' }
+
+[[family.fault]]
+id = "default-typescript-closing-fence"
+message = "test_fenced_tags_require_a_complete_closing_fence"
+transform = { file = "tools/check-parity.py", replace = '''                if (
+                    len(lines) < 3
+                    or "`" in lines[0][len(fence) :]
+                    or re.fullmatch(r" {0,3}" + fence + r"`*[ \t]*", lines[-1]) is None
+                ):''', with = '                if False:' }
+
+[[family.fault]]
+id = "default-typescript-callable-values"
+message = "test_typescript_callable_values_read_inputs_but_not_return_records"
+transform = { file = "tools/check-parity.py", replace = '            callable_types.append((name, node.get("type") or {}))', with = '            pass' }
+
+
+[[family.fault]]
+id = "default-typescript-callable-output-record"
+message = "test_typescript_callable_values_read_inputs_but_not_return_records"
+transform = { file = "tools/check-parity.py", replace = 'node.get("kind") == TS_PROPERTY and parent_kind == TS_CLASS', with = 'node.get("kind") == TS_PROPERTY' }
+
+
+[[family.fault]]
+id = "default-typescript-callable-reference"
+message = "test_typescript_callable_values_read_inputs_but_not_return_records"
+transform = { file = "tools/check-parity.py", replace = '        if isinstance(target, int) and target in nodes and target not in seen:', with = '        if False:' }
+
+[[family.fault]]
+id = "default-typescript-callable-cycle"
+message = "test_callable_reference_cycles_keep_other_signature_branches"
+transform = { file = "tools/check-parity.py", replace = '            seen.add(target)', with = '            seen.add(None)' }
+
+
+[[family.fault]]
+id = "default-typescript-fence-info"
+message = "test_fenced_tags_reject_malformed_openers_and_line_boundaries"
+transform = { file = "tools/check-parity.py", replace = '''                    or "`" in lines[0][len(fence) :]
+''', with = '' }
+
+[[family.fault]]
+id = "default-typescript-fence-lines"
+message = "test_fenced_tags_reject_malformed_openers_and_line_boundaries"
+transform = { file = "tools/check-parity.py", replace = '                lines = re.split(r"\r\n?|\n", value)', with = '                lines = value.splitlines()' }
+
+[[family.fault]]
+id = "default-typescript-fence-indent"
+message = "test_fenced_tags_reject_malformed_openers_and_line_boundaries"
+transform = { file = "tools/check-parity.py", replace = 're.fullmatch(r" {0,3}" + fence + r"`*[ \t]*", lines[-1])', with = 're.fullmatch(r"\s*" + fence + r"`*[ \t]*", lines[-1])' }
