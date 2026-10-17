@@ -273,7 +273,6 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(last.kwargs["timeout"], 120)
         self.assertTrue(last.kwargs["capture_output"])
         self.assertTrue(last.kwargs["text"])
-        self.assertFalse(last.kwargs["check"])
         for key in ("GH_TOKEN", "GITHUB_TOKEN", "RECOVERY_ROLE_ARN"):
             self.assertNotIn(key, last.kwargs["env"])
 
@@ -826,6 +825,35 @@ class RuntimeTests(unittest.TestCase):
                 {"operation": expected_operation, "code": expected_code},
             )
         self.assertNotIn("private", json.dumps(api.failures))
+
+    def test_optional_role_observation_rejects_before_api_and_sanitizes_api_errors(
+        self,
+    ):
+        clock = fixtures.Clock()
+        api = recovery.Api(None, None, clock=clock, sleep=clock.sleep)
+        iam = Mock()
+        for role in ("not-an-arn/name", "", None, 4):
+            with self.subTest(role=role):
+                self.assertEqual(
+                    recovery.observe_duration(iam, role, api), {"status": "unavailable"}
+                )
+                iam.get_role.assert_not_called()
+        iam.get_role.side_effect = RuntimeError("private-credentials")
+        role = "arn:aws:iam::0:role/name"
+        self.assertEqual(
+            recovery.observe_duration(iam, role, api), {"status": "unavailable"}
+        )
+        iam.get_role.assert_called_once_with(RoleName="name")
+
+    def test_remaining_fractional_budget_reaches_independent_verifier(self):
+        clock = fixtures.Clock()
+
+        def nearly_spent(*args):
+            clock.now = recovery.TOTAL_SECONDS - 0.5
+
+        code, value, _, runner, *_ = self.run_main(clock=clock, apply=nearly_spent)
+        self.assertEqual((code, value["status"]), (0, "passed"))
+        self.assertEqual(runner.call_args.kwargs["timeout"], 0.5)
 
     def test_version_observation_is_exact_deduplicated_metadata_only(self):
         clock = fixtures.Clock()

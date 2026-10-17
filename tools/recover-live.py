@@ -1202,7 +1202,6 @@ def main() -> int:
                 capture_output=True,
                 text=True,
                 timeout=min(120, remaining),
-                check=False,
                 env={
                     k: v
                     for k, v in os.environ.items()
