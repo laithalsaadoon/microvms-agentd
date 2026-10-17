@@ -1092,11 +1092,6 @@ def selected(
         for resource, row, _ in plan.values()
         if resource["kind"] == "image"
     }
-    targets = {
-        row["logGroupName"]
-        for resource, row, _ in plan.values()
-        if resource["kind"] == "log-group"
-    }
     if scoped:
         targets = {
             ownership[resource["sha256"]][1]

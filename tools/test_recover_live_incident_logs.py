@@ -289,6 +289,59 @@ def test_incident_policy_requires_every_historical_anchor(field):
         recovery.incident_policy(value)
 
 
+@pytest.mark.parametrize("policy", [None, [], "incident-owned-logs-v1", True])
+def test_incident_log_requires_an_object_policy_with_a_fixed_refusal(policy):
+    value = manifest()
+    value["incident_recovery"] = policy
+    with pytest.raises(recovery.Refused, match="^incident_policy$"):
+        recovery.incident_policy(value)
+
+
+@pytest.mark.parametrize("log_count,image_count", [(1, 0), (1, 2), (2, 1)])
+def test_incident_default_log_requires_one_exact_image_pair(log_count, image_count):
+    row = manifest()["resources"][-1]
+    images = {
+        str(index): ("explicit-incident-image", EXPLICIT, None)
+        for index in range(image_count)
+    }
+    with pytest.raises(recovery.Refused, match="^incident_log_pair$"):
+        recovery.incident_log_selection(REGION, [row] * log_count, images, {})
+
+
+@pytest.mark.parametrize(
+    "kind,name",
+    [("image", EXPLICIT), ("log-group", None), ("log-group", 1)]
+    + [("log-group", name) for name in ["", "bad/name", "bad.name", "a" * 65]],
+)
+def test_incident_default_log_rejects_invalid_pair_identity(kind, name):
+    row = dict(manifest()["resources"][-1], kind=kind)
+    images = {"image": ("explicit-incident-image", name, None)}
+    with pytest.raises(recovery.Refused, match="^incident_log_pair$"):
+        recovery.incident_log_selection(REGION, [row], images, {})
+
+
+@pytest.mark.parametrize("name", ["UpperCase_9-name", "a" * 64])
+def test_incident_default_log_accepts_the_complete_image_name_alphabet(name):
+    group = recovery.SERVICE_PREFIX + name
+    row = dict(manifest()["resources"][-1], sha256=key("log-group", group))
+    images = {"image": ("explicit-incident-image", name, None)}
+    assert recovery.incident_log_selection(REGION, [row], images, {}) == {
+        row["sha256"]: ("incident-default-log", group, None)
+    }
+
+
+@pytest.mark.parametrize("conflict", [False, True])
+def test_incident_default_log_refuses_wrong_hash_or_prior_authority(conflict):
+    row = manifest()["resources"][-1]
+    images = {"image": ("explicit-incident-image", EXPLICIT, None)}
+    proven = {row["sha256"]: ("shared-log", EXPLICIT_GROUP, None)} if conflict else {}
+    if not conflict:
+        row["sha256"] = key("log-group", EXPLICIT_GROUP + "-other")
+    reason = "incident_log_conflict" if conflict else "incident_log_unresolved"
+    with pytest.raises(recovery.Refused, match=f"^{reason}$"):
+        recovery.incident_log_selection(REGION, [row], images, proven)
+
+
 def test_incident_default_log_is_derived_only_from_its_explicit_image():
     value = manifest()
     original = copy.deepcopy(value)
@@ -380,6 +433,31 @@ def test_scoped_unknown_logging_keeps_scanning_and_emits_exact_evidence(incident
     serialized = json.dumps(report)
     for name in (*IMAGE_NAMES, *expected_groups, arn(fixtures.UNKNOWN)):
         assert name not in serialized
+
+
+def test_unknown_logging_count_includes_every_version_on_later_pages(incident):
+    incident.records = {str(number): version(number) for number in (1, 2, 3)}
+    incident.split_versions = True
+    report = recover(incident)
+    assert {
+        row["unknownLoggingVersionCount"] for row in report["incidentLogEvidence"]
+    } == {3}
+    assert len(incident.api.version_evidence) == 3
+    assert {row["loggingStatus"] for row in incident.api.version_evidence} == {
+        "unknown"
+    }
+
+
+def test_single_target_compares_complete_log_names_not_substrings(incident):
+    incident.records = {"1": version(1, {"cloudWatch": {"logGroup": "target"}})}
+    incident.api.region = REGION
+    assert (
+        incident.api.configured_dependencies(
+            recovery.SERVICE_PREFIX + "target", incident.plane.images, set()
+        )
+        == 0
+    )
+    no_log_deletes(incident)
 
 
 def test_each_log_delete_rechecks_all_exact_addresses_and_complete_censuses(incident):
