@@ -614,3 +614,251 @@ class Members(unittest.TestCase):
             ("public::Alias", "public::Extension", False),
         )
         self.assertEqual(entry.declaration["origin"], "public::Extension::call")
+
+
+class VisitedDeclarations(unittest.TestCase):
+    def setUp(self):
+        self.walker = walk._Walk(Path("unused"), ())
+        self.doc = {"_name": "defining_crate", "paths": {}, "index": {}}
+
+    def test_visit_preserves_struct_declaration_and_canonical_or_fallback_origin(self):
+        for canonical in (True, False):
+            with self.subTest(canonical=canonical):
+                self.setUp()
+                options = item(
+                    "struct",
+                    {
+                        "kind": {"plain": {"fields": [2]}},
+                        "generics": {"params": [], "where_predicates": []},
+                    },
+                    name="Options",
+                    attrs=["#[non_exhaustive]"],
+                )
+                self.doc["index"]["2"] = {
+                    "name": "enabled",
+                    "visibility": "public",
+                    "inner": {"struct_field": {"primitive": "bool"}},
+                }
+                if canonical:
+                    self.doc["paths"]["1"] = {
+                        "path": ["dependency", "Options"],
+                        "kind": "struct",
+                    }
+                self.walker.visit(self.doc, options, "public::RenamedOptions")
+                self.assertEqual(set(self.walker.entries), {"public::RenamedOptions"})
+                entry = self.walker.entries["public::RenamedOptions"]
+                self.assertEqual(
+                    (entry.path, entry.kind, entry.owner, entry.via, entry.generic),
+                    ("public::RenamedOptions", "struct", None, None, False),
+                )
+                self.assertEqual(
+                    entry.declaration,
+                    {
+                        "kind": "struct",
+                        "origin": "dependency::Options"
+                        if canonical
+                        else "defining_crate::Options",
+                        "attributes": ["#[non_exhaustive]"],
+                        "generics": {"params": [], "where_predicates": []},
+                        "construction": "plain",
+                        "fields": {"enabled": {"primitive": "bool"}},
+                    },
+                )
+                self.assertEqual(
+                    self.walker.seen, {("public::RenamedOptions", "struct")}
+                )
+                canonical_key = (
+                    (("dependency", "Options"), "struct")
+                    if canonical
+                    else ("defining_crate", "1")
+                )
+                self.assertEqual(
+                    dict(self.walker.homes), {canonical_key: ["public::RenamedOptions"]}
+                )
+
+    def test_visit_propagates_trait_declaration_origin_and_generics_to_members(self):
+        for params in ([], [{"kind": {"type": {}}, "name": "T"}]):
+            with self.subTest(params=params):
+                self.setUp()
+                self.walker.root = self.doc
+                trait = item(
+                    "trait",
+                    {
+                        "generics": {"params": params},
+                        "bounds": [{"lifetime": "'static"}],
+                        "is_unsafe": True,
+                        "is_auto": False,
+                        "is_dyn_compatible": True,
+                        "items": [7, 8],
+                        "implementations": [],
+                    },
+                    name="Service",
+                    identity=3,
+                )
+                self.doc["paths"]["3"] = {
+                    "path": ["dependency", "Service"],
+                    "kind": "trait",
+                }
+                self.doc["index"].update(
+                    {
+                        "7": item(
+                            "function",
+                            {
+                                "generics": {"params": []},
+                                "sig": {"inputs": [["request", {"primitive": "u8"}]]},
+                            },
+                            name="call",
+                            identity=7,
+                        ),
+                        "8": item(
+                            "assoc_type",
+                            {"type": {"primitive": "u32"}},
+                            name="Response",
+                            identity=8,
+                        ),
+                    }
+                )
+                self.walker.visit(self.doc, trait, "public::Service")
+                self.assertEqual(
+                    set(self.walker.entries),
+                    {
+                        "public::Service",
+                        "public::Service::call",
+                        "public::Service::Response",
+                    },
+                )
+                self.assertEqual(
+                    self.walker.entries["public::Service"].declaration,
+                    {
+                        "kind": "trait",
+                        "origin": "dependency::Service",
+                        "attributes": [],
+                        "generics": {"params": params},
+                        "bounds": [{"lifetime": "'static"}],
+                        "is_unsafe": True,
+                        "is_auto": False,
+                        "is_dyn_compatible": True,
+                    },
+                )
+                method = self.walker.entries["public::Service::call"]
+                self.assertEqual(
+                    (method.kind, method.owner, method.via, method.generic),
+                    ("method", "public::Service", "trait", bool(params)),
+                )
+                self.assertEqual(
+                    method.declaration,
+                    {
+                        "origin": "dependency::Service::call",
+                        "generics": {"params": []},
+                        "parameters": {
+                            "request": {"position": 0, "type": {"primitive": "u8"}}
+                        },
+                        "returns": None,
+                        "receiver": None,
+                        "header": {},
+                    },
+                )
+                associated = self.walker.entries["public::Service::Response"]
+                self.assertEqual(
+                    (associated.kind, associated.via, associated.generic),
+                    ("assoc_type", "trait", bool(params)),
+                )
+                self.assertEqual(
+                    associated.declaration,
+                    {
+                        "kind": "assoc_type",
+                        "origin": "dependency::Service::Response",
+                        "type": {"primitive": "u32"},
+                    },
+                )
+                self.assertEqual(
+                    self.walker.extensions, {"3": (self.doc, trait, "public::Service")}
+                )
+
+    def test_visit_propagates_inherent_impl_constraints_and_type_or_impl_generics(self):
+        for type_params, impl_params, generic in (
+            ([], [], False),
+            ([{"kind": {"type": {}}, "name": "T"}], [], True),
+            ([], [{"kind": {"type": {}}, "name": "U"}], True),
+        ):
+            with self.subTest(type_params=type_params, impl_params=impl_params):
+                self.setUp()
+                options = item(
+                    "struct",
+                    {
+                        "kind": "unit",
+                        "generics": {"params": type_params},
+                        "impls": [20, 21],
+                    },
+                    name="Options",
+                )
+                self.doc["paths"]["1"] = {
+                    "path": ["dependency", "Options"],
+                    "kind": "struct",
+                }
+                self.doc["index"]["7"] = item(
+                    "function",
+                    {
+                        "generics": {"params": []},
+                        "sig": {"inputs": []},
+                    },
+                    name="new",
+                    identity=7,
+                )
+                self.doc["index"]["7"]["visibility"] = "public"
+                self.doc["index"]["8"] = item(
+                    "function", {"generics": {"params": []}}, name="hidden", identity=8
+                )
+                self.doc["index"]["8"]["visibility"] = "default"
+                self.doc["index"]["20"] = item(
+                    "impl", {"trait": {"path": "ForeignTrait"}, "items": [8]}
+                )
+                impl = {
+                    "trait": None,
+                    "for": {
+                        "resolved_path": {"id": 1, "path": "Options", "args": None}
+                    },
+                    "generics": {
+                        "params": impl_params,
+                        "where_predicates": [{"lifetime": "'static"}],
+                    },
+                    "is_unsafe": True,
+                    "is_negative": False,
+                    "items": [7, 8],
+                }
+                self.doc["index"]["21"] = item("impl", impl)
+                self.walker.visit(self.doc, options, "public::Alias")
+                self.assertEqual(
+                    set(self.walker.entries), {"public::Alias", "public::Alias::new"}
+                )
+                method = self.walker.entries["public::Alias::new"]
+                self.assertEqual(
+                    (method.kind, method.owner, method.via, method.generic),
+                    ("method", "public::Alias", "inherent", generic),
+                )
+                self.assertEqual(
+                    method.declaration,
+                    {
+                        "origin": "dependency::Options::new",
+                        "parameters": {},
+                        "returns": None,
+                        "generics": {"params": []},
+                        "receiver": None,
+                        "header": {},
+                        "impl": {
+                            "trait": None,
+                            "for": {
+                                "resolved_path": {
+                                    "path": "dependency::Options",
+                                    "args": None,
+                                }
+                            },
+                            "generics": {
+                                "params": impl_params,
+                                "where_predicates": [{"lifetime": "'static"}],
+                            },
+                            "is_unsafe": True,
+                            "is_negative": False,
+                        },
+                    },
+                )

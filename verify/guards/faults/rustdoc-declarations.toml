@@ -7,3 +7,12 @@ expect = "exit-nonzero"
 message = "test_origin_uses_canonical_paths_and_an_explicit_fallback"
 suite = "script"
 transform = { file = "tools/rustdoc_walk.py", replace = "return \"::\".join(summary[\"path\"]) if summary else fallback", with = "return fallback" }
+
+[[fault]]
+id = "rustdoc-visit-declaration-dropped"
+guard = "tools/test_rustdoc_declarations.py::VisitedDeclarations::test_visit_preserves_struct_declaration_and_canonical_or_fallback_origin"
+run = ["uv", "run", "--locked", "pytest", "-q", "tools/test_rustdoc_declarations.py::VisitedDeclarations"]
+expect = "exit-nonzero"
+message = "test_visit_preserves_struct_declaration_and_canonical_or_fallback_origin"
+suite = "script"
+transform = { file = "tools/rustdoc_walk.py", replace = "self.add(Entry(path, what, declaration=self.declaration(doc, item, origin)))", with = "self.add(Entry(path, what))" }
