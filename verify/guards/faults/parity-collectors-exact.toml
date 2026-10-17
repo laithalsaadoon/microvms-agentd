@@ -1,0 +1,16 @@
+# Exact collector contracts preserve source identity and independently mapped inputs.
+[[family]]
+guard = "tools/test_parity_collectors_exact.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "tools/test_parity_collectors_exact.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "parity-collectors-core-origin"
+message = "test_complete_declarations_and_argument_origins"
+transform = { file = "tools/parity_inventory.py", replace = '''"origin": f"{declaration.get('origin')}({parameter})",''', with = '''"origin": parameter,''' }
+
+[[family.fault]]
+id = "parity-collectors-ts-reference"
+message = "test_reference_identity_and_declaration_shapes"
+transform = { file = "tools/parity_inventory.py", replace = "                    result[key] = references[child]\n", with = "                    result[key] = str(child)\n" }

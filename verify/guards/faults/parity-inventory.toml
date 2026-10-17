@@ -103,7 +103,7 @@ transform = { file = "tools/rustdoc_walk.py", replace = "next(iter(shape)) if is
 [[family.fault]]
 id = "parity-inventory-rust-discriminant"
 message = "test_rust_discriminants_and_associated_type_bounds_are_held"
-transform = { file = "tools/rustdoc_walk.py", replace = "\"discriminant\": stable_type(variant.get(\"discriminant\"), doc)", with = "\"discriminant\": None" }
+transform = { file = "tools/rustdoc_walk.py", replace = "\"discriminant\": variant.get(\"discriminant\")", with = "\"discriminant\": None" }
 
 [[family.fault]]
 id = "parity-inventory-rust-associated-type"

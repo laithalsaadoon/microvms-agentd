@@ -6,9 +6,20 @@ import runpy
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
-import parity_inventory as inventory
-import rustdoc_walk
+inventory = SimpleNamespace(
+    **runpy.run_path(
+        str(Path(__file__).with_name("parity_inventory.py")),
+        run_name="tools.parity_inventory",
+    )
+)
+rustdoc_walk = SimpleNamespace(
+    **runpy.run_path(
+        str(Path(__file__).with_name("rustdoc_walk.py")),
+        run_name="tools.rustdoc_walk",
+    )
+)
 
 
 def argument(name, *, kind="positional or keyword", type_="str", default=None):

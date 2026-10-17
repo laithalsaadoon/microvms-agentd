@@ -201,11 +201,13 @@ sources = [
   "tools/generate-core-api.py",
   "tools/rustdoc_walk.py",
   "tools/test_rustdoc_walk.py",
+  "tools/test_rustdoc_declarations.py",
+  "tools/test_generate_core_api.py",
 ]
 depends = ["toolchain:id"]
 outputs = { auto = true }
 run = [
-  "uv run --locked pytest -n auto -q -p no:cacheprovider tools/test_rustdoc_walk.py",
+  "uv run --locked pytest -n auto -q -p no:cacheprovider tools/test_rustdoc_walk.py tools/test_rustdoc_declarations.py tools/test_generate_core_api.py",
   "./tools/generate-core-api.py --check",
 ]
 

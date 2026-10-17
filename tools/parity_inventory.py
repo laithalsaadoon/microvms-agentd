@@ -292,27 +292,21 @@ def typescript(project: dict) -> Inventory:
         if isinstance(value, dict):
             # References already carry their written name; IDs, source links and comments
             # change independently of the input contract.
-            result = {
-                key: stable(child)
-                for key, child in value.items()
-                if key
-                not in ("id", "target", "comment", "sources", "groups", "categories")
-            }
-            if "target" in value:
-                target = value["target"]
-                if isinstance(target, int):
-                    if target not in references:
-                        raise InventoryError(
-                            f"unresolved TypeScript reference {target}"
-                        )
-                    result["target"] = references[target]
+            result = {}
+            for key, child in value.items():
+                if key in ("id", "comment", "sources", "groups", "categories"):
+                    continue
+                if key == "target" and isinstance(child, int):
+                    if child not in references:
+                        raise InventoryError(f"unresolved TypeScript reference {child}")
+                    result[key] = references[child]
                 else:
-                    result["target"] = stable(target)
+                    result[key] = stable(child)
             return result
         return value
 
     def signatures(owner, item):
-        signatures_ = item.get("signatures", []) or [
+        signatures_ = item.get("signatures") or [
             item[key] for key in ("getSignature", "setSignature") if key in item
         ]
         put(
@@ -333,9 +327,7 @@ def typescript(project: dict) -> Inventory:
                         if parameter.get("flags", {}).get("isRest")
                         else "argument",
                         "type": stable(parameter.get("type")),
-                        "required": not parameter.get("flags", {}).get(
-                            "isOptional", False
-                        ),
+                        "required": not parameter.get("flags", {}).get("isOptional"),
                         "position": position,
                     },
                 )
@@ -364,7 +356,7 @@ def typescript(project: dict) -> Inventory:
                         "flags": stable(item.get("flags", {})),
                         "members": {
                             member["name"]: {
-                                "kind": TS_KINDS.get(member["kind"], member["kind"]),
+                                "kind": TS_KINDS.get(member["kind"]),
                                 "type": stable(member.get("type")),
                                 "optional": member.get("flags", {}).get(
                                     "isOptional", False
@@ -389,7 +381,7 @@ def typescript(project: dict) -> Inventory:
                     {
                         "kind": "field",
                         "type": stable(item.get("type")),
-                        "required": not item.get("flags", {}).get("isOptional", False),
+                        "required": not item.get("flags", {}).get("isOptional"),
                         "flags": stable(item.get("flags", {})),
                     },
                 )
@@ -435,7 +427,7 @@ def problems(
             errors.append(f"{where}: unknown row keys")
         if "capability" in row and row["capability"] not in capabilities:
             errors.append(f"{where}: unknown capability {row['capability']}")
-        named = 0
+        implementer = None
         for surface in surfaces:
             cell = row.get(surface)
             if isinstance(cell, dict) and set(cell) == {"exempt"}:
@@ -452,7 +444,7 @@ def problems(
             ):
                 errors.append(f"{where}: {surface}: name declarations or an exemption")
                 continue
-            named += 1
+            implementer = surface
             for name in cell:
                 if not name.startswith(f"{category}:"):
                     errors.append(f"{where}: {surface}: {name} has the wrong kind")
@@ -461,7 +453,7 @@ def problems(
                         f"{where}: {surface}: {name} belongs to multiple rows"
                     )
                 claimed[surface].add(name)
-        if not named:
+        if implementer is None:
             errors.append(f"{where}: no surface implements the contract")
     for surface in surfaces:
         actual = observed.get(surface, {})

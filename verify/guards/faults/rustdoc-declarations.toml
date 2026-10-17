@@ -1,0 +1,9 @@
+# A re-export's public alias must not replace its declaration's canonical origin.
+[[fault]]
+id = "rustdoc-declaration-origin-alias"
+guard = "tools/test_rustdoc_declarations.py::StableTypes::test_origin_uses_canonical_paths_and_an_explicit_fallback"
+run = ["uv", "run", "--locked", "pytest", "-q", "tools/test_rustdoc_declarations.py::StableTypes::test_origin_uses_canonical_paths_and_an_explicit_fallback"]
+expect = "exit-nonzero"
+message = "test_origin_uses_canonical_paths_and_an_explicit_fallback"
+suite = "script"
+transform = { file = "tools/rustdoc_walk.py", replace = "return \"::\".join(summary[\"path\"]) if summary else fallback", with = "return fallback" }

@@ -264,13 +264,14 @@ class _Walk:
                 for position, member_id in enumerate(ids)
                 if member_id is not None
                 and (member := doc["index"][str(member_id)])
-                and (not public_only or member["visibility"] == "public")
+                and (public_only is False or member["visibility"] == "public")
             }
 
         def variant_shape(variant):
             variant = doc["index"][str(variant)]["inner"]["variant"]
             shape = variant["kind"]
-            result = {"discriminant": stable_type(variant.get("discriminant"), doc)}
+            # Rustdoc's discriminant contains only expr/value strings, never item IDs.
+            result = {"discriminant": variant.get("discriminant")}
             if isinstance(shape, str):
                 return {**result, "kind": shape}
             if "tuple" in shape:
@@ -338,11 +339,13 @@ class _Walk:
             result["construction"] = (
                 next(iter(shape)) if isinstance(shape, dict) else shape
             )
-            result["fields"] = fields(
-                shape.get("plain", {}).get("fields", shape.get("tuple", []))
-                if isinstance(shape, dict)
-                else []
-            )
+            if isinstance(shape, dict):
+                field_ids = (
+                    shape["plain"]["fields"] if "plain" in shape else shape["tuple"]
+                )
+            else:
+                field_ids = []
+            result["fields"] = fields(field_ids)
         elif what == "union":
             result["fields"] = fields(inner["fields"])
         elif what == "enum":
