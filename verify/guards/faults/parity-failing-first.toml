@@ -41,7 +41,66 @@ transform = { file = "tools/fail-to-pass.py", replace = 'not verdict[0]', with =
 [[family.fault]]
 id = "f2p-parity-cargo-config"
 message = "FAIL: test_rust_case_config_is_accepted_by_cargo ("
-transform = { file = "tools/fail-to-pass.py", replace = 'config = f"env.{PARITY_SELECTOR}.value={json.dumps(test.case)}"', with = 'config = f"env.{PARITY_SELECTOR}={{value={json.dumps(test.case)},force=true}}"' }
+transform = { file = "tools/fail-to-pass.py", replace = 'config = f"env.{PARITY_SELECTOR}.value={toml_str(test.case)}"', with = 'config = f"env.{PARITY_SELECTOR}={{value={toml_str(test.case)},force=true}}"' }
+
+[[family.fault]]
+id = "f2p-parity-cargo-unicode"
+message = "FAIL: test_rust_case_config_is_accepted_by_cargo ("
+transform = { file = "tools/fail-to-pass.py", replace = 'config = f"env.{PARITY_SELECTOR}.value={toml_str(test.case)}"', with = 'config = f"env.{PARITY_SELECTOR}.value={json.dumps(test.case)}"' }
+
+[[family.fault]]
+id = "f2p-parity-source-span"
+message = "FAIL: test_discovery_preserves_utf8_case_identity_and_complete_runner_records ("
+transform = { file = "tools/fail-to-pass.py", replace = "                    1,\n                    len(text.splitlines()),", with = "                    2,\n                    len(text.splitlines())," }
+
+[[family.fault]]
+id = "f2p-parity-invalid-surface"
+message = "FAIL: test_discovery_rejects_unknown_capabilities_and_invalid_surface_cells ("
+transform = { file = "tools/fail-to-pass.py", replace = 'if not isinstance(cell, (str, list)) or not cell:', with = 'if not isinstance(cell, (str, list)) and not cell:' }
+
+[[family.fault]]
+id = "f2p-parity-fake-runner"
+message = "FAIL: test_fake_cases_select_the_cli_binary_and_preserve_node_guards ("
+transform = { file = "tools/fail-to-pass.py", replace = 'guard = "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"', with = 'guard = "wrong_cli_runner"' }
+
+[[family.fault]]
+id = "f2p-parity-tier-diagnostic"
+message = "FAIL: test_discovery_reports_missing_cli_tiers_and_unowned_areas ("
+transform = { file = "tools/fail-to-pass.py", replace = 'f"cannot read CLI_{tier}_AREAS from parity_corpus"', with = 'None' }
+
+[[family.fault]]
+id = "f2p-parity-exemption-continues"
+message = "ERROR: test_the_capability_and_case_skip_omit_only_their_surfaces ("
+transform = { file = "tools/fail-to-pass.py", replace = "if isinstance(cell, dict) and cell.get(\"exempt\"):\n                continue", with = "if isinstance(cell, dict) and cell.get(\"exempt\"):\n                break" }
+
+[[family.fault]]
+id = "f2p-parity-skip-continues"
+message = "ERROR: test_the_capability_and_case_skip_omit_only_their_surfaces ("
+transform = { file = "tools/fail-to-pass.py", replace = "if surface in case.get(\"skip\", {}):\n                continue", with = "if surface in case.get(\"skip\", {}):\n                break" }
+
+[[family.fault]]
+id = "f2p-parity-case-layout"
+message = "FAIL: test_discovery_refuses_paths_outside_the_direct_area_layout ("
+transform = { file = "tools/fail-to-pass.py", replace = 'if len(relative.parts) != 2:', with = 'if False:' }
+
+[[family.fault]]
+id = "f2p-parity-python-escaped-id"
+message = "FAIL: test_generated_python_selectors_run_pytests_escaped_case_ids ("
+transform = { file = "tools/fail-to-pass.py", replace = 'pytest_id = case_id.encode(PYTEST_ID_ENCODING).decode()', with = 'pytest_id = case_id' }
+
+[[family.fault]]
+id = "f2p-parity-no-runnable-surface"
+message = "FAIL: test_a_changed_case_with_no_runnable_surface_cannot_pass_check_or_prove ("
+transform = { file = "tools/fail-to-pass.py", replace = 'if len(found) == first_surface:', with = 'if False:' }
+
+[[fault]]
+id = "f2p-parity-case-diagnostic"
+guard = "test_fail_to_pass.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_fail_to_pass.py", "-k", "test_a_shared_proof_requires_a_case_identifier"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_shared_proof_requires_a_case_identifier ("
+transform = { file = "tools/fail-to-pass.py", replace = 'assert test.case is not None, "a shared proof must name its case"', with = 'assert test.case is not None, "XXa shared proof must name its caseXX"' }
 
 [[fault]]
 id = "parity-select-only"

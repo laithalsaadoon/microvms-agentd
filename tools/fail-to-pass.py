@@ -135,6 +135,8 @@ PARITY_DIR = "verify/parity/cases"
 PARITY_TABLE = "verify/parity/capabilities.toml"
 PARITY_SENTINEL = f"{PARITY_DIR}/wrap-dockerfile/sentinel.json"
 PARITY_SELECTOR = "MICROVMS_PARITY_CASE"
+# Pytest's default parameter IDs escape Unicode with this Python codec.
+PYTEST_ID_ENCODING = "unicode_escape"
 PARITY_PEER = [
     "cargo",
     "build",
@@ -387,16 +389,20 @@ def parity_tests(root: Path, files: list[str]) -> list[Test]:
     """Each changed case, once per surface its capability and skip table require."""
     if not files:
         return []
-    table = tomllib.loads((root / PARITY_TABLE).read_text(encoding="utf-8"))
+    table = tomllib.loads((root / PARITY_TABLE).read_bytes().decode())
     rows = {row["id"]: row for row in table["capability"]}
     found = []
     for path in files:
-        text = (root / path).read_text(encoding="utf-8")
+        relative = Path(path).relative_to(PARITY_DIR)
+        if len(relative.parts) != 2:
+            raise Failure(f"{path}: a case must be directly under its area")
+        text = (root / path).read_bytes().decode()
         case = json.loads(text)
-        case_id = Path(path).relative_to(PARITY_DIR).with_suffix("").as_posix()
+        case_id = relative.with_suffix("").as_posix()
         row = rows.get(case.get("capability"))
         if row is None:
             raise Failure(f"{path}: capability names no row in {PARITY_TABLE}")
+        first_surface = len(found)
         for surface in ("core", "cli", "py", "ts"):
             cell = row.get(surface)
             if isinstance(cell, dict) and cell.get("exempt"):
@@ -411,7 +417,7 @@ def parity_tests(root: Path, files: list[str]) -> list[Test]:
                 source = (
                     root / "crates/microvms-core/tests/parity_corpus/mod.rs"
                 ).read_text()
-                area = case_id.split("/", 1)[0]
+                area = relative.parts[0]
                 tiers = {}
                 for tier in ("PROCESS", "FAKE"):
                     match = re.search(
@@ -429,7 +435,8 @@ def parity_tests(root: Path, files: list[str]) -> list[Test]:
                 else:
                     raise Failure(f"{path}: no CLI runner owns area {area!r}")
             elif surface == "py":
-                guard = f"bindings/microvms-py/tests/test_parity_cases.py::test_a_case[{case_id}]"
+                pytest_id = case_id.encode(PYTEST_ID_ENCODING).decode()
+                guard = f"bindings/microvms-py/tests/test_parity_cases.py::test_a_case[{pytest_id}]"
             else:
                 guard = case_id
             found.append(
@@ -444,6 +451,8 @@ def parity_tests(root: Path, files: list[str]) -> list[Test]:
                     surface=surface,
                 )
             )
+        if len(found) == first_surface:
+            raise Failure(f"{path}: no applicable surface can prove this case")
     return found
 
 
@@ -1213,7 +1222,7 @@ def parity_command(test: Test) -> tuple[list[list[str]], str]:
             target = ["-p", "microvms-cli", "--bin", "microvm"]
         else:
             target = ["-p", "microvms-cli", "--test", "parity_cases"]
-        config = f"env.{PARITY_SELECTOR}.value={json.dumps(test.case)}"
+        config = f"env.{PARITY_SELECTOR}.value={toml_str(test.case)}"
         force = f"env.{PARITY_SELECTOR}.force=true"
         return [
             PARITY_PEER,

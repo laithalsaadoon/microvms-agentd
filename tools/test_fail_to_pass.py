@@ -648,13 +648,224 @@ class ParityTests(Fixture):
         path = self.add_case()
         table = self.root / TOOL["PARITY_TABLE"]
         text = table.read_text()
-        text = text.replace('py = "wrap_dockerfile"', 'py = { exempt = "fixture" }')
-        table.write_text(text)
+        for cell, skipped, expected in (
+            (
+                'core = "microvms_core::control::artifact::wrap_dockerfile"',
+                "cli",
+                {"py", "ts"},
+            ),
+            ('py = "wrap_dockerfile"', "ts", {"core", "cli"}),
+        ):
+            with self.subTest(cell=cell, skipped=skipped):
+                surface = cell.split(" = ")[0]
+                table.write_text(
+                    text.replace(cell, f'{surface} = {{ exempt = "fixture" }}')
+                )
+                case = json.loads((REPO / TOOL["PARITY_SENTINEL"]).read_text())
+                case["skip"] = {skipped: "fixture (IMAGE-1)"}
+                self.write(path, json.dumps(case))
+                tests = TOOL["parity_tests"](self.root, [path])
+                self.assertEqual({test.surface for test in tests}, expected)
+
+    def test_discovery_preserves_utf8_case_identity_and_complete_runner_records(self):
+        path = self.add_case("café")
+        table = self.root / TOOL["PARITY_TABLE"]
+        table.write_bytes(table.read_bytes() + "\n# café\n".encode())
+        case = json.loads((self.root / path).read_bytes())
+        case["input"]["task"] += "# café\n"
+        self.write(path, json.dumps(case, ensure_ascii=False))
+        case_id = "wrap-dockerfile/café"
+        guards = {
+            "core": "core_answers_the_shared_case_corpus",
+            "cli": "the_cli_process_answers_the_shared_case_corpus",
+            "py": r"bindings/microvms-py/tests/test_parity_cases.py::test_a_case[wrap-dockerfile/caf\xe9]",
+            "ts": case_id,
+        }
+        self.assertEqual(
+            TOOL["parity_tests"](self.root, [path]),
+            [
+                TOOL["Test"](
+                    "parity",
+                    path,
+                    guard,
+                    f"parity-{surface}-{case_id}",
+                    1,
+                    1,
+                    case=case_id,
+                    surface=surface,
+                )
+                for surface, guard in guards.items()
+            ],
+        )
+
+    def test_discovery_rejects_unknown_capabilities_and_invalid_surface_cells(self):
+        path = self.add_case()
         case = json.loads((self.root / path).read_text())
-        case["skip"] = {"ts": "fixture (IMAGE-1)"}
+        case["capability"] = "unknown"
         self.write(path, json.dumps(case))
+        with self.assertRaises(TOOL["Failure"]) as caught:
+            TOOL["parity_tests"](self.root, [path])
+        self.assertEqual(
+            str(caught.exception),
+            f"{path}: capability names no row in {TOOL['PARITY_TABLE']}",
+        )
+        self.add_case()
+        table = self.root / TOOL["PARITY_TABLE"]
+        text = table.read_text()
+        for cell in ('""', "[]", "7", '{ exempt = "" }'):
+            with self.subTest(cell=cell):
+                table.write_text(
+                    text.replace(
+                        'core = "microvms_core::control::artifact::wrap_dockerfile"',
+                        f"core = {cell}",
+                    )
+                )
+                with self.assertRaises(TOOL["Failure"]) as caught:
+                    TOOL["parity_tests"](self.root, [path])
+                self.assertEqual(
+                    str(caught.exception), f"{path}: capability has no core surface"
+                )
+
+    def test_fake_cases_select_the_cli_binary_and_preserve_node_guards(self):
+        path = f"{TOOL['PARITY_DIR']}/image-name/case.json"
+        self.write(
+            path,
+            (
+                REPO / TOOL["PARITY_DIR"] / "image-name/ensure-image-name.json"
+            ).read_text(),
+        )
         tests = TOOL["parity_tests"](self.root, [path])
-        self.assertEqual({test.surface for test in tests}, {"core", "cli"})
+        cli = next(test for test in tests if test.surface == "cli")
+        self.assertEqual(
+            cli.guard,
+            "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes",
+        )
+        self.assertEqual(
+            TOOL["parity_command"](cli)[0][-1][-7:],
+            [
+                "-p",
+                "microvms-cli",
+                "--bin",
+                "microvm",
+                "--",
+                "--exact",
+                cli.guard,
+            ],
+        )
+        node = next(
+            test
+            for test in TOOL["parity_tests"](self.root, [self.add_case()])
+            if test.surface == "ts"
+        )
+        candidate = TOOL["Candidate"](node, "node", *TOOL["parity_command"](node))
+        self.assertEqual(
+            tomllib.loads(TOOL["entry_toml"](candidate, "base"))["fault"][0]["guard"],
+            "wrap-dockerfile/changed",
+        )
+
+    def test_discovery_reports_missing_cli_tiers_and_unowned_areas(self):
+        path = self.add_case()
+        source = self.root / "crates/microvms-core/tests/parity_corpus/mod.rs"
+        text = source.read_text()
+        for tier in ("PROCESS", "FAKE"):
+            with self.subTest(tier=tier):
+                source.write_text(
+                    text.replace(
+                        f"pub const CLI_{tier}_AREAS", f"const CLI_{tier}_AREAS"
+                    )
+                )
+                with self.assertRaises(TOOL["Failure"]) as caught:
+                    TOOL["parity_tests"](self.root, [path])
+                self.assertEqual(
+                    str(caught.exception),
+                    f"cannot read CLI_{tier}_AREAS from parity_corpus",
+                )
+        source.write_text(text)
+        unknown = f"{TOOL['PARITY_DIR']}/unknown/case.json"
+        self.write(unknown, (self.root / path).read_text())
+        with self.assertRaises(TOOL["Failure"]) as caught:
+            TOOL["parity_tests"](self.root, [unknown])
+        self.assertEqual(
+            str(caught.exception), f"{unknown}: no CLI runner owns area 'unknown'"
+        )
+
+    def test_discovery_refuses_paths_outside_the_direct_area_layout(self):
+        for name in ("case.json", "wrap-dockerfile/nested/case.json"):
+            path = f"{TOOL['PARITY_DIR']}/{name}"
+            with self.subTest(path=path):
+                self.write(path, (REPO / TOOL["PARITY_SENTINEL"]).read_text())
+                with self.assertRaises(TOOL["Failure"]) as caught:
+                    TOOL["parity_tests"](self.root, [path])
+                self.assertEqual(
+                    str(caught.exception),
+                    f"{path}: a case must be directly under its area",
+                )
+
+    def test_generated_python_selectors_run_pytests_escaped_case_ids(self):
+        cases = ["café", "astral-😀", "tab-\t", "ascii-backslash-\\"]
+        source = self.root / "case_ids.py"
+        source.write_text(
+            "import pytest\n"
+            f"@pytest.mark.parametrize('case', {['wrap-dockerfile/' + c for c in cases]!r}, ids=str)\n"
+            "def test_a_case(case):\n    assert case.startswith('wrap-dockerfile/')\n"
+        )
+        for name in cases:
+            with self.subTest(name=name):
+                path = self.add_case(name)
+                selected = next(
+                    test
+                    for test in TOOL["parity_tests"](self.root, [path])
+                    if test.surface == "py"
+                )
+                command = TOOL["parity_command"](selected)[0][-1]
+                node = str(source) + "::" + command[-1].split("::", 1)[1]
+                done = subprocess.run(
+                    [sys.executable, "-m", "pytest", "-q", node],
+                    cwd=self.root,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertExit(done, 0)
+                self.assertIn("1 passed", done.stdout)
+
+    def test_a_changed_case_with_no_runnable_surface_cannot_pass_check_or_prove(self):
+        self.fix()
+        self.add_case("runnable")
+        path = self.add_case("unproved")
+        original = json.loads((self.root / path).read_text())
+        original["capability"] = "unproved"
+        table = self.root / TOOL["PARITY_TABLE"]
+        original_table = table.read_text()
+        for exempt_core in (False, True):
+            with self.subTest(exempt_core=exempt_core):
+                case = dict(
+                    original,
+                    skip={
+                        surface: "no offline runner (IMAGE-1)"
+                        for surface in ("cli", "py", "ts")
+                    }
+                    if exempt_core
+                    else {
+                        surface: "no offline runner (IMAGE-1)"
+                        for surface in ("core", "cli", "py", "ts")
+                    },
+                )
+                self.write(path, json.dumps(case))
+                core = '{ exempt = "no offline runner" }' if exempt_core else '"run"'
+                table.write_text(
+                    original_table
+                    + (
+                        '\n[[capability]]\nid = "unproved"\n'
+                        f'core = {core}\ncli = "run"\npy = "run"\nts = "run"\n'
+                    )
+                )
+                for command in ("check", "prove"):
+                    done = self.run_script(command)
+                    self.assertExit(done, 1)
+                    self.assertIn(
+                        f"{path}: no applicable surface can prove this case",
+                        done.stdout + done.stderr,
+                    )
 
     def test_one_cases_entry_does_not_prove_another_case(self):
         self.fix()
@@ -1625,27 +1836,52 @@ class RegistryShapeTests(unittest.TestCase):
                 self.assertIn(build, known)
 
     def test_rust_case_config_is_accepted_by_cargo(self):
-        test = TOOL["parity_tests"](REPO, [TOOL["PARITY_SENTINEL"]])[0]
-        run, _ = TOOL["parity_command"](test)
-        argv = run[-1]
-        configs = []
-        for index, value in enumerate(argv):
-            if value == "--config":
-                configs += [value, argv[index + 1]]
-        done = subprocess.run(
-            ["cargo", "metadata", "--no-deps", "--format-version", "1", *configs],
-            cwd=REPO,
-            capture_output=True,
-            text=True,
-        )
-        self.assertEqual(done.returncode, 0, done.stderr)
+        for case_id in (
+            "wrap-dockerfile/sentinel",
+            "wrap-dockerfile/café",
+            "wrap-dockerfile/astral-😀",
+        ):
+            with self.subTest(case=case_id):
+                test = TOOL["Test"](
+                    "parity",
+                    "case.json",
+                    "guard",
+                    "case",
+                    1,
+                    2,
+                    case=case_id,
+                    surface="core",
+                )
+                run, _ = TOOL["parity_command"](test)
+                argv = run[-1]
+                configs = []
+                for index, value in enumerate(argv):
+                    if value == "--config":
+                        configs += [value, argv[index + 1]]
+                done = subprocess.run(
+                    [
+                        "cargo",
+                        "metadata",
+                        "--no-deps",
+                        "--format-version",
+                        "1",
+                        *configs,
+                    ],
+                    cwd=REPO,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(done.returncode, 0, done.stderr)
+                parsed = tomllib.loads(configs[1])
+                self.assertEqual(
+                    parsed["env"]["MICROVMS_PARITY_CASE"]["value"], case_id
+                )
 
     def test_a_shared_proof_requires_a_case_identifier(self):
         test = TOOL["Test"]("parity", "case.json", "guard", "case", 1, 2, surface="ts")
-        with self.assertRaisesRegex(
-            AssertionError, "a shared proof must name its case"
-        ):
+        with self.assertRaises(AssertionError) as caught:
             TOOL["parity_command"](test)
+        self.assertEqual(str(caught.exception), "a shared proof must name its case")
 
 
 class CandidateBuildTests(unittest.TestCase):
