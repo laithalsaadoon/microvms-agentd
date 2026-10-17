@@ -356,7 +356,7 @@ index 6681286..38d8daa 100644
              let call = Call::get(
 @@ -774,15 +766,7 @@ impl ControlPlane {
              );
-             let reply = send_with_retry(self.transport(), call).await?;
+             let reply = self.send(call).await?;
              let page: ops::ListMicrovmSummariesResponseWire = reply.json("ListMicrovms")?;
 -            for item in page.items {
 -                match position.get(&item.microvm_id) {

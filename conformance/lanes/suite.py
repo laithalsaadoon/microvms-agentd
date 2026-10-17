@@ -65,6 +65,7 @@ from lanes.poweroff import drive_poweroff
 from lanes.prefix_sweep import drive_prefix_sweep
 from lanes.project_build import drive_project_build
 from lanes.quickstart import drive_provisioned_quickstart
+from lanes.retry_telemetry import drive_retry_telemetry
 from lanes.sessions import (
     drive_adopt_by_id,
     drive_find_by_name,
@@ -297,6 +298,16 @@ def run_suite(args: argparse.Namespace) -> int:
             )
             run_section(
                 results, "stable_launch", drive_stable_launch, cli, launched, results
+            )
+            run_section(
+                results,
+                "retry_telemetry",
+                drive_retry_telemetry,
+                cli,
+                launched,
+                bindings,
+                aws,
+                results,
             )
             # Lifecycle by id (#195, #197, #201, #203) on its own bounded VMs, from the
             # suite's image.

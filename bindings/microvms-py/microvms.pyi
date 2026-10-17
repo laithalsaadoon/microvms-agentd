@@ -507,9 +507,6 @@ class ControlPlane:
         Resolves credentials for `region` from the default chain.
         """
     def __repr__(self, /) -> str: ...
-    def _parity_calls(self, /) -> list[str]: ...
-    @staticmethod
-    def _parity_from_script(script: str, retry: tuple[int, float] |None = None) -> ControlPlane: ...
     @staticmethod
     async def create_async(region: Region, *, retry: tuple[int, float] |None = None) -> ControlPlane:
         """
