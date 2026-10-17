@@ -239,14 +239,15 @@
       "priority": "high",
       "refines": [],
       "satisfies": [],
-      "sentence": "If the acknowledgement that follows a client-deadline kill fails, then the microvms-core shall return a synthesized result whose POSIX exit code is 124 and whose notes name the failure.",
+      "sentence": "If the acknowledgement that follows a client-deadline kill fails, then the microvms-core shall return a synthesized result whose POSIX exit code is the timeout status and whose notes name the failure.",
       "status": "approved",
       "systemName": "microvms-core",
-      "systemResponse": "return a synthesized result whose POSIX exit code is 124 and whose notes name the failure",
+      "systemResponse": "return a synthesized result whose POSIX exit code is the timeout status and whose notes name the failure",
       "trigger": "the acknowledgement that follows a client-deadline kill fails",
-      "updatedAt": "2026-09-24T18:00:00.000Z",
+      "updatedAt": "2026-10-17T00:00:00.000Z",
       "verificationMethod": "test",
-      "verifies": []
+      "verifies": [],
+      "verificationNote": "The timeout status is 124; the signal status offset is 128. crates/microvms-app/src/session/exec.rs defines the exit-status contract."
     },
     "2387d164-eca4-4546-9a12-9b9d1b1046a6": {
       "createdAt": "2026-08-08T01:56:27.483Z",
@@ -261,13 +262,14 @@
       "responseKind": "effect",
       "satisfies": [],
       "sentence": "While the lifecycle is RUNNING, the microvms-core shall accept a suspend request and transition the lifecycle to SUSPENDING.",
-      "stateEffect": "when vm_state = RUNNING: vm_state := SUSPENDING",
+      "stateEffect": "when vm_state = RUNNING: vm_state := SUSPENDING, token_installed := token_installed, image_exists := image_exists, was_terminated := was_terminated, bootstrap_count := bootstrap_count",
       "status": "approved",
       "systemName": "microvms-core",
       "systemResponse": "accept a suspend request and transition the lifecycle to SUSPENDING",
       "updatedAt": "2026-08-08T02:10:17.186Z",
       "verificationMethod": "test",
-      "verifies": []
+      "verifies": [],
+      "verificationNote": " The modeled event preserves every state variable it does not update, matching the Rust model next_state clone-and-update semantics."
     },
     "23a832eb-4bbe-497a-8810-0ea5f8e801b6": {
       "createdAt": "2026-08-08T01:55:36.742Z",
@@ -606,13 +608,13 @@
       "priority": "high",
       "refines": [],
       "satisfies": [],
-      "sentence": "The microvms-core shall report a finished exec's POSIX exit code as 124 when a deadline ended the command, as 128 plus the signal number for any other signal death, and otherwise as the exit code.",
+      "sentence": "The microvms-core shall report a finished exec's POSIX exit code as the timeout status when a deadline ended the command, as the signal status offset plus the signal number for any other signal death, and otherwise as the exit code.",
       "status": "approved",
       "systemName": "microvms-core",
-      "systemResponse": "report a finished exec's POSIX exit code as 124 when a deadline ended the command, as 128 plus the signal number for any other signal death, and otherwise as the exit code",
-      "updatedAt": "2026-09-24T18:00:00.000Z",
+      "systemResponse": "report a finished exec's POSIX exit code as the timeout status when a deadline ended the command, as the signal status offset plus the signal number for any other signal death, and otherwise as the exit code",
+      "updatedAt": "2026-10-17T00:00:00.000Z",
       "verificationMethod": "test",
-      "verificationNote": "a deadline is the daemon's timed_out, a client kill that signalled a live process group, or a synthesized result (#222)",
+      "verificationNote": "The timeout status is 124; the signal status offset is 128. crates/microvms-app/src/session/exec.rs defines the exit-status contract.",
       "verifies": []
     },
     "5fbadc75-cd39-492d-b1a7-9162bc611dbd": {
@@ -685,14 +687,15 @@
       "responseKind": "effect",
       "satisfies": [],
       "sentence": "When the platform reports that the run hook answered with a success status, the microvms-core shall mark the lifecycle RUNNING and the agent token installed.",
-      "stateEffect": "when vm_state = PENDING and bootstrap_count = 0 and image_exists: vm_state := RUNNING, token_installed := true, bootstrap_count := bootstrap_count + 1",
+      "stateEffect": "when vm_state = PENDING and bootstrap_count = 0 and image_exists: vm_state := RUNNING, token_installed := true, bootstrap_count := bootstrap_count + 1, image_exists := image_exists, was_terminated := was_terminated",
       "status": "approved",
       "systemName": "microvms-core",
       "systemResponse": "mark the lifecycle RUNNING and the agent token installed",
       "trigger": "the platform reports that the run hook answered with a success status",
       "updatedAt": "2026-08-08T02:10:17.186Z",
       "verificationMethod": "test",
-      "verifies": []
+      "verifies": [],
+      "verificationNote": " The modeled event preserves every state variable it does not update, matching the Rust model next_state clone-and-update semantics."
     },
     "68485270-472f-4091-bc5f-789a63b35b06": {
       "createdAt": "2026-08-08T01:55:59.548Z",
@@ -962,14 +965,15 @@
       "responseKind": "effect",
       "satisfies": [],
       "sentence": "When the platform reports suspension complete, the microvms-core shall mark the lifecycle SUSPENDED.",
-      "stateEffect": "when vm_state = SUSPENDING: vm_state := SUSPENDED",
+      "stateEffect": "when vm_state = SUSPENDING: vm_state := SUSPENDED, token_installed := token_installed, image_exists := image_exists, was_terminated := was_terminated, bootstrap_count := bootstrap_count",
       "status": "approved",
       "systemName": "microvms-core",
       "systemResponse": "mark the lifecycle SUSPENDED",
       "trigger": "the platform reports suspension complete",
       "updatedAt": "2026-08-08T02:10:17.186Z",
       "verificationMethod": "test",
-      "verifies": []
+      "verifies": [],
+      "verificationNote": " The modeled event preserves every state variable it does not update, matching the Rust model next_state clone-and-update semantics."
     },
     "914d7dad-50c3-418a-b0c5-9d16a90ca4dd": {
       "createdAt": "2026-08-08T01:56:28.356Z",
@@ -983,14 +987,15 @@
       "responseKind": "effect",
       "satisfies": [],
       "sentence": "When a terminate request is accepted, the microvms-core shall transition the lifecycle to TERMINATING and record the VM as terminated.",
-      "stateEffect": "when vm_state = PENDING or vm_state = RUNNING or vm_state = SUSPENDED: vm_state := TERMINATING, was_terminated := true",
+      "stateEffect": "when vm_state = PENDING or vm_state = RUNNING or vm_state = SUSPENDED: vm_state := TERMINATING, was_terminated := true, token_installed := token_installed, image_exists := image_exists, bootstrap_count := bootstrap_count",
       "status": "approved",
       "systemName": "microvms-core",
       "systemResponse": "transition the lifecycle to TERMINATING and record the VM as terminated",
       "trigger": "a terminate request is accepted",
       "updatedAt": "2026-08-08T02:10:17.186Z",
       "verificationMethod": "test",
-      "verifies": []
+      "verifies": [],
+      "verificationNote": " The modeled event preserves every state variable it does not update, matching the Rust model next_state clone-and-update semantics."
     },
     "93e34813-942b-4204-8484-587c8424f7b4": {
       "createdAt": "2026-08-08T01:56:51.166Z",
@@ -1102,13 +1107,13 @@
       "responseKind": "effect",
       "satisfies": [],
       "sentence": "While the lifecycle is SUSPENDED, the microvms-core shall accept a resume request, reuse the installed agent token, and transition the lifecycle to RUNNING without re-delivering a run-hook payload.",
-      "stateEffect": "when vm_state = SUSPENDED: vm_state := RUNNING",
+      "stateEffect": "when vm_state = SUSPENDED: vm_state := RUNNING, token_installed := token_installed, image_exists := image_exists, was_terminated := was_terminated, bootstrap_count := bootstrap_count",
       "status": "approved",
       "systemName": "microvms-core",
       "systemResponse": "accept a resume request, reuse the installed agent token, and transition the lifecycle to RUNNING without re-delivering a run-hook payload",
       "updatedAt": "2026-08-08T02:10:17.186Z",
       "verificationMethod": "test",
-      "verificationNote": "PLATFORM.md: suspend/resume is a freeze and restore; token, filesystem, exec records all survive",
+      "verificationNote": "PLATFORM.md: suspend/resume is a freeze and restore; token, filesystem, exec records all survive The modeled event preserves every state variable it does not update, matching the Rust model next_state clone-and-update semantics.",
       "verifies": []
     },
     "a2f8bed9-722a-4fca-b978-ff26d30a18e5": {
@@ -1123,14 +1128,15 @@
       "responseKind": "effect",
       "satisfies": [],
       "sentence": "When a launch request is accepted, the microvms-core shall transition the lifecycle to PENDING and record the image as existing.",
-      "stateEffect": "when vm_state = PENDING: image_exists := true",
+      "stateEffect": "when vm_state = PENDING: image_exists := true, vm_state := vm_state, token_installed := token_installed, was_terminated := was_terminated, bootstrap_count := bootstrap_count",
       "status": "approved",
       "systemName": "microvms-core",
       "systemResponse": "transition the lifecycle to PENDING and record the image as existing",
       "trigger": "a launch request is accepted",
       "updatedAt": "2026-08-08T02:10:17.186Z",
       "verificationMethod": "test",
-      "verifies": []
+      "verifies": [],
+      "verificationNote": " The modeled event preserves every state variable it does not update, matching the Rust model next_state clone-and-update semantics."
     },
     "a3647e5e-72a9-49f7-b2d4-31d0cf179ba6": {
       "createdAt": "2026-09-29T05:00:00.000Z",
@@ -1312,14 +1318,15 @@
       "responseKind": "effect",
       "satisfies": [],
       "sentence": "When the platform reports termination complete, the microvms-core shall mark the lifecycle TERMINATED.",
-      "stateEffect": "when vm_state = TERMINATING: vm_state := TERMINATED",
+      "stateEffect": "when vm_state = TERMINATING: vm_state := TERMINATED, token_installed := token_installed, image_exists := image_exists, was_terminated := was_terminated, bootstrap_count := bootstrap_count",
       "status": "approved",
       "systemName": "microvms-core",
       "systemResponse": "mark the lifecycle TERMINATED",
       "trigger": "the platform reports termination complete",
       "updatedAt": "2026-08-08T02:10:17.186Z",
       "verificationMethod": "test",
-      "verifies": []
+      "verifies": [],
+      "verificationNote": " The modeled event preserves every state variable it does not update, matching the Rust model next_state clone-and-update semantics."
     },
     "b7c4c4ba-1dc6-4869-8c3f-d023a62ec8c4": {
       "createdAt": "2026-09-24T18:00:00.000Z",
@@ -1781,25 +1788,21 @@
           "TERMINATING",
           "TERMINATED"
         ],
-        "frame": "stable",
         "initial": "vm_state = PENDING",
         "name": "vm_state",
         "type": "enum"
       },
       {
-        "frame": "stable",
         "initial": "token_installed = false",
         "name": "token_installed",
         "type": "bool"
       },
       {
-        "frame": "stable",
         "initial": "image_exists = false",
         "name": "image_exists",
         "type": "bool"
       },
       {
-        "frame": "stable",
         "initial": "was_terminated = false",
         "name": "was_terminated",
         "type": "bool"
@@ -1809,7 +1812,6 @@
           "max": 3,
           "min": 0
         },
-        "frame": "stable",
         "initial": "bootstrap_count = 0",
         "name": "bootstrap_count",
         "type": "int"
@@ -1821,16 +1823,6 @@
       "code": "GTWR_R6_MISSING_UNITS",
       "reason": "4096 carries its unit: the trigger reads 'ceiling of 4096 bytes'; the linter's unit list does not include bytes",
       "requirementId": "834e04ac-4606-4779-811a-068e3a1d65ee"
-    },
-    {
-      "code": "GTWR_R6_MISSING_UNITS",
-      "reason": "124 and 128 are POSIX exit statuses (timeout(1)'s 124, 128 plus a signal number), which carry no unit",
-      "requirementId": "5eecef52-466d-49f7-a1c4-3c254bf901ce"
-    },
-    {
-      "code": "GTWR_R6_MISSING_UNITS",
-      "reason": "124 and 128 are POSIX exit statuses (timeout(1)'s 124, 128 plus a signal number), which carry no unit",
-      "requirementId": "234d70e2-caec-4d60-987a-4c5dca2fdecf"
     },
     {
       "code": "GTWR_R6_MISSING_UNITS",
