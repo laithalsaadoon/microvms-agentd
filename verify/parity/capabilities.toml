@@ -1070,26 +1070,31 @@ cli = "sync --timeout"
 [[default]]
 id = "sync-full"
 exempt = "whether this sync ignores the VM's manifest: an argument of the call, with no default anywhere else"
+value = "False"
 py = ["Session.sync_dir(full)", "Session.sync_dir_async(full)"]
 
 [[default]]
 id = "watch-interval"
 exempt = "how often `ls --watch` redraws, a terminal affordance with no counterpart below the CLI"
+value = "2"
 cli = "ls --interval-sec"
 
 [[default]]
 id = "compare-hold"
 exempt = "the hold `cost --compare` prices when none is given; core's and both bindings' compare_residency take the hold as a required argument"
+value = "3600"
 cli = "cost --hold-sec"
 
 [[default]]
 id = "keep-awake-while-busy"
 exempt = "the binding passes it to core's KeepAwake::while_busy on every call, and the policy doesn't read its own setting back to compare with"
+value = "False"
 py = "Session.keep_awake(while_busy)"
 
 [[default]]
 id = "stdin-eof"
 exempt = "whether this one write closes stdin: an argument of the call, with no default anywhere else"
+value = "False"
 py = ["ExecHandle.write_stdin(eof)", "ExecHandle.write_stdin_async(eof)"]
 
 # ── types whose members pair across the bindings ─────────────────────────────
@@ -1191,3 +1196,954 @@ core = ["microvms_core::error::Error::attempt_count", "microvms_core::error::Err
 cli = { exempt = "control-plane failures include retry telemetry in the JSON data object" }
 py = "MicrovmError"
 ts = "retryDetails"
+
+# Explicit scalar values and omission markers, including TypeScript input defaults.
+
+[[default]]
+id = "prompt-permission"
+core = "prompt.permissionMode"
+py = ["AgentVm.prompt(permission_mode)", "AgentVm.prompt_async(permission_mode)", "AgentVm.prompt_sync(permission_mode)", "AgentVm.prompt_sync_async(permission_mode)", "prompt_agent(permission_mode)", "prompt_agent_async(permission_mode)"]
+ts = ["PromptOptions.permissionMode"]
+cli = ["agent-prompt --permission-mode"]
+
+[[default]]
+id = "base-working-directory"
+core = "image.workingDirectory"
+py = ["BaseImage(working_dir)"]
+ts = ["BaseImageInput.workingDir"]
+
+[[default]]
+id = "stream-offset"
+core = "stream.offset"
+py = ["ExecHandle.stream(offset)", "Session.spawn(offset)", "Session.spawn_async(offset)"]
+ts = ["StreamOptionsInput.offset", "SpawnOptions.offset"]
+
+[[default]]
+id = "cost-runningSeconds"
+core = "cost.runningSeconds"
+py = ["estimate_run(running_seconds)"]
+cli = ["cost --running-sec"]
+
+[[default]]
+id = "cost-suspendedSeconds"
+core = "cost.suspendedSeconds"
+py = ["estimate_run(suspended_seconds)"]
+cli = ["cost --suspended-sec"]
+
+[[default]]
+id = "exec-optional-cwd"
+core = "exec.cwd"
+py = ["Session.run(cwd)", "Session.run_async(cwd)", "Session.run_sync(cwd)", "Session.run_sync_async(cwd)", "Session.run_to_completion(cwd)", "Session.run_to_completion_async(cwd)", "Session.spawn(cwd)", "Session.spawn_async(cwd)"]
+ts = ["ExecOptions.cwd", "CompletionRequest.cwd"]
+
+[[default]]
+id = "exec-optional-user"
+core = "exec.user"
+py = ["Session.run(user)", "Session.run_async(user)", "Session.run_sync(user)", "Session.run_sync_async(user)", "Session.run_to_completion(user)", "Session.run_to_completion_async(user)", "Session.spawn(user)", "Session.spawn_async(user)"]
+ts = ["ExecOptions.user", "CompletionRequest.user"]
+
+[[default]]
+id = "exec-optional-group"
+core = "exec.group"
+py = ["Session.run(group)", "Session.run_async(group)", "Session.run_sync(group)", "Session.run_sync_async(group)", "Session.run_to_completion(group)", "Session.run_to_completion_async(group)", "Session.spawn(group)", "Session.spawn_async(group)"]
+ts = ["ExecOptions.group", "CompletionRequest.group"]
+
+[[default]]
+id = "exec-optional-timeoutSeconds"
+core = "exec.timeoutSeconds"
+py = ["Session.run(timeout_sec)", "Session.run_async(timeout_sec)", "Session.run_sync(timeout_sec)", "Session.run_sync_async(timeout_sec)", "Session.run_to_completion(timeout_sec)", "Session.run_to_completion_async(timeout_sec)", "Session.spawn(timeout_sec)", "Session.spawn_async(timeout_sec)"]
+ts = ["ExecOptions.timeoutSec", "CompletionRequest.timeoutSec"]
+
+[[default]]
+id = "prompt-optional-execId"
+core = "prompt.execId"
+py = ["AgentVm.prompt(exec_id)", "AgentVm.prompt_async(exec_id)", "AgentVm.prompt_sync(exec_id)", "AgentVm.prompt_sync_async(exec_id)", "prompt_agent(exec_id)", "prompt_agent_async(exec_id)"]
+ts = ["PromptOptions.execId"]
+
+[[default]]
+id = "prompt-optional-timeoutSeconds"
+core = "prompt.timeoutSeconds"
+py = ["AgentVm.prompt(timeout_sec)", "AgentVm.prompt_async(timeout_sec)", "prompt_agent(timeout_sec)", "prompt_agent_async(timeout_sec)"]
+ts = ["PromptOptions.timeoutSec"]
+
+[[default]]
+id = "wrap-optional-workdir"
+core = "image.workdir"
+py = ["wrap_dockerfile(workdir)"]
+ts = ["WrapDockerfileOptions.workdir"]
+
+[[default]]
+id = "cost-optional-running"
+core = "cost.running"
+py = ["run_report(running)"]
+ts = ["RunUsageOptions.running"]
+
+[[default]]
+id = "cost-optional-suspended"
+core = "cost.suspended"
+py = ["run_report(suspended)"]
+ts = ["RunUsageOptions.suspended"]
+
+[[default]]
+id = "cost-optional-imageBuild"
+core = "cost.imageBuild"
+py = ["run_report(image_build)"]
+ts = ["RunUsageOptions.imageBuild"]
+
+[[default]]
+id = "cost-optional-imageGb"
+core = "cost.imageGb"
+py = ["estimate_run(image_gb)", "run_report(image_gb)"]
+ts = ["PlanUsageOptions.imageGb", "RunUsageOptions.imageGb"]
+
+[[default]]
+id = "cost-optional-snapshotGb"
+core = "cost.snapshotGb"
+py = ["estimate_run(snapshot_gb)", "run_report(snapshot_gb)"]
+ts = ["PlanUsageOptions.snapshotGb", "RunUsageOptions.snapshotGb"]
+
+[[default]]
+id = "omitted-py-agentspec"
+exempt = "AgentSpec accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["AgentSpec(model)", "AgentSpec(cli_version)"]
+
+[[default]]
+id = "omitted-py-agentspec-claude-code"
+exempt = "AgentSpec.claude_code accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["AgentSpec.claude_code(model)", "AgentSpec.claude_code(cli_version)"]
+
+[[default]]
+id = "omitted-py-agentspec-codex"
+exempt = "AgentSpec.codex accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["AgentSpec.codex(model)", "AgentSpec.codex(cli_version)"]
+
+[[default]]
+id = "omitted-py-agentvm"
+exempt = "AgentVm accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["AgentVm(agents)"]
+
+[[default]]
+id = "omitted-py-agentvm-adopt"
+exempt = "AgentVm.adopt accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["AgentVm.adopt(agents)", "AgentVm.adopt(port)", "AgentVm.adopt_async(agents)", "AgentVm.adopt_async(port)"]
+
+[[default]]
+id = "omitted-py-agentvm-build-artifact"
+exempt = "AgentVm.build_artifact accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["AgentVm.build_artifact(size)"]
+
+[[default]]
+id = "omitted-py-agentvm-build-image"
+exempt = "AgentVm.build_image accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["AgentVm.build_image(size)", "AgentVm.build_image_async(size)"]
+
+[[default]]
+id = "omitted-py-agentvm-create"
+exempt = "AgentVm.create accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["AgentVm.create_async(agents)"]
+
+[[default]]
+id = "omitted-py-agentvm-ensure-image"
+exempt = "AgentVm.ensure_image accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["AgentVm.ensure_image(size)", "AgentVm.ensure_image(s3_key_prefix)", "AgentVm.ensure_image_async(size)", "AgentVm.ensure_image_async(s3_key_prefix)"]
+
+[[default]]
+id = "omitted-py-agentvm-find-image"
+exempt = "AgentVm.find_image accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["AgentVm.find_image(size)", "AgentVm.find_image_async(size)"]
+
+[[default]]
+id = "omitted-py-agentvm-from-name"
+exempt = "AgentVm.from_name accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["AgentVm.from_name(agents)", "AgentVm.from_name(port)", "AgentVm.from_name_async(agents)", "AgentVm.from_name_async(port)"]
+
+[[default]]
+id = "omitted-py-agentvm-image-name"
+exempt = "AgentVm.image_name accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["AgentVm.image_name(size)"]
+
+[[default]]
+id = "omitted-py-agentvm-install-access"
+exempt = "AgentVm.install_access accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["AgentVm.install_access(token)", "AgentVm.install_access(ttl_seconds)", "AgentVm.install_access_async(token)", "AgentVm.install_access_async(ttl_seconds)"]
+
+[[default]]
+id = "omitted-py-agentvm-launch"
+exempt = "AgentVm.launch accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["AgentVm.launch(execution_role_arn)", "AgentVm.launch(agent_token)", "AgentVm.launch(client_token)", "AgentVm.launch(max_idle_sec)", "AgentVm.launch(suspended_sec)", "AgentVm.launch(max_duration_sec)", "AgentVm.launch(image_version)", "AgentVm.launch(egress_network_connectors)", "AgentVm.launch(log_group)", "AgentVm.launch(log_stream)", "AgentVm.launch(launch_env)", "AgentVm.launch(ready_timeout)", "AgentVm.launch_async(execution_role_arn)", "AgentVm.launch_async(agent_token)", "AgentVm.launch_async(client_token)", "AgentVm.launch_async(max_idle_sec)", "AgentVm.launch_async(suspended_sec)", "AgentVm.launch_async(max_duration_sec)", "AgentVm.launch_async(image_version)", "AgentVm.launch_async(egress_network_connectors)", "AgentVm.launch_async(log_group)", "AgentVm.launch_async(log_stream)", "AgentVm.launch_async(launch_env)", "AgentVm.launch_async(ready_timeout)"]
+
+[[default]]
+id = "omitted-py-agentvm-terminate"
+exempt = "AgentVm.terminate accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["AgentVm.terminate(delete_attempts)", "AgentVm.terminate(delete_backoff)", "AgentVm.terminate_async(delete_attempts)", "AgentVm.terminate_async(delete_backoff)"]
+
+[[default]]
+id = "omitted-py-controlplane-delete-image"
+exempt = "ControlPlane.delete_image accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["ControlPlane.delete_image(attempts)", "ControlPlane.delete_image(backoff)", "ControlPlane.delete_image_async(attempts)", "ControlPlane.delete_image_async(backoff)"]
+
+[[default]]
+id = "omitted-py-controlplane-list"
+exempt = "ControlPlane.list accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["ControlPlane.list(image_identifier)", "ControlPlane.list(image_version)", "ControlPlane.list_async(image_identifier)", "ControlPlane.list_async(image_version)"]
+
+[[default]]
+id = "omitted-py-controlplane-wait-for-state"
+exempt = "ControlPlane.wait_for_state accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["ControlPlane.wait_for_state(fail_on)", "ControlPlane.wait_for_state_async(fail_on)"]
+
+[[default]]
+id = "omitted-py-exechandle-stream"
+exempt = "ExecHandle.stream accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["ExecHandle.stream(max_reconnects)", "ExecHandle.stream(idle_timeout)"]
+
+[[default]]
+id = "omitted-py-execprocess-wait"
+exempt = "ExecProcess.wait accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["ExecProcess.wait(timeout)", "ExecProcess.wait_async(timeout)"]
+
+[[default]]
+id = "omitted-py-keepawake-wait"
+exempt = "KeepAwake.wait accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["KeepAwake.wait(timeout)", "KeepAwake.wait_async(timeout)"]
+
+[[default]]
+id = "omitted-py-nameregistry"
+exempt = "NameRegistry accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["NameRegistry(state_dir)"]
+
+[[default]]
+id = "omitted-py-portforward-stop"
+exempt = "PortForward.stop accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["PortForward.stop(timeout)", "PortForward.stop_async(timeout)"]
+
+[[default]]
+id = "omitted-py-sandbox-adopt"
+exempt = "Sandbox.adopt accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["Sandbox.adopt(port)", "Sandbox.adopt_async(port)"]
+
+[[default]]
+id = "omitted-py-sandbox-build-artifact"
+exempt = "Sandbox.build_artifact accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["Sandbox.build_artifact(base_image)", "Sandbox.build_artifact(dockerfile)", "Sandbox.build_artifact(project_dir)"]
+
+[[default]]
+id = "omitted-py-sandbox-build-image"
+exempt = "Sandbox.build_image accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["Sandbox.build_image(size)", "Sandbox.build_image(base_image)", "Sandbox.build_image(base_image_version)", "Sandbox.build_image(dockerfile)", "Sandbox.build_image(project_dir)", "Sandbox.build_image(run_hook_timeout)", "Sandbox.build_image(build_hook_timeout)", "Sandbox.build_image(tags)", "Sandbox.build_image(log_group)", "Sandbox.build_image(log_stream)", "Sandbox.build_image(token_scope)", "Sandbox.build_image_async(size)", "Sandbox.build_image_async(base_image)", "Sandbox.build_image_async(base_image_version)", "Sandbox.build_image_async(dockerfile)", "Sandbox.build_image_async(project_dir)", "Sandbox.build_image_async(run_hook_timeout)", "Sandbox.build_image_async(build_hook_timeout)", "Sandbox.build_image_async(tags)", "Sandbox.build_image_async(log_group)", "Sandbox.build_image_async(log_stream)", "Sandbox.build_image_async(token_scope)"]
+
+[[default]]
+id = "omitted-py-sandbox-ensure-image"
+exempt = "Sandbox.ensure_image accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["Sandbox.ensure_image(context_dir)", "Sandbox.ensure_image(s3_key_prefix)", "Sandbox.ensure_image(size)", "Sandbox.ensure_image(base_image)", "Sandbox.ensure_image(base_image_version)", "Sandbox.ensure_image(project_dir)", "Sandbox.ensure_image(tags)", "Sandbox.ensure_image(wait_timeout)", "Sandbox.ensure_image_async(context_dir)", "Sandbox.ensure_image_async(s3_key_prefix)", "Sandbox.ensure_image_async(size)", "Sandbox.ensure_image_async(base_image)", "Sandbox.ensure_image_async(base_image_version)", "Sandbox.ensure_image_async(project_dir)", "Sandbox.ensure_image_async(tags)", "Sandbox.ensure_image_async(wait_timeout)"]
+
+[[default]]
+id = "omitted-py-sandbox-from-name"
+exempt = "Sandbox.from_name accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["Sandbox.from_name(port)", "Sandbox.from_name_async(port)"]
+
+[[default]]
+id = "omitted-py-sandbox-preflight"
+exempt = "Sandbox.preflight accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["Sandbox.preflight(size)", "Sandbox.preflight(base_image)", "Sandbox.preflight(base_image_version)", "Sandbox.preflight(dockerfile)", "Sandbox.preflight(project_dir)", "Sandbox.preflight(run_hook_timeout)", "Sandbox.preflight(build_hook_timeout)", "Sandbox.preflight(tags)", "Sandbox.preflight(log_group)", "Sandbox.preflight(log_stream)", "Sandbox.preflight(token_scope)"]
+
+[[default]]
+id = "omitted-py-sandbox-run"
+exempt = "Sandbox.run accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["Sandbox.run(image_identifier)", "Sandbox.run(image_version)", "Sandbox.run(execution_role_arn)", "Sandbox.run(agent_token)", "Sandbox.run(client_token)", "Sandbox.run(launch_env)", "Sandbox.run(egress_network_connectors)", "Sandbox.run(max_idle_sec)", "Sandbox.run(suspended_sec)", "Sandbox.run(max_duration_sec)", "Sandbox.run(ready_timeout)", "Sandbox.run(token_scope)", "Sandbox.run(log_group)", "Sandbox.run(log_stream)", "Sandbox.run_async(image_identifier)", "Sandbox.run_async(image_version)", "Sandbox.run_async(execution_role_arn)", "Sandbox.run_async(agent_token)", "Sandbox.run_async(client_token)", "Sandbox.run_async(launch_env)", "Sandbox.run_async(egress_network_connectors)", "Sandbox.run_async(max_idle_sec)", "Sandbox.run_async(suspended_sec)", "Sandbox.run_async(max_duration_sec)", "Sandbox.run_async(ready_timeout)", "Sandbox.run_async(token_scope)", "Sandbox.run_async(log_group)", "Sandbox.run_async(log_stream)"]
+
+[[default]]
+id = "omitted-py-sandbox-terminate"
+exempt = "Sandbox.terminate accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["Sandbox.terminate(delete_attempts)", "Sandbox.terminate(delete_backoff)", "Sandbox.terminate_async(delete_attempts)", "Sandbox.terminate_async(delete_backoff)"]
+
+[[default]]
+id = "omitted-py-sandbox-wait-until-running"
+exempt = "Sandbox.wait_until_running accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["Sandbox.wait_until_running(timeout)", "Sandbox.wait_until_running_async(timeout)"]
+
+[[default]]
+id = "omitted-py-session-attach"
+exempt = "Session.attach accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["Session.attach(port)", "Session.attach(request_timeout)", "Session.attach_async(port)", "Session.attach_async(request_timeout)"]
+
+[[default]]
+id = "omitted-py-session-download-file"
+exempt = "Session.download_file accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["Session.download_file(start_line)", "Session.download_file(end_line)", "Session.download_file_async(start_line)", "Session.download_file_async(end_line)"]
+
+[[default]]
+id = "omitted-py-session-keep-awake"
+exempt = "Session.keep_awake accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["Session.keep_awake(interval)", "Session.keep_awake(max_duration)", "Session.keep_awake(idle_window)", "Session.keep_awake(tolerated_errors)"]
+
+[[default]]
+id = "omitted-py-session-port-forward"
+exempt = "Session.port_forward accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["Session.port_forward(bind)", "Session.port_forward(max_connections)", "Session.port_forward_async(bind)", "Session.port_forward_async(max_connections)"]
+
+[[default]]
+id = "omitted-py-session-run"
+exempt = "Session.run accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["Session.run(env)", "Session.run(exec_id)", "Session.run_async(env)", "Session.run_async(exec_id)"]
+
+[[default]]
+id = "omitted-py-session-run-sync"
+exempt = "Session.run_sync accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["Session.run_sync(env)", "Session.run_sync(exec_id)", "Session.run_sync_async(env)", "Session.run_sync_async(exec_id)"]
+
+[[default]]
+id = "omitted-py-session-run-to-completion"
+exempt = "Session.run_to_completion accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["Session.run_to_completion(on_output)", "Session.run_to_completion(env)", "Session.run_to_completion(exec_id)", "Session.run_to_completion_async(on_output)", "Session.run_to_completion_async(env)", "Session.run_to_completion_async(exec_id)"]
+
+[[default]]
+id = "omitted-py-session-spawn"
+exempt = "Session.spawn accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["Session.spawn(env)", "Session.spawn(exec_id)", "Session.spawn(max_reconnects)", "Session.spawn(idle_timeout)", "Session.spawn(gap_policy)", "Session.spawn_async(env)", "Session.spawn_async(exec_id)", "Session.spawn_async(max_reconnects)", "Session.spawn_async(idle_timeout)", "Session.spawn_async(gap_policy)"]
+
+[[default]]
+id = "omitted-py-session-sync-dir"
+exempt = "Session.sync_dir accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["Session.sync_dir(delete_timeout)", "Session.sync_dir_async(delete_timeout)"]
+
+[[default]]
+id = "omitted-py-session-tunnel"
+exempt = "Session.tunnel accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["Session.tunnel(bind)", "Session.tunnel(verify_identity)", "Session.tunnel(max_connections)", "Session.tunnel_async(bind)", "Session.tunnel_async(verify_identity)", "Session.tunnel_async(max_connections)"]
+
+[[default]]
+id = "omitted-py-session-upload-file"
+exempt = "Session.upload_file accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["Session.upload_file(mode)", "Session.upload_file_async(mode)"]
+
+[[default]]
+id = "omitted-py-sizeclass-from-request"
+exempt = "SizeClass.from_request accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["SizeClass.from_request(cpus)", "SizeClass.from_request(memory_mib)"]
+
+[[default]]
+id = "omitted-py-tunnel-stop"
+exempt = "Tunnel.stop accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["Tunnel.stop(timeout)", "Tunnel.stop_async(timeout)"]
+
+[[default]]
+id = "omitted-py-compare-residency"
+exempt = "compare_residency accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["compare_residency(rates)"]
+
+[[default]]
+id = "omitted-py-egress-posture-for"
+exempt = "egress_posture_for accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["egress_posture_for(connectors)", "egress_posture_for(region)"]
+
+[[default]]
+id = "omitted-py-estimate-run"
+exempt = "estimate_run accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["estimate_run(image_retained_seconds)", "estimate_run(launched)", "estimate_run(label)", "estimate_run(rates)"]
+
+[[default]]
+id = "omitted-py-mint-bedrock-token"
+exempt = "mint_bedrock_token accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["mint_bedrock_token(ttl_seconds)", "mint_bedrock_token_async(ttl_seconds)"]
+
+[[default]]
+id = "omitted-py-mint-bedrock-token-with-credentials"
+exempt = "mint_bedrock_token_with_credentials accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["mint_bedrock_token_with_credentials(session_token)", "mint_bedrock_token_with_credentials(ttl_seconds)"]
+
+[[default]]
+id = "omitted-py-preflight"
+exempt = "preflight accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["preflight(region)", "preflight_async(region)"]
+
+[[default]]
+id = "omitted-py-provision-agentd"
+exempt = "provision_agentd accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["provision_agentd(version)", "provision_agentd(state_dir)", "provision_agentd(binary)", "provision_agentd_async(version)", "provision_agentd_async(state_dir)", "provision_agentd_async(binary)"]
+
+[[default]]
+id = "omitted-py-provision-agentd-report"
+exempt = "provision_agentd_report accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["provision_agentd_report(version)", "provision_agentd_report(state_dir)", "provision_agentd_report(binary)", "provision_agentd_report_async(version)", "provision_agentd_report_async(state_dir)", "provision_agentd_report_async(binary)"]
+
+[[default]]
+id = "omitted-py-run-report"
+exempt = "run_report accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["run_report(image_retained)", "run_report(launched)", "run_report(label)", "run_report(rates)"]
+
+[[default]]
+id = "omitted-py-wrap-dockerfile"
+exempt = "wrap_dockerfile accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["wrap_dockerfile(port)"]
+
+[[default]]
+id = "omitted-ts-agentensureoptions"
+exempt = "AgentEnsureOptions accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["AgentEnsureOptions.s3KeyPrefix"]
+
+[[default]]
+id = "omitted-ts-agentimageoptions"
+exempt = "AgentImageOptions accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["AgentImageOptions.codeArtifactUri"]
+
+[[default]]
+id = "omitted-ts-agentlaunchoptions"
+exempt = "AgentLaunchOptions accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["AgentLaunchOptions.agentToken", "AgentLaunchOptions.autoResume", "AgentLaunchOptions.clientToken", "AgentLaunchOptions.disableLogging", "AgentLaunchOptions.egressNetworkConnectors", "AgentLaunchOptions.executionRoleArn", "AgentLaunchOptions.imageVersion", "AgentLaunchOptions.launchEnv", "AgentLaunchOptions.logGroup", "AgentLaunchOptions.logStream", "AgentLaunchOptions.maxDurationSec", "AgentLaunchOptions.maxIdleSec", "AgentLaunchOptions.readyTimeout", "AgentLaunchOptions.shell", "AgentLaunchOptions.suspendedSec"]
+
+[[default]]
+id = "omitted-ts-agentspecinput"
+exempt = "AgentSpecInput accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["AgentSpecInput.cliVersion", "AgentSpecInput.model"]
+
+[[default]]
+id = "omitted-ts-agentvm-adopt"
+exempt = "AgentVm.adopt accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["AgentVm.adopt(agents)", "AgentVm.adopt(port)"]
+
+[[default]]
+id = "omitted-ts-agentvm-buildartifact"
+exempt = "AgentVm.buildArtifact accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["AgentVm.buildArtifact(size)"]
+
+[[default]]
+id = "omitted-ts-agentvm-buildimage"
+exempt = "AgentVm.buildImage accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["AgentVm.buildImage(size)"]
+
+[[default]]
+id = "omitted-ts-agentvm-create"
+exempt = "AgentVm.create accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["AgentVm.create(agents)"]
+
+[[default]]
+id = "omitted-ts-agentvm-ensureimage"
+exempt = "AgentVm.ensureImage accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["AgentVm.ensureImage(size)"]
+
+[[default]]
+id = "omitted-ts-agentvm-findimage"
+exempt = "AgentVm.findImage accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["AgentVm.findImage(size)"]
+
+[[default]]
+id = "omitted-ts-agentvm-fromname"
+exempt = "AgentVm.fromName accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["AgentVm.fromName(agents)", "AgentVm.fromName(port)"]
+
+[[default]]
+id = "omitted-ts-agentvm-imagename"
+exempt = "AgentVm.imageName accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["AgentVm.imageName(size)"]
+
+[[default]]
+id = "omitted-ts-agentvm-installaccess"
+exempt = "AgentVm.installAccess accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["AgentVm.installAccess(token)", "AgentVm.installAccess(ttlSeconds)"]
+
+[[default]]
+id = "omitted-ts-agentvm-prompt"
+exempt = "AgentVm.prompt accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["AgentVm.prompt(options)"]
+
+[[default]]
+id = "omitted-ts-agentvm-promptsync"
+exempt = "AgentVm.promptSync accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["AgentVm.promptSync(options)"]
+
+[[default]]
+id = "omitted-ts-agentvm-terminate"
+exempt = "AgentVm.terminate accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["AgentVm.terminate(options)"]
+
+[[default]]
+id = "omitted-ts-buildimageoptions"
+exempt = "BuildImageOptions accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["BuildImageOptions.baseImage", "BuildImageOptions.baseImageVersion", "BuildImageOptions.dockerfile", "BuildImageOptions.inheritWorkdir", "BuildImageOptions.logGroup", "BuildImageOptions.logStream", "BuildImageOptions.projectDir", "BuildImageOptions.repairGuestIdentity", "BuildImageOptions.tags", "BuildImageOptions.tokenScope"]
+
+[[default]]
+id = "omitted-ts-completionrequest"
+exempt = "CompletionRequest accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["CompletionRequest.clientGraceSec", "CompletionRequest.env", "CompletionRequest.execId", "CompletionRequest.inheritImageEnv", "CompletionRequest.poweroffOnExit", "CompletionRequest.reapGroupOnExit", "CompletionRequest.shell"]
+
+[[default]]
+id = "omitted-ts-controlplane-deleteimage"
+exempt = "ControlPlane.deleteImage accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["ControlPlane.deleteImage(options)"]
+
+[[default]]
+id = "omitted-ts-controlplane-list"
+exempt = "ControlPlane.list accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["ControlPlane.list(options)"]
+
+[[default]]
+id = "omitted-ts-controlplane-waitforstate"
+exempt = "ControlPlane.waitForState accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["ControlPlane.waitForState(options)"]
+
+[[default]]
+id = "omitted-ts-deleteimageoptions"
+exempt = "DeleteImageOptions accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["DeleteImageOptions.attempts", "DeleteImageOptions.backoff"]
+
+[[default]]
+id = "omitted-ts-downloadfileoptions"
+exempt = "DownloadFileOptions accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["DownloadFileOptions.endLine", "DownloadFileOptions.startLine"]
+
+[[default]]
+id = "omitted-ts-ensureimageoptions"
+exempt = "EnsureImageOptions accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["EnsureImageOptions.baseImage", "EnsureImageOptions.baseImageVersion", "EnsureImageOptions.contextDir", "EnsureImageOptions.force", "EnsureImageOptions.projectDir", "EnsureImageOptions.repairGuestIdentity", "EnsureImageOptions.s3KeyPrefix", "EnsureImageOptions.tags", "EnsureImageOptions.waitTimeoutSeconds"]
+
+[[default]]
+id = "omitted-ts-exechandle-stream"
+exempt = "ExecHandle.stream accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["ExecHandle.stream(options)"]
+
+[[default]]
+id = "omitted-ts-exechandle-wait"
+exempt = "ExecHandle.wait accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["ExecHandle.wait(timeout)"]
+
+[[default]]
+id = "omitted-ts-exechandle-waitandack"
+exempt = "ExecHandle.waitAndAck accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["ExecHandle.waitAndAck(timeout)"]
+
+[[default]]
+id = "omitted-ts-exechandle-writestdin"
+exempt = "ExecHandle.writeStdin accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["ExecHandle.writeStdin(eof)"]
+
+[[default]]
+id = "omitted-ts-execoptions"
+exempt = "ExecOptions accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["ExecOptions.env", "ExecOptions.execId", "ExecOptions.inheritImageEnv", "ExecOptions.poweroffOnExit", "ExecOptions.reapGroupOnExit", "ExecOptions.shell", "ExecOptions.stdin", "ExecOptions.timeout"]
+
+[[default]]
+id = "omitted-ts-execprocess-wait"
+exempt = "ExecProcess.wait accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["ExecProcess.wait(timeoutSeconds)"]
+
+[[default]]
+id = "omitted-ts-keepawakeoptions"
+exempt = "KeepAwakeOptions accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["KeepAwakeOptions.idleWindowSec", "KeepAwakeOptions.intervalSec", "KeepAwakeOptions.maxDurationSec", "KeepAwakeOptions.toleratedErrors", "KeepAwakeOptions.whileBusy"]
+
+[[default]]
+id = "omitted-ts-listmicrovmsoptions"
+exempt = "ListMicrovmsOptions accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["ListMicrovmsOptions.imageIdentifier", "ListMicrovmsOptions.imageVersion"]
+
+[[default]]
+id = "omitted-ts-namerecordobject"
+exempt = "NameRecordObject accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["NameRecordObject.egressPosture", "NameRecordObject.identityHostSeed", "NameRecordObject.identityVmPublicKey"]
+
+[[default]]
+id = "omitted-ts-nameregistry-constructor"
+exempt = "NameRegistry.constructor accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["NameRegistry.constructor(stateDir)"]
+
+[[default]]
+id = "omitted-ts-planusageoptions"
+exempt = "PlanUsageOptions accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["PlanUsageOptions.imageRetainedSeconds", "PlanUsageOptions.label", "PlanUsageOptions.launched", "PlanUsageOptions.runningSeconds", "PlanUsageOptions.suspendedSeconds", "PlanUsageOptions.suspendResumeCycles"]
+
+[[default]]
+id = "omitted-ts-portforward-stop"
+exempt = "PortForward.stop accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["PortForward.stop(timeout)"]
+
+[[default]]
+id = "omitted-ts-promptoptions"
+exempt = "PromptOptions accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["PromptOptions.reapGroupOnExit"]
+
+[[default]]
+id = "omitted-ts-provisionoptions"
+exempt = "ProvisionOptions accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["ProvisionOptions.binary", "ProvisionOptions.stateDir", "ProvisionOptions.version"]
+
+[[default]]
+id = "omitted-ts-runoptions"
+exempt = "RunOptions accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["RunOptions.agentToken", "RunOptions.autoResume", "RunOptions.clientToken", "RunOptions.denyEgress", "RunOptions.disableLogging", "RunOptions.egress", "RunOptions.egressNetworkConnectors", "RunOptions.executionRoleArn", "RunOptions.identity", "RunOptions.imageIdentifier", "RunOptions.imageVersion", "RunOptions.launchEnv", "RunOptions.logGroup", "RunOptions.logStream", "RunOptions.maxDurationSec", "RunOptions.maxIdleSec", "RunOptions.readyTimeout", "RunOptions.shell", "RunOptions.suspendedSec", "RunOptions.tokenScope", "RunOptions.wait"]
+
+[[default]]
+id = "omitted-ts-runusageoptions"
+exempt = "RunUsageOptions accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["RunUsageOptions.imageRetained", "RunUsageOptions.label", "RunUsageOptions.launched", "RunUsageOptions.suspendResumeCycles"]
+
+[[default]]
+id = "omitted-ts-sandbox-adopt"
+exempt = "Sandbox.adopt accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["Sandbox.adopt(port)"]
+
+[[default]]
+id = "omitted-ts-sandbox-buildartifact"
+exempt = "Sandbox.buildArtifact accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["Sandbox.buildArtifact(size)", "Sandbox.buildArtifact(runHookTimeout)", "Sandbox.buildArtifact(buildHookTimeout)"]
+
+[[default]]
+id = "omitted-ts-sandbox-buildimage"
+exempt = "Sandbox.buildImage accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["Sandbox.buildImage(size)", "Sandbox.buildImage(runHookTimeout)", "Sandbox.buildImage(buildHookTimeout)"]
+
+[[default]]
+id = "omitted-ts-sandbox-ensureimage"
+exempt = "Sandbox.ensureImage accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["Sandbox.ensureImage(size)"]
+
+[[default]]
+id = "omitted-ts-sandbox-fromname"
+exempt = "Sandbox.fromName accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["Sandbox.fromName(port)"]
+
+[[default]]
+id = "omitted-ts-sandbox-preflight"
+exempt = "Sandbox.preflight accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["Sandbox.preflight(size)", "Sandbox.preflight(runHookTimeout)", "Sandbox.preflight(buildHookTimeout)"]
+
+[[default]]
+id = "omitted-ts-sandbox-run"
+exempt = "Sandbox.run accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["Sandbox.run(options)"]
+
+[[default]]
+id = "omitted-ts-sandbox-terminate"
+exempt = "Sandbox.terminate accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["Sandbox.terminate(options)"]
+
+[[default]]
+id = "omitted-ts-sandbox-waituntilrunning"
+exempt = "Sandbox.waitUntilRunning accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["Sandbox.waitUntilRunning(timeout)"]
+
+[[default]]
+id = "omitted-ts-serveoptions"
+exempt = "ServeOptions accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["ServeOptions.bind", "ServeOptions.maxConnections"]
+
+[[default]]
+id = "omitted-ts-session-attach"
+exempt = "Session.attach accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["Session.attach(port)", "Session.attach(requestTimeout)"]
+
+[[default]]
+id = "omitted-ts-session-downloadfile"
+exempt = "Session.downloadFile accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["Session.downloadFile(options)"]
+
+[[default]]
+id = "omitted-ts-session-keepawake"
+exempt = "Session.keepAwake accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["Session.keepAwake(options)"]
+
+[[default]]
+id = "omitted-ts-session-portforward"
+exempt = "Session.portForward accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["Session.portForward(options)"]
+
+[[default]]
+id = "omitted-ts-session-run"
+exempt = "Session.run accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["Session.run(options)"]
+
+[[default]]
+id = "omitted-ts-session-runsync"
+exempt = "Session.runSync accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["Session.runSync(options)"]
+
+[[default]]
+id = "omitted-ts-session-runtocompletion"
+exempt = "Session.runToCompletion accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["Session.runToCompletion(options)", "Session.runToCompletion(onOutput)"]
+
+[[default]]
+id = "omitted-ts-session-spawn"
+exempt = "Session.spawn accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["Session.spawn(options)"]
+
+[[default]]
+id = "omitted-ts-session-syncdir"
+exempt = "Session.syncDir accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["Session.syncDir(options)"]
+
+[[default]]
+id = "omitted-ts-session-tunnel"
+exempt = "Session.tunnel accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["Session.tunnel(options)", "Session.tunnel(verifyIdentity)"]
+
+[[default]]
+id = "omitted-ts-session-uploadfile"
+exempt = "Session.uploadFile accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["Session.uploadFile(mode)"]
+
+[[default]]
+id = "omitted-ts-session-waituntilready"
+exempt = "Session.waitUntilReady accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["Session.waitUntilReady(timeout)"]
+
+[[default]]
+id = "omitted-ts-sizeclass-fromrequest"
+exempt = "SizeClass.fromRequest accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["SizeClass.fromRequest(cpus)", "SizeClass.fromRequest(memoryMib)"]
+
+[[default]]
+id = "omitted-ts-spawnoptions"
+exempt = "SpawnOptions accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["SpawnOptions.exec", "SpawnOptions.gapPolicy", "SpawnOptions.idleTimeout", "SpawnOptions.maxReconnects", "SpawnOptions.reconnect"]
+
+[[default]]
+id = "omitted-ts-streamevent"
+exempt = "StreamEvent accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["StreamEvent.data", "StreamEvent.end", "StreamEvent.exitCode", "StreamEvent.offset", "StreamEvent.signal", "StreamEvent.stream", "StreamEvent.text", "StreamEvent.timedOut", "StreamEvent.totalOffset", "StreamEvent.truncated", "StreamEvent.writersMayBeAlive"]
+
+[[default]]
+id = "omitted-ts-streamoptionsinput"
+exempt = "StreamOptionsInput accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["StreamOptionsInput.errorOnGap", "StreamOptionsInput.idleTimeout", "StreamOptionsInput.maxReconnects", "StreamOptionsInput.reconnect"]
+
+[[default]]
+id = "omitted-ts-syncdiroptions"
+exempt = "SyncDirOptions accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["SyncDirOptions.deleteTimeout", "SyncDirOptions.full"]
+
+[[default]]
+id = "omitted-ts-teardownoptions"
+exempt = "TeardownOptions accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["TeardownOptions.deleteAttempts", "TeardownOptions.deleteBackoff", "TeardownOptions.deleteImage", "TeardownOptions.deleteLogGroup", "TeardownOptions.waitForTerminated"]
+
+[[default]]
+id = "omitted-ts-tunnel-stop"
+exempt = "Tunnel.stop accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["Tunnel.stop(timeout)"]
+
+[[default]]
+id = "omitted-ts-waitforstateoptions"
+exempt = "WaitForStateOptions accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["WaitForStateOptions.failOn", "WaitForStateOptions.pollInterval", "WaitForStateOptions.timeout"]
+
+[[default]]
+id = "omitted-ts-wrapdockerfileoptions"
+exempt = "WrapDockerfileOptions accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["WrapDockerfileOptions.inheritWorkdir", "WrapDockerfileOptions.port"]
+
+[[default]]
+id = "omitted-ts-compareresidency"
+exempt = "compareResidency accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["compareResidency(cycles)", "compareResidency(rates)"]
+
+[[default]]
+id = "omitted-ts-egressposturefor"
+exempt = "egressPostureFor accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["egressPostureFor(egress)", "egressPostureFor(connectors)", "egressPostureFor(denyEgress)", "egressPostureFor(region)"]
+
+[[default]]
+id = "omitted-ts-estimaterun"
+exempt = "estimateRun accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["estimateRun(options)", "estimateRun(rates)"]
+
+[[default]]
+id = "omitted-ts-mintbedrocktoken"
+exempt = "mintBedrockToken accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["mintBedrockToken(ttlSeconds)"]
+
+[[default]]
+id = "omitted-ts-mintbedrocktokenwithcredentials"
+exempt = "mintBedrockTokenWithCredentials accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["mintBedrockTokenWithCredentials(ttlSeconds)"]
+
+[[default]]
+id = "omitted-ts-preflight"
+exempt = "preflight accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["preflight(region)"]
+
+[[default]]
+id = "omitted-ts-promptagent"
+exempt = "promptAgent accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["promptAgent(options)"]
+
+[[default]]
+id = "omitted-ts-provisionagentd"
+exempt = "provisionAgentd accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["provisionAgentd(options)"]
+
+[[default]]
+id = "omitted-ts-provisionagentdreport"
+exempt = "provisionAgentdReport accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["provisionAgentdReport(options)"]
+
+[[default]]
+id = "omitted-ts-runreport"
+exempt = "runReport accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["runReport(options)", "runReport(rates)"]
+
+[[default]]
+id = "omitted-ts-wrapdockerfile"
+exempt = "wrapDockerfile accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["wrapDockerfile(options)"]
+
+[[default]]
+id = "cli-quickstart-exec"
+exempt = "The quickstart demonstration command is CLI presentation, with no runtime default on the shared execution API."
+value = "echo hello from a microvm"
+cli = ["quickstart --exec"]
+
+[[default]]
+id = "cli-tunnel-bind"
+exempt = "The CLI states only the listening IP; the shared edge listener owns the socket address and chooses a port separately."
+value = "127.0.0.1"
+cli = ["tunnel --bind"]
+
+[[default]]
+id = "cli-port-forward-bind"
+exempt = "The CLI states only the listening IP; the shared edge listener owns the socket address and chooses a port separately."
+value = "127.0.0.1"
+cli = ["port-forward --bind"]
+
+[[default]]
+id = "cli-cost-build-sec"
+exempt = "Zero omits the measured build phase in the CLI report input; core represents an absent measured phase with None."
+value = "0"
+cli = ["cost --build-sec"]

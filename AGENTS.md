@@ -169,8 +169,12 @@ capabilities, or `verify/parity/capabilities.toml` says why one doesn't.
   fails `ratchet:check` on one in adapter source that has no decision there. A
   flag or keyword default is held through the generated surfaces: core publishes
   its defaults as the manifest's `clientDefaults`, and `parity:check` fails on a
-  default in `docs/manifest.json` or `microvms.pyi` that no `[[default]]` row in
-  `verify/parity/capabilities.toml` maps to one, or that differs from it.
+  default in `docs/manifest.json`, `microvms.pyi`, or `index.d.ts` that no
+  `[[default]]` row in `verify/parity/capabilities.toml` maps to one, or that differs
+  from it. This includes strings, zero, and absent values. TypeScript input fields
+  state defaults with `@defaultValue`; optional inputs without a tag state the
+  `undefined` omission marker. An exemption pins the declared value and explains
+  its ownership; an omission marker does not prove the effective runtime fallback.
 - A bug in behavior the surfaces share is a case in `verify/parity/cases/`,
   which every surface's runner checks against one `expect`, not a new test and
   seeded fault on each surface. The case lands with the fix. Run its

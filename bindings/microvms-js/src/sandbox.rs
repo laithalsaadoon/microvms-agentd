@@ -240,6 +240,7 @@ impl TeardownReport {
 pub struct BaseImageInput {
     pub name: String,
     pub docker_ref: String,
+    /// @defaultValue ""
     pub working_dir: Option<String>,
 }
 

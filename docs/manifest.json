@@ -8,18 +8,33 @@
       "agentSizeMib": 1024,
       "bedrockTokenTtlHours": 12,
       "clientGraceSeconds": 60.0,
+      "cost": {
+        "imageBuild": null,
+        "imageGb": null,
+        "running": null,
+        "runningSeconds": 0.0,
+        "snapshotGb": null,
+        "suspended": null,
+        "suspendedSeconds": 0.0
+      },
       "exec": {
+        "cwd": null,
+        "group": null,
         "inheritImageEnv": false,
         "poweroffOnExit": false,
         "reapGroupOnExit": false,
         "shell": false,
-        "stdin": false
+        "stdin": false,
+        "timeoutSeconds": null,
+        "user": null
       },
       "execWaitSeconds": 300.0,
       "image": {
         "force": false,
         "inheritWorkdir": false,
-        "repairGuestIdentity": false
+        "repairGuestIdentity": false,
+        "workdir": null,
+        "workingDirectory": ""
       },
       "keepAwakeToleratedErrors": 3,
       "launch": {
@@ -38,7 +53,10 @@
       "lifecyclePollIntervalSeconds": 5.0,
       "lifecycleTimeoutSeconds": 300.0,
       "prompt": {
-        "reapGroupOnExit": false
+        "execId": null,
+        "permissionMode": "agent-default",
+        "reapGroupOnExit": false,
+        "timeoutSeconds": null
       },
       "promptTimeoutSeconds": 900.0,
       "readyTimeoutSeconds": 120.0,
@@ -47,6 +65,7 @@
       "sizeMib": 2048,
       "stream": {
         "errorOnGap": false,
+        "offset": 0,
         "reconnect": true
       },
       "syncDeleteTimeoutSeconds": 60.0,

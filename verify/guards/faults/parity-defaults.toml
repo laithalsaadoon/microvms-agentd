@@ -12,7 +12,7 @@ suite = "script"
 [[family.fault]]
 id = "parity-default-undeclared"
 message = "py: ExecHandle.write_stdin(eof) = False belongs to no [[default]] row"
-transform = { file = "verify/parity/capabilities.toml", replace = "[[default]]\nid = \"stdin-eof\"\nexempt = \"whether this one write closes stdin: an argument of the call, with no default anywhere else\"\npy = [\"ExecHandle.write_stdin(eof)\", \"ExecHandle.write_stdin_async(eof)\"]\n", with = "" }
+transform = { file = "verify/parity/capabilities.toml", replace = "[[default]]\nid = \"stdin-eof\"\nexempt = \"whether this one write closes stdin: an argument of the call, with no default anywhere else\"\nvalue = \"False\"\npy = [\"ExecHandle.write_stdin(eof)\", \"ExecHandle.write_stdin_async(eof)\"]\n", with = "" }
 
 [[family.fault]]
 id = "parity-default-core-changed"
@@ -47,7 +47,7 @@ transform = { file = "tools/check-parity.py", replace = "            if paramete
 [[family.fault]]
 id = "parity-default-py-floor"
 message = "py: the surface states no default the rows hold, so nothing was read"
-transform = { file = "tools/check-parity.py", replace = "        if parameter.get(\"default\") is not None:\n            surface.defaults[f\"{owner}", with = "        if False:\n            surface.defaults[f\"{owner}" }
+transform = { file = "tools/check-parity.py", replace = "        if parameter.get(\"default\") is not None:\n            name = f\"{owner}", with = "        if False:\n            name = f\"{owner}" }
 
 [[family.fault]]
 id = "parity-default-sentinel"

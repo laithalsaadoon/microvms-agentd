@@ -1,0 +1,74 @@
+# Default kinds and omission metadata must fail closed (#570).
+[[family]]
+guard = "tools/check-parity.py"
+run = ["./tools/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "default-kind-string"
+message = "defaults to \"agent-default\", but clientDefaults.prompt.permissionMode is \"unrestricted\""
+transform = { file = "docs/manifest.json", replace = "\"permissionMode\": \"agent-default\"", with = "\"permissionMode\": \"unrestricted\"" }
+
+[[family.fault]]
+id = "default-kind-zero"
+message = "defaults to 0, but clientDefaults.stream.offset is 1"
+transform = { file = "docs/manifest.json", replace = "\"offset\": 0", with = "\"offset\": 1" }
+
+[[family.fault]]
+id = "default-kind-absent"
+message = "defaults to None, but clientDefaults.exec.cwd is \"/tmp\""
+transform = { file = "docs/manifest.json", replace = "\"cwd\": null", with = "\"cwd\": \"/tmp\"" }
+
+[[family.fault]]
+id = "default-kind-typescript"
+message = "ts: PromptOptions.permissionMode defaults to \"unrestricted\""
+transform = { file = "bindings/microvms-js/index.d.ts", replace = "* @defaultValue \"agent-default\"", with = "* @defaultValue \"unrestricted\"" }
+
+[[family.fault]]
+id = "default-typescript-floor"
+message = "ts: the surface states no default the rows hold, so nothing was read"
+transform = { file = "tools/check-parity.py", replace = "    record_ts_defaults(project, surface)\n", with = "    pass\n" }
+
+[[family.fault]]
+id = "default-exemption-pin"
+message = "default stdin-eof: an exempt default must pin its value"
+transform = { file = "verify/parity/capabilities.toml", replace = "id = \"stdin-eof\"\nexempt = \"whether this one write closes stdin: an argument of the call, with no default anywhere else\"\nvalue = \"False\"", with = "id = \"stdin-eof\"\nexempt = \"whether this one write closes stdin: an argument of the call, with no default anywhere else\"" }
+
+[[family]]
+guard = "tools/test_check_parity.py"
+run = ["python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-q"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "default-python-overload-conflict"
+message = "AssertionError: ParityError not raised"
+transform = { file = "tools/check-parity.py", replace = "            if previous is not None and previous != parameter[\"default\"]:\n", with = "            if False:\n" }
+
+[[family.fault]]
+id = "default-typescript-inline-input"
+message = "test_the_typescript_reader_over_typedoc"
+transform = { file = "tools/check-parity.py", replace = "            if isinstance(declaration, dict):\n", with = "            if False:\n" }
+
+[[family.fault]]
+id = "default-python-overload-only"
+message = "test_python_overloads_are_read_and_must_agree"
+transform = { file = "site/scripts/reference/griffe_dump.py", replace = "    for name, overloads in owner.overloads.items():\n", with = "    for name, overloads in []:\n" }
+
+[[family.fault]]
+id = "default-python-constructor"
+message = "test_python_constructor_defaults_use_the_class_name_and_must_agree"
+transform = { file = "tools/check-parity.py", replace = "                    \"__init__\",\n", with = "" }
+
+[[fault]]
+id = "default-typescript-permission-fallback"
+guard = "both agents and permission modes reach the wire with the remote deadline"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/agents.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+note = "bindings/microvms-js/__test__/agents.mjs::both agents and permission modes reach the wire with the remote deadline"
+transform = { file = "bindings/microvms-js/src/agents.rs", replace = ".unwrap_or(defaults.permission_mode)", with = ".unwrap_or(\"unrestricted\".parse().unwrap())" }

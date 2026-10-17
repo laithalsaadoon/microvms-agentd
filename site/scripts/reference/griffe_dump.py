@@ -69,6 +69,9 @@ def function_record(function: griffe.Function) -> dict[str, object]:
         "decorators": sorted(str(decorator.value) for decorator in function.decorators),
         "labels": sorted(function.labels),
         "parameters": parameters(function),
+        "overloads": [
+            function_record(overload) for overload in function.overloads or []
+        ],
         "returns": text(function.returns),
         "special": function.is_special,
         "lineno": function.lineno,
@@ -102,15 +105,28 @@ def member_record(member: griffe.Object | griffe.Alias) -> dict[str, object] | N
     return None
 
 
+def member_records(owner: griffe.Module | griffe.Class) -> list[dict[str, object]]:
+    records = [member_record(member) for member in owner.members.values()]
+    # A stub may contain overloads without an implementation. Griffe stores those
+    # on the owner instead of in members; preserve them so no public signature vanishes.
+    for name, overloads in owner.overloads.items():
+        if name not in owner.members and overloads:
+            record = member_record(overloads[0])
+            if record is None:
+                continue
+            record["overloads"] = [function_record(item) for item in overloads[1:]]
+            records.append(record)
+    return [record for record in records if record is not None]
+
+
 def class_record(cls: griffe.Class) -> dict[str, object]:
-    members = [member_record(member) for member in cls.members.values()]
     return {
         "kind": "class",
         "name": cls.name,
         "docstring": docstring(cls),
         "bases": [str(base) for base in cls.bases],
         "decorators": sorted(str(decorator.value) for decorator in cls.decorators),
-        "members": [member for member in members if member is not None],
+        "members": member_records(cls),
         "lineno": cls.lineno,
     }
 
@@ -123,13 +139,12 @@ def main(argv: list[str]) -> int:
     module = griffe.visit(
         path.stem, filepath=path, code=path.read_text(encoding="utf-8")
     )
-    members = [member_record(member) for member in module.members.values()]
     json.dump(
         {
             "griffe": version("griffelib"),
             "module": module.name,
             "docstring": docstring(module),
-            "members": [member for member in members if member is not None],
+            "members": member_records(module),
         },
         sys.stdout,
         indent=1,

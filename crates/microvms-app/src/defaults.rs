@@ -38,6 +38,8 @@ pub fn client_defaults() -> Value {
     let stream = StreamOptions::default();
     let teardown = TeardownOpts::default();
     let prompt = PromptOptions::default();
+    let plan = crate::cost::PlanUsage::default();
+    let usage = crate::cost::RunUsage::default();
     let image = CreateImageRequest::new(String::new(), Vec::new(), String::new(), String::new());
     let ensured = EnsureImageRequest::new(
         String::new(),
@@ -81,6 +83,10 @@ pub fn client_defaults() -> Value {
             ),
         },
         "exec": {
+            "cwd": start.cwd,
+            "user": start.user,
+            "group": start.group,
+            "timeoutSeconds": start.timeout_sec,
             "shell": matches!(start.shell, protocol::exec::Shell::Flag(true)),
             "stdin": start.stdin,
             "reapGroupOnExit": start.reap_group_on_exit,
@@ -88,6 +94,7 @@ pub fn client_defaults() -> Value {
             "inheritImageEnv": start.inherit_image_env,
         },
         "stream": {
+            "offset": stream.offset,
             "reconnect": stream.reconnect,
             "errorOnGap": stream.error_on_gap,
         },
@@ -97,9 +104,23 @@ pub fn client_defaults() -> Value {
             "waitForTerminated": teardown.wait_for_terminated.is_some(),
         },
         "prompt": {
+            "permissionMode": prompt.permission_mode.as_str(),
+            "execId": prompt.exec_id,
+            "timeoutSeconds": prompt.timeout.map(seconds),
             "reapGroupOnExit": prompt.reap_group_on_exit,
         },
+        "cost": {
+            "runningSeconds": plan.running_seconds,
+            "suspendedSeconds": plan.suspended_seconds,
+            "running": usage.running.map(crate::cost::DurationP::seconds_f64),
+            "suspended": usage.suspended.map(crate::cost::DurationP::seconds_f64),
+            "imageBuild": usage.image_build.map(crate::cost::DurationP::seconds_f64),
+            "imageGb": usage.image_gb,
+            "snapshotGb": usage.snapshot_gb,
+        },
         "image": {
+            "workingDirectory": crate::control::artifact::BaseImage::al2023().working_dir,
+            "workdir": WrapOptions::default().workdir,
             "inheritWorkdir": WrapOptions::default().inherit_workdir,
             "repairGuestIdentity": image.repair_guest_identity,
             "force": ensured.force,
@@ -136,8 +157,24 @@ mod tests {
         assert_eq!(defaults["launch"]["maxIdleSeconds"], launch.max_idle_sec);
         assert_eq!(defaults["launch"]["wait"], launch.wait);
         let start = protocol::exec::StartRequest::new("x", vec!["true".into()]);
+        assert_eq!(defaults["exec"]["cwd"], json!(start.cwd));
+        assert_eq!(defaults["exec"]["user"], json!(start.user));
+        assert_eq!(defaults["exec"]["group"], json!(start.group));
+        assert_eq!(defaults["exec"]["timeoutSeconds"], json!(start.timeout_sec));
         assert_eq!(defaults["exec"]["stdin"], start.stdin);
         assert_eq!(defaults["exec"]["shell"], false);
+        assert_eq!(
+            defaults["stream"]["offset"],
+            StreamOptions::default().offset
+        );
+        assert_eq!(
+            defaults["prompt"]["permissionMode"],
+            PromptOptions::default().permission_mode.as_str()
+        );
+        assert_eq!(
+            defaults["image"]["workingDirectory"],
+            crate::control::artifact::BaseImage::al2023().working_dir
+        );
         assert_eq!(
             defaults["syncDeleteTimeoutSeconds"],
             crate::workspace::DEFAULT_SYNC_DELETE_TIMEOUT.as_secs_f64()

@@ -1521,6 +1521,7 @@ export declare function baseImageFromDockerfile(dockerfile: string): BaseImageIn
 export interface BaseImageInput {
   name: string
   dockerRef: string
+  /** @defaultValue "" */
   workingDir?: string
 }
 
@@ -1820,6 +1821,7 @@ export interface ExecOptions {
    * does not have is refused (`unknown_shell`) before anything starts.
    */
   shell?: boolean | string
+  /** @defaultValue null */
   cwd?: string
   env?: Record<string, string>
   /**
@@ -1827,11 +1829,18 @@ export interface ExecOptions {
    * unknown name is refused (`unknown_user`) before anything starts. A user with a passwd
    * row gets `HOME`, `USER` and `LOGNAME` from it, beneath the launch environment and
    * `env`.
+   * @defaultValue null
    */
   user?: number | string
-  /** A numeric gid, or a name the daemon resolves against the guest's `/etc/group`. */
+  /**
+   * A numeric gid, or a name the daemon resolves against the guest's `/etc/group`.
+   * @defaultValue null
+   */
   group?: number | string
-  /** The daemon's own kill deadline for the child, distinct from a client-side `wait`. */
+  /**
+   * The daemon's own kill deadline for the child, distinct from a client-side `wait`.
+   * @defaultValue null
+   */
   timeoutSec?: number
   /** Whether to open a stdin pipe. Writing without this is a 409. */
   stdin?: boolean
@@ -2516,7 +2525,10 @@ export interface PromptOptions {
   timeoutSec?: number
   /** A stable exec id, for a retry that must not spawn twice. */
   execId?: string
-  /** Agent process permissions: agent-default (default) or unrestricted. */
+  /**
+   * Agent process permissions: agent-default (default) or unrestricted.
+   * @defaultValue "agent-default"
+   */
   permissionMode?: 'agent-default' | 'unrestricted'
   /** Stop residual children when the main agent exits. Defaults to false. */
   reapGroupOnExit?: boolean
@@ -2775,6 +2787,7 @@ export interface SpawnOptions {
    * The byte to start reading at. Non-zero resumes output a previous process was reading —
    * which, with a stable `exec.execId`, is how a spawned process survives *this* process
    * restarting.
+   * @defaultValue 0
    */
   offset?: number
   /**
@@ -2842,7 +2855,10 @@ export interface StreamEvent {
 
 /** How a stream should behave. */
 export interface StreamOptionsInput {
-  /** The byte to start at. Non-zero resumes a stream a previous process was reading. */
+  /**
+   * The byte to start at. Non-zero resumes a stream a previous process was reading.
+   * @defaultValue 0
+   */
   offset?: number
   /**
    * Whether to reconnect after a cut. `false` ends the stream at the cut instead, which

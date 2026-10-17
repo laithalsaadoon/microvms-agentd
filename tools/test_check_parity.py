@@ -117,7 +117,31 @@ py = "Sandbox.run(wait)"
 [[default]]
 id = "watch-interval"
 exempt = "a terminal affordance"
+value = "2"
 cli = "ls --interval-sec"
+
+[[default]]
+id = "offset"
+core = "offset"
+cli = "cost --running-sec"
+py = "Session.kill(offset)"
+
+[[default]]
+id = "labels"
+core = "label"
+py = "run_report(label)"
+
+[[default]]
+id = "absent"
+core = "image"
+py = "Sandbox.run(image)"
+ts = "Sandbox.run(image)"
+
+[[default]]
+id = "table-format"
+exempt = "a terminal-only rendering selection"
+value = "table"
+cli = "ls --format"
 """
 
 # The table with two tracked gaps, one on a row and one on a type's member: the records
@@ -161,7 +185,7 @@ GRIFFE = {
         pyclass(
             "Sandbox",
             function("__new__"),
-            function("run", wait="True", image=None),
+            function("run", wait="True", image="None"),
             attribute("microvm_id"),
         ),
         pyclass(
@@ -206,7 +230,12 @@ TYPEDOC = {
     "children": [
         tsclass(
             "Sandbox",
-            member("run"),
+            {
+                **member("run"),
+                "signatures": [
+                    {"parameters": [{"name": "image", "flags": {"isOptional": True}}]}
+                ],
+            },
             member("microvmId"),
             member("region", ACCESSOR),
             member("create", static=True),
@@ -259,7 +288,13 @@ MANIFEST = {
             ),
         ],
         "globalFlags": [{"name": "json", "positional": False}],
-        "clientDefaults": {"execWaitSeconds": 300.0, "launch": {"wait": True}},
+        "clientDefaults": {
+            "execWaitSeconds": 300.0,
+            "launch": {"wait": True},
+            "offset": 0,
+            "label": "run",
+            "image": None,
+        },
     },
 }
 
@@ -598,13 +633,76 @@ class DefaultTests(FixtureCase):
     def test_a_python_default_no_row_holds_fails(self):
         self.parameter("Session", "kill", "offset")["default"] = "False"
         self.assertProblem(
-            "py: Session.kill(offset) = False belongs to no [[default]] row"
+            "Session.kill(offset) defaults to False, but clientDefaults.offset is 0"
         )
 
-    def test_a_zero_none_or_string_default_needs_no_row(self):
-        # cost --running-sec 0, Sandbox.run(image=None), ls --format table and run_report's label
-        # are in the baseline with no row, and it passes.
-        self.assertEqual(self.problems(), [])
+    def test_zero_absent_and_string_defaults_are_held(self):
+        for value in ["0", "0.0", "None", "''", "'run'", "False"]:
+            self.assertTrue(PARITY["held"]("py", value))
+
+    def test_string_defaults_compare_values_and_do_not_coerce_numbers(self):
+        self.manifest["data"]["clientDefaults"]["label"] = "other"
+        self.assertProblem('run_report(label) defaults to "run"')
+        self.assertTrue(PARITY["differs"]('"0"', 0))
+        self.assertTrue(PARITY["differs"]("False", 0))
+        self.assertFalse(PARITY["differs"]("''", ""))
+
+    def test_zero_defaults_are_enrolled_and_compared(self):
+        self.parameter("Session", "kill", "offset")["default"] = "1"
+        self.assertProblem(
+            "Session.kill(offset) defaults to 1, but clientDefaults.offset is 0"
+        )
+        self.table = self.table.replace('py = "Session.kill(offset)"', "")
+        self.parameter("Session", "kill", "offset")["default"] = "0"
+        self.assertProblem("Session.kill(offset) = 0 belongs to no [[default]] row")
+
+    def test_absent_defaults_are_values_and_missing_defaults_are_refused(self):
+        self.manifest["data"]["clientDefaults"]["image"] = "image"
+        self.assertProblem("Sandbox.run(image) defaults to None")
+        self.assertProblem("Sandbox.run(image) defaults to undefined")
+        self.parameter("Sandbox", "run", "image")["default"] = None
+        self.assertProblem("py: Sandbox.run(image) states no default")
+
+    def test_exempt_omission_markers_are_pinned(self):
+        self.flag("ls", "format")["default"] = "json"
+        self.assertProblem("defaults to json, but its exemption pins table")
+
+    def test_exempt_defaults_cannot_drop_their_value_pin(self):
+        self.table = self.table.replace('value = "table"\n', "")
+        self.assertProblem("default table-format: an exempt default must pin its value")
+
+    def test_typescript_default_tags_are_compared_and_cannot_disappear(self):
+        parameter = self.typedoc["children"][0]["children"][1]["signatures"][0][
+            "parameters"
+        ][0]
+        parameter["comment"] = {
+            "blockTags": [{"tag": "@defaultValue", "content": [{"text": '"changed"'}]}]
+        }
+        self.assertProblem('ts: Sandbox.run(image) defaults to "changed"')
+        parameter["flags"] = {}
+        del parameter["comment"]
+        self.assertProblem("ts: Sandbox.run(image) states no default")
+
+    def test_typescript_tags_refuse_malformed_duplicate_and_container_values(self):
+        for values in [["bad"], ["{}"], ["NaN"], ["Infinity"], ["0", "0"]]:
+            with self.subTest(values=values):
+                parameter = self.typedoc["children"][0]["children"][1]["signatures"][0][
+                    "parameters"
+                ][0]
+                parameter["comment"] = {
+                    "blockTags": [
+                        {"tag": "@defaultValue", "content": [{"text": value}]}
+                        for value in values
+                    ]
+                }
+                with self.assertRaises(PARITY["ParityError"]):
+                    self.problems()
+
+    def test_global_and_positional_cli_defaults_are_enrolled(self):
+        self.manifest["data"]["globalFlags"][0]["default"] = "false"
+        self.manifest["data"]["commands"][0]["parameters"][-1]["default"] = "binary"
+        self.assertProblem("@global --json = false belongs to no [[default]] row")
+        self.assertProblem("run binary = binary belongs to no [[default]] row")
 
     def test_a_cli_default_that_differs_from_cores_fails(self):
         self.flag("run", "timeout")["default"] = "301"
@@ -679,13 +777,13 @@ class DefaultTests(FixtureCase):
         )
         self.assertProblem("default watch-interval: the exemption has an empty reason")
 
-    def test_a_typescript_cell_is_refused(self):
+    def test_a_typescript_cell_must_name_a_stated_default(self):
         self.table = self.table.replace(
             'py = "Sandbox.run(wait)"',
             'py = "Sandbox.run(wait)"\nts = "Sandbox.run(wait)"',
         )
         self.assertProblem(
-            "default launch-wait: ts: index.d.ts states defaults only in prose"
+            "default launch-wait: ts: Sandbox.run(wait) states no default"
         )
 
     def test_a_surface_stating_no_default_fails_the_floor(self):
@@ -819,13 +917,31 @@ DECLARATIONS = """
 // SPDX-License-Identifier: Apache-2.0
 export declare class Session {
   get endpoint(): string
-  health(): Promise<boolean>
+  health(options?: RunOptions): Promise<boolean>
   static attach(endpoint: string): Promise<Session>
   bytes(): Buffer
 }
 export declare function runReport(): string
 export declare const __napiBindingTarget: string
-export interface RunOptions { timeout?: number }
+export interface BaseOptions {
+  /** @defaultValue 9 */
+  inherited?: number
+}
+export interface RunOptions extends BaseOptions {
+  /** @defaultValue 0 */
+  timeout?: number
+  /** @defaultValue "" */
+  label?: string
+  nested?: {
+    /** @defaultValue null */
+    value?: string | null
+  }
+  other?: OtherOptions
+}
+export type OtherOptions = {
+  /** @defaultValue false */
+  enabled?: boolean
+}
 export declare namespace snapshots {
   export function snapshotVm(): void
 }
@@ -845,8 +961,7 @@ class ReaderTests(unittest.TestCase):
         self.assertEqual(
             surface.classes["Session"].members, {"health", "attach", "endpoint"}
         )
-        # Defaults as the stub spells them, `...` for a named constant; `None` is read but not
-        # held.
+        # Defaults retain the stub's spelling, including named constants and absence.
         self.assertEqual(
             surface.defaults,
             {
@@ -855,9 +970,7 @@ class ReaderTests(unittest.TestCase):
                 "Session.health(label)": "None",
             },
         )
-        self.assertFalse(
-            PARITY["held"]("py", surface.defaults["Session.health(label)"])
-        )
+        self.assertTrue(PARITY["held"]("py", surface.defaults["Session.health(label)"]))
 
     def test_the_typescript_reader_over_typedoc(self):
         with tempfile.TemporaryDirectory() as scratch:
@@ -880,6 +993,60 @@ class ReaderTests(unittest.TestCase):
         self.assertIn("RunOptions", surface.names)
         self.assertIn("RunOptions.timeout", surface.names)
         self.assertNotIn("RunOptions", surface.classes)
+        self.assertEqual(
+            surface.defaults,
+            {
+                "Session.health(options)": "undefined",
+                "RunOptions.timeout": "0",
+                "RunOptions.label": '""',
+                "RunOptions.nested": "undefined",
+                "RunOptions.nested.value": "null",
+                "RunOptions.other": "undefined",
+                "OtherOptions.enabled": "false",
+                "RunOptions.inherited": "9",
+                "BaseOptions.inherited": "9",
+            },
+        )
+
+    def test_python_overloads_are_read_and_must_agree(self):
+        stub_text = """\
+from typing import Literal, overload
+@overload
+def run(mode: Literal["a"], timeout: float = 0.0) -> str: ...
+@overload
+def run(mode: Literal["b"], timeout: float = 0.0) -> bytes: ...
+"""
+        with tempfile.TemporaryDirectory() as scratch:
+            stub = Path(scratch) / "microvms.pyi"
+            stub.write_text(stub_text, encoding="utf-8")
+            surface = PARITY["py_surface"](PARITY["run_griffe"](stub))
+            self.assertEqual(surface.defaults, {"run(timeout)": "0.0"})
+            stub.write_text(stub_text.replace("= 0.0) -> bytes", "= 1.0) -> bytes"))
+            with self.assertRaisesRegex(
+                PARITY["ParityError"],
+                "run\\(timeout\\) has conflicting overload defaults",
+            ):
+                PARITY["py_surface"](PARITY["run_griffe"](stub))
+
+    def test_python_constructor_defaults_use_the_class_name_and_must_agree(self):
+        stub_text = """\
+class Example:
+    def __new__(cls, count: int = 0) -> Example: ...
+    def __init__(self, count: int = 0) -> None: ...
+"""
+        with tempfile.TemporaryDirectory() as scratch:
+            stub = Path(scratch) / "microvms.pyi"
+            stub.write_text(stub_text, encoding="utf-8")
+            surface = PARITY["py_surface"](PARITY["run_griffe"](stub))
+            self.assertEqual(surface.defaults, {"Example(count)": "0"})
+            stub.write_text(
+                stub_text.replace("count: int = 0) -> None", "count: int = 1) -> None")
+            )
+            with self.assertRaisesRegex(
+                PARITY["ParityError"],
+                "Example\\(count\\) has conflicting overload defaults",
+            ):
+                PARITY["py_surface"](PARITY["run_griffe"](stub))
 
     def test_a_declaration_typedoc_would_drop_is_refused(self):
         # TypeDoc leaves out a declaration tagged `@hidden`, `@ignore` or `@private`, so the
