@@ -1,0 +1,232 @@
+# SPDX-License-Identifier: Apache-2.0
+# The observer cannot mutate resources or turn incomplete evidence into acceptance.
+
+[[family]]
+guard = "test_recover_live_observation.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_observation.py::test_read_only_api_rejects_non_observation_operations_before_provider_call"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-observation-write-boundary"
+message = "test_read_only_api_rejects_non_observation_operations_before_provider_call"
+transform = { file = "tools/recover-live.py", replace = "require(operation in OBSERVATION_OPERATIONS, \"read_only_operation\")", with = "require(True, \"read_only_operation\")" }
+
+[[family]]
+guard = "test_recover_live_observation.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_observation.py::test_observation_reads_both_version_responses_and_never_cleanup_paths"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-observation-verifier-first"
+message = "test_observation_reads_both_version_responses_and_never_cleanup_paths"
+transform = { file = "tools/recover-live.py", replace = "    region = manifest[\"region\"]\n    report.update(\n        sections=", with = "    region = manifest[\"region\"]\n    api.call(api.plane, \"list_microvm_images\")\n    report.update(\n        sections=" }
+
+[[family]]
+guard = "test_recover_live_observation.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_observation.py::test_complete_version_pagination_reads_every_exact_pair"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-observation-pagination"
+message = "test_complete_version_pagination_reads_every_exact_pair"
+transform = { file = "tools/recover-live.py", replace = "continuation = page.get(\"nextToken\")", with = "continuation = None" }
+
+[[family]]
+guard = "test_recover_live_observation.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_observation.py::test_incomplete_version_scan_preserves_other_sections_and_marks_failure[duplicate]"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-observation-duplicate-version"
+message = "test_incomplete_version_scan_preserves_other_sections_and_marks_failure"
+transform = { file = "tools/recover-live.py", replace = "require(number not in seen, \"duplicate_identity\")", with = "require(True, \"duplicate_identity\")" }
+
+[[family]]
+guard = "test_recover_live_observation.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_observation.py::test_logging_observation_retains_exact_uncertainty_without_raw_values"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-observation-missing-logging"
+message = "test_logging_observation_retains_exact_uncertainty_without_raw_values"
+transform = { file = "tools/recover-live.py", replace = "logging = {\"kind\": \"missing\" if \"logging\" not in record else \"null\"}", with = "logging = {\"kind\": \"disabled\" if \"logging\" not in record else \"null\"}" }
+
+[[family]]
+guard = "test_recover_live_observation.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_observation.py::test_logging_observation_retains_exact_uncertainty_without_raw_values"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-observation-logging-privacy"
+message = "test_logging_observation_retains_exact_uncertainty_without_raw_values"
+transform = { file = "tools/recover-live.py", replace = "\"logGroupSha256\": identity(\"log-group\", region, group),", with = "\"logGroupSha256\": group," }
+
+[[family]]
+guard = "test_recover_live_observation.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_observation.py::test_missing_and_unknown_state_and_availability_are_not_inferred"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-observation-availability-source"
+message = "test_missing_and_unknown_state_and_availability_are_not_inferred"
+transform = { file = "tools/recover-live.py", replace = "(\"availability\", \"status\", {\"ACTIVE\", \"INACTIVE\"}),", with = "(\"availability\", \"availability\", {\"ACTIVE\", \"INACTIVE\"})," }
+
+[[family]]
+guard = "test_recover_live_observation.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_observation.py::test_observation_schema_rejects_wrong_kind_success_claims_and_unknown_fields"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-observation-refuses-acceptance"
+message = "test_observation_schema_rejects_wrong_kind_success_claims_and_unknown_fields"
+transform = { file = "tools/recover-live.py", replace = "and value[\"recoveryAccepted\"] is False", with = "and True" }
+
+[[family]]
+guard = "test_recover_live_observation.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_observation.py::test_completed_observation_requires_full_reconciled_version_coverage[pagination]"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-observation-pagination-proof"
+message = "test_completed_observation_requires_full_reconciled_version_coverage"
+transform = { file = "tools/recover-live.py", replace = "                row[\"paginationComplete\"]\n                and row[\"listedCount\"]", with = "                True\n                and row[\"listedCount\"]" }
+
+[[family]]
+guard = "test_recover_live_observation.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_observation.py::test_completed_observation_requires_full_reconciled_version_coverage[missing_coverage]"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-observation-complete-coverage"
+message = "test_completed_observation_requires_full_reconciled_version_coverage"
+transform = { file = "tools/recover-live.py", replace = "set(coverage)", with = "set(listed_images)" }
+
+[[family]]
+guard = "test_recover_live_observation.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_observation.py::test_core_observe_mode_runs_verifier_and_read_only_api_without_cleanup"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-observation-api-routing"
+message = "test_core_observe_mode_runs_verifier_and_read_only_api_without_cleanup"
+transform = { file = "tools/recover-live.py", replace = "api_type = ReadOnlyApi if args.mode == \"observe\" else Api", with = "api_type = Api" }
+
+[[family]]
+guard = "test_recovery_observation_boundary.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recovery_observation_boundary.py::test_credential_mode_routes_after_unchanged_preflight"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-observation-credential-routing"
+message = "test_credential_mode_routes_after_unchanged_preflight"
+transform = { file = "tools/recovery-credentials.py", replace = "\"observe\" if getattr(args, \"observe_only\", False) else \"apply\", args, child", with = "\"apply\", args, child" }
+
+[[family]]
+guard = "test_recovery_observation_boundary.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recovery_observation_boundary.py::test_observation_child_uses_distinct_validator_without_exclusive_flag"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-observation-validator-routing"
+message = "test_observation_child_uses_distinct_validator_without_exclusive_flag"
+transform = { file = "tools/recovery-credentials.py", replace = "return VALIDATE_OBSERVATION(json.loads(path.read_bytes()))", with = "return VALIDATE_RECEIPT(json.loads(path.read_bytes()))" }
+
+[[family]]
+guard = "test_recovery_observation_boundary.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recovery_observation_boundary.py::test_workflow_observation_input_is_recovery_only_and_defaults_off"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-observation-mode-guard"
+message = "test_workflow_observation_input_is_recovery_only_and_defaults_off"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "      - name: refuse observation outside recovery mode\n        if: inputs.observe_only && inputs.mode != 'recover'\n        run: exit 1", with = "      - name: refuse observation outside recovery mode\n        if: inputs.observe_only && inputs.mode != 'recover'\n        run: exit 0" }
+
+[[family]]
+guard = "test_recovery_observation_boundary.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recovery_observation_boundary.py::test_workflow_observation_has_separate_command_and_artifact"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-observation-distinct-artifact"
+message = "test_workflow_observation_has_separate_command_and_artifact"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "          name: recovery-observation\n          path: recovery-observation.json", with = "          name: recovery-report\n          path: recovery-observation.json" }
+
+[[family]]
+guard = "test_recover_live_observation.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_observation.py::test_oversize_independent_verifier_retains_bounded_census_and_incomplete_receipt"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-observation-verifier-bound"
+message = "test_oversize_independent_verifier_retains_bounded_census_and_incomplete_receipt"
+transform = { file = "tools/recover-live.py", replace = "            len(verified[\"resources\"]) <= OBSERVATION_MAX_ROWS\n            and len(json.dumps(verified).encode()) <= OBSERVATION_MAX_BYTES // 4,", with = "            True," }
+
+[[family]]
+guard = "test_recover_live_observation.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_observation.py::test_conflicting_source_arn_keeps_listed_image_and_versions_in_incomplete_census"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-observation-source-identity-collision"
+message = "test_conflicting_source_arn_keeps_listed_image_and_versions_in_incomplete_census"
+transform = { file = "tools/recover-live.py", replace = "if requested in images:", with = "if False:" }
+
+[[family]]
+guard = "test_recover_live_observation.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_observation.py::test_observation_interruption_stops_reads_and_retains_prior_evidence"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-observation-cancellation"
+message = "test_observation_interruption_stops_reads_and_retains_prior_evidence"
+transform = { file = "tools/recover-live.py", replace = "if isinstance(exc, (InterruptedError, KeyboardInterrupt)):", with = "if False:" }
+
+[[family]]
+guard = "test_recover_live_observation.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_observation.py::test_incomplete_listed_image_requires_arn_hash"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-observation-listed-arn-required"
+message = "test_incomplete_listed_image_requires_arn_hash"
+transform = { file = "tools/recover-live.py", replace = "valid((\"listed\" in row) == (\"imageArnSha256\" in row))", with = "valid(True)" }
+
+[[family]]
+guard = "test_recover_live_observation.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_observation.py::test_completed_coverage_is_bound_to_listed_image_arn"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-observation-coverage-arn-binding"
+message = "test_completed_coverage_is_bound_to_listed_image_arn"
+transform = { file = "tools/recover-live.py", replace = "valid(row[\"imageArnSha256\"] == listed_images[image][\"imageArnSha256\"])", with = "valid(True)" }
+
+[[family]]
+guard = "test_recover_live_observation.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_observation.py::test_version_snapshot_rejects_vm_state"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-observation-version-state"
+message = "test_version_snapshot_rejects_vm_state"
+transform = { file = "tools/recover-live.py", replace = "valid(item[\"state\"] in states | {\"missing\", \"null\", \"malformed\"})", with = "valid(item[\"state\"] in states | VM_STATES | {\"missing\", \"null\", \"malformed\"})" }
+
+[[family]]
+guard = "test_recover_live_observation.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_observation.py::test_source_identity_requires_paired_fields_and_approved_image"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-observation-source-identity-pair"
+message = "test_source_identity_requires_paired_fields_and_approved_image"
+transform = { file = "tools/recover-live.py", replace = "(\"sourceIdentityMatches\" in row)", with = "(\"requestedArnSha256\" in row)" }
+
+[[family]]
+guard = "test_recover_live_observation.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_observation.py::test_source_identity_requires_paired_fields_and_approved_image"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-observation-source-identity-approved"
+message = "test_source_identity_requires_paired_fields_and_approved_image"
+transform = { file = "tools/recover-live.py", replace = "valid(\"requestedArnSha256\" not in row or row[\"approved\"])", with = "valid(True)" }

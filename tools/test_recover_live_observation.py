@@ -6,6 +6,7 @@ import copy
 import importlib.util
 import io
 import json
+import runpy
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -224,6 +225,25 @@ def test_read_only_api_rejects_non_observation_operations_before_provider_call(
     with pytest.raises(recovery.Refused):
         census.api.call(client, operation, secret="synthetic-private-argument")
     getattr(client, operation).assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "list_microvm_images",
+        "get_microvm_image",
+        "list_microvms",
+        "describe_log_groups",
+        "list_microvm_image_versions",
+        "get_microvm_image_version",
+    ],
+)
+def test_read_only_api_allows_each_required_observation_operation(operation):
+    client = Mock()
+    getattr(client, operation).return_value = {"items": []}
+    api = recovery.ReadOnlyApi(client, client, clock=lambda: 0)
+    assert api.call(client, operation, imageIdentifier="synthetic-id") == {"items": []}
+    getattr(client, operation).assert_called_once_with(imageIdentifier="synthetic-id")
 
 
 def test_observation_reads_both_version_responses_and_never_cleanup_paths(
@@ -469,6 +489,100 @@ def test_failed_independent_verifier_still_collects_census_without_claiming_comp
     assert "private-error" not in json.dumps(value)
 
 
+@pytest.mark.parametrize("error", [InterruptedError, KeyboardInterrupt])
+@pytest.mark.parametrize("phase", ["verifier", "version_read"])
+def test_observation_interruption_stops_reads_and_retains_prior_evidence(
+    census, monkeypatch, error, phase
+):
+    if phase == "verifier":
+
+        def interrupted(*args, **kwargs):
+            census.events.append("verifier")
+            raise error("synthetic-interruption")
+
+        monkeypatch.setattr(recovery.subprocess, "run", interrupted)
+    else:
+        census.plane.list_microvm_image_versions.return_value = {
+            "items": [census.version, {**census.version, "imageVersion": "later"}]
+        }
+        census.plane.get_microvm_image_version.side_effect = error(
+            "synthetic-interruption"
+        )
+    value = report()
+    with pytest.raises(error):
+        recovery.observe(census.manifest, census.owned, census.api, value)
+    assert value["status"] == "incomplete"
+    if phase == "verifier":
+        assert census.events == ["verifier"]
+        assert value["sections"]["independentVerifier"] == "incomplete"
+        assert value["images"] == value["versions"] == []
+        census.plane.list_microvm_images.assert_not_called()
+        census.plane.list_microvms.assert_not_called()
+        census.logs.describe_log_groups.assert_not_called()
+    else:
+        assert value["sections"]["independentVerifier"] == "completed"
+        assert value["sections"]["versions"] == "incomplete"
+        assert len(value["images"]) == len(value["versions"]) == 1
+        assert value["images"][0]["getOutcome"] == "observed"
+        census.plane.get_microvm_image_version.assert_called_once_with(
+            imageIdentifier=ARN, imageVersion=VERSION
+        )
+        assert census.events[-1] == "get_microvm_image_version"
+    assert "synthetic-interruption" not in json.dumps(value)
+    assert recovery.validate_observation(value) is value
+
+
+@pytest.mark.parametrize("count", [1001, 9000])
+def test_oversize_independent_verifier_retains_bounded_census_and_incomplete_receipt(
+    census, monkeypatch, tmp_path, count
+):
+    stdout = "\n".join(
+        "UNCLASSIFIED (not deleted, not provably ours): log group "
+        f"/aws/lambda-microvms/synthetic-unclassified-{index}"
+        for index in range(count)
+    )
+    stdout += (
+        f"\naccount {REGION}: clean of everything this project can name; {count} "
+        "log group(s) under /aws/lambda-microvms/ belong to no known prefix and no "
+        "ledger record and were left alone (listed above; --strict fails on them)\n"
+    )
+    parsed = recovery.captured_verifier(
+        subprocess.CompletedProcess([], 0, stdout, ""), REGION
+    )
+    assert len(parsed["resources"]) == count
+    assert len(parsed["resources"]) > recovery.OBSERVATION_MAX_ROWS
+    if count == 9000:
+        assert len(json.dumps(parsed).encode()) > recovery.OBSERVATION_MAX_BYTES
+
+    def verifier(command, **kwargs):
+        census.events.append("verifier")
+        return subprocess.CompletedProcess(command, 0, stdout, "")
+
+    monkeypatch.setattr(recovery.subprocess, "run", verifier)
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    assert value["status"] == "incomplete"
+    assert value["sections"]["independentVerifier"] == "incomplete"
+    assert "independentVerifier" not in value
+    assert value["errors"] == [
+        {"section": "independentVerifier", "code": "observation_limit"}
+    ]
+    assert all(
+        value["sections"][section] == "completed"
+        for section in ("images", "microvms", "logGroups", "versions")
+    )
+    assert (
+        len(value["images"]) == len(value["versions"]) == len(value["logGroups"]) == 1
+    )
+    assert len(json.dumps(value).encode()) < recovery.OBSERVATION_MAX_BYTES
+    assert recovery.validate_observation(value) is value
+    wrapper = runpy.run_path(str(Path(__file__).with_name("recovery-credentials.py")))
+    path = tmp_path / "incomplete-observation.json"
+    path.write_text(json.dumps(value))
+    assert wrapper["read_receipt"](path, observe_only=True) == value
+    assert wrapper["failure_receipt"](path, observe_only=True) == value
+
+
 def test_observation_receipt_cannot_be_accepted_as_cleanup(census):
     value = report()
     recovery.observe(census.manifest, census.owned, census.api, value)
@@ -586,6 +700,89 @@ def test_version_coverage_counts_every_exact_get_and_refuses_false_completion(
     forged["versionCoverage"][0]["getCount"] = 0
     with pytest.raises(recovery.Refused):
         recovery.validate_observation(forged)
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    [
+        "pagination",
+        "missing_coverage",
+        "missing_version",
+        "version_arn",
+        "orphan_version",
+    ],
+)
+def test_completed_observation_requires_full_reconciled_version_coverage(
+    census, corruption
+):
+    if corruption == "missing_coverage":
+        census.plane.list_microvm_image_versions.return_value = {"items": []}
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    assert recovery.validate_observation(value) is value
+    if corruption == "pagination":
+        value["versionCoverage"][0]["paginationComplete"] = False
+    elif corruption == "missing_coverage":
+        value["versionCoverage"] = []
+    elif corruption == "missing_version":
+        value["versions"] = []
+    elif corruption == "version_arn":
+        value["versions"][0]["imageArnSha256"] = "c" * 64
+    else:
+        value["versions"][0]["imageSha256"] = "c" * 64
+    with pytest.raises(recovery.Refused):
+        recovery.validate_observation(value)
+
+
+@pytest.mark.parametrize("empty", [False, True])
+@pytest.mark.parametrize("corruption", ["missing", "mismatch"])
+def test_completed_coverage_is_bound_to_listed_image_arn(census, empty, corruption):
+    if empty:
+        census.plane.list_microvm_image_versions.return_value = {"items": []}
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    assert recovery.validate_observation(value) is value
+    if corruption == "missing":
+        del value["images"][0]["imageArnSha256"]
+    else:
+        value["images"][0]["imageArnSha256"] = "c" * 64
+    with pytest.raises(recovery.Refused):
+        recovery.validate_observation(value)
+
+
+def test_incomplete_listed_image_requires_arn_hash(census):
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    value["status"] = "incomplete"
+    del value["images"][0]["imageArnSha256"]
+    with pytest.raises(recovery.Refused):
+        recovery.validate_observation(value)
+
+
+@pytest.mark.parametrize("snapshot", ["listed", "observed"])
+def test_version_snapshot_rejects_vm_state(census, snapshot):
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    value["versions"][0][snapshot]["state"] = "RUNNING"
+    with pytest.raises(recovery.Refused):
+        recovery.validate_observation(value)
+
+
+@pytest.mark.parametrize(
+    "corruption", ["missing_request", "missing_match", "unapproved"]
+)
+def test_source_identity_requires_paired_fields_and_approved_image(census, corruption):
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    row = value["images"][0]
+    if corruption == "missing_request":
+        del row["requestedArnSha256"]
+    elif corruption == "missing_match":
+        del row["sourceIdentityMatches"]
+    else:
+        row["approved"] = False
+    with pytest.raises(recovery.Refused):
+        recovery.validate_observation(value)
 
 
 def test_observed_disagreement_is_evidence_not_a_recovery_default(census):
@@ -713,6 +910,47 @@ def test_full_list_inventory_and_source_image_identity_are_kept_distinct(census)
     assert value["versionCoverage"][0]["imageArnSha256"] == recovery.digest(
         replacement["imageArn"].encode()
     )
+
+
+def test_conflicting_source_arn_keeps_listed_image_and_versions_in_incomplete_census(
+    census,
+):
+    listed = {**census.image, "name": NAME + "-other"}
+    census.plane.list_microvm_images.return_value = {"items": [listed]}
+    census.plane.get_microvm_image.return_value = listed
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    assert value["status"] == "incomplete"
+    assert value["sections"]["images"] == "incomplete"
+    assert value["sections"]["versions"] == "incomplete"
+    assert value["sections"]["independentVerifier"] == "completed"
+    assert value["errors"] == [
+        {
+            "section": "images",
+            "code": "observation_identity",
+            "imageSha256": recovery.identity("image", REGION, NAME),
+        }
+    ]
+    assert len(value["images"]) == len(value["versionCoverage"]) == 1
+    assert value["images"][0]["imageSha256"] == recovery.identity(
+        "image", REGION, listed["name"]
+    )
+    assert value["images"][0]["listed"] == recovery.observation_snapshot(
+        listed, REGION, recovery.IMAGE_STATES
+    )
+    assert value["images"][0]["approved"] is False
+    assert (
+        value["versionCoverage"][0]["imageSha256"] == value["images"][0]["imageSha256"]
+    )
+    assert len(value["versions"]) == 1
+    assert value["versions"][0]["versionSha256"] == recovery.digest(VERSION.encode())
+    census.plane.list_microvm_image_versions.assert_called_once_with(
+        imageIdentifier=ARN
+    )
+    census.plane.get_microvm_image_version.assert_called_once_with(
+        imageIdentifier=ARN, imageVersion=VERSION
+    )
+    assert recovery.validate_observation(value) is value
 
 
 def test_private_environment_values_never_reach_independent_verifier(
