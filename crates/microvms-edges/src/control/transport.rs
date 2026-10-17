@@ -40,12 +40,11 @@ impl SignedTransport {
     /// Because the credentials a developer actually has are in SSO, a credential process,
     /// or an instance profile, and re-implementing that resolution is how a client ends up
     /// working only on the machine it was written on. `aws-config`'s default chain is the
-    /// whole reason to depend on it at all — the manifest turns off its HTTP client, since
-    /// reqwest is the one here, but keeps `sso` and `credentials-process`.
+    /// whole reason to depend on it at all. Its HTTP client serves credential endpoints;
+    /// reqwest sends the signed service requests. SSO and credential processes stay enabled.
     ///
-    /// The provider is held rather than the resolved credentials: instance-profile creds
-    /// are temporary, so each request re-resolves and picks up a rotation. That is why
-    /// this is a provider field and not a `Credentials` field.
+    /// The shared provider keeps the SDK identity cache: temporary credentials refresh
+    /// before expiry, and concurrent requests share the same refresh.
     pub async fn new(region: Region) -> Result<Self, Error> {
         let credentials = default_credentials(&region).await?;
         // Generous rather than tight: a control-plane call is not a hot path, and a timeout
@@ -68,26 +67,14 @@ impl SignedTransport {
     }
 }
 
-/// The default credential chain for `region`, as a provider re-asked per request.
+/// The process-wide default credential chain and identity cache for `region`.
 ///
 /// Shared by [`SignedTransport`] and [`crate::control::SignedBuildServices`], so the STS and
 /// S3 calls `ensure_image` makes resolve exactly the identity the control-plane calls do.
 pub(crate) async fn default_credentials(
     region: &Region,
 ) -> Result<aws_credential_types::provider::SharedCredentialsProvider, Error> {
-    let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-        .region(aws_config::Region::new(region.as_str().to_string()))
-        .load()
-        .await;
-    config.credentials_provider().ok_or_else(|| {
-        Error::new(
-            ErrorKind::Credentials,
-            "no credentials provider resolved. The default chain looks at environment \
-             variables, the shared config files, SSO, a credential process, then the EC2 \
-             instance metadata service; none of them answered. `aws sts get-caller-identity` \
-             is the cheapest way to see the same failure.",
-        )
-    })
+    super::credentials::shared(region).await
 }
 
 /// A reqwest client with a 10-second connect timeout and the given overall `timeout`.
@@ -116,8 +103,8 @@ pub(crate) async fn resolve_credentials(
         Error::new(
             ErrorKind::Credentials,
             format!(
-                "could not resolve credentials for {operation}: {error}. Waiting will not fix \
-                 this — the identity is wrong or absent."
+                "could not resolve credentials for {operation}: {error}. Check the provider \
+                 source: credentials may be missing or their endpoint unavailable."
             ),
         )
         .with_source(error)
@@ -160,8 +147,8 @@ impl Transport for SignedTransport {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Reply, Error>> + Send + '_>>
     {
         Box::pin(async move {
-            // Re-resolved per request so an instance-profile rotation is picked up. The
-            // provider caches internally, so this is not a metadata call per request.
+            // The shared wrapper resolves through the SDK identity cache, which refreshes
+            // temporary credentials before expiry and coalesces concurrent cache misses.
             let credentials = resolve_credentials(&self.credentials, call.operation).await?;
 
             let url = self.url(&call);

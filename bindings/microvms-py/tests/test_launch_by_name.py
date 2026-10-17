@@ -10,11 +10,37 @@ names it. The listing and the ARN it answers are asserted in Rust
 
 from __future__ import annotations
 
+import subprocess
+import sys
+from collections.abc import Callable
+from functools import wraps
 from pathlib import Path
 
 import pytest
 
 import microvms
+
+
+def isolated_credentials(test: Callable[[], None]) -> Callable[[], None]:
+    """A process-wide credential cache must start after this module's environment fixture."""
+
+    @wraps(test)
+    def run() -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import runpy, sys; runpy.run_path(sys.argv[1])[sys.argv[2]].__wrapped__()",
+                str(Path(__file__).resolve()),
+                test.__name__,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    return run
 
 
 @pytest.fixture(autouse=True)
@@ -59,12 +85,14 @@ def first_signed_call(image_identifier: str) -> str:
     return str(raised.value)
 
 
+@isolated_credentials
 def test_a_bare_image_name_is_listed_before_any_launch() -> None:
     """The name reaches the core as a name, and the core's first call is the listing."""
     message = first_signed_call("wanted-image")
     assert "for ListMicrovmImages" in message, message
 
 
+@isolated_credentials
 def test_an_image_arn_goes_straight_to_the_launch() -> None:
     """An ARN costs no listing: the first call is `RunMicrovm` itself."""
     message = first_signed_call(
@@ -73,6 +101,7 @@ def test_an_image_arn_goes_straight_to_the_launch() -> None:
     assert "for RunMicrovm" in message, message
 
 
+@isolated_credentials
 def test_identity_on_run_reaches_the_launch_request() -> None:
     """`identity=True` reaches the core's request (#263): the core refuses a stable client
     token with an identity, locally, and the same launch without one reaches its first call."""
@@ -85,6 +114,7 @@ def test_identity_on_run_reaches_the_launch_request() -> None:
         microvms.Sandbox(microvms.Region.us_east_1()).run(identity=False, **stable)
 
 
+@isolated_credentials
 def test_launch_image_arn_names_the_image_the_launch_sent() -> None:
     """`Sandbox.launch_image_arn` is core's `Sandbox::launch_image_arn` (#280).
 

@@ -153,6 +153,16 @@ fn exception_for(py: Python<'_>, kind: ErrorKind) -> Bound<'_, PyType> {
 pub(crate) fn to_py_err(py: Python<'_>, error: &Error) -> PyErr {
     let exception = exception_for(py, error.kind());
     let raised = PyErr::from_type(exception, error.to_string());
+    fn source_exception(py: Python<'_>, source: &(dyn std::error::Error + 'static)) -> PyErr {
+        let raised = PyException::new_err(source.to_string());
+        if let Some(inner) = source.source() {
+            raised.set_cause(py, Some(source_exception(py, inner)));
+        }
+        raised
+    }
+    if let Some(source) = std::error::Error::source(error) {
+        raised.set_cause(py, Some(source_exception(py, source)));
+    }
     // Attributes rather than a structured message. Setting them can only fail if the
     // exception instance refuses an attribute, which a `PyException` subclass does not;
     // a failure here is swallowed rather than replacing the real error with a

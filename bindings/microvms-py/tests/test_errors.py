@@ -325,3 +325,18 @@ def test_every_other_five_hundred_is_still_retryable(sse_server: object) -> None
     assert server.requested_paths[-1].startswith("/v1/fs/file?")
     assert raised.value.wire_kind == "ServerError"
     assert raised.value.retryable is True
+
+
+def test_transport_sources_survive_as_python_exception_causes() -> None:
+    session = microvms.Session.direct("http://127.0.0.1:9", "test-token")
+    with pytest.raises(microvms.RetryableError) as raised:
+        session.health()
+    assert raised.value.code == "ERR_RETRYABLE"
+    assert raised.value.wire_kind == "Transport"
+    cause = raised.value.__cause__
+    assert isinstance(cause, Exception)
+    messages = []
+    while cause is not None:
+        messages.append(str(cause))
+        cause = cause.__cause__
+    assert any("connect" in message.lower() for message in messages), messages
