@@ -492,6 +492,61 @@ impl fmt::Display for WireKind {
 mod tests {
     use super::*;
 
+    #[test]
+    fn retry_details_distinguish_unmeasured_and_observed_failures() {
+        for error in [
+            Error::new(ErrorKind::Platform, "local failure"),
+            Error::wire(WireKind::Transport, "daemon failure"),
+        ] {
+            assert!(!error.throttled());
+            assert_eq!(error.attempt_count(), 0);
+            assert_eq!(error.backoff(), std::time::Duration::ZERO);
+        }
+
+        let delay = std::time::Duration::from_millis(750);
+        let error = Error::new(ErrorKind::Retryable, "service throttle")
+            .with_throttled(true)
+            .with_retry_details(4, delay);
+        assert!(error.throttled());
+        assert_eq!(error.attempt_count(), 4);
+        assert_eq!(error.backoff(), delay);
+    }
+
+    #[test]
+    fn wrapping_retry_details_inherits_only_when_outer_has_no_attempts() {
+        let source = || {
+            Error::new(ErrorKind::Retryable, "service throttle")
+                .with_throttled(true)
+                .with_retry_details(4, std::time::Duration::from_millis(750))
+        };
+        let inherited = Error::new(ErrorKind::WindowClosed, "wrapped").with_source(source());
+        assert_eq!(inherited.kind(), ErrorKind::WindowClosed);
+        assert!(inherited.throttled());
+        assert_eq!(inherited.attempt_count(), 4);
+        assert_eq!(inherited.backoff(), std::time::Duration::from_millis(750));
+
+        let own_delay = std::time::Duration::from_millis(200);
+        let own = Error::new(ErrorKind::Platform, "outer request")
+            .with_retry_details(2, own_delay)
+            .with_source(source());
+        assert!(!own.throttled());
+        assert_eq!(own.attempt_count(), 2);
+        assert_eq!(own.backoff(), own_delay);
+        assert!(
+            std::error::Error::source(&own)
+                .unwrap()
+                .downcast_ref::<Error>()
+                .unwrap()
+                .throttled()
+        );
+
+        let unrelated =
+            Error::new(ErrorKind::Platform, "formatting failure").with_source(std::fmt::Error);
+        assert_eq!(unrelated.attempt_count(), 0);
+        assert!(!unrelated.throttled());
+        assert_eq!(unrelated.backoff(), std::time::Duration::ZERO);
+    }
+
     /// The thirteen codes, spelled as `cli.py` spells them. Written out rather
     /// than generated, because a generated list would agree with a typo.
     #[test]

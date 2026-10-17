@@ -1335,6 +1335,45 @@ mod tests {
         (plane, fake, clock)
     }
 
+    #[tokio::test]
+    async fn list_images_returns_all_pages_after_configured_throttle_retries() {
+        let (plane, fake, _) = planted();
+        let plane = plane.with_retry(
+            super::super::transport::RetryPolicy::new(7, Duration::from_secs(3600)).unwrap(),
+        );
+        for _ in 0..6 {
+            fake.answer("ListMicrovmImages", Answer::throttled_as_400());
+        }
+        fake.answer(
+            "ListMicrovmImages",
+            Answer::ok(fake::list_images_response(
+                &["first-image"],
+                Some("page/two"),
+            )),
+        );
+        fake.answer(
+            "ListMicrovmImages",
+            Answer::ok(fake::list_images_response(&["second-image"], None)),
+        );
+
+        let images = plane.list_images().await.unwrap();
+        assert_eq!(
+            images
+                .iter()
+                .map(|image| image.name.as_str())
+                .collect::<Vec<_>>(),
+            ["first-image", "second-image"]
+        );
+        let calls = fake.calls();
+        assert_eq!(calls.len(), 8);
+        assert!(calls[..7].iter().all(|call| call == &calls[0]));
+        assert_eq!(calls[0].path, "/2025-09-09/microvm-images");
+        assert_eq!(
+            calls[7].path,
+            "/2025-09-09/microvm-images?nextToken=page%2Ftwo"
+        );
+    }
+
     fn a_request() -> CreateImageRequest {
         CreateImageRequest::new(
             "agentd-conformance",

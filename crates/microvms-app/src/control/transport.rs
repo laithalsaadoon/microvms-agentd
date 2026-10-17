@@ -1038,17 +1038,33 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn exhausted_public_retry_reports_throttle_attempts_and_backoff() {
         use crate::control::fake::{Answer, FakeControlPlane};
-        let transport = FakeControlPlane::new();
-        for _ in 0..6 {
-            transport.answer("ListMicrovms", Answer::throttled_as_400());
-        }
-        let error = send_with_retry(&transport, Call::get("ListMicrovms", "/list"))
-            .await
+        for accepts_missing in [false, true] {
+            let transport = FakeControlPlane::new();
+            for _ in 0..6 {
+                transport.answer("ListMicrovms", Answer::throttled_as_400());
+            }
+            let call = Call::get("ListMicrovms", "/list");
+            let error = if accepts_missing {
+                send_accepting(&transport, call, &[404]).await
+            } else {
+                send_with_retry(&transport, call).await
+            }
             .unwrap_err();
-        assert!(error.throttled());
-        assert_eq!(error.attempt_count(), 6);
-        assert!(error.backoff() >= Duration::from_millis(6200));
-        assert!(error.backoff() < Duration::from_millis(12400));
+            assert_eq!(transport.call_count("ListMicrovms"), 6);
+            assert!(error.throttled());
+            assert_eq!(error.attempt_count(), 6);
+            assert!(error.backoff() >= Duration::from_millis(6200));
+            assert!(error.backoff() < Duration::from_millis(12400));
+        }
+        for status in [200, 404] {
+            let transport = FakeControlPlane::new();
+            transport.answer("GetMicrovm", Answer::failure(status, "accepted"));
+            let reply = send_accepting(&transport, Call::get("GetMicrovm", "/missing"), &[404])
+                .await
+                .unwrap();
+            assert_eq!(reply.status, status);
+            assert_eq!(transport.call_count("GetMicrovm"), 1);
+        }
     }
 
     #[tokio::test]

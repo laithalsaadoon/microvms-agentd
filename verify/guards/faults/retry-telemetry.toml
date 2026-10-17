@@ -1,6 +1,38 @@
 # Retry budgets and telemetry: each mutant removes one observable guarantee.
 
 [[fault]]
+id = "retry-domain-details-lost"
+guard = "error::tests::retry_details_distinguish_unmeasured_and_observed_failures"
+run = ["cargo", "test", "-p", "microvms-domain", "--lib", "--", "--exact", "error::tests::retry_details_distinguish_unmeasured_and_observed_failures"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-domain/src/error.rs", replace = "self.attempts = attempts;", with = "self.attempts = attempts.saturating_sub(attempts);" }
+
+[[fault]]
+id = "retry-domain-wrapper-overwrites-outer"
+guard = "error::tests::wrapping_retry_details_inherits_only_when_outer_has_no_attempts"
+run = ["cargo", "test", "-p", "microvms-domain", "--lib", "--", "--exact", "error::tests::wrapping_retry_details_inherits_only_when_outer_has_no_attempts"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-domain/src/error.rs", replace = "if self.attempts == 0", with = "if self.attempts != 0" }
+
+[[fault]]
+id = "retry-list-images-drops-items"
+guard = "control::image::tests::list_images_returns_all_pages_after_configured_throttle_retries"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::image::tests::list_images_returns_all_pages_after_configured_throttle_retries"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/image.rs", replace = "let page: ops::ListImagesResponseWire = reply.json(\"ListMicrovmImages\")?;\n            items.extend(page.items);", with = "let page: ops::ListImagesResponseWire = reply.json(\"ListMicrovmImages\")?;\n            items.extend(std::iter::empty());" }
+
+[[fault]]
+id = "retry-accepted-status-rejected"
+guard = "control::transport::tests::exhausted_public_retry_reports_throttle_attempts_and_backoff"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::transport::tests::exhausted_public_retry_reports_throttle_attempts_and_backoff"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "if reply.is_success() || accept.contains(&reply.status) {", with = "if reply.is_success() && accept.contains(&reply.status) {" }
+
+[[fault]]
 id = "retry-throttle-attempts-ignored"
 guard = "control::transport::tests::throttle_budget_counts_attempts_bounds_elapsed_and_keeps_other_failures_default"
 run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::transport::tests::throttle_budget_counts_attempts_bounds_elapsed_and_keeps_other_failures_default"]
