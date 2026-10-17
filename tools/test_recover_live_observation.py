@@ -150,6 +150,9 @@ def census(monkeypatch):
         ({"logging": {}}, {"kind": "malformed"}),
         ({"logging": {"disabled": True}}, {"kind": "malformed"}),
         ({"logging": {"cloudWatch": {}}}, {"kind": "malformed"}),
+        ({"logging": {"cloudWatch": None}}, {"kind": "malformed"}),
+        ({"logging": {"cloudWatch": {"logGroup": ""}}}, {"kind": "malformed"}),
+        ({"logging": {"cloudWatch": {"logGroup": 42}}}, {"kind": "malformed"}),
         (
             {"logging": {"disabled": {}, "cloudWatch": {"logGroup": GROUP}}},
             {"kind": "malformed"},
@@ -224,7 +227,8 @@ def test_observation_error_stays_within_report_error_bound(existing):
     assert recovery.validate_observation(value) is value
 
 
-def test_missing_and_unknown_state_and_availability_are_not_inferred():
+@pytest.mark.parametrize("availability", ["ACTIVE", "INACTIVE"])
+def test_missing_and_unknown_state_and_availability_are_not_inferred(availability):
     assert recovery.observation_snapshot({}, REGION) == {
         "state": "missing",
         "availability": "missing",
@@ -240,9 +244,10 @@ def test_missing_and_unknown_state_and_availability_are_not_inferred():
             == "malformed"
         )
     snapshot = recovery.observation_snapshot(
-        {"state": "SUCCESSFUL", "status": "INACTIVE"}, REGION
+        {"state": "SUCCESSFUL", "status": availability}, REGION
     )
-    assert snapshot["state"] == "SUCCESSFUL" and snapshot["availability"] == "INACTIVE"
+    assert snapshot["state"] == "SUCCESSFUL"
+    assert snapshot["availability"] == availability
 
 
 @pytest.mark.parametrize(
