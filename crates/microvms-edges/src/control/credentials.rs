@@ -18,6 +18,59 @@ type RegionProviders = Mutex<HashMap<Region, Arc<OnceCell<SharedCredentialsProvi
 
 static PROVIDERS: OnceLock<RegionProviders> = OnceLock::new();
 
+pub(super) fn diagnostic(error: &CredentialsError) -> Error {
+    use aws_credential_types::provider::error::TokenError;
+
+    // Provider errors can contain secret values, even in an ancestor's Display (for
+    // example VarError::NotUnicode from AWS_SECRET_ACCESS_KEY). Keep only known error
+    // categories, never provider-owned text or the original source in a public error.
+    let mut messages = Vec::new();
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    while let Some(inner) = source {
+        let message = if let Some(error) = inner.downcast_ref::<CredentialsError>() {
+            match error {
+                CredentialsError::CredentialsNotLoaded(_) => {
+                    "credential provider is not configured"
+                }
+                CredentialsError::ProviderTimedOut(_) => "credential provider timed out",
+                CredentialsError::InvalidConfiguration(_) => {
+                    "credential provider configuration is invalid"
+                }
+                CredentialsError::ProviderError(_) => "credential provider failed",
+                _ => "unexpected credential provider failure",
+            }
+        } else if let Some(error) = inner.downcast_ref::<TokenError>() {
+            match error {
+                TokenError::TokenNotLoaded(_) => "access token provider is not configured",
+                TokenError::ProviderTimedOut(_) => "access token provider timed out",
+                TokenError::InvalidConfiguration(_) => {
+                    "access token provider configuration is invalid"
+                }
+                TokenError::ProviderError(_) => "access token provider failed",
+                TokenError::Unhandled(_) => "unexpected access token provider failure",
+            }
+        } else if let Some(std::env::VarError::NotUnicode(_)) = inner.downcast_ref() {
+            "credential environment variable is not valid Unicode"
+        } else if inner
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|error| error.kind() == std::io::ErrorKind::TimedOut)
+            || inner
+                .downcast_ref::<reqwest::Error>()
+                .is_some_and(reqwest::Error::is_timeout)
+        {
+            "credential provider request timed out"
+        } else {
+            source = inner.source();
+            continue;
+        };
+        if !messages.contains(&message) {
+            messages.push(message);
+        }
+        source = inner.source();
+    }
+    Error::new(ErrorKind::Credentials, messages.join(": "))
+}
+
 pub(super) async fn shared(region: &Region) -> Result<SharedCredentialsProvider, Error> {
     let providers = PROVIDERS.get_or_init(Mutex::default);
     get_or_load(providers, region, async {
@@ -155,6 +208,47 @@ mod tests {
     use aws_smithy_async::{rt::sleep::TokioSleep, time::TimeSource};
     use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
     use std::time::{Duration, SystemTime};
+
+    #[test]
+    fn credential_diagnostics_keep_known_categories_without_provider_text() {
+        let errors = [
+            (
+                CredentialsError::not_loaded("SYNTHETIC_CREDENTIAL_SENTINEL"),
+                "not configured",
+            ),
+            (
+                CredentialsError::invalid_configuration("SYNTHETIC_CREDENTIAL_SENTINEL"),
+                "configuration is invalid",
+            ),
+            (
+                CredentialsError::provider_error(CredentialsError::provider_timed_out(
+                    Duration::from_secs(1),
+                )),
+                "credential provider timed out",
+            ),
+            (
+                CredentialsError::provider_error(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "SYNTHETIC_CREDENTIAL_SENTINEL",
+                )),
+                "credential provider request timed out",
+            ),
+            (
+                CredentialsError::provider_error(
+                    aws_credential_types::provider::error::TokenError::provider_timed_out(
+                        Duration::from_secs(1),
+                    ),
+                ),
+                "access token provider timed out",
+            ),
+        ];
+        for (error, expected) in errors {
+            let safe = diagnostic(&error);
+            assert!(safe.to_string().contains(expected));
+            assert!(!format!("{safe} {safe:?}").contains("SYNTHETIC_CREDENTIAL_SENTINEL"));
+            assert!(std::error::Error::source(&safe).is_none());
+        }
+    }
 
     #[derive(Clone, Debug, Default)]
     struct Clock(Arc<AtomicU64>);

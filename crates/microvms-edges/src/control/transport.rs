@@ -103,6 +103,7 @@ pub(crate) async fn resolve_credentials(
     use aws_credential_types::provider::ProvideCredentials as _;
 
     provider.provide_credentials().await.map_err(|error| {
+        let error = super::credentials::diagnostic(&error);
         Error::new(
             ErrorKind::Credentials,
             format!(
@@ -129,6 +130,7 @@ impl Transport for SignedTransport {
                 .await
                 .map(|_| ())
                 .map_err(|error| {
+                    let error = super::credentials::diagnostic(&error);
                     Error::new(
                         ErrorKind::Credentials,
                         format!(
@@ -351,6 +353,78 @@ mod tests {
             };
             let port: &dyn Transport = &transport;
             assert_eq!(port.region(), Some(&region));
+        }
+    }
+
+    #[derive(Debug)]
+    struct LeakySource(std::env::VarError);
+
+    impl std::fmt::Display for LeakySource {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "provider failed: {}", self.0)
+        }
+    }
+
+    impl std::error::Error for LeakySource {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            Some(&self.0)
+        }
+    }
+
+    #[derive(Debug)]
+    struct BrokenCredentials;
+
+    impl aws_credential_types::provider::ProvideCredentials for BrokenCredentials {
+        fn provide_credentials<'a>(
+            &'a self,
+        ) -> aws_credential_types::provider::future::ProvideCredentials<'a>
+        where
+            Self: 'a,
+        {
+            aws_credential_types::provider::future::ProvideCredentials::new(async {
+                Err(
+                    aws_credential_types::provider::error::CredentialsError::unhandled(
+                        LeakySource(std::env::VarError::NotUnicode(
+                            "SYNTHETIC_CREDENTIAL_SENTINEL".into(),
+                        )),
+                    ),
+                )
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn credential_diagnostics_discard_secret_values_on_both_resolution_paths() {
+        let provider =
+            aws_credential_types::provider::SharedCredentialsProvider::new(BrokenCredentials);
+        let transport = SignedTransport {
+            region: Region::UsEast1,
+            endpoint: endpoint_for(&Region::UsEast1),
+            credentials: provider.clone(),
+            http: http_client(std::time::Duration::from_secs(1)).unwrap(),
+        };
+        let errors = [
+            resolve_credentials(&provider, "TestOperation")
+                .await
+                .unwrap_err(),
+            transport.resolve_credentials().await.unwrap_err(),
+        ];
+        for error in errors {
+            assert_eq!(error.code(), "ERR_CREDENTIALS");
+            let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+            while let Some(inner) = source {
+                assert!(
+                    !format!("{inner} {inner:?}").contains("SYNTHETIC_CREDENTIAL_SENTINEL"),
+                    "credential diagnostics must discard secret values"
+                );
+                source = inner.source();
+            }
+            assert!(
+                error
+                    .to_string()
+                    .contains("credential environment variable is not valid Unicode")
+            );
+            assert!(!error.retryable());
         }
     }
 
