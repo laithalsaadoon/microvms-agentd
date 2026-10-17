@@ -1,0 +1,152 @@
+# SPDX-License-Identifier: Apache-2.0
+# Historical terminal rows cannot starve evidence or erase uncertainty.
+
+[[family]]
+guard = "tools/test_recover_live_history.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_history.py::test_terminal_history_cannot_starve_live_vms_or_other_resource_evidence"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-history-compaction"
+message = "test_terminal_history_cannot_starve_live_vms_or_other_resource_evidence"
+transform = { file = "tools/recover-live.py", replace = "if state == \"TERMINATED\":", with = "if False:" }
+
+[[family]]
+guard = "tools/test_recover_live_history.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_history.py::test_only_exact_terminal_state_is_compacted"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-history-unknown-state-retained"
+message = "test_only_exact_terminal_state_is_compacted"
+transform = { file = "tools/recover-live.py", replace = "if state == \"TERMINATED\":", with = "if state != \"RUNNING\":" }
+
+[[family]]
+guard = "tools/test_recover_live_history.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_history.py::test_terminal_digest_is_sorted_and_bound_to_exact_identities"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-history-digest-domain"
+message = "test_terminal_digest_is_sorted_and_bound_to_exact_identities"
+transform = { file = "tools/recover-live.py", replace = "return digest(OBSERVATION_TERMINATED_DOMAIN + b\"\".join(sorted(identities)))", with = "return digest(b\"\".join(sorted(identities)))" }
+
+[[family]]
+guard = "tools/test_recover_live_history.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_history.py::test_duplicate_identity_across_compacted_and_retained_rows_fails"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-history-duplicate-identity"
+message = "test_duplicate_identity_across_compacted_and_retained_rows_fails"
+transform = { file = "tools/recover-live.py", replace = "require(identifier not in seen, \"duplicate_identity\")\n                seen.add(identifier)\n                state = observation_field", with = "require(True, \"duplicate_identity\")\n                seen.add(identifier)\n                state = observation_field" }
+
+[[family]]
+guard = "tools/test_recover_live_history.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_history.py::test_oversize_vm_page_fails_before_accepting_its_rows"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-history-page-bound"
+message = "test_oversize_vm_page_fails_before_accepting_its_rows"
+transform = { file = "tools/recover-live.py", replace = "require(len(rows) <= OBSERVATION_VM_PAGE_ROWS, \"observation_limit\")", with = "require(True, \"observation_limit\")" }
+
+[[family]]
+guard = "tools/test_recover_live_history.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_history.py::test_terminal_history_page_ceiling_requires_natural_end[True]"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-history-page-ceiling"
+message = "test_terminal_history_page_ceiling_requires_natural_end"
+transform = { file = "tools/recover-live.py", replace = "require(pages < OBSERVATION_VM_MAX_PAGES, \"observation_limit\")", with = "require(True, \"observation_limit\")" }
+
+[[family]]
+guard = "tools/test_recover_live_history.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_history.py::test_failed_scan_retains_prior_counts_digest_and_other_evidence"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-history-token-byte-bound"
+message = "test_failed_scan_retains_prior_counts_digest_and_other_evidence"
+transform = { file = "tools/recover-live.py", replace = "require(len(encoded) <= OBSERVATION_VM_TOKEN_BYTES, \"pagination_token\")", with = "require(True, \"pagination_token\")" }
+
+[[family]]
+guard = "tools/test_recover_live_history.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_history.py::test_failed_scan_retains_prior_counts_digest_and_other_evidence"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-history-partial-digest"
+message = "test_failed_scan_retains_prior_counts_digest_and_other_evidence"
+transform = { file = "tools/recover-live.py", replace = "\"terminatedIdentitySha256\": terminated_identity_digest(terminated),", with = "\"terminatedIdentitySha256\": terminated_identity_digest(set())," }
+
+[[family]]
+guard = "tools/test_recover_live_history.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_history.py::test_failed_scan_retains_prior_counts_digest_and_other_evidence"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-history-natural-completion"
+message = "test_failed_scan_retains_prior_counts_digest_and_other_evidence"
+transform = { file = "tools/recover-live.py", replace = "\"paginationComplete\": report[\"sections\"][\"microvms\"] == \"completed\",", with = "\"paginationComplete\": True," }
+
+[[family]]
+guard = "tools/test_recover_live_history.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_history.py::test_forged_history_coverage_cannot_claim_completion"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-history-retained-coverage"
+message = "test_forged_history_coverage_cannot_claim_completion"
+transform = { file = "tools/recover-live.py", replace = "valid(coverage[\"retainedCount\"] == len(value[\"microvms\"]))", with = "valid(True)" }
+
+[[family]]
+guard = "tools/test_recover_live_history.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_history.py::test_forged_history_coverage_cannot_claim_completion"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-history-coverage-arithmetic"
+message = "test_forged_history_coverage_cannot_claim_completion"
+transform = { file = "tools/recover-live.py", replace = "coverage[\"processedCount\"]\n                == coverage[\"terminatedCount\"] + coverage[\"retainedCount\"]", with = "True" }
+
+[[family]]
+guard = "tools/test_recover_live_history.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_history.py::test_v2_never_serializes_terminal_vms_as_retained_rows"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-history-no-retained-terminal"
+message = "test_v2_never_serializes_terminal_vms_as_retained_rows"
+transform = { file = "tools/recover-live.py", replace = "valid(row[\"state\"] != \"TERMINATED\")", with = "valid(True)" }
+
+[[family]]
+guard = "tools/test_recover_live_history.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_history.py::test_v1_receipts_preserve_legacy_terminal_rows_and_acceptance"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-history-v1-terminal-compatibility"
+message = "test_v1_receipts_preserve_legacy_terminal_rows_and_acceptance"
+transform = { file = "tools/recover-live.py", replace = "if version == 2:\n                    valid(row[\"state\"] != \"TERMINATED\")", with = "if version in (1, 2):\n                    valid(row[\"state\"] != \"TERMINATED\")" }
+
+[[family]]
+guard = "tools/test_recovery_credentials.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recovery_credentials.py::CredentialTests::test_observation_fallback_uses_v2_and_preserves_existing_versions"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-history-wrapper-schema"
+message = "test_observation_fallback_uses_v2_and_preserves_existing_versions"
+transform = { file = "tools/recovery-credentials.py", replace = "\"schemaVersion\": OBSERVATION_CORE[\"OBSERVATION_SCHEMA_VERSION\"],", with = "\"schemaVersion\": 1," }
+
+[[family]]
+guard = "tools/test_recover_live_history.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_history.py::test_terminal_history_cannot_starve_live_vms_or_other_resource_evidence"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "readonly-history-evidence-first"
+message = "test_terminal_history_cannot_starve_live_vms_or_other_resource_evidence"
+transform = [{ file = "tools/recover-live.py", replace = "    # Gather image/version/log evidence before traversing retained VM history.\n    observe_microvms(api, report, region)\n", with = "" }, { file = "tools/recover-live.py", replace = "    images, names = {}, set()", with = "    observe_microvms(api, report, region)\n    images, names = {}, set()" }]

@@ -563,6 +563,25 @@ class CredentialTests(unittest.TestCase):
             )
         self.assertEqual(wrapper.failure_receipt(self.args.report), partial)
 
+    def test_observation_fallback_uses_v2_and_preserves_existing_versions(self):
+        expected = {
+            "kind": "live-recovery-observation",
+            "schemaVersion": 2,
+            "conformance_verified": False,
+            "recoveryAccepted": False,
+            "mutationsPerformed": False,
+            "status": "incomplete",
+        }
+        self.assertEqual(wrapper.failure_receipt(self.args.report, True), expected)
+        self.assertEqual(wrapper.VALIDATE_OBSERVATION(expected), expected)
+        for version in (1, 2):
+            with self.subTest(version=version):
+                saved = expected | {"schemaVersion": version, "reason": "deadline"}
+                self.args.report.write_text(json.dumps(saved))
+                self.assertEqual(wrapper.failure_receipt(self.args.report, True), saved)
+        self.args.report.write_text(json.dumps(expected | {"status": "completed"}))
+        self.assertEqual(wrapper.failure_receipt(self.args.report, True), expected)
+
     def test_positive_remaining_budget_and_credential_boundary(self):
         self.args.report.write_text(json.dumps(RECEIPT))
         run = Mock(return_value=subprocess.CompletedProcess([], 0))
