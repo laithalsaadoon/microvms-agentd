@@ -52,10 +52,9 @@ pub enum Region {
     /// A region this client has not seen carry MicroVMs.
     ///
     /// **You are opting into the null-message trap.** If this region does not run
-    /// MicroVMs, the first control-plane call answers `AccessDeniedException` with a
-    /// null message and you will spend the next hour reading an IAM policy that is
-    /// correct. Constructible only through [`Region::unlisted`], which says so at
-    /// the call site.
+    /// MicroVMs, the first control-plane call can answer `AccessDeniedException` with a
+    /// null message, which an IAM denial can also produce. Constructible through
+    /// [`Region::unlisted`], which makes that uncertainty visible at the call site.
     ///
     /// It exists because AWS adds regions faster than this list is re-read, and a
     /// client that refuses a region AWS has just launched in is its own kind of
@@ -96,9 +95,9 @@ impl Region {
     ///
     /// **This is the escape hatch, and it costs you the diagnostic.** If the region
     /// does not run MicroVMs, the first control-plane call answers
-    /// `AccessDeniedException` with a null message field, which reads as a genuine
-    /// IAM denial (`docs/PLATFORM.md`, "Calling an unpriced region returns
-    /// `AccessDeniedException` with a null message"). Use it when AWS has launched
+    /// `AccessDeniedException` with a null message field, which can also mean an
+    /// IAM denial (`docs/PLATFORM.md`, "A null-message AccessDeniedException can mean
+    /// region availability or IAM"). Use it when AWS has launched
     /// MicroVMs somewhere new, and add the region to [`MICROVM_REGIONS`] in the same
     /// change.
     ///
