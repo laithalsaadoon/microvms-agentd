@@ -118,3 +118,49 @@ transform = { file = "tools/check-parity.py", replace = "    if type(actual) in 
 id = "default-boolean-numeric-distinction"
 message = "FAIL: test_booleans_and_numbers_remain_distinct_defaults"
 transform = { file = "tools/check-parity.py", replace = "    return type(actual) is not type(value) or actual != value\n", with = "    return actual != value\n" }
+
+[[family]]
+guard = "tools/test_check_parity.py: DefaultTests"
+run = ["uv", "run", "--locked", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "DefaultTests"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "default-duplicate-row-id"
+message = "FAIL: test_duplicate_default_ids_fail_with_distinct_selectors"
+transform = { file = "tools/check-parity.py", replace = "        if row_id in seen:\n            problems.append(f\"{where}: the id is used by more than one row\")\n        seen.add(row_id)\n", with = "        if row_id in seen:\n            problems.append(f\"{where}: the id is used by more than one row\")\n        seen.add(None)\n" }
+
+[[family.fault]]
+id = "default-value-pin-detection"
+message = "FAIL: test_value_pins_require_an_exemption_and_source_spelling"
+transform = { file = "tools/check-parity.py", replace = "        if \"value\" in row and (reason is None or not isinstance(row[\"value\"], str)):\n", with = "        if \"VALUE\" in row and (reason is None or not isinstance(row[\"value\"], str)):\n" }
+
+[[family.fault]]
+id = "default-value-pin-kind"
+message = "FAIL: test_value_pins_require_an_exemption_and_source_spelling"
+transform = { file = "tools/check-parity.py", replace = "        if \"value\" in row and (reason is None or not isinstance(row[\"value\"], str)):\n", with = "        if \"value\" in row and (reason is None and not isinstance(row[\"value\"], str)):\n" }
+
+[[family.fault]]
+id = "default-invalid-cell-continues"
+message = "FAIL: test_invalid_cell_does_not_hide_a_later_surface_mismatch"
+transform = { file = "tools/check-parity.py", replace = "                    f\"{where}: {key}: a cell is a default's name or a list of them\"\n                )\n                continue\n", with = "                    f\"{where}: {key}: a cell is a default's name or a list of them\"\n                )\n                break\n" }
+
+[[family.fault]]
+id = "default-missing-selector-continues"
+message = "FAIL: test_missing_default_does_not_hide_a_later_selector_mismatch"
+transform = { file = "tools/check-parity.py", replace = "                    problems.append(f\"{where}: {key}: {name} states no default\")\n                    continue\n", with = "                    problems.append(f\"{where}: {key}: {name} states no default\")\n                    break\n" }
+
+[[family.fault]]
+id = "default-unread-selector-claims"
+message = "FAIL: test_unread_surface_still_claims_every_selector"
+transform = { file = "tools/check-parity.py", replace = "                claimed[(key, name)] = row_id\n                if key in empty:\n                    continue\n", with = "                claimed[(key, name)] = row_id\n                if key in empty:\n                    break\n" }
+
+[[family.fault]]
+id = "default-unread-manifest"
+message = "FAIL: test_unread_manifest_does_not_report_missing_client_defaults"
+transform = { file = "tools/check-parity.py", replace = "    if client is None and \"cli\" not in empty:\n", with = "    if client is None and \"CLI\" not in empty:\n" }
+
+[[family.fault]]
+id = "default-unread-surface-continues"
+message = "FAIL: test_unread_surface_does_not_hide_later_unclaimed_defaults"
+transform = { file = "tools/check-parity.py", replace = "    for key in (\"cli\", \"py\", \"ts\"):\n        if key in empty:\n            continue\n", with = "    for key in (\"cli\", \"py\", \"ts\"):\n        if key in empty:\n            break\n" }

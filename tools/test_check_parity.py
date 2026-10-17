@@ -673,6 +673,16 @@ class DefaultTests(FixtureCase):
         function = next(item for item in owner["members"] if item["name"] == method)
         return next(item for item in function["parameters"] if item["name"] == name)
 
+    def default_problems(self, empty):
+        surfaces = {
+            "cli": PARITY["cli_surface"](self.manifest),
+            "py": PARITY["py_surface"](self.griffe),
+            "ts": PARITY["ts_surface"](self.typedoc),
+        }
+        return PARITY["default_problems"](
+            PARITY["parse_table"](self.table)["default"], surfaces, empty
+        )
+
     def test_the_baseline_states_defaults_and_holds_them(self):
         cli = PARITY["cli_surface"](self.manifest)
         self.assertEqual(cli.defaults["run --timeout"], "300")
@@ -868,6 +878,82 @@ class DefaultTests(FixtureCase):
             'core = "launch.wait"', 'core = "launch.wait"\nnote = "x"'
         )
         self.assertProblem("default launch-wait: unknown key note")
+
+    def test_duplicate_default_ids_fail_with_distinct_selectors(self):
+        self.table = self.table.replace('id = "launch-wait"', 'id = "exec-wait"')
+        self.assertEqual(
+            self.problems(),
+            ["default exec-wait: the id is used by more than one row"],
+        )
+
+    def test_value_pins_require_an_exemption_and_source_spelling(self):
+        for before, after, row_id in [
+            (
+                'core = "launch.wait"',
+                'core = "launch.wait"\nvalue = "True"',
+                "launch-wait",
+            ),
+            ('value = "table"', "value = 0", "table-format"),
+        ]:
+            with self.subTest(row_id=row_id):
+                self.table = TABLE.replace(before, after)
+                self.assertIn(
+                    f"default {row_id}: value pins an exempt default's source spelling",
+                    self.problems(),
+                )
+
+    def test_invalid_cell_does_not_hide_a_later_surface_mismatch(self):
+        self.table = self.table.replace('cli = "run --timeout"', "cli = 123")
+        self.parameter("Session", "health", "timeout")["default"] = "301"
+        problems = self.problems()
+        self.assertIn(
+            "default exec-wait: cli: a cell is a default's name or a list of them",
+            problems,
+        )
+        self.assertIn(
+            "default exec-wait: py: Session.health(timeout) defaults to 301, but "
+            "clientDefaults.execWaitSeconds is 300.0",
+            problems,
+        )
+
+    def test_missing_default_does_not_hide_a_later_selector_mismatch(self):
+        self.parameter("Session", "health", "timeout")["default"] = None
+        self.parameter("Session", "attach", "retries")["default"] = "301"
+        self.assertEqual(
+            self.problems(),
+            [
+                "default exec-wait: py: Session.health(timeout) states no default",
+                "default exec-wait: py: Session.attach(retries) defaults to 301, but "
+                "clientDefaults.execWaitSeconds is 300.0",
+            ],
+        )
+
+    def test_unread_surface_still_claims_every_selector(self):
+        self.table = self.table.replace(
+            'py = "Sandbox.run(wait)"',
+            'py = ["Sandbox.run(wait)", "Session.attach(retries)"]',
+        )
+        self.assertEqual(
+            self.default_problems(empty={"py"}),
+            [
+                "default launch-wait: py: Session.attach(retries) is also in "
+                "default exec-wait"
+            ],
+        )
+
+    def test_unread_manifest_does_not_report_missing_client_defaults(self):
+        del self.manifest["data"]["clientDefaults"]
+        self.assertEqual(
+            self.default_problems(empty={"cli"}),
+            ["sentinel default exec-wait: no stated default was compared with core's"],
+        )
+
+    def test_unread_surface_does_not_hide_later_unclaimed_defaults(self):
+        self.table = self.table.replace('py = "Sandbox.run(wait)"', "")
+        self.assertEqual(
+            self.default_problems(empty={"cli"}),
+            ["py: Sandbox.run(wait) = True belongs to no [[default]] row"],
+        )
 
 
 class ExemptionRecordTests(unittest.TestCase):
