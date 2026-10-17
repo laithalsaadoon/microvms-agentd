@@ -29,8 +29,41 @@ model tests do not make a failed formal comparison pass.
 
 Source: symspec 2.0.0 distributed `dist/cli.mjs`, the
 `conditionalConflicts` and `buildCoverage` implementations, read October 17, 2026.
-The complete before-and-after tool reports are retained in the working evidence;
-the tables below index every finding code and its requirement set.
+The tables below index every finding code and its requirement set.
+
+### Reproduce the guard limitation
+
+After `mise run spec:setup`, run these commands from the repository root:
+
+```sh
+mise exec node@24.22.0 -- tools/check-spec.sh verify/formal/fixtures/auth-guards.json --strict
+mise exec node@24.22.0 -- tools/check-spec.sh verify/formal/fixtures/auth-guards-with-model.json --strict
+```
+
+Both commands exit with status 3 and report `conditional-conflict-unchecked` for
+`AGENTD-5` and `AGENTD-6`. The first document preserves their existing requirement
+text. The second preserves that text and adds complementary Boolean transition
+guards and an authorization invariant. Its reachability result proves the
+invariant with `certificateVerified: true` and `frameClosed: true`, but the
+conditional coverage demotion remains. These are diagnostic fixtures, not an
+alternative specification or an exclusion from verification.
+
+No newer supported release was available on October 17, 2026: the npm `latest`
+tag and the [GitHub releases](https://github.com/laithalsaadoon/symspec/releases)
+both identify 2.0.0. The current upstream source at commit
+`49b37c6a700a7915df36c7fbe41a93a19baa7b56` retains the same limitation:
+
+- [The coverage decision](https://github.com/laithalsaadoon/symspec/blob/49b37c6a700a7915df36c7fbe41a93a19baa7b56/src/domain/engine/pipeline/check.ts#L1983)
+  explicitly leaves mutually exclusive guards undecided and disallows a waiver.
+- [The operation](https://github.com/laithalsaadoon/symspec/blob/49b37c6a700a7915df36c7fbe41a93a19baa7b56/src/app/operations/check.ts#L1240)
+  combines engine and reachability demotions; a proved state invariant cannot
+  discharge an engine coverage demotion.
+
+A verifier enhancement must connect the original guard clauses to their typed
+predicates, prove disjointness or overlap, and preserve an undecided result when
+that proof is absent. Increasing a timeout cannot supply that missing relation.
+Strict verification remains incomplete until the verifier can make this decision
+and every other demotion below has a justified resolution.
 
 ## Finding inventory
 

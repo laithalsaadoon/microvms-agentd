@@ -303,7 +303,7 @@ When a start request carries its user and group as integers and its shell as a b
 
 ## AGENTD-17
 
-If the handshake of an identity-verified tunnel is not made with the host key the run hook pinned, then the agentd shall close the tunnel with close code 4403.
+If the handshake of an identity-verified tunnel is not made with the host key the run hook pinned, then the agentd shall close the tunnel with the IDENTITY_REFUSED close code.
 
 - **model:** `crates/model/src/tunnel.rs`
 - **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
@@ -556,7 +556,7 @@ The language bindings layer shall preserve the cost honesty rules, exposing prov
 
 ## BIND-6
 
-The microvms-core shall report a finished exec's POSIX exit code as 124 when a deadline ended the command, as 128 plus the signal number for any other signal death, and otherwise as the exit code.
+The microvms-core shall report a finished exec's POSIX exit code as the timeout status when a deadline ended the command, as the signal status offset plus the signal number for any other signal death, and otherwise as the exit code.
 
 - **model:** `crates/model/src/run.rs`
 - **gherkin:** `crates/microvms-core/tests/features/run_to_completion.feature`
@@ -600,7 +600,7 @@ If the client deadline of a run-to-completion call expires before the exec's res
 
 ## BIND-10
 
-If the acknowledgement that follows a client-deadline kill fails, then the microvms-core shall return a synthesized result whose POSIX exit code is 124 and whose notes name the failure.
+If the acknowledgement that follows a client-deadline kill fails, then the microvms-core shall return a synthesized result whose POSIX exit code is the timeout status and whose notes name the failure.
 
 - **model:** `crates/model/src/run.rs`
 - **gherkin:** `crates/microvms-core/tests/features/run_to_completion.feature`
