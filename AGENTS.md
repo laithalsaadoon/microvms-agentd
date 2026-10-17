@@ -171,10 +171,10 @@ capabilities, or `verify/parity/capabilities.toml` says why one doesn't.
   its defaults as the manifest's `clientDefaults`, and `parity:check` fails on a
   default in `docs/manifest.json`, `microvms.pyi`, or `index.d.ts` that no
   `[[default]]` row in `verify/parity/capabilities.toml` maps to one, or that differs
-  from it. This includes strings, zero, and absent values. TypeScript input fields
-  state defaults with `@defaultValue`; optional inputs without a tag state the
-  `undefined` omission marker. An exemption pins the declared value and explains
-  its ownership; an omission marker does not prove the effective runtime fallback.
+  from it. This includes strings, zero, and absent values. TypeScript uses
+  `@defaultValue` to declare a default. Optional inputs without a tag state the
+  `undefined` omission marker. Each exemption pins the declared value and explains
+  its ownership. The omission marker does not prove the effective runtime fallback.
 - A bug in behavior the surfaces share is a case in `verify/parity/cases/`,
   which every surface's runner checks against one `expect`, not a new test and
   seeded fault on each surface. The case lands with the fix. Run its
