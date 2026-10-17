@@ -11,12 +11,15 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from botocore.exceptions import ClientError
 from harness.constants import REPO
+from harness.observation import retry_observation
 from harness.results import Results
 from lanes.retry_telemetry import (
     POLICIES,
     bounded_plane,
     cleanup,
+    drive_retry_telemetry,
     inventory,
     run_driver,
     verdicts,
@@ -237,6 +240,7 @@ def clean(plane: Plane) -> bool:
 
 
 def check_retry_telemetry(results: Results) -> None:
+    check_baseline_retries(results)
     check_drivers(results)
     check_observation_resolution(results)
     calls = []
@@ -380,6 +384,139 @@ def check_retry_telemetry(results: Results) -> None:
         and known == {"partial"}
         and failure == "driver exceeded bounded runtime",
     )
+
+
+def check_baseline_retries(results: Results) -> None:
+    """A partial or failed baseline never becomes permission to clean existing VMs."""
+    target = "ThrottlingException"
+    for code in (target, "AccessDeniedException", "persistent throttle"):
+        calls: list[str] = []
+        elapsed = [0.0]
+
+        def snapshot() -> dict[str, str]:
+            calls.append("snapshot")
+            if len(calls) == 1 or code != target:
+                raise ClientError(
+                    {
+                        "Error": {
+                            "Code": target if code == "persistent throttle" else code
+                        }
+                    },
+                    "ListMicrovms",
+                )
+            return {"existing": "RUNNING"}
+
+        failure = None
+        value = None
+        try:
+            value = retry_observation(
+                snapshot,
+                deadline=3,
+                clock=lambda: elapsed[0],
+                sleep=lambda seconds: elapsed.__setitem__(0, elapsed[0] + seconds),
+            )
+        except ClientError as error:
+            failure = error.response["Error"]["Code"]
+        results.check(
+            f"observer read handles {code} without inventing a snapshot",
+            (value == {"existing": "RUNNING"} and failure is None and len(calls) == 2)
+            if code == target
+            else value is None
+            and failure == (target if code == "persistent throttle" else code)
+            and len(calls) == (2 if code == "persistent throttle" else 1)
+            and elapsed[0] <= 3,
+        )
+
+    for failure_code in (None, target, "AccessDeniedException"):
+        calls = []
+        elapsed = [0.0]
+
+        class SnapshotPlane:
+            def get_paginator(self, operation: str) -> SimpleNamespace:
+                assert operation == "list_microvms"
+
+                def pages():
+                    calls.append("listing")
+                    yield {
+                        "items": [
+                            {
+                                "microvmId": "existing",
+                                "imageArn": "image",
+                                "state": "RUNNING",
+                            }
+                        ]
+                    }
+                    if failure_code or calls.count("listing") == 1:
+                        raise ClientError(
+                            {"Error": {"Code": failure_code or target}}, "ListMicrovms"
+                        )
+                    yield {
+                        "items": [
+                            {
+                                "microvmId": "second",
+                                "imageArn": "image",
+                                "state": "RUNNING",
+                            }
+                        ]
+                    }
+
+                return SimpleNamespace(paginate=pages)
+
+        def wait(_timeout):
+            calls.append("build")
+            return SimpleNamespace(
+                commands={
+                    "python": ["python", "-I", "old"],
+                    "node": ["node", "old", "addon"],
+                }
+            )
+
+        def driver(_command, _request):
+            calls.append("driver")
+            data = report()
+            for phase in data["phases"]:
+                phase["observedAtMilliseconds"] = 102000
+            return data, {"new"}, ""
+
+        def clean(_plane, _image, baseline, known):
+            calls.append("cleanup")
+            return baseline == {"existing", "second"} and known == {"new"}
+
+        probe = Results(probe=True)
+        caught = False
+        with (
+            patch("lanes.retry_telemetry.BASELINE_SECONDS", 3),
+            patch("lanes.retry_telemetry.bounded_plane", return_value=SnapshotPlane()),
+            patch("lanes.retry_telemetry.run_driver", side_effect=driver),
+            patch("lanes.retry_telemetry.cleanup", side_effect=clean),
+            patch.dict("os.environ", {"MICROVM_EXECUTION_ROLE_ARN": "role"}),
+        ):
+            try:
+                drive_retry_telemetry(
+                    SimpleNamespace(region="us-east-1"),
+                    SimpleNamespace(data={"imageIdentifier": "image"}),
+                    SimpleNamespace(wait=wait),
+                    None,
+                    probe,
+                    clock=lambda: elapsed[0],
+                    sleep=lambda seconds: elapsed.__setitem__(0, elapsed[0] + seconds),
+                )
+            except ClientError:
+                caught = True
+        results.check(
+            "retry probe stops before drivers on an exhausted baseline"
+            if failure_code == target
+            else "retry probe stops before drivers on a nonretryable baseline"
+            if failure_code
+            else "retry probe rebuilds a throttled baseline before drivers and cleanup",
+            caught
+            and calls == ["listing"] * (2 if failure_code == target else 1)
+            and not probe.passed
+            if failure_code
+            else not caught
+            and calls == ["listing", "listing", "build", "driver", "driver", "cleanup"]
+            and not probe.failed,
+        )
 
 
 def check_observation_resolution(results: Results) -> None:

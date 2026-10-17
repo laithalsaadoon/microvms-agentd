@@ -18,10 +18,10 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from botocore.config import Config
 from harness.cli import Cli
-from harness.constants import REPO, SERVICE
+from harness.constants import REPO
 from harness.envelope import Envelope
+from harness.observation import bounded_plane, retry_observation
 from harness.results import Results
 
 from lanes.bindings import BINDINGS, BUILD_TIMEOUT_SEC, BindingBuild
@@ -32,15 +32,7 @@ DRIVER_SECONDS = 15 * 60
 CLEANUP_SECONDS = 180
 VISIBILITY_SECONDS = 60
 POLL_SECONDS = 2
-
-
-def bounded_plane(aws: Any) -> Any:
-    # The cleanup deadline is checked between iterations: bound each SDK call too,
-    # so one unresponsive connection cannot keep that final iteration alive forever.
-    return aws.client(
-        SERVICE,
-        config=Config(connect_timeout=5, read_timeout=5, retries={"max_attempts": 0}),
-    )
+BASELINE_SECONDS = 60
 
 
 def finite(value: Any) -> bool:
@@ -233,12 +225,26 @@ def cleanup(
 
 
 def drive_retry_telemetry(
-    cli: Cli, launched: Envelope, build: BindingBuild, aws: Any, results: Results
+    cli: Cli,
+    launched: Envelope,
+    build: BindingBuild,
+    aws: Any,
+    results: Results,
+    *,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> None:
     print("\n-- retry telemetry (#674, #677: bounded AWS launch probes) --")
     image = str(launched.data["imageIdentifier"])
     plane = bounded_plane(aws)
-    baseline = set(inventory(plane, image))
+    # A failed baseline must stop before any driver launches: cleanup may only remove
+    # VMs absent from a complete pre-launch snapshot of this shared image.
+    baseline = retry_observation(
+        lambda: set(inventory(plane, image)),
+        deadline=clock() + BASELINE_SECONDS,
+        clock=clock,
+        sleep=sleep,
+    )
     known: set[str] = set()
     built = build.wait(BUILD_TIMEOUT_SEC)
     try:

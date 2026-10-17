@@ -1,0 +1,39 @@
+[[family]]
+guard = "conformance/run_rs.py --self-test: conformance/selftest/retry_telemetry.py and conformance/selftest/ensure_image.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "observer-throttle-retry"
+message = "FAIL  observer read handles ThrottlingException without inventing a snapshot"
+transform = { file = "conformance/harness/observation.py", replace = 'if error.response.get("Error", {}).get("Code") != "ThrottlingException":', with = 'if True:' }
+
+[[family.fault]]
+id = "observer-throttle-only"
+message = "FAIL  observer read handles AccessDeniedException without inventing a snapshot"
+transform = { file = "conformance/harness/observation.py", replace = 'if error.response.get("Error", {}).get("Code") != "ThrottlingException":', with = 'if False:' }
+
+[[family.fault]]
+id = "observer-throttle-deadline"
+message = "FAIL  observer read handles persistent throttle without inventing a snapshot"
+transform = { file = "conformance/harness/observation.py", replace = 'if clock() >= deadline:', with = 'if clock() > deadline:' }
+
+[[family.fault]]
+id = "observer-throttle-no-empty-fallback"
+message = "FAIL  observer read handles persistent throttle without inventing a snapshot"
+transform = { file = "conformance/harness/observation.py", replace = '''if clock() >= deadline:
+                raise''', with = '''if clock() >= deadline:
+                return {}''' }
+
+[[family.fault]]
+id = "observer-baseline-snapshot"
+message = "FAIL  retry probe rebuilds a throttled baseline before drivers and cleanup"
+transform = { file = "conformance/lanes/retry_telemetry.py", replace = 'lambda: set(inventory(plane, image)),', with = 'lambda: set(),' }
+
+[[family.fault]]
+id = "observer-vm-cleanup-retry"
+message = "FAIL  the ensure-image cleanup fails exactly where each account misleads it"
+transform = { file = "conformance/lanes/ensure_image.py", replace = '''states = retry_observation(
+                read_states, deadline=deadline, clock=clock, sleep=sleep
+            )''', with = 'states = read_states()' }
