@@ -265,7 +265,7 @@ def test_read_only_api_rejects_non_observation_operations_before_provider_call(
     census, operation
 ):
     client = Mock()
-    with pytest.raises(recovery.Refused):
+    with pytest.raises(recovery.Refused, match="^read_only_operation$"):
         census.api.call(client, operation, secret="synthetic-private-argument")
     getattr(client, operation).assert_not_called()
 
