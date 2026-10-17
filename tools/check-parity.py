@@ -254,15 +254,15 @@ def ts_surface(project: dict[str, Any]) -> Surface:
 def record_ts_defaults(project: dict[str, Any], surface: Surface) -> None:
     """Read defaults on callable inputs and the record types they consume.
 
-    TypeScript cannot put initializers in declarations. `@defaultValue` supplies an
-    explicit scalar; an optional input without one states the `undefined` omission
+    `@defaultValue` supplies an explicit scalar when the declaration has no initializer.
+    An optional input without either states the `undefined` omission
     marker and must have its own table decision. Return-only records are not inputs.
     """
     nodes: dict[int, tuple[str, dict[str, Any]]] = {}
     callables: list[tuple[str, dict[str, Any]]] = []
 
-    def index(node: dict[str, Any], prefix: str = "") -> None:
-        name = prefix + node.get("name", "")
+    def index(node: dict[str, Any], prefix: str) -> None:
+        name = prefix + node["name"]
         if isinstance(node.get("id"), int):
             nodes[node["id"]] = (name, node)
         for signature in node.get("signatures") or []:
@@ -281,7 +281,7 @@ def record_ts_defaults(project: dict[str, Any], surface: Surface) -> None:
         value = node.get("defaultValue")
         if tags:
             value = "".join(
-                part.get("text", "") for part in tags[0].get("content") or []
+                part["text"] for part in tags[0].get("content") or []
             ).strip()
             if value.startswith("```"):
                 lines = value.splitlines()
@@ -331,7 +331,9 @@ def record_ts_defaults(project: dict[str, Any], surface: Surface) -> None:
             if isinstance(declaration, dict):
                 input_record(declaration, owner)
             for key, nested in value.items():
-                if key not in ("target", "declaration"):
+                # A type operator's target is another type; a reference's numeric target
+                # is harmless here. Declarations were handled above without return types.
+                if key != "declaration":
                     input_type(nested, owner)
 
     def input_parameters(signature: dict[str, Any], owner: str) -> None:
@@ -340,7 +342,7 @@ def record_ts_defaults(project: dict[str, Any], surface: Surface) -> None:
             default(parameter, name)
             input_type(parameter.get("type"), name)
 
-    index(project)
+    index(project, "")
     for owner, signature in callables:
         input_parameters(signature, owner)
 

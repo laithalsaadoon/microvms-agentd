@@ -226,6 +226,7 @@ def tsclass(name, *members):
 
 TYPEDOC = {
     "schemaVersion": "2.0",
+    "name": "Documentation",
     "kind": 1,
     "children": [
         tsclass(
@@ -654,6 +655,82 @@ class DefaultValueComparisonTests(unittest.TestCase):
         ]:
             with self.subTest(key=key, text=text, value=value):
                 self.assertTrue(PARITY["differs"](text, value, key))
+
+
+class TypeScriptDefaultTests(unittest.TestCase):
+    """Scalar defaults and overloads in TypeDoc's serialized signature shape."""
+
+    def read(self, *parameters):
+        return PARITY["ts_surface"](
+            {
+                "kind": 1,
+                "name": "Documentation",
+                "children": [
+                    {
+                        "kind": FUNCTION,
+                        "name": "run",
+                        "signatures": [
+                            {"parameters": [parameter]} for parameter in parameters
+                        ],
+                    }
+                ],
+            }
+        ).defaults
+
+    def tagged(self, *parts):
+        return {
+            "name": "value",
+            "comment": {
+                "blockTags": [
+                    {
+                        "tag": "@defaultValue",
+                        "content": [{"kind": "text", "text": part} for part in parts],
+                    }
+                ]
+            },
+        }
+
+    def test_native_defaults_are_read_before_optional_omission(self):
+        self.assertEqual(
+            self.read(
+                {"name": "value", "defaultValue": "42", "flags": {"isOptional": True}}
+            ),
+            {"run(value)": "42"},
+        )
+
+    def test_tag_parts_concatenate_and_fenced_scalars_keep_whitespace(self):
+        for parts, expected in [
+            (('"', "run", '"'), '"run"'),
+            (("```json\n \n0\n \n```",), "0"),
+            (("undefined",), "undefined"),
+        ]:
+            with self.subTest(parts=parts):
+                self.assertEqual(
+                    self.read(self.tagged(*parts)), {"run(value)": expected}
+                )
+
+    def test_invalid_tag_values_report_the_reason(self):
+        for value, reason in [
+            ("invalid", "malformed @defaultValue"),
+            ("[]", "must be a scalar"),
+            ("NaN", "nonfinite @defaultValue"),
+        ]:
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(PARITY["ParityError"], reason):
+                    self.read(self.tagged(value))
+        parameter = self.tagged("0")
+        parameter["comment"]["blockTags"] *= 2
+        with self.assertRaisesRegex(PARITY["ParityError"], "duplicate @defaultValue"):
+            self.read(parameter)
+
+    def test_overloads_agree_or_report_conflicting_defaults(self):
+        self.assertEqual(
+            self.read(self.tagged("0"), self.tagged("0")), {"run(value)": "0"}
+        )
+        with self.assertRaisesRegex(
+            PARITY["ParityError"], "conflicting overload defaults"
+        ):
+            self.read(self.tagged("0"), self.tagged("1"))
 
 
 class DefaultTests(FixtureCase):
@@ -1088,6 +1165,42 @@ export type OtherOptions = {
 export declare namespace snapshots {
   export function snapshotVm(): void
 }
+export declare function accept(options: AliasOptions, callback: CallbackOptions): void
+export type AliasOptions = BaseOptions | {
+  local?: {
+    /** @defaultValue true */
+    enabled?: boolean
+  }
+}
+export interface CallbackOptions {
+  invoke?: {
+    (flag?: boolean): OutputOnly
+    optional?: number
+  }
+  next?: CallbackOptions
+}
+export interface OutputOnly {
+  ignored?: number
+}
+export declare function list(options: Array<{
+  /** @defaultValue 7 */
+  size?: number
+}>): void
+export declare function readonlyList(options: readonly {
+  /** @defaultValue 8 */
+  size?: number
+}[]): void
+export interface GenericBase<T> {
+  inherited?: T
+}
+export interface GenericInput extends GenericBase<{ flag?: boolean }> {}
+export declare function generic(options: GenericInput): void
+export declare class NativeDefaults {
+  readonly count = 3
+}
+export declare function native(options: NativeDefaults): void
+export declare const DEFAULT_COUNT = 7
+export declare function wholeModule(value: typeof import("./index")): void
 """
 
 
@@ -1119,12 +1232,22 @@ class ReaderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as scratch:
             declarations = Path(scratch) / "index.d.ts"
             declarations.write_text(DECLARATIONS, encoding="utf-8")
-            surface = PARITY["ts_surface"](
-                PARITY["run_typedoc"](declarations, Path(scratch))
-            )
+            project = PARITY["run_typedoc"](declarations, Path(scratch))
+            surface = PARITY["ts_surface"](project)
         self.assertEqual(
             surface.functions,
-            {"runReport", "__napiBindingTarget", "snapshots.snapshotVm"},
+            {
+                "runReport",
+                "__napiBindingTarget",
+                "snapshots.snapshotVm",
+                "accept",
+                "list",
+                "readonlyList",
+                "generic",
+                "native",
+                "wholeModule",
+                "DEFAULT_COUNT",
+            },
         )
         self.assertEqual(
             surface.classes["Session"].methods, {"health", "attach", "bytes"}
@@ -1148,6 +1271,22 @@ class ReaderTests(unittest.TestCase):
                 "OtherOptions.enabled": "false",
                 "RunOptions.inherited": "9",
                 "BaseOptions.inherited": "9",
+                "AliasOptions.local": "undefined",
+                "AliasOptions.local.enabled": "true",
+                "CallbackOptions.invoke": "undefined",
+                "CallbackOptions.invoke.optional": "undefined",
+                "CallbackOptions.invoke(flag)": "undefined",
+                "CallbackOptions.next": "undefined",
+                "list(options).size": "7",
+                "readonlyList(options).size": "8",
+                "GenericBase.inherited": "undefined",
+                "GenericInput.flag": "undefined",
+                "GenericInput.inherited": "undefined",
+                "GenericInput.inherited.flag": "undefined",
+                "NativeDefaults.count": "3",
+                f"{project['name']}.AliasOptions.local": "undefined",
+                f"{project['name']}.AliasOptions.local.enabled": "true",
+                f"{project['name']}.DEFAULT_COUNT": "7",
             },
         )
 

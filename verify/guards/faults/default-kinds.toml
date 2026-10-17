@@ -164,3 +164,69 @@ transform = { file = "tools/check-parity.py", replace = "    if client is None a
 id = "default-unread-surface-continues"
 message = "FAIL: test_unread_surface_does_not_hide_later_unclaimed_defaults"
 transform = { file = "tools/check-parity.py", replace = "    for key in (\"cli\", \"py\", \"ts\"):\n        if key in empty:\n            continue\n", with = "    for key in (\"cli\", \"py\", \"ts\"):\n        if key in empty:\n            break\n" }
+
+[[family]]
+guard = "tools/test_check_parity.py: TypeScript defaults and input traversal"
+run = ["uv", "run", "--locked", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "default-typescript-native-value"
+message = "test_native_defaults_are_read_before_optional_omission"
+transform = { file = "tools/check-parity.py", replace = "        value = node.get(\"defaultValue\")\n", with = "        value = None\n" }
+
+[[family.fault]]
+id = "default-typescript-tag-pieces"
+message = "test_tag_parts_concatenate_and_fenced_scalars_keep_whitespace"
+transform = { file = "tools/check-parity.py", replace = "            value = \"\".join(\n", with = "            value = \"XXXX\".join(\n" }
+
+[[family.fault]]
+id = "default-typescript-fenced-scalar"
+message = "test_tag_parts_concatenate_and_fenced_scalars_keep_whitespace"
+transform = { file = "tools/check-parity.py", replace = "                value = \"\\n\".join(lines[1:-1]).strip()\n", with = "                value = \"XX\\nXX\".join(lines[1:-1]).strip()\n" }
+
+[[family.fault]]
+id = "default-typescript-explicit-undefined"
+message = "test_tag_parts_concatenate_and_fenced_scalars_keep_whitespace"
+transform = { file = "tools/check-parity.py", replace = "            if value != \"undefined\":\n", with = "            if value != \"UNDEFINED\":\n" }
+
+[[family.fault]]
+id = "default-typescript-invalid-tag-reason"
+message = "test_invalid_tag_values_report_the_reason"
+transform = { file = "tools/check-parity.py", replace = "            raise ParityError(f\"ts: {name} has duplicate @defaultValue tags\")\n", with = "            raise ParityError(None)\n" }
+
+[[family.fault]]
+id = "default-typescript-overload-value"
+message = "test_overloads_agree_or_report_conflicting_defaults"
+transform = { file = "tools/check-parity.py", replace = "        if value is not None:\n            previous = surface.defaults.get(name)\n", with = "        if value is not None:\n            previous = None\n" }
+
+[[family.fault]]
+id = "default-typescript-readonly-input"
+message = "test_the_typescript_reader_over_typedoc"
+transform = { file = "tools/check-parity.py", replace = "                if key != \"declaration\":\n", with = "                if key not in (\"target\", \"declaration\"):\n" }
+
+[[family.fault]]
+id = "default-typescript-return-only"
+message = "test_the_typescript_reader_over_typedoc"
+transform = { file = "tools/check-parity.py", replace = "                if key != \"declaration\":\n", with = "                if True:\n" }
+
+[[family.fault]]
+id = "default-typescript-inherited-owner"
+message = "test_the_typescript_reader_over_typedoc"
+transform = { file = "tools/check-parity.py", replace = "        input_type(node.get(\"extendedTypes\"), name)\n", with = "        input_type(node.get(\"extendedTypes\"), None)\n" }
+
+[[family.fault]]
+id = "default-typescript-recursive-input"
+message = "test_the_typescript_reader_over_typedoc"
+transform = { file = "tools/check-parity.py", replace = "                visited.add(target)\n", with = "                visited.add(None)\n" }
+
+[[family.fault]]
+id = "default-typescript-module-reference"
+message = "test_the_typescript_reader_over_typedoc"
+transform = { file = "tools/check-parity.py", replace = "    index(project, \"\")\n", with = "    for child in project.get(\"children\") or []:\n        index(child, \"\")\n" }
+
+[[family.fault]]
+id = "default-typescript-callable-record"
+message = "test_the_typescript_reader_over_typedoc"
+transform = { file = "tools/check-parity.py", replace = "        for signature in node.get(\"signatures\") or []:\n            input_parameters(signature, name)\n", with = "        for signature in []:\n            input_parameters(signature, name)\n" }
