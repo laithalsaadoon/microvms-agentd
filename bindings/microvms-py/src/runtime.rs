@@ -387,6 +387,21 @@ where
     spawned(|| RUNTIME.spawn(future), false)
 }
 
+/// Keep an in-flight lifecycle operation shielded, but signal cancellation so its
+/// retry loop can stop before submitting another request.
+pub(crate) fn spawn_with_retry_cancellation<F>(
+    future: F,
+    cancellation: microvms_core::control::transport::RetryCancellation,
+) -> Spawned<F::Output>
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    let mut task = spawned(|| RUNTIME.spawn(future), false);
+    task.on_cancel = Some(Box::new(move || cancellation.cancel()));
+    task
+}
+
 /// Runs a blocking core call on the shared runtime's blocking pool and returns the awaitable
 /// side of it: the twin of a call core makes synchronous, such as the daemon fetch, which runs
 /// its own thread. A thread can't be stopped, so a cancelled awaitable leaves the call to finish,
@@ -409,6 +424,7 @@ fn spawned<T>(start: impl FnOnce() -> JoinHandle<T>, abort_on_drop: bool) -> Spa
     Spawned {
         task,
         abort_on_drop,
+        on_cancel: None,
     }
 }
 
@@ -422,6 +438,7 @@ fn spawned<T>(start: impl FnOnce() -> JoinHandle<T>, abort_on_drop: bool) -> Spa
 pub(crate) struct Spawned<T> {
     task: Result<Fenced<JoinHandle<T>>, Option<CoreError>>,
     abort_on_drop: bool,
+    on_cancel: Option<Box<dyn FnOnce() + Send>>,
 }
 
 impl<T> Future for Spawned<T> {
@@ -453,8 +470,14 @@ impl<T> Drop for Spawned<T> {
         // Aborting a finished task is a no-op, so this needs no "did it finish" check.
         if let Ok(task) = &self.task {
             task.fence.close();
+            let task = task.future.as_ref().get_ref();
+            if !task.is_finished()
+                && let Some(cancel) = self.on_cancel.take()
+            {
+                cancel();
+            }
             if self.abort_on_drop {
-                task.future.as_ref().get_ref().abort();
+                task.abort();
             }
         }
     }

@@ -510,7 +510,19 @@ async fn control_plane_case(case: &Case) -> Value {
     let script =
         microvms_app::testing::ParityControlPlane::from_json(&case.input("script").to_string())
             .unwrap();
-    let plane = script.plane();
+    let plane = match case.input.get("retry") {
+        Some(retry) => script.plane().with_retry(
+            microvms_core::control::transport::RetryPolicy::new(
+                retry["max_attempts"].as_u64().unwrap().try_into().unwrap(),
+                microvms_core::duration::of_secs_f64(
+                    retry["max_elapsed_seconds"].as_f64().unwrap(),
+                )
+                .unwrap(),
+            )
+            .unwrap(),
+        ),
+        None => script.plane(),
+    };
     if case.input_strings("actions") == ["sweep"] {
         let options = microvms_core::control::SweepOptions {
             keep: case.input_strings("keep"),
@@ -536,16 +548,25 @@ async fn control_plane_case(case: &Case) -> Value {
     }
     let id = case.input_str("microvm_id");
     for action in case.input_strings("actions") {
-        if action == "suspend" {
-            assert_eq!(plane.get_microvm(id).await.unwrap().state, "RUNNING");
-            plane.suspend(id).await.unwrap();
-            assert_eq!(plane.get_microvm(id).await.unwrap().state, "SUSPENDED");
-        } else {
-            assert_eq!(action, "resume");
-            let error = plane.resume(id).await.unwrap_err();
+        let result = async {
+            if action == "suspend" {
+                assert_eq!(plane.get_microvm(id).await?.state, "RUNNING");
+                plane.suspend(id).await?;
+                assert_eq!(plane.get_microvm(id).await?.state, "SUSPENDED");
+                Ok(())
+            } else {
+                assert_eq!(action, "resume");
+                plane.resume(id).await
+            }
+        }
+        .await;
+        if let Err(error) = result {
             let mut answer = refusal(&error);
             if case.input.get("message_mentions").is_some() {
                 answer["message_mentions"] = case.message_mentions(&error.to_string());
+            }
+            if case.input.get("report_retry").is_some() {
+                answer["retry"] = json!({"attempt_count": error.attempt_count(), "backoff_positive": !error.backoff().is_zero(), "throttled": error.throttled()});
             }
             answer["calls"] = json!(script.calls());
             return answer;

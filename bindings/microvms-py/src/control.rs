@@ -518,12 +518,29 @@ pub struct PyControlPlane {
 }
 
 /// Opens a control plane for `region`: both spellings of the constructor.
-async fn open(region: microvms_core::Region) -> Result<PyControlPlane, microvms_core::Error> {
+async fn open(
+    region: microvms_core::Region,
+    retry: Option<(u32, f64)>,
+) -> Result<PyControlPlane, microvms_core::Error> {
+    let policy = retry_policy(retry)?;
     ControlPlane::new(region).await.map(|plane| PyControlPlane {
-        inner: Arc::new(plane),
+        inner: Arc::new(match policy {
+            Some(policy) => plane.with_retry(policy),
+            None => plane,
+        }),
         #[cfg(feature = "parity-fixtures")]
         parity: None,
     })
+}
+
+pub(crate) fn retry_policy(
+    retry: Option<(u32, f64)>,
+) -> Result<Option<microvms_core::control::transport::RetryPolicy>, microvms_core::Error> {
+    retry
+        .map(|(attempts, elapsed)| {
+            microvms_core::control::transport::RetryPolicy::new(attempts, seconds(elapsed)?)
+        })
+        .transpose()
 }
 
 /// The future a method's two spellings drive: `$body` with `$plane` bound to an owned
@@ -722,10 +739,14 @@ fn delete_budget(
 #[pymethods]
 impl PyControlPlane {
     #[staticmethod]
-    fn _parity_from_script(script: &str) -> PyCoreResult<Self> {
+    #[pyo3(signature = (script, retry=None))]
+    fn _parity_from_script(script: &str, retry: Option<(u32, f64)>) -> PyCoreResult<Self> {
         let parity = microvms_core::testing::ParityControlPlane::from_json(script)?;
         Ok(Self {
-            inner: Arc::new(parity.plane()),
+            inner: Arc::new(match retry_policy(retry)? {
+                Some(policy) => parity.plane().with_retry(policy),
+                None => parity.plane(),
+            }),
             parity: Some(parity),
         })
     }
@@ -739,14 +760,23 @@ impl PyControlPlane {
 impl PyControlPlane {
     /// Resolves credentials for `region` from the default chain.
     #[new]
-    fn new(py: Python<'_>, region: PyRegion) -> PyCoreResult<PyControlPlane> {
-        Ok(runtime::block_on(py, open(region.inner))?)
+    #[pyo3(signature = (region, *, retry=None))]
+    fn new(
+        py: Python<'_>,
+        region: PyRegion,
+        retry: Option<(u32, f64)>,
+    ) -> PyCoreResult<PyControlPlane> {
+        Ok(runtime::block_on(py, open(region.inner, retry))?)
     }
 
     /// The awaitable twin of `ControlPlane(region)`.
     #[staticmethod]
-    async fn create_async(region: PyRegion) -> PyCoreResult<PyControlPlane> {
-        Ok(runtime::spawn(open(region.inner)).await??)
+    #[pyo3(signature = (region, *, retry=None))]
+    async fn create_async(
+        region: PyRegion,
+        retry: Option<(u32, f64)>,
+    ) -> PyCoreResult<PyControlPlane> {
+        Ok(runtime::spawn(open(region.inner, retry)).await??)
     }
 
     /// The region this plane addresses.

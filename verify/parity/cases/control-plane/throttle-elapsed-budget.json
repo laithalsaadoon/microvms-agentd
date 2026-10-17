@@ -1,0 +1,36 @@
+{
+  "capability": "resume-by-id",
+  "input": {
+    "microvm_id": "mvm-parity",
+    "actions": [
+      "resume"
+    ],
+    "retry": {
+      "max_attempts": 3,
+      "max_elapsed_seconds": 0.001
+    },
+    "report_retry": true,
+    "script": [
+      {
+        "operation": "ResumeMicrovm",
+        "status": 429,
+        "body": "{}"
+      }
+    ]
+  },
+  "expect": {
+    "error": {
+      "code": "ERR_RETRYABLE",
+      "wire_kind": null,
+      "retryable": true
+    },
+    "calls": [
+      "ResumeMicrovm"
+    ],
+    "retry": {
+      "attempt_count": 1,
+      "backoff_positive": false,
+      "throttled": true
+    }
+  }
+}

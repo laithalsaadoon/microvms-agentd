@@ -214,7 +214,7 @@ def exception_lines(extension: Path) -> list[str]:
         ]
 
     # Base class first, then the rest alphabetically. `__mro__` order would be the other
-    # defensible choice and reads worse: a reader wants the base and its four attributes
+    # defensible choice and reads worse: a reader wants the base and its attributes
     # before the thirteen one-line subclasses that inherit them.
     def sort_key(entry: dict[str, str]) -> tuple[int, str]:
         return (
@@ -232,7 +232,7 @@ def exception_lines(extension: Path) -> list[str]:
                 lines.append(f"    {chunk}" if chunk else "")
             lines.append('    """')
         if entry["base"] == "Exception":
-            # The four attributes `to_py_err` attaches with `setattr`. Declared on the base
+            # The attributes `to_py_err` attaches with `setattr`. Declared on the base
             # so every subclass inherits them, which is what lets a caller read `.code`
             # off any raised exception instead of parsing the message.
             lines += [
@@ -240,6 +240,9 @@ def exception_lines(extension: Path) -> list[str]:
                 "    kind: str",
                 "    wire_kind: str | None",
                 "    retryable: bool",
+                "    throttled: bool",
+                "    attempt_count: int",
+                "    backoff_seconds: float",
             ]
         elif not doc:
             lines.append("    ...")

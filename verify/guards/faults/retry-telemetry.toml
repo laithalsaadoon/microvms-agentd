@@ -1,0 +1,98 @@
+# Retry budgets and telemetry: each mutant removes one observable guarantee.
+
+[[fault]]
+id = "retry-throttle-attempts-ignored"
+guard = "control::transport::tests::throttle_budget_counts_attempts_bounds_elapsed_and_keeps_other_failures_default"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::transport::tests::throttle_budget_counts_attempts_bounds_elapsed_and_keeps_other_failures_default"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "details.attempt_count < policy.max_attempts", with = "details.attempt_count < 6" }
+
+[[fault]]
+id = "retry-throttle-deadline-ignored"
+guard = "control::transport::tests::throttle_budget_counts_attempts_bounds_elapsed_and_keeps_other_failures_default"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::transport::tests::throttle_budget_counts_attempts_bounds_elapsed_and_keeps_other_failures_default"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "&& elapsed.saturating_add(delay) < policy.max_elapsed", with = "&& elapsed.saturating_add(delay) < Duration::MAX" }
+
+[[fault]]
+id = "retry-error-attempts-lost"
+guard = "control::transport::tests::exhausted_public_retry_reports_throttle_attempts_and_backoff"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::transport::tests::exhausted_public_retry_reports_throttle_attempts_and_backoff"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-domain/src/error.rs", replace = "self.attempts = attempts;", with = "self.attempts = attempts.saturating_sub(attempts);" }
+
+[[fault]]
+id = "retry-cancellation-ignored"
+guard = "control::transport::tests::a_cancel_signal_wakes_backoff_before_another_request"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::transport::tests::a_cancel_signal_wakes_backoff_before_another_request"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "if cancellation.is_some_and(RetryCancellation::is_cancelled) {", with = "if false && cancellation.is_some_and(RetryCancellation::is_cancelled) {" }
+
+[[fault]]
+id = "retry-launch-running-time-lost"
+guard = "sandbox::tests::launch_metrics_track_retries_running_and_ready_without_changing_on_clones"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "sandbox::tests::launch_metrics_track_retries_running_and_ready_without_changing_on_clones"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/sandbox.rs", replace = "            metrics\n                .lock()\n                .unwrap_or_else(std::sync::PoisonError::into_inner)\n                .running_at\n                .get_or_insert_with(|| self.control.clock().unix_now().as_secs_f64());", with = "            let _ = metrics;" }
+
+[[fault]]
+id = "retry-cancellation-discards-an-accepted-launch"
+guard = "sandbox::tests::cancellation_preserves_an_inflight_accepted_launch"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "sandbox::tests::cancellation_preserves_an_inflight_accepted_launch"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "            Ok(reply) if reply.is_success() || accept.contains(&reply.status) => {\n                return Ok((reply, details));", with = "            Ok(reply) if reply.is_success() || accept.contains(&reply.status) => {\n                if cancellation.is_some_and(RetryCancellation::is_cancelled) {\n                    return Err(Error::new(ErrorKind::Interrupted, \"cancelled\"));\n                }\n                return Ok((reply, details));" }
+
+[[fault]]
+id = "retry-post-response-details-lost"
+guard = "control::microvm::tests::post_response_failures_keep_request_retry_details"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::microvm::tests::post_response_failures_keep_request_retry_details"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/mod.rs", replace = "self.reply\n            .json(operation)\n            .map_err(|error| self.error(error))", with = "self.reply.json(operation)" }
+
+[[fault]]
+id = "retry-wrapped-details-lost"
+guard = "control::microvm::tests::post_response_failures_keep_request_retry_details"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::microvm::tests::post_response_failures_keep_request_retry_details"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-domain/src/error.rs", replace = "self.attempts = error.attempts;", with = "self.attempts = 0;" }
+
+[[fault]]
+id = "retry-resolution-cancellation-ignored"
+guard = "sandbox::tests::cancellation_interrupts_image_resolution_and_releases_the_sandbox"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "sandbox::tests::cancellation_interrupts_image_resolution_and_releases_the_sandbox"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/sandbox.rs", replace = "        wire.image_identifier = if let Some(cancellation) = cancellation {\n            // This lookup only reads images, so cancelling it cannot abandon a VM.\n            // The launch below remains shielded while its request is in flight.\n            tokio::select! {\n                biased;\n                _ = cancellation.cancelled() => {\n                    return Err(Error::new(\n                        ErrorKind::Interrupted,\n                        \"launch cancelled before a VM was assigned\",\n                    ));\n                }\n                resolved = resolution => resolved?,\n            }\n        } else {\n            resolution.await?\n        };", with = "        wire.image_identifier = resolution.await?;" }
+
+[[fault]]
+id = "js-retry-details-null-floor"
+guard = "retryDetails refuses unrelated values and reads telemetry without parsing text"
+run = [["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"], ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/retry.mjs"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "bindings/microvms-js/src/errors.rs", replace = "    if error.get_type().ok()? != ValueType::Object {\n        return None;\n    }\n    let error = Object::from_unknown(error).ok()?;\n    Some(RetryDetails", with = "    let error = Object::from_unknown(error).ok()?;\n    Some(RetryDetails" }
+
+[[fault]]
+id = "js-retry-details-forwarded"
+guard = "Sandbox control-plane failures retain retry telemetry"
+run = [["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"], ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/retry.mjs"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "bindings/microvms-js/src/errors.rs", replace = "result.map_err(|error| with_retry_details(env, error))", with = "result.map_err(napi::Error::from)" }
+
+[[fault]]
+id = "py-retry-stub-attributes"
+guard = "tools/generate-py-stubs.py --check"
+run = ["./tools/generate-py-stubs.py", "--check"]
+expect = "exit-nonzero"
+suite = "bindings"
+message = "bindings/microvms-py/microvms.pyi is stale"
+transform = { file = "tools/generate-py-stubs.py", replace = "                \"    throttled: bool\",\n                \"    attempt_count: int\",\n                \"    backoff_seconds: float\",\n", with = "" }

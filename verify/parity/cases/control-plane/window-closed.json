@@ -32,7 +32,8 @@
     "actions": [
       "suspend",
       "resume"
-    ]
+    ],
+    "report_retry": true
   },
   "expect": {
     "error": {
@@ -46,6 +47,11 @@
       "GetMicrovm",
       "ResumeMicrovm",
       "GetMicrovm"
-    ]
+    ],
+    "retry": {
+      "attempt_count": 1,
+      "backoff_positive": false,
+      "throttled": false
+    }
   }
 }

@@ -502,13 +502,16 @@ class ControlPlane:
     suspend of a SUSPENDED VM is the service's to refuse. Use it when a process has only an
     identifier, such as a durable workflow step in a fresh process.
     """
-    def __new__(cls, /, region: Region) -> ControlPlane:
+    def __new__(cls, /, region: Region, *, retry: tuple[int, float] |None = None) -> ControlPlane:
         """
         Resolves credentials for `region` from the default chain.
         """
     def __repr__(self, /) -> str: ...
+    def _parity_calls(self, /) -> list[str]: ...
     @staticmethod
-    async def create_async(region: Region) -> ControlPlane:
+    def _parity_from_script(script: str, retry: tuple[int, float] |None = None) -> ControlPlane: ...
+    @staticmethod
+    async def create_async(region: Region, *, retry: tuple[int, float] |None = None) -> ControlPlane:
         """
         The awaitable twin of `ControlPlane(region)`.
         """
@@ -2468,7 +2471,7 @@ class Sandbox:
         what has to happen, not what has to be reported. Any leak is on the report the
         caller can also get by calling `terminate()` themselves.
         """
-    def __new__(cls, /, region: Region) -> Sandbox:
+    def __new__(cls, /, region: Region, *, retry: tuple[int, float] |None = None) -> Sandbox:
         """
         Resolves credentials for `region` and returns a sandbox with nothing launched.
         
@@ -2550,7 +2553,7 @@ class Sandbox:
         cancelling the awaitable leaves the build running to completion on this sandbox.
         """
     @staticmethod
-    async def create_async(region: Region) -> Sandbox:
+    async def create_async(region: Region, *, retry: tuple[int, float] |None = None) -> Sandbox:
         """
         The awaitable twin of `Sandbox(region)`: resolves credentials on the shared runtime.
         """
@@ -2743,8 +2746,8 @@ class Sandbox:
     async def run_async(self, /, *, image_identifier: str |None = None, image_version: str |None = None, execution_role_arn: str |None = None, agent_token: str |None = None, client_token: str |None = None, launch_env: dict[str, str] |None = None, identity: bool = False, egress: bool = False, egress_network_connectors: Sequence[str] |None = None, deny_egress: bool = False, shell: bool = False, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None, ready_timeout: float |None = None, token_scope: str |None = None, wait: bool = True, log_group: str |None = None, log_stream: str |None = None, disable_logging: bool = False) -> Session:
         """
         The awaitable twin of `run`, with its keywords. A lifecycle transition: cancelling the
-        awaitable leaves the launch running to completion, so the VM it starts is still this
-        sandbox's to terminate.
+        awaitable stops pending retries. An in-flight request finishes so an accepted VM
+        is still recorded on this sandbox and remains available to terminate.
         """
     @property
     def session(self, /) -> Session |None:
@@ -3041,6 +3044,11 @@ class Session:
     async def kill_async(self, /, exec_id: str) -> bool:
         """
         The awaitable twin of `kill`.
+        """
+    @property
+    def launch_metrics(self, /) -> dict |None:
+        """
+        Launch observations, or None for a session not created by a launch.
         """
     @property
     def port(self, /) -> int:
@@ -3873,6 +3881,9 @@ class MicrovmError(Exception):
     kind: str
     wire_kind: str | None
     retryable: bool
+    throttled: bool
+    attempt_count: int
+    backoff_seconds: float
 
 class BuildWedgedError(MicrovmError):
     """

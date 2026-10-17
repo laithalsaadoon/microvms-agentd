@@ -630,6 +630,7 @@ pub struct Sandbox {
     image: Option<Image>,
     /// The image ARN [`Sandbox::run`] resolved and sent in `RunMicrovm`, set before the call.
     launch_image_arn: Option<String>,
+    launch_metrics: Option<Arc<std::sync::Mutex<crate::session::LaunchMetrics>>>,
     microvm: Option<Microvm>,
     session: Option<Session>,
     /// A backend for the session [`Sandbox::run`] builds, or `None` for the real HTTP one.
@@ -762,6 +763,7 @@ impl Sandbox {
             control: Arc::new(control),
             image: None,
             launch_image_arn: None,
+            launch_metrics: None,
             microvm: None,
             session: None,
             session_backend: None,
@@ -1109,6 +1111,24 @@ impl Sandbox {
     /// the ARN sent. A name that resolves to nothing fails with `ERR_PRECONDITION` and leaves
     /// the sandbox as it was, so a later `run` on it can still launch.
     pub async fn run(&mut self, request: RunRequest) -> Result<&mut Session, Error> {
+        self.run_inner(request, None).await
+    }
+
+    /// Like `run`, but stops retries when signaled. An in-flight request is allowed to
+    /// finish so an accepted VM is recorded; cancellation never discards its identity.
+    pub async fn run_cancellable(
+        &mut self,
+        request: RunRequest,
+        cancellation: &crate::control::transport::RetryCancellation,
+    ) -> Result<&mut Session, Error> {
+        self.run_inner(request, Some(cancellation)).await
+    }
+
+    async fn run_inner(
+        &mut self,
+        request: RunRequest,
+        cancellation: Option<&crate::control::transport::RetryCancellation>,
+    ) -> Result<&mut Session, Error> {
         self.refuse_detached("run")?;
         // STATE-3's local half. A sandbox that has already bootstrapped cannot bootstrap
         // again, and the refusal is here rather than in a comment because `run` twice is
@@ -1202,13 +1222,36 @@ impl Sandbox {
         // launch's local refusals go first: the listing a name costs is a call, and a launch
         // `run_microvm` would refuse anyway costs none. An ARN passes through with no call.
         self.control.launch_connectors(&wire)?;
-        wire.image_identifier = self
-            .control
-            .resolve_image_arn(&wire.image_identifier)
-            .await?;
+        let resolution = self.control.resolve_image_arn(&wire.image_identifier);
+        wire.image_identifier = if let Some(cancellation) = cancellation {
+            // This lookup only reads images, so cancelling it cannot abandon a VM.
+            // The launch below remains shielded while its request is in flight.
+            tokio::select! {
+                biased;
+                _ = cancellation.cancelled() => {
+                    return Err(Error::new(
+                        ErrorKind::Interrupted,
+                        "launch cancelled before a VM was assigned",
+                    ));
+                }
+                resolved = resolution => resolved?,
+            }
+        } else {
+            resolution.await?
+        };
         self.launch_image_arn = Some(wire.image_identifier.clone());
 
-        let launched = self.control.run_microvm(wire).await?;
+        let (launched, details) = self
+            .control
+            .run_microvm_reported(wire, cancellation)
+            .await?;
+        self.launch_metrics = Some(Arc::new(std::sync::Mutex::new(
+            crate::session::LaunchMetrics {
+                attempt_count: details.attempt_count,
+                backoff_seconds: details.backoff.as_secs_f64(),
+                ..Default::default()
+            },
+        )));
 
         // The durable half of the identity, kept the moment the launch is accepted: the host
         // secret and the VM's public pin. The VM's own secret ends here — `keep` drops it —
@@ -1261,7 +1304,9 @@ impl Sandbox {
         if let Some(backend) = &self.session_backend {
             builder = builder.with_backend(Arc::clone(backend));
         }
-        self.session = Some(builder.build_with(self.control.adapters())?);
+        let mut session = builder.build_with(self.control.adapters())?;
+        session.launch_metrics = self.launch_metrics.clone();
+        self.session = Some(session);
         Ok(())
     }
 
@@ -1298,6 +1343,13 @@ impl Sandbox {
         // STATE-2. The platform reported the run hook succeeded, so the token is in the
         // guest's memory — and this is the one place that counts it (STATE-3).
         self.set_lifecycle(Lifecycle::Running);
+        if let Some(metrics) = &self.launch_metrics {
+            metrics
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .running_at
+                .get_or_insert_with(|| self.control.clock().unix_now().as_secs_f64());
+        }
         self.token_installed = true;
         self.bootstrap_count += 1;
         self.microvm = Some(running);
@@ -2250,6 +2302,135 @@ mod tests {
         let sandbox = Sandbox::with_control_plane(plane).with_session_backend(daemon.clone());
         answer_launch(&recorder);
         (sandbox, recorder, daemon)
+    }
+
+    #[tokio::test]
+    async fn launch_metrics_track_retries_running_and_ready_without_changing_on_clones() {
+        use crate::clock::Clock;
+        let recorder = Arc::new(FakeControlPlane::new());
+        recorder.answer("RunMicrovm", Answer::throttled_as_400());
+        answer_launch(&recorder);
+        let clock = Arc::new(TestClock::new());
+        let plane = crate::testing::control_plane(recorder.clone(), Region::UsEast1, clock.clone());
+        let mut sandbox = Sandbox::with_control_plane(plane)
+            .with_session_backend(crate::testing::HealthyDaemon::new());
+        let mut request = RunRequest::new().with_image("arn:image");
+        request.wait = false;
+        let session = sandbox.run(request).await.unwrap().clone();
+        let accepted = session.launch_metrics().unwrap();
+        assert_eq!(accepted.attempt_count, 2);
+        assert!(accepted.backoff_seconds > 0.0);
+        assert_eq!(accepted.running_at, None);
+        assert_eq!(accepted.ready_at, None);
+        clock.advance(Duration::from_secs(7));
+        sandbox
+            .wait_until_running(DEFAULT_RUNNING_TIMEOUT)
+            .await
+            .unwrap();
+        let ready = session.launch_metrics().unwrap();
+        assert_eq!(ready.attempt_count, accepted.attempt_count);
+        assert_eq!(ready.backoff_seconds, accepted.backoff_seconds);
+        assert_eq!(ready.running_at, Some(clock.unix_now().as_secs_f64()));
+        assert_eq!(ready.ready_at, ready.running_at);
+        clock.advance(Duration::from_secs(3));
+        session
+            .wait_until_ready(Duration::from_secs(1))
+            .await
+            .unwrap();
+        assert_eq!(session.launch_metrics(), Some(ready));
+        sandbox.detach().unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancellation_preserves_an_inflight_accepted_launch() {
+        use crate::control::transport::RetryCancellation;
+        let (mut sandbox, recorder, _) = planted();
+        answer_launch(&recorder);
+        let gate = recorder.hold_responses();
+        let cancellation = RetryCancellation::default();
+        let mut request = RunRequest::new().with_image("arn:image");
+        request.wait = false;
+        {
+            let pending = sandbox.run_cancellable(request, &cancellation);
+            tokio::pin!(pending);
+            tokio::select! {
+                biased;
+                _ = &mut pending => panic!("response must wait for the gate"),
+                _ = std::future::ready(()) => {}
+            }
+            assert_eq!(recorder.call_count("RunMicrovm"), 1);
+            cancellation.cancel();
+            gate.notify_one();
+            assert_eq!(
+                pending
+                    .await
+                    .unwrap()
+                    .launch_metrics()
+                    .unwrap()
+                    .attempt_count,
+                1
+            );
+        }
+        assert!(sandbox.microvm().is_some());
+        assert_eq!(recorder.call_count("RunMicrovm"), 1);
+        sandbox.detach().unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancelled_retry_does_not_launch_before_any_request() {
+        use crate::control::transport::RetryCancellation;
+        let (mut sandbox, recorder, _) = planted();
+        let cancellation = RetryCancellation::default();
+        cancellation.cancel();
+        let error = sandbox
+            .run_cancellable(RunRequest::new().with_image("arn:image"), &cancellation)
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Interrupted);
+        assert_eq!(recorder.call_count("RunMicrovm"), 0);
+        assert!(sandbox.microvm().is_none());
+    }
+
+    #[tokio::test]
+    async fn cancellation_interrupts_image_resolution_and_releases_the_sandbox() {
+        use crate::control::transport::{RetryCancellation, RetryPolicy};
+        let recorder = Arc::new(FakeControlPlane::new());
+        recorder.answer("ListMicrovmImages", Answer::throttled_as_400());
+        let plane = crate::testing::control_plane(
+            recorder.clone(),
+            Region::UsEast1,
+            Arc::new(crate::testing::YieldingClock::new()),
+        )
+        .with_retry(RetryPolicy::new(100, Duration::from_secs(3600)).unwrap());
+        let sandbox = tokio::sync::Mutex::new(Sandbox::with_control_plane(plane));
+        let cancellation = RetryCancellation::default();
+        let pending = async {
+            sandbox
+                .lock()
+                .await
+                .run_cancellable(RunRequest::new().with_image("named-image"), &cancellation)
+                .await
+                .map(|_| ())
+        };
+        tokio::pin!(pending);
+        tokio::select! {
+            biased;
+            _ = &mut pending => panic!("image resolution must be retrying"),
+            _ = std::future::ready(()) => {}
+        }
+        assert_eq!(recorder.call_count("ListMicrovmImages"), 1);
+        assert!(sandbox.try_lock().is_err());
+        cancellation.cancel();
+        let error = tokio::select! {
+            biased;
+            result = &mut pending => result.unwrap_err(),
+            _ = std::future::ready(()) => panic!("cancellation must finish without another sleep"),
+        };
+        assert_eq!(error.kind(), ErrorKind::Interrupted);
+        assert_eq!(recorder.call_count("ListMicrovmImages"), 1);
+        assert_eq!(recorder.call_count("RunMicrovm"), 0);
+        let sandbox = sandbox.try_lock().expect("cancellation releases the lock");
+        assert!(sandbox.microvm().is_none());
     }
 
     /// Not yet bootstrapped, then bootstrapped: the two health answers a launch waits through.

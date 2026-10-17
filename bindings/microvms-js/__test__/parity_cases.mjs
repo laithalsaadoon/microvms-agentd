@@ -535,7 +535,8 @@ async function tunnel(testCase) {
 }
 
 async function controlPlane(testCase) {
-  const plane = ControlPlane.parityFromScript(JSON.stringify(testCase.input.script));
+  const retry = testCase.input.retry;
+  const plane = ControlPlane.parityFromScript(JSON.stringify(testCase.input.script), retry && {maxAttempts: retry.max_attempts, maxElapsedSeconds: retry.max_elapsed_seconds});
   if (testCase.input.actions.length === 1 && testCase.input.actions[0] === 'sweep') {
     const report = await plane.sweep(testCase.input.prefix, {
       keep: testCase.input.keep, dryRun: testCase.input.dry_run,
@@ -564,6 +565,9 @@ async function controlPlane(testCase) {
       const answer = refusal(error);
       if (testCase.input.message_mentions) {
         answer.message_mentions = Object.fromEntries(testCase.input.message_mentions.map(text => [text, error.message.includes(text)]));
+      }
+      if (testCase.input.report_retry) {
+        answer.retry = {attempt_count: error.attemptCount, backoff_positive: error.backoffSeconds > 0, throttled: error.throttled};
       }
       answer.calls = plane.parityCalls();
       return answer;

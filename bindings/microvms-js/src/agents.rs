@@ -459,8 +459,19 @@ impl AgentVm {
     ///
     /// `agents` defaults to Claude Code alone. An empty list or a repeated agent is refused by
     /// the core before any AWS call.
-    #[napi(factory)]
-    pub async fn create(
+    #[napi]
+    pub fn create<'env>(
+        env: &'env napi::Env,
+        region: &Region,
+        agents_: Option<Vec<AgentSpecInput>>,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, AgentVm>> {
+        let region = region.clone();
+        crate::errors::spawn_with_retry_details(env, async move {
+            Self::create_impl(&region, agents_).await
+        })
+    }
+
+    async fn create_impl(
         region: &Region,
         agents_: Option<Vec<AgentSpecInput>>,
     ) -> Result<AgentVm, AsyncError> {
@@ -479,8 +490,25 @@ impl AgentVm {
     }
 
     /// Adopts the agent VM registered as `name` in `registry`; see `Sandbox.fromName`.
-    #[napi(factory)]
-    pub async fn from_name(
+    #[napi]
+    pub fn from_name<'env>(
+        env: &'env napi::Env,
+        region: &Region,
+        name: String,
+        registry: &crate::names::NameRegistry,
+        agents_: Option<Vec<AgentSpecInput>>,
+        port: Option<u16>,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, AgentVm>> {
+        let region = region.clone();
+        let registry = crate::names::NameRegistry {
+            store: registry.store.clone(),
+        };
+        crate::errors::spawn_with_retry_details(env, async move {
+            Self::from_name_impl(&region, name, &registry, agents_, port).await
+        })
+    }
+
+    async fn from_name_impl(
         region: &Region,
         name: String,
         registry: &crate::names::NameRegistry,
@@ -512,8 +540,23 @@ impl AgentVm {
     ///
     /// `agents` states what the VM carries and defaults to Claude Code alone; read
     /// `installedAgents(session)` first when the adopting process does not know.
-    #[napi(factory)]
-    pub async fn adopt(
+    #[napi]
+    pub fn adopt<'env>(
+        env: &'env napi::Env,
+        region: &Region,
+        microvm_id: String,
+        endpoint: String,
+        agent_token: String,
+        agents_: Option<Vec<AgentSpecInput>>,
+        port: Option<u16>,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, AgentVm>> {
+        let region = region.clone();
+        crate::errors::spawn_with_retry_details(env, async move {
+            Self::adopt_impl(&region, microvm_id, endpoint, agent_token, agents_, port).await
+        })
+    }
+
+    async fn adopt_impl(
         region: &Region,
         microvm_id: String,
         endpoint: String,
@@ -578,7 +621,19 @@ impl AgentVm {
     /// The Dockerfile `buildImage` will send: the client's agentd stanza plus the agent
     /// layers. Nothing in it is a secret.
     #[napi]
-    pub async fn dockerfile(&self) -> Result<String, AsyncError> {
+    pub fn dockerfile<'env>(
+        &self,
+        env: &'env napi::Env,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, String>> {
+        let owned = Self {
+            sandbox: Arc::clone(&self.sandbox),
+            specs: self.specs.clone(),
+            region: self.region.clone(),
+        };
+        crate::errors::spawn_with_retry_details(env, async move { owned.dockerfile_impl().await })
+    }
+
+    async fn dockerfile_impl(&self) -> Result<String, AsyncError> {
         let port = self.sandbox.lock().await.port();
         agents::dockerfile(&self.specs, &BaseImage::al2023(), port).map_err(js_async)
     }
@@ -587,7 +642,24 @@ impl AgentVm {
     /// Content-addressed, so an unchanged binary, spec set and size name the image a previous
     /// run built; `findImage` looks it up, and `ensureImage` builds or reuses it.
     #[napi]
-    pub async fn image_name(
+    pub fn image_name<'env>(
+        &self,
+        env: &'env napi::Env,
+        options: AgentImageOptions,
+        size: Option<&SizeClass>,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, String>> {
+        let owned = Self {
+            sandbox: Arc::clone(&self.sandbox),
+            specs: self.specs.clone(),
+            region: self.region.clone(),
+        };
+        let size = size.copied();
+        crate::errors::spawn_with_retry_details(env, async move {
+            owned.image_name_impl(options, size.as_ref()).await
+        })
+    }
+
+    async fn image_name_impl(
         &self,
         options: AgentImageOptions,
         size: Option<&SizeClass>,
@@ -598,7 +670,24 @@ impl AgentVm {
 
     /// The ARN of an existing image named per `imageName`, or `null` when there is none.
     #[napi]
-    pub async fn find_image(
+    pub fn find_image<'env>(
+        &self,
+        env: &'env napi::Env,
+        options: AgentImageOptions,
+        size: Option<&SizeClass>,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, Option<String>>> {
+        let owned = Self {
+            sandbox: Arc::clone(&self.sandbox),
+            specs: self.specs.clone(),
+            region: self.region.clone(),
+        };
+        let size = size.copied();
+        crate::errors::spawn_with_retry_details(env, async move {
+            owned.find_image_impl(options, size.as_ref()).await
+        })
+    }
+
+    async fn find_image_impl(
         &self,
         options: AgentImageOptions,
         size: Option<&SizeClass>,
@@ -613,7 +702,24 @@ impl AgentVm {
     /// waited on while building, deleted and rebuilt when failed, and uploaded to
     /// `s3://<s3Bucket>/<s3KeyPrefix>/<name>/artifact.zip` only when a build is needed.
     #[napi]
-    pub async fn ensure_image(
+    pub fn ensure_image<'env>(
+        &self,
+        env: &'env napi::Env,
+        options: AgentEnsureOptions,
+        size: Option<&SizeClass>,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, crate::sandbox::EnsuredImage>> {
+        let owned = Self {
+            sandbox: Arc::clone(&self.sandbox),
+            specs: self.specs.clone(),
+            region: self.region.clone(),
+        };
+        let size = size.copied();
+        crate::errors::spawn_with_retry_details(env, async move {
+            owned.ensure_image_impl(options, size.as_ref()).await
+        })
+    }
+
+    async fn ensure_image_impl(
         &self,
         options: AgentEnsureOptions,
         size: Option<&SizeClass>,
@@ -636,7 +742,24 @@ impl AgentVm {
 
     /// The artifact bytes to upload to `s3://<bucket>/<imageName>.zip` before `buildImage`.
     #[napi]
-    pub async fn build_artifact(
+    pub fn build_artifact<'env>(
+        &self,
+        env: &'env napi::Env,
+        options: AgentImageOptions,
+        size: Option<&SizeClass>,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, napi::bindgen_prelude::Buffer>> {
+        let owned = Self {
+            sandbox: Arc::clone(&self.sandbox),
+            specs: self.specs.clone(),
+            region: self.region.clone(),
+        };
+        let size = size.copied();
+        crate::errors::spawn_with_retry_details(env, async move {
+            owned.build_artifact_impl(options, size.as_ref()).await
+        })
+    }
+
+    async fn build_artifact_impl(
         &self,
         options: AgentImageOptions,
         size: Option<&SizeClass>,
@@ -649,7 +772,24 @@ impl AgentVm {
     /// Builds the image and waits for it to become usable. `codeArtifactUri` is where you
     /// uploaded `buildArtifact`'s bytes. Several minutes, server-side.
     #[napi]
-    pub async fn build_image(
+    pub fn build_image<'env>(
+        &self,
+        env: &'env napi::Env,
+        options: AgentImageOptions,
+        size: Option<&SizeClass>,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, Image>> {
+        let owned = Self {
+            sandbox: Arc::clone(&self.sandbox),
+            specs: self.specs.clone(),
+            region: self.region.clone(),
+        };
+        let size = size.copied();
+        crate::errors::spawn_with_retry_details(env, async move {
+            owned.build_image_impl(options, size.as_ref()).await
+        })
+    }
+
+    async fn build_image_impl(
         &self,
         options: AgentImageOptions,
         size: Option<&SizeClass>,
@@ -663,7 +803,19 @@ impl AgentVm {
     /// Hands the VM off to another process; see `Sandbox.detach`. The adopter passes the
     /// same agents to `AgentVm.adopt`.
     #[napi]
-    pub async fn detach(&self) -> Result<crate::sandbox::Detached, AsyncError> {
+    pub fn detach<'env>(
+        &self,
+        env: &'env napi::Env,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, crate::sandbox::Detached>> {
+        let owned = Self {
+            sandbox: Arc::clone(&self.sandbox),
+            specs: self.specs.clone(),
+            region: self.region.clone(),
+        };
+        crate::errors::spawn_with_retry_details(env, async move { owned.detach_impl().await })
+    }
+
+    async fn detach_impl(&self) -> Result<crate::sandbox::Detached, AsyncError> {
         let inner = self.sandbox.lock().await.detach().map_err(js_async)?;
         Ok(crate::sandbox::Detached { inner })
     }
@@ -675,7 +827,23 @@ impl AgentVm {
     /// VPC connectors, whose VPC must route to Bedrock. The idle knobs default to the core's
     /// figures (ten-minute idle and suspended windows, a one-hour ceiling).
     #[napi]
-    pub async fn launch(&self, options: AgentLaunchOptions) -> Result<Session, AsyncError> {
+    pub fn launch<'env>(
+        &self,
+        env: &'env napi::Env,
+        options: AgentLaunchOptions,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, Session>> {
+        let owned = Self {
+            sandbox: Arc::clone(&self.sandbox),
+            specs: self.specs.clone(),
+            region: self.region.clone(),
+        };
+        crate::errors::spawn_with_retry_details(
+            env,
+            async move { owned.launch_impl(options).await },
+        )
+    }
+
+    async fn launch_impl(&self, options: AgentLaunchOptions) -> Result<Session, AsyncError> {
         let mut request = agents::launch_request_for(
             &self.specs,
             options.image_identifier,
@@ -787,7 +955,23 @@ impl AgentVm {
 
     /// Tears down, best-effort, never rejecting; see `Sandbox.terminate`.
     #[napi]
-    pub async fn terminate(
+    pub fn terminate<'env>(
+        &self,
+        env: &'env napi::Env,
+        options: Option<TeardownOptions>,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, TeardownReport>> {
+        let owned = Self {
+            sandbox: Arc::clone(&self.sandbox),
+            specs: self.specs.clone(),
+            region: self.region.clone(),
+        };
+        crate::errors::spawn_with_retry_details(
+            env,
+            async move { owned.terminate_impl(options).await },
+        )
+    }
+
+    async fn terminate_impl(
         &self,
         options: Option<TeardownOptions>,
     ) -> Result<TeardownReport, AsyncError> {

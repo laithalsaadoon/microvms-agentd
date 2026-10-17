@@ -35,6 +35,9 @@ pub struct Error {
     kind: ErrorKind,
     wire_kind: Option<WireKind>,
     message: String,
+    throttled: bool,
+    attempts: u32,
+    backoff: std::time::Duration,
     #[source]
     source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
 }
@@ -46,6 +49,9 @@ impl Error {
             kind,
             wire_kind: None,
             message: message.into(),
+            throttled: false,
+            attempts: 0,
+            backoff: std::time::Duration::ZERO,
             source: None,
         }
     }
@@ -70,6 +76,9 @@ impl Error {
             kind: wire_kind.error_kind(),
             wire_kind: Some(wire_kind),
             message: message.into(),
+            throttled: false,
+            attempts: 0,
+            backoff: std::time::Duration::ZERO,
             source: None,
         }
     }
@@ -77,8 +86,48 @@ impl Error {
     /// Attaches the underlying error, reachable through [`std::error::Error::source`].
     #[must_use]
     pub fn with_source(mut self, source: impl std::error::Error + Send + Sync + 'static) -> Self {
+        // Wrapping a refusal (for example, a resume of an ended VM) keeps the
+        // work already done by the underlying control-plane request visible.
+        if self.attempts == 0
+            && let Some(error) =
+                (&source as &(dyn std::error::Error + 'static)).downcast_ref::<Self>()
+        {
+            self.attempts = error.attempts;
+            self.backoff = error.backoff;
+            self.throttled = error.throttled;
+        }
         self.source = Some(Box::new(source));
         self
+    }
+
+    /// Marks a control-plane throttle without parsing its explanation.
+    #[must_use]
+    pub fn with_throttled(mut self, throttled: bool) -> Self {
+        self.throttled = throttled;
+        self
+    }
+
+    /// Attaches the attempts and completed retry sleeps for this control-plane call.
+    #[must_use]
+    pub fn with_retry_details(mut self, attempts: u32, backoff: std::time::Duration) -> Self {
+        self.attempts = attempts;
+        self.backoff = backoff;
+        self
+    }
+
+    /// Whether the service refused this call because of throttling.
+    pub fn throttled(&self) -> bool {
+        self.throttled
+    }
+
+    /// Attempts sent for the failed call, or zero when no request telemetry is available.
+    pub fn attempt_count(&self) -> u32 {
+        self.attempts
+    }
+
+    /// Total completed retry sleeps for this call.
+    pub fn backoff(&self) -> std::time::Duration {
+        self.backoff
     }
 
     /// The coarse class, one per row of the exit-code table.

@@ -69,7 +69,7 @@
 
 use microvms_core::{Error, ErrorKind};
 use napi::ValueType;
-use napi::bindgen_prelude::{FromNapiValue, JsObjectValue, Object, Unknown};
+use napi::bindgen_prelude::{FromNapiValue, JsObjectValue, JsValue, Object, Unknown};
 
 /// Preserve source diagnostics in the message without changing the published cause levels:
 /// those carry the error code and optional wire kind, so inserting a provider there would
@@ -158,6 +158,38 @@ pub(crate) fn js_async(error: Error) -> AsyncError {
     AsyncError(error)
 }
 
+/// Drives the core future while decorating errors on the owning JS thread.
+pub(crate) fn spawn_with_retry_details<'env, T, F>(
+    env: &'env napi::Env,
+    future: F,
+) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, T>>
+where
+    T: napi::bindgen_prelude::ToNapiValue + Send + 'static,
+    F: std::future::Future<Output = Result<T, AsyncError>> + Send + 'static,
+{
+    env.spawn_future_with_callback(async move { Ok(future.await) }, |env, result| {
+        result.map_err(|error| with_retry_details(env, error))
+    })
+}
+
+/// Converts on the owning JS thread, where additional typed error properties can be set.
+/// The existing code/cause chain is preserved byte-for-byte.
+pub(crate) fn with_retry_details(env: &napi::Env, error: AsyncError) -> napi::Error {
+    let attempts = error.0.attempt_count();
+    let backoff = error.0.backoff().as_secs_f64();
+    let throttled = error.0.throttled();
+    let mapped: napi::Error = error.into();
+    let value = napi::JsError::from(mapped).into_unknown(*env);
+    let decorated = (|| -> napi::Result<napi::Error> {
+        let mut object = Object::from_unknown(value)?;
+        object.set_named_property("attemptCount", attempts)?;
+        object.set_named_property("backoffSeconds", backoff)?;
+        object.set_named_property("throttled", throttled)?;
+        Ok(napi::Error::from(object.to_unknown()))
+    })();
+    decorated.unwrap_or_else(|error| error)
+}
+
 /// Every `ERR_*` code this library can raise, for a caller building an exhaustive switch.
 ///
 /// Enumerated from the core's own `ErrorKind::ALL` rather than transcribed, so a kind added
@@ -192,6 +224,28 @@ pub fn is_retryable(error: Unknown<'_>) -> bool {
     code_of(error)
         .and_then(|code| ErrorKind::ALL.into_iter().find(|kind| kind.code() == code))
         .is_some_and(ErrorKind::retryable)
+}
+
+/// Retry telemetry on a control-plane failure. Attempts include the first request.
+#[napi_derive::napi(object)]
+pub struct RetryDetails {
+    pub attempt_count: u32,
+    pub backoff_seconds: f64,
+    pub throttled: bool,
+}
+
+/// Reads typed telemetry from a control-plane rejection, or returns null for other errors.
+#[napi_derive::napi]
+pub fn retry_details(error: Unknown<'_>) -> Option<RetryDetails> {
+    if error.get_type().ok()? != ValueType::Object {
+        return None;
+    }
+    let error = Object::from_unknown(error).ok()?;
+    Some(RetryDetails {
+        attempt_count: error.get_named_property("attemptCount").ok()?,
+        backoff_seconds: error.get_named_property("backoffSeconds").ok()?,
+        throttled: error.get_named_property("throttled").ok()?,
+    })
 }
 
 /// `error.cause.message`, when `error` is an object whose cause is one with a string message.

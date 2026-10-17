@@ -35,6 +35,144 @@
 
 use crate::error::{Error, ErrorKind};
 use crate::region::Region;
+use std::time::Duration;
+
+/// An opt-in throttle budget. Other transient errors retain the default budget.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RetryPolicy {
+    max_attempts: u32,
+    max_elapsed: Duration,
+}
+
+impl RetryPolicy {
+    /// Includes the initial request. Elapsed time includes requests and sleeps;
+    /// an in-flight request is allowed to finish, but no retry starts after the deadline.
+    pub fn new(max_attempts: u32, max_elapsed: Duration) -> Result<Self, Error> {
+        if max_attempts == 0 || max_elapsed.is_zero() {
+            return Err(Error::invalid_arg(
+                "retry max_attempts and max_elapsed must be positive",
+            ));
+        }
+        Ok(Self {
+            max_attempts,
+            max_elapsed,
+        })
+    }
+}
+
+/// Cancels pending retries without discarding an in-flight launch response.
+#[derive(Clone, Debug)]
+pub struct RetryCancellation(tokio::sync::watch::Sender<bool>);
+
+impl Default for RetryCancellation {
+    fn default() -> Self {
+        Self(tokio::sync::watch::Sender::new(false))
+    }
+}
+
+impl RetryCancellation {
+    /// Stop before the next request. An accepted launch is still recorded.
+    pub fn cancel(&self) {
+        self.0.send_replace(true);
+    }
+
+    fn is_cancelled(&self) -> bool {
+        *self.0.borrow()
+    }
+
+    pub(crate) async fn cancelled(&self) {
+        let mut receiver = self.0.subscribe();
+        let _ = receiver.wait_for(|cancelled| *cancelled).await;
+    }
+}
+
+/// Work done by one control-plane call, independent of concurrent callers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RetryDetails {
+    pub attempt_count: u32,
+    pub backoff: Duration,
+}
+
+fn retry_delays() -> backon::ExponentialBuilder {
+    backon::ExponentialBuilder::default()
+        .with_jitter()
+        .with_min_delay(Duration::from_millis(200))
+        .with_max_delay(Duration::from_secs(20))
+        .with_max_times(5)
+}
+
+/// Sends with an optional throttle budget, measuring and sleeping on the plane's clock.
+/// The call is cloned unchanged, including its idempotency token, on each attempt.
+pub(crate) async fn send_configured(
+    transport: &dyn Transport,
+    call: Call,
+    accept: &[u16],
+    policy: Option<RetryPolicy>,
+    clock: &dyn crate::clock::Clock,
+) -> Result<(Reply, RetryDetails), Error> {
+    send_cancellable(transport, call, accept, policy, clock, None).await
+}
+
+pub(crate) async fn send_cancellable(
+    transport: &dyn Transport,
+    call: Call,
+    accept: &[u16],
+    policy: Option<RetryPolicy>,
+    clock: &dyn crate::clock::Clock,
+    cancellation: Option<&RetryCancellation>,
+) -> Result<(Reply, RetryDetails), Error> {
+    use backon::BackoffBuilder;
+    let started = clock.elapsed();
+    let mut details = RetryDetails::default();
+    let mut delays = retry_delays().without_max_times().build();
+    let mut ordinary_retries = 0;
+    loop {
+        if cancellation.is_some_and(RetryCancellation::is_cancelled) {
+            return Err(Error::new(
+                ErrorKind::Interrupted,
+                "launch retries cancelled before a VM was assigned",
+            )
+            .with_retry_details(details.attempt_count, details.backoff));
+        }
+        details.attempt_count += 1;
+        let error = match transport.send(call.clone()).await {
+            Ok(reply) if reply.is_success() || accept.contains(&reply.status) => {
+                return Ok((reply, details));
+            }
+            Ok(reply) => classify_failure_in_region(call.operation, &reply, transport.region()),
+            Err(error) => error,
+        };
+        let delay = delays.next().expect("unbounded backoff");
+        let elapsed = clock.elapsed().saturating_sub(started);
+        let allowed = if error.throttled()
+            && let Some(policy) = policy
+        {
+            details.attempt_count < policy.max_attempts
+                && elapsed.saturating_add(delay) < policy.max_elapsed
+        } else {
+            ordinary_retries += 1;
+            ordinary_retries <= 5
+        };
+        if !error.retryable() || !allowed {
+            return Err(error.with_retry_details(details.attempt_count, details.backoff));
+        }
+        if let Some(cancellation) = cancellation {
+            tokio::select! {
+                _ = cancellation.cancelled() => continue,
+                _ = clock.sleep(delay) => {}
+            }
+        } else {
+            clock.sleep(delay).await;
+        }
+        details.backoff += delay;
+        // A scheduler delay can carry the sleep past the deadline.
+        if error.throttled()
+            && policy.is_some_and(|p| clock.elapsed().saturating_sub(started) >= p.max_elapsed)
+        {
+            return Err(error.with_retry_details(details.attempt_count, details.backoff));
+        }
+    }
+}
 
 /// The pinned API version, which is also the first path segment of every operation.
 ///
@@ -294,7 +432,7 @@ pub trait Transport: Send + Sync {
 /// take no token and are retried anyway: they are state transitions whose second
 /// application is a no-op or a `ConflictException`, and a conflict is not retried.
 pub async fn send_with_retry(transport: &dyn Transport, call: Call) -> Result<Reply, Error> {
-    use backon::{ExponentialBuilder, Retryable};
+    use backon::Retryable;
 
     let operation = call.operation;
     let attempt = || {
@@ -312,16 +450,19 @@ pub async fn send_with_retry(transport: &dyn Transport, call: Call) -> Result<Re
         }
     };
 
-    attempt
-        .retry(
-            ExponentialBuilder::default()
-                .with_jitter()
-                .with_min_delay(std::time::Duration::from_millis(200))
-                .with_max_delay(std::time::Duration::from_secs(20))
-                .with_max_times(5),
-        )
+    let mut details = RetryDetails {
+        attempt_count: 1,
+        backoff: Duration::ZERO,
+    };
+    let result = attempt
+        .retry(retry_delays())
         .when(Error::retryable)
-        .await
+        .notify(|_, delay| {
+            details.attempt_count += 1;
+            details.backoff += delay;
+        })
+        .await;
+    result.map_err(|error| error.with_retry_details(details.attempt_count, details.backoff))
 }
 
 /// [`send_with_retry`], answering `Ok` for the statuses in `accept` as well as for a
@@ -336,7 +477,7 @@ pub async fn send_accepting(
     call: Call,
     accept: &[u16],
 ) -> Result<Reply, Error> {
-    use backon::{ExponentialBuilder, Retryable};
+    use backon::Retryable;
 
     let operation = call.operation;
     let attempt = || {
@@ -354,16 +495,19 @@ pub async fn send_accepting(
         }
     };
 
-    attempt
-        .retry(
-            ExponentialBuilder::default()
-                .with_jitter()
-                .with_min_delay(std::time::Duration::from_millis(200))
-                .with_max_delay(std::time::Duration::from_secs(20))
-                .with_max_times(5),
-        )
+    let mut details = RetryDetails {
+        attempt_count: 1,
+        backoff: Duration::ZERO,
+    };
+    let result = attempt
+        .retry(retry_delays())
         .when(Error::retryable)
-        .await
+        .notify(|_, delay| {
+            details.attempt_count += 1;
+            details.backoff += delay;
+        })
+        .await;
+    result.map_err(|error| error.with_retry_details(details.attempt_count, details.backoff))
 }
 
 /// Turns a failure status and body into an [`Error`] of the right kind.
@@ -467,6 +611,9 @@ fn classify_failure_in_region(operation: &str, reply: &Reply, region: Option<&Re
             "{operation} failed with HTTP {}: {said}. {explanation}",
             reply.status
         ),
+    )
+    .with_throttled(
+        reply.status == 429 || reply.error_type.as_deref() == Some("ThrottlingException"),
     )
 }
 
@@ -790,6 +937,163 @@ pub mod paths {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn throttle_budget_counts_attempts_bounds_elapsed_and_keeps_other_failures_default() {
+        use crate::clock::Clock;
+        use crate::control::fake::{Answer, FakeControlPlane, TestClock};
+        for (status, policy, expected) in [
+            (429, None, 6),
+            (
+                429,
+                Some(RetryPolicy::new(3, Duration::from_secs(3600)).unwrap()),
+                3,
+            ),
+            (
+                429,
+                Some(RetryPolicy::new(9, Duration::from_millis(1)).unwrap()),
+                1,
+            ),
+            (
+                503,
+                Some(RetryPolicy::new(9, Duration::from_secs(3600)).unwrap()),
+                6,
+            ),
+            (
+                403,
+                Some(RetryPolicy::new(9, Duration::from_secs(3600)).unwrap()),
+                1,
+            ),
+        ] {
+            let transport = FakeControlPlane::new();
+            for _ in 0..10 {
+                transport.answer("RunMicrovm", Answer::failure(status, "failure"));
+            }
+            let clock = TestClock::new();
+            let error = send_configured(
+                &transport,
+                Call::get("RunMicrovm", "/run"),
+                &[],
+                policy,
+                &clock,
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(transport.call_count("RunMicrovm"), expected);
+            assert_eq!(error.attempt_count(), expected as u32);
+            assert_eq!(error.throttled(), status == 429);
+            assert_eq!(error.backoff(), clock.elapsed());
+            if expected == 1 {
+                assert_eq!(clock.elapsed(), Duration::ZERO);
+            }
+        }
+        assert!(RetryPolicy::new(0, Duration::from_secs(1)).is_err());
+        assert!(RetryPolicy::new(1, Duration::ZERO).is_err());
+    }
+
+    #[tokio::test]
+    async fn configured_retries_recover_header_throttles_with_the_identical_call() {
+        use crate::clock::Clock;
+        use crate::control::fake::{Answer, FakeControlPlane, TestClock};
+        let transport = FakeControlPlane::new();
+        for _ in 0..7 {
+            transport.answer("RunMicrovm", Answer::throttled_as_400());
+        }
+        transport.answer("RunMicrovm", Answer::ok("{}"));
+        let clock = TestClock::new();
+        let call = Call::post_json(
+            "RunMicrovm",
+            "/run",
+            &serde_json::json!({"clientToken":"same-launch"}),
+        )
+        .unwrap();
+        let (_, details) = send_configured(
+            &transport,
+            call.clone(),
+            &[],
+            Some(RetryPolicy::new(8, Duration::from_secs(3600)).unwrap()),
+            &clock,
+        )
+        .await
+        .unwrap();
+        assert_eq!(details.attempt_count, 8);
+        assert_eq!(details.backoff, clock.elapsed());
+        assert!(details.backoff > Duration::ZERO);
+        assert!(transport.calls().iter().all(|sent| sent == &call));
+        transport.answer("GetMicrovm", Answer::failure(404, "missing"));
+        let (reply, details) = send_configured(
+            &transport,
+            Call::get("GetMicrovm", "/missing"),
+            &[404],
+            None,
+            &clock,
+        )
+        .await
+        .unwrap();
+        assert_eq!(reply.status, 404);
+        assert_eq!(details.attempt_count, 1);
+        assert_eq!(details.backoff, Duration::ZERO);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn exhausted_public_retry_reports_throttle_attempts_and_backoff() {
+        use crate::control::fake::{Answer, FakeControlPlane};
+        let transport = FakeControlPlane::new();
+        for _ in 0..6 {
+            transport.answer("ListMicrovms", Answer::throttled_as_400());
+        }
+        let error = send_with_retry(&transport, Call::get("ListMicrovms", "/list"))
+            .await
+            .unwrap_err();
+        assert!(error.throttled());
+        assert_eq!(error.attempt_count(), 6);
+        assert!(error.backoff() >= Duration::from_millis(6200));
+        assert!(error.backoff() < Duration::from_millis(12400));
+    }
+
+    #[tokio::test]
+    async fn a_cancel_signal_wakes_backoff_before_another_request() {
+        use crate::clock::testing::YieldingClock;
+        use crate::control::fake::{Answer, FakeControlPlane};
+        let transport = FakeControlPlane::new();
+        transport.answer("RunMicrovm", Answer::throttled_as_400());
+        let clock = YieldingClock::new();
+        let cancellation = RetryCancellation::default();
+        let call = Call::get("RunMicrovm", "/run");
+        let pending = send_cancellable(
+            &transport,
+            call,
+            &[],
+            Some(RetryPolicy::new(100, Duration::from_secs(3600)).unwrap()),
+            &clock,
+            Some(&cancellation),
+        );
+        tokio::pin!(pending);
+        tokio::select! { biased; _ = &mut pending => panic!("backoff should yield"), _ = std::future::ready(()) => {} }
+        cancellation.cancel();
+        let error = pending.await.unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Interrupted);
+        assert_eq!(transport.call_count("RunMicrovm"), 1);
+    }
+
+    #[tokio::test]
+    async fn dropping_a_retry_future_prevents_another_request() {
+        use crate::clock::testing::YieldingClock;
+        use crate::control::fake::{Answer, FakeControlPlane};
+        let transport = FakeControlPlane::new();
+        transport.answer("RunMicrovm", Answer::throttled_as_400());
+        let clock = YieldingClock::new();
+        let mut future = Box::pin(send_configured(
+            &transport,
+            Call::get("RunMicrovm", "/run"),
+            &[],
+            Some(RetryPolicy::new(100, Duration::from_secs(3600)).unwrap()),
+            &clock,
+        ));
+        tokio::select! { biased; _ = &mut future => panic!("retry sleep should yield"), _ = std::future::ready(()) => {} }
+        drop(future);
+        assert_eq!(transport.call_count("RunMicrovm"), 1);
+    }
 
     /// The endpoint, from the model's `endpointPrefix`. `lambda` and not
     /// `lambda-microvms` — which is the fact that makes TRAP-6 possible, since this

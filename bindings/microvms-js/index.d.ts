@@ -66,7 +66,7 @@ export declare class AgentVm {
    */
   imageName(options: AgentImageOptions, size?: SizeClass | undefined | null): Promise<string>
   /** The ARN of an existing image named per `imageName`, or `null` when there is none. */
-  findImage(options: AgentImageOptions, size?: SizeClass | undefined | null): Promise<string | null>
+  findImage(options: AgentImageOptions, size?: SizeClass | undefined | null): Promise<string | undefined | null>
   /**
    * Builds or reuses this VM's image, named per `imageName`: resolved at once when ready,
    * waited on while building, deleted and rebuilt when failed, and uploaded to
@@ -209,20 +209,20 @@ export declare class ControlPlane {
    * Resolves credentials for `region` from the default chain. A factory because
    * credential resolution is async.
    */
-  static create(region: Region): Promise<ControlPlane>
+  static create(region: Region, retry?: RetryOptions | undefined | null): Promise<ControlPlane>
   /** `GetMicrovm`. */
   get(microvmId: string): Promise<Microvm>
   /** `ListMicrovms`, every page, optionally narrowed to one image and version. */
   list(options?: ListMicrovmsOptions | undefined | null): Promise<Array<MicrovmSummary>>
   /** `SuspendMicrovm`. Resolves once accepted; `waitForState` for SUSPENDED. */
-  suspend(microvmId: string): Promise<void>
+  suspend(microvmId: string): Promise<undefined>
   /**
    * `ResumeMicrovm`. Resolves once accepted; `waitForState` for RUNNING. A VM that ended
    * before the resume, whatever ended it, rejects with `ERR_WINDOW_CLOSED` (STATE-12).
    */
-  resume(microvmId: string): Promise<void>
+  resume(microvmId: string): Promise<undefined>
   /** `TerminateMicrovm`. Resolves once accepted; `waitForState` for TERMINATED. */
-  terminate(microvmId: string): Promise<void>
+  terminate(microvmId: string): Promise<undefined>
   /**
    * Polls `GetMicrovm` until the state is one of `wanted`.
    *
@@ -828,7 +828,7 @@ export declare class Sandbox {
    * `#[napi(constructor)]` cannot be. `region` is a [`Region`] instance and not a string,
    * which is TRAP-6 at this boundary.
    */
-  static create(region: Region): Promise<Sandbox>
+  static create(region: Region, retry?: RetryOptions | undefined | null): Promise<Sandbox>
   /**
    * The lifecycle state: `"PENDING"`, `"RUNNING"`, `"SUSPENDING"`, `"SUSPENDED"`,
    * `"TERMINATING"`, or `"TERMINATED"`.
@@ -959,7 +959,7 @@ export declare class Sandbox {
    * `buildImage` would, so a caller who uploads its own artifact checks the request before
    * paying for the upload. Takes `buildImage`'s arguments.
    */
-  preflight(options: BuildImageOptions, size?: SizeClass | undefined | null, runHookTimeout?: RunHookTimeout | undefined | null, buildHookTimeout?: BuildHookTimeout | undefined | null): Promise<void>
+  preflight(options: BuildImageOptions, size?: SizeClass | undefined | null, runHookTimeout?: RunHookTimeout | undefined | null, buildHookTimeout?: BuildHookTimeout | undefined | null): Promise<undefined>
   /**
    * `ListManagedMicrovmImageVersions`, every page: the versions of a managed base, the
    * values `buildImage`'s base-version pin takes.
@@ -1045,6 +1045,8 @@ export declare class Sandbox {
 
 /** One running MicroVM's control API, with the proxy auth handled for you. */
 export declare class Session {
+  /** Launch observations, absent for sessions not created by a launch. */
+  launchMetrics(): Promise<LaunchMetrics | null>
   /**
    * A session against a daemon reached **directly**, with no proxy headers.
    *
@@ -2233,6 +2235,14 @@ export interface KeepAwakeReport {
   elapsedSec: number
 }
 
+/** Observations made by the client during launch. */
+export interface LaunchMetrics {
+  attemptCount: number
+  backoffSeconds: number
+  runningAt?: number
+  readyAt?: number
+}
+
 /** The service's optional `ListMicrovms` filters. */
 export interface ListMicrovmsOptions {
   imageIdentifier?: string
@@ -2563,6 +2573,22 @@ export interface ProvisionOptions {
   stateDir?: string
   /** A binary the caller manages. Outranks `$MICROVM_AGENTD`; must be an aarch64 ELF. */
   binary?: string
+}
+
+/** Reads typed telemetry from a control-plane rejection, or returns null for other errors. */
+export declare function retryDetails(error: unknown): RetryDetails | null
+
+/** Retry telemetry on a control-plane failure. Attempts include the first request. */
+export interface RetryDetails {
+  attemptCount: number
+  backoffSeconds: number
+  throttled: boolean
+}
+
+/** Optional throttle-only budget; attempts include the first request. */
+export interface RetryOptions {
+  maxAttempts: number
+  maxElapsedSeconds: number
 }
 
 /** Everything a launch needs. */

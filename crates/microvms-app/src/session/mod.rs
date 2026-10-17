@@ -221,6 +221,16 @@ fn unauthenticated(mut request: HttpRequest) -> HttpRequest {
     request
 }
 
+/// Measurements observed by this client's launch, in Unix seconds for timestamps.
+/// Absent timestamps mean that phase has not been observed by this client.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LaunchMetrics {
+    pub attempt_count: u32,
+    pub backoff_seconds: f64,
+    pub running_at: Option<f64>,
+    pub ready_at: Option<f64>,
+}
+
 /// The control API of one running MicroVM.
 ///
 /// `Clone` shares the transport, including the cached proxy token, so a clone moved into a
@@ -228,6 +238,7 @@ fn unauthenticated(mut request: HttpRequest) -> HttpRequest {
 #[derive(Clone)]
 pub struct Session {
     transport: Arc<Transport>,
+    pub(crate) launch_metrics: Option<Arc<std::sync::Mutex<LaunchMetrics>>>,
     upload_identity: Arc<tokio::sync::OnceCell<(u32, u32)>>,
     endpoint: String,
     port: u16,
@@ -238,6 +249,15 @@ pub struct Session {
 }
 
 impl Session {
+    /// Launch observations, or `None` when this session did not originate from a launch.
+    pub fn launch_metrics(&self) -> Option<LaunchMetrics> {
+        self.launch_metrics.as_ref().map(|metrics| {
+            *metrics
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        })
+    }
+
     /// The bearer this session authenticates with.
     ///
     /// Public because a caller who launched with a minted token needs to read it back
@@ -449,7 +469,16 @@ impl Session {
         let mut last: Option<Error> = None;
         loop {
             match self.health().await {
-                Ok(health) if health.bootstrapped => return Ok(health),
+                Ok(health) if health.bootstrapped => {
+                    if let Some(metrics) = &self.launch_metrics {
+                        metrics
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .ready_at
+                            .get_or_insert_with(|| self.clock.unix_now().as_secs_f64());
+                    }
+                    return Ok(health);
+                }
                 Ok(_) => {}
                 Err(err) if err.retryable() => last = Some(err),
                 Err(err) => return Err(err),
@@ -719,6 +748,7 @@ impl SessionBuilder {
             (None, None) => None,
         };
         Ok(Session {
+            launch_metrics: None,
             upload_identity: Arc::new(tokio::sync::OnceCell::new()),
             transport: Arc::new(Transport {
                 backend,

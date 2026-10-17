@@ -409,6 +409,16 @@ async fn parity_control_plane(case: &parity_corpus::Case) -> serde_json::Value {
         microvms_core::testing::ParityControlPlane::from_json(&case.input("script").to_string())
             .unwrap();
     let seam = ParitySeam {
+        retry: case.input.get("retry").map(|retry| {
+            microvms_core::control::transport::RetryPolicy::new(
+                retry["max_attempts"].as_u64().unwrap().try_into().unwrap(),
+                microvms_core::duration::of_secs_f64(
+                    retry["max_elapsed_seconds"].as_f64().unwrap(),
+                )
+                .unwrap(),
+            )
+            .unwrap()
+        }),
         transport: transport.clone(),
         refusing: RefusingSeam::new(),
     };
@@ -475,6 +485,9 @@ async fn parity_control_plane(case: &parity_corpus::Case) -> serde_json::Value {
                 if case.input.get("message_mentions").is_some() {
                     answer["message_mentions"] = case.message_mentions(&error.message);
                 }
+                if case.input.get("report_retry").is_some() {
+                    answer["retry"] = serde_json::json!({"attempt_count": error.data["attemptCount"], "backoff_positive": error.data["backoffSeconds"].as_f64().unwrap() > 0.0, "throttled": error.data["throttled"]});
+                }
                 answer["calls"] = serde_json::json!(transport.calls());
                 return answer;
             }
@@ -485,6 +498,7 @@ async fn parity_control_plane(case: &parity_corpus::Case) -> serde_json::Value {
 
 /// The CLI receives the same ordered script as the bindings, with no alternate response map.
 struct ParitySeam {
+    retry: Option<microvms_core::control::transport::RetryPolicy>,
     transport: Arc<microvms_core::testing::ParityControlPlane>,
     refusing: RefusingSeam,
 }
@@ -497,7 +511,10 @@ impl crate::seam::CoreSeam for ParitySeam {
         '_,
         Result<microvms_core::control::ControlPlane, microvms_core::Error>,
     > {
-        let plane = self.transport.plane();
+        let plane = match self.retry {
+            Some(policy) => self.transport.plane().with_retry(policy),
+            None => self.transport.plane(),
+        };
         Box::pin(async move { Ok(plane) })
     }
 

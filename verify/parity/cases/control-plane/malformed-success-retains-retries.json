@@ -1,0 +1,38 @@
+{
+  "capability": "suspend-by-id",
+  "input": {
+    "microvm_id": "mvm-parity",
+    "actions": [
+      "suspend"
+    ],
+    "report_retry": true,
+    "script": [
+      {
+        "operation": "GetMicrovm",
+        "status": 429,
+        "body": "{}"
+      },
+      {
+        "operation": "GetMicrovm",
+        "status": 200,
+        "body": "{}"
+      }
+    ]
+  },
+  "expect": {
+    "error": {
+      "code": "ERR_PLATFORM",
+      "wire_kind": null,
+      "retryable": false
+    },
+    "calls": [
+      "GetMicrovm",
+      "GetMicrovm"
+    ],
+    "retry": {
+      "attempt_count": 2,
+      "backoff_positive": true,
+      "throttled": false
+    }
+  }
+}

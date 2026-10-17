@@ -176,6 +176,9 @@ pub(crate) fn to_py_err(py: Python<'_>, error: &Error) -> PyErr {
         error.wire_kind().map(microvms_core::WireKind::as_str),
     );
     let _ = value.setattr("retryable", error.retryable());
+    let _ = value.setattr("throttled", error.throttled());
+    let _ = value.setattr("attempt_count", error.attempt_count());
+    let _ = value.setattr("backoff_seconds", error.backoff().as_secs_f64());
     raised
 }
 

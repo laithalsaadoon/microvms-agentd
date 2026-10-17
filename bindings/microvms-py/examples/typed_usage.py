@@ -428,3 +428,10 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def retry_telemetry(error: MicrovmError) -> tuple[int, float, bool]:
+    assert_type(error.attempt_count, int)
+    assert_type(error.backoff_seconds, float)
+    assert_type(error.throttled, bool)
+    return error.attempt_count, error.backoff_seconds, error.throttled
