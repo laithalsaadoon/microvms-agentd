@@ -99,12 +99,16 @@ jobs:
           path: draft-release
           if-no-files-found: error
 
+  native-box:
+    needs: owner
+    uses: ./.github/workflows/native-box.yml
+
   live:
     name: real AWS
-    needs: [owner, draft]
+    needs: [owner, draft, native-box]
     # Every run needs its matching release for quickstart. A missing release fails before
     # AWS work; main still tests its own source-built daemon and CLI in the other sections.
-    if: ${{ !cancelled() && needs.owner.result == 'success' && needs.draft.result == 'success' }}
+    if: ${{ !cancelled() && needs.owner.result == 'success' && needs.native-box.result == 'success' && needs.draft.result == 'success' }}
     runs-on: ubuntu-latest
     environment: live-aws
     timeout-minutes: 90
@@ -184,6 +188,13 @@ jobs:
         with:
           name: draft-release
           path: draft-release
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: native-box
+          path: examples/strands-box-codex-sdk/.box-bin
+      - name: restore executable modes on native Box artifacts
+        run: chmod +x examples/strands-box-codex-sdk/.box-bin/strands-box*
 
       # The directory supplies quickstart's matching release on branches and tags alike.
       # It does not replace main's source-built AGENTD or MICROVM.

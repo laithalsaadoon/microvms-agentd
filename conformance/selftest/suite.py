@@ -32,6 +32,7 @@ from selftest.image_versions import check_image_versions_section
 from selftest.isolated_image import check_isolated_known_vm
 from selftest.local import check_doctor_region_lines, check_preflight_lines
 from selftest.names import check_terminate_fallback
+from selftest.native_box import check_native_box
 from selftest.platform_measurements import check_platform_measurements
 from selftest.posture import check_execution_role_policy, check_posture_lines
 from selftest.poweroff import check_poweroff_lane
@@ -63,6 +64,7 @@ def self_test() -> int:
         check_cli8_attribution(results)
         check_run_section(results)
         check_terminate_fallback(results)
+        check_native_box(results, Path(tmp))
         check_bdd_outcome(results)
         check_posture_lines(results)
         check_execution_role_policy(results)

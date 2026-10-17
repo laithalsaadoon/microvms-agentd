@@ -19,6 +19,27 @@ and runs six scenarios through the SDK. It prints the rule that decided each sce
 `microvm terminate`. The script writes the results and Box's decision log to `out/`. It exits 0
 only when both metadata probes and all six scenarios pass.
 
+## Native build verification
+
+The `native Box build` workflow runs `build-box.sh` on GitHub's native
+`ubuntu-24.04-arm` runner. Download its `native-box` artifact for the binaries
+and `build.json`. The receipt records the exact Box commit, host architecture,
+and Rust compiler. It also records the cargo-zigbuild and Zig versions, target
+glibc, and SHA-256 hash of each binary.
+
+The live suite builds Box from the same pinned commit and checks the receipt
+and hashes. It then runs this example's metadata probes and policy scenarios.
+A native build alone does not prove that the example works in a MicroVM.
+The named `native_box` checks in a green live run provide that proof.
+
+`run.sh` accepts `MICROVM` (the command-line tool path), `BOX_IMAGE` (an image built earlier),
+`BOX_BIN_DIR`, and `BOX_OUT_DIR`. The live suite stages a private config for
+either `us-east-1` or `us-west-2`. The checked-in east-region template stays
+unchanged. The suite builds the image with its own daemon. After the run, it
+deletes the VM, image, S3 artifacts, and service log groups and checks each
+deletion. Raw model responses and Box decision logs stay in temporary
+storage. They do not enter the workflow's logs or artifacts.
+
 ## The layers
 
 From the outside in:

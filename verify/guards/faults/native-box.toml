@@ -1,0 +1,40 @@
+[[family]]
+guard = "conformance/run_rs.py --self-test: conformance/selftest/native_box.py"
+run = ["./conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "native-box-host"
+message = "FAIL  native Box rejects missing hostArchitecture"
+transform = { file = "conformance/lanes/native_box.py", replace = 'and receipt.get("hostArchitecture") == "aarch64"', with = 'and True' }
+
+[[family.fault]]
+id = "native-box-tool-version"
+message = "FAIL  native Box records supported tool version commands"
+transform = { file = "examples/strands-box-codex-sdk/build-box.sh", replace = 'version("cargo-zigbuild", "--version")', with = 'version("cargo", "zigbuild", "--version")' }
+
+[[family.fault]]
+id = "native-box-digest"
+message = "FAIL  native Box rejects changed strands-box"
+transform = { file = "conformance/lanes/native_box.py", replace = '== hashlib.sha256((directory / name).read_bytes()).hexdigest()', with = '== receipt.get("sha256", {}).get(name)' }
+
+[[family.fault]]
+id = "native-box-metadata"
+message = "FAIL  native Box rejects missing metadata-outside"
+transform = { file = "conformance/lanes/native_box.py", replace = 'report.get(f"metadata-{where}")', with = '"passed\n"' }
+
+[[family.fault]]
+id = "native-box-scenario"
+message = "FAIL  native Box rejects release-before-tests checks="
+transform = { file = "conformance/lanes/native_box.py", replace = 'all(check.get("ok") is True for check in checks)', with = 'True' }
+
+[[family.fault]]
+id = "native-box-region"
+message = "FAIL  native Box stages the gateway, policy and model for us-west-2"
+transform = { file = "examples/strands-box-codex-sdk/stage_box.py", replace = 'path.write_text(text.replace("us-east-1", region))', with = 'path.write_text(text)' }
+
+[[family.fault]]
+id = "native-box-cleanup-privacy"
+message = "FAIL  native Box cleanup omits resource identifiers from logs"
+transform = { file = "conformance/lanes/native_box.py", replace = 'return super().check(name, ok)', with = 'return super().check(name, ok, detail)' }

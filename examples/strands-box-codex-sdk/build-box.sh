@@ -38,11 +38,41 @@ rustup toolchain install "$TOOLCHAIN" --profile minimal >/dev/null
 rustup target add "$TARGET" --toolchain "$TOOLCHAIN" >/dev/null
 
 # The `.2.34` suffix is cargo-zigbuild's glibc pin: link against AL2023's glibc.
-cargo zigbuild --release --target "$TARGET.2.34" -p strands-box -p strands-box-containment
+cargo zigbuild --locked --release --target "$TARGET.2.34" -p strands-box -p strands-box-containment
 
 mkdir -p "$OUT"
 for bin in strands-box strands-box-sock-alias strands-box-contain-trampoline; do
   install -m 0755 "target/$TARGET/release/$bin" "$OUT/$bin"
 done
 echo "$BOX_COMMIT" > "$OUT/COMMIT"
+# Record the native host separately from the target: a cross build is not evidence
+# for the native aarch64 path. Hashes bind the receipt to the binaries later run.
+python3 - "$OUT" <<'PY_RECEIPT'
+import hashlib
+import json
+import pathlib
+import platform
+import subprocess
+import sys
+
+out = pathlib.Path(sys.argv[1])
+def version(*args):
+    return subprocess.check_output(args, text=True).strip()
+
+receipt = {
+    "sourceRevision": version("git", "rev-parse", "HEAD"),
+    "hostSystem": platform.system(),
+    "hostArchitecture": platform.machine(),
+    "target": "aarch64-unknown-linux-gnu.2.34",
+    "rustc": version("rustc", "--version"),
+    "cargoZigbuild": version("cargo-zigbuild", "--version"),
+    "zig": version("zig", "version"),
+    "sha256": {
+        name: hashlib.sha256((out / name).read_bytes()).hexdigest()
+        for name in ("strands-box", "strands-box-sock-alias", "strands-box-contain-trampoline")
+    },
+}
+(out / "build.json").write_text(json.dumps(receipt, indent=2) + "\n")
+print(json.dumps(receipt, indent=2))
+PY_RECEIPT
 echo "built Strands Box $BOX_COMMIT for $TARGET into $OUT" >&2
