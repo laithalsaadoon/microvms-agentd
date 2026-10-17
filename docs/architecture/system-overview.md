@@ -25,7 +25,7 @@ The workspace also contains `agentd-model` for state exploration and `model-conf
 | Layer | Technology | Source |
 | --- | --- | --- |
 | Language | Rust, `edition = "2024"` | `Cargo.toml:30` |
-| Toolchain | `channel = "1.99.0"` | `rust-toolchain.toml:22` |
+| Toolchain | `channel = "1.99.1"` | `rust-toolchain.toml:22` |
 | Guest HTTP | `axum = { version = "0.8.9", features = ["ws"] }` | `crates/agentd/Cargo.toml:25` |
 | Asynchronous runtime | `tokio = { version = "1.53", features = ["time", "sync", "io-util", "macros", "rt"] }` | `crates/microvms-app/Cargo.toml:33` |
 | Host HTTP | `reqwest` with `version = "0.13"` and `"rustls"` | `crates/microvms-edges/Cargo.toml:58` |
