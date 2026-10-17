@@ -1108,6 +1108,10 @@ mod tests {
         ));
         tokio::select! { biased; _ = &mut future => panic!("retry sleep should yield"), _ = std::future::ready(()) => {} }
         drop(future);
+        // Let any accidentally detached retry run after its backoff before checking.
+        clock.advance(Duration::from_secs(3600));
+        tokio::task::yield_now().await;
+        tokio::task::yield_now().await;
         assert_eq!(transport.call_count("RunMicrovm"), 1);
     }
 

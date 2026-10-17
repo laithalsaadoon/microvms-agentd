@@ -2384,14 +2384,18 @@ mod tests {
     async fn cancelled_retry_does_not_launch_before_any_request() {
         use crate::control::transport::RetryCancellation;
         let (mut sandbox, recorder, _) = planted();
+        recorder.answer(
+            "RunMicrovm",
+            Answer::failure(403, "pre-cancelled request reached the transport"),
+        );
         let cancellation = RetryCancellation::default();
         cancellation.cancel();
         let error = sandbox
             .run_cancellable(RunRequest::new().with_image("arn:image"), &cancellation)
             .await
             .unwrap_err();
-        assert_eq!(error.kind(), ErrorKind::Interrupted);
         assert_eq!(recorder.call_count("RunMicrovm"), 0);
+        assert_eq!(error.kind(), ErrorKind::Interrupted);
         assert!(sandbox.microvm().is_none());
     }
 
