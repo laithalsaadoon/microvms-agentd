@@ -20,6 +20,7 @@ static PROVIDERS: OnceLock<RegionProviders> = OnceLock::new();
 
 pub(super) fn diagnostic(error: &CredentialsError) -> Error {
     use aws_credential_types::provider::error::TokenError;
+    use aws_smithy_runtime_api::client::result::ConnectorError;
 
     // Provider errors can contain secret values, even in an ancestor's Display (for
     // example VarError::NotUnicode from AWS_SECRET_ACCESS_KEY). Keep only known error
@@ -57,6 +58,10 @@ pub(super) fn diagnostic(error: &CredentialsError) -> Error {
             || inner
                 .downcast_ref::<reqwest::Error>()
                 .is_some_and(reqwest::Error::is_timeout)
+            || inner
+                .downcast_ref::<ConnectorError>()
+                .is_some_and(ConnectorError::is_timeout)
+            || inner.is::<aws_smithy_async::future::timeout::TimedOutError>()
         {
             "credential provider request timed out"
         } else {
@@ -67,6 +72,11 @@ pub(super) fn diagnostic(error: &CredentialsError) -> Error {
             messages.push(message);
         }
         source = inner.source();
+    }
+    // Some SDK cache failures have private types and no typed source. Give useful
+    // guidance without interpreting provider-owned text or claiming a specific cause.
+    if messages.as_slice() == ["credential provider failed"] {
+        messages.push("check provider availability and timeout settings");
     }
     Error::new(ErrorKind::Credentials, messages.join(": "))
 }
@@ -252,6 +262,77 @@ mod tests {
             assert!(!format!("{safe} {safe:?}").contains("SYNTHETIC_CREDENTIAL_SENTINEL"));
             assert!(std::error::Error::source(&safe).is_none());
         }
+    }
+
+    #[test]
+    fn smithy_http_timeouts_keep_typed_categories_without_provider_text() {
+        use aws_smithy_runtime_api::client::result::ConnectorError;
+
+        let errors = [
+            CredentialsError::provider_error(ConnectorError::timeout(
+                "SYNTHETIC_CREDENTIAL_SENTINEL".into(),
+            )),
+            CredentialsError::not_loaded(ConnectorError::timeout(
+                "SYNTHETIC_CREDENTIAL_SENTINEL".into(),
+            )),
+            CredentialsError::provider_error(aws_smithy_async::future::timeout::TimedOutError),
+        ];
+        for error in errors {
+            let safe = diagnostic(&error);
+            assert!(
+                safe.to_string()
+                    .contains("credential provider request timed out")
+            );
+            assert!(!format!("{safe} {safe:?}").contains("SYNTHETIC_CREDENTIAL_SENTINEL"));
+            assert!(std::error::Error::source(&safe).is_none());
+        }
+
+        let other = CredentialsError::provider_error(ConnectorError::io(
+            std::io::Error::other("SYNTHETIC_CREDENTIAL_SENTINEL timed out").into(),
+        ));
+        let safe = diagnostic(&other);
+        assert!(!safe.to_string().contains("request timed out"));
+        assert!(!format!("{safe} {safe:?}").contains("SYNTHETIC_CREDENTIAL_SENTINEL"));
+        assert!(std::error::Error::source(&safe).is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn opaque_cache_timeout_keeps_safe_actionable_guidance() {
+        #[derive(Debug)]
+        struct PendingProvider;
+
+        impl ProvideCredentials for PendingProvider {
+            fn provide_credentials<'a>(&'a self) -> future::ProvideCredentials<'a>
+            where
+                Self: 'a,
+            {
+                future::ProvideCredentials::new(std::future::pending())
+            }
+        }
+
+        let config = aws_config::SdkConfig::builder()
+            .credentials_provider(SharedCredentialsProvider::new(PendingProvider))
+            .identity_cache(
+                aws_config::identity::IdentityCache::lazy()
+                    .load_timeout(Duration::from_millis(1))
+                    .build(),
+            )
+            .time_source(Clock::default())
+            .sleep_impl(TokioSleep::new())
+            .build();
+        let error = cached(&config)
+            .unwrap()
+            .provide_credentials()
+            .await
+            .unwrap_err();
+        let safe = diagnostic(&error);
+        assert_eq!(
+            safe.to_string(),
+            "credential provider failed: check provider availability and timeout settings"
+        );
+        assert_eq!(safe.kind(), ErrorKind::Credentials);
+        assert!(!safe.to_string().contains("timed out"));
+        assert!(std::error::Error::source(&safe).is_none());
     }
 
     #[derive(Clone, Debug, Default)]
