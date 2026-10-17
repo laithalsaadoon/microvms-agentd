@@ -1,0 +1,10 @@
+# The CLI must require --yes before a prefix sweep mutates matched resources.
+
+[[fault]]
+id = "gc-requires-confirmation"
+guard = "guards::image::gc_dry_run_requires_explicit_confirmation"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::image::gc_dry_run_requires_explicit_confirmation"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/microvms-cli/src/guards/image.rs::gc_dry_run_requires_explicit_confirmation"
+transform = { file = "crates/microvms-cli/src/commands/image.rs", replace = "dry_run: !args.yes,", with = "dry_run: args.yes," }

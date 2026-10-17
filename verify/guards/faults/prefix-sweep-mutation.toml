@@ -1,0 +1,27 @@
+# Each fault reproduces a surviving hosted mutation of cleanup's decisions.
+
+[[family]]
+guard = "control::sweep::tests::cleanup_confirms_termination_before_deletion_and_image_absence"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::sweep::tests::cleanup_confirms_termination_before_deletion_and_image_absence"]
+expect = "test-failed"
+suite = "rust"
+
+[[family.fault]]
+id = "sweep-version-page-continuation"
+transform = { file = "crates/microvms-app/src/control/image.rs", replace = "Some(token) if pacing.is_none() || seen.insert(token.clone()) => {", with = "Some(token) if pacing.is_none() && seen.insert(token.clone()) => {" }
+
+[[family.fault]]
+id = "sweep-termination-exit-condition"
+transform = { file = "crates/microvms-app/src/control/sweep.rs", replace = "if !pending\n                || self.clock().elapsed().saturating_sub(started) >= DEFAULT_LIFECYCLE_TIMEOUT", with = "if !pending\n                && self.clock().elapsed().saturating_sub(started) >= DEFAULT_LIFECYCLE_TIMEOUT" }
+
+[[family.fault]]
+id = "sweep-live-vm-image-match"
+transform = { file = "crates/microvms-app/src/control/sweep.rs", replace = "vm.image_arn == image.image_arn && vm.state != \"TERMINATED\"", with = "vm.image_arn != image.image_arn && vm.state != \"TERMINATED\"" }
+
+[[family.fault]]
+id = "sweep-deleted-image-match"
+transform = { file = "crates/microvms-app/src/control/sweep.rs", replace = "!remaining.iter().any(|image| &image.image_arn == *arn)", with = "!remaining.iter().any(|image| &image.image_arn != *arn)" }
+
+[[family.fault]]
+id = "sweep-deletion-deadline"
+transform = { file = "crates/microvms-app/src/control/sweep.rs", replace = "if self.clock().elapsed().saturating_sub(started) >= DEFAULT_LIFECYCLE_TIMEOUT {", with = "if self.clock().elapsed().saturating_sub(started) < DEFAULT_LIFECYCLE_TIMEOUT {" }

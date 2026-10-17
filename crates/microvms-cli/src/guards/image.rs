@@ -10,7 +10,7 @@ use microvms_core::control::ops::VersionStatus;
 use microvms_core::testing::{self as fake, YieldingClock};
 
 use super::support::{ScriptedSeam, ScriptedTransport, dispatch_with, full_infra, region_flags};
-use crate::cli::{Command, ImageBuildsArgs, ImageSetStatusArgs, ImageVersionsArgs};
+use crate::cli::{Command, GcArgs, ImageBuildsArgs, ImageSetStatusArgs, ImageVersionsArgs};
 
 const ARN: &str = "arn:aws:lambda:us-east-1:123456789012:microvm-image:img";
 
@@ -158,4 +158,54 @@ async fn image_builds_lists_a_versions_builds_or_reads_one_with_its_sizes() {
         .map(|build| build["buildState"].as_str().expect("a state"))
         .collect();
     assert_eq!(states, ["SUCCESSFUL", "FAILED"]);
+}
+
+/// Cleanup must be an explicit choice even when discovery finds a deletable image.
+///
+/// **Falsification**: `gc-requires-confirmation` removes the negation when the handler
+/// forwards `--yes`; the unconfirmed call deletes the image and reports cleanup.
+#[tokio::test]
+async fn gc_dry_run_requires_explicit_confirmation() {
+    for yes in [false, true] {
+        let transport = Arc::new(ScriptedTransport::new());
+        transport
+            .answer(
+                "ListMicrovmImages",
+                200,
+                r#"{"items":[{"imageArn":"arn:old","name":"job-old","state":"CREATED"}]}"#,
+            )
+            .answer("ListMicrovmImages", 200, r#"{"items":[]}"#)
+            .answer("ListMicrovms", 200, r#"{"items":[]}"#)
+            .answer("ListMicrovmImageVersions", 200, r#"{"items":[]}"#)
+            .answer(
+                "DeleteMicrovmImage",
+                200,
+                r#"{"imageIdentifier":"arn:old","state":"DELETING"}"#,
+            );
+        let command = Command::Gc(GcArgs {
+            prefix: "job-".into(),
+            keep: Vec::new(),
+            yes,
+            region: region_flags(),
+        });
+        let (result, _) = dispatch_with(&seam(&transport), &command, full_infra()).await;
+        let rendered = result.expect("prefix sweep succeeds");
+
+        assert_eq!(rendered.kind, "microvm.gc");
+        assert_eq!(
+            rendered.data["imagesMatched"],
+            serde_json::json!(["arn:old"])
+        );
+        assert_eq!(rendered.data["dryRun"], !yes);
+        assert_eq!(transport.called("DeleteMicrovmImage"), usize::from(yes));
+        if yes {
+            assert_eq!(
+                rendered.data["imagesDeleted"],
+                serde_json::json!(["arn:old"])
+            );
+        } else {
+            assert_eq!(rendered.data["imagesDeleted"], serde_json::json!([]));
+            assert_eq!(transport.calls(), ["ListMicrovmImages", "ListMicrovms"]);
+        }
+    }
 }

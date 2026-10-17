@@ -293,7 +293,7 @@ impl ControlPlane {
 mod tests {
     use super::*;
     use crate::region::Region;
-    use crate::testing::{Answer, FakeControlPlane, TestClock, control_plane};
+    use crate::testing::{Answer, FakeControlPlane, TestClock, control_plane, list_versions_page};
     use std::sync::Arc;
 
     fn fixture() -> (Arc<FakeControlPlane>, Arc<TestClock>, ControlPlane) {
@@ -306,6 +306,18 @@ mod tests {
     const IMAGES: &str = r#"{"items":[{"imageArn":"arn:old","name":"job-old","state":"CREATED"},{"imageArn":"arn:keep","name":"job-keep","state":"CREATED"},{"imageArn":"arn:foreign","name":"other-job-old","state":"CREATED"}]}"#;
     const VMS: &str = r#"{"items":[{"microvmId":"mvm-old","imageArn":"arn:old","imageVersion":"1","state":"RUNNING","startedAt":1234.5},{"microvmId":"mvm-keep","imageArn":"arn:keep","imageVersion":"1","state":"RUNNING"},{"microvmId":"mvm-foreign","imageArn":"arn:foreign","imageVersion":"1","state":"RUNNING"},{"microvmId":"mvm-done","imageArn":"arn:old","imageVersion":"1","state":"TERMINATED"}]}"#;
     const EMPTY: &str = r#"{"items":[]}"#;
+
+    fn polls_through_deadline(fake: &FakeControlPlane, body: &str) {
+        for _ in 0..=DEFAULT_LIFECYCLE_TIMEOUT.as_secs() / LIFECYCLE_POLL_INTERVAL.as_secs() {
+            fake.answer("ListMicrovms", Answer::ok(body));
+        }
+        // A broken loop condition must fail the report assertions, not repeat a ready
+        // future forever and prevent the test runner from observing the failure.
+        fake.answer(
+            "ListMicrovms",
+            Answer::failure(403, "polling exceeded the deadline"),
+        );
+    }
 
     #[tokio::test]
     async fn dry_run_protects_keep_names_and_arns_and_filters_substrings() {
@@ -373,12 +385,34 @@ mod tests {
     async fn cleanup_confirms_termination_before_deletion_and_image_absence() {
         let (fake, _, plane) = fixture();
         fake.answer("ListMicrovmImages", Answer::ok(IMAGES));
-        fake.answer("ListMicrovmImages", Answer::ok(EMPTY));
+        fake.answer("ListMicrovmImages", Answer::ok(IMAGES));
+        fake.answer(
+            "ListMicrovmImages",
+            Answer::ok(
+                r#"{"items":[{"imageArn":"arn:keep","name":"job-keep","state":"CREATED"}]}"#,
+            ),
+        );
+        fake.answer(
+            "ListMicrovmImages",
+            Answer::failure(403, "deletion was already confirmed"),
+        );
         fake.answer("ListMicrovms", Answer::ok(VMS));
         fake.answer("ListMicrovms", Answer::ok(r#"{"items":[{"microvmId":"mvm-old","imageArn":"arn:old","imageVersion":"1","state":"TERMINATING"}]}"#));
-        fake.answer("ListMicrovms", Answer::ok(r#"{"items":[{"microvmId":"mvm-old","imageArn":"arn:old","imageVersion":"1","state":"TERMINATED"}]}"#));
+        fake.answer("ListMicrovms", Answer::ok(r#"{"items":[{"microvmId":"mvm-old","imageArn":"arn:old","imageVersion":"1","state":"TERMINATED"},{"microvmId":"mvm-foreign","imageArn":"arn:foreign","imageVersion":"1","state":"RUNNING"}]}"#));
+        fake.answer(
+            "ListMicrovms",
+            Answer::failure(403, "termination was already confirmed"),
+        );
         fake.answer("TerminateMicrovm", Answer::ok("{}"));
-        fake.answer("ListMicrovmImageVersions", Answer::ok(EMPTY));
+        fake.answer(
+            "ListMicrovmImageVersions",
+            Answer::ok(list_versions_page(&["1"], Some("versions-next"))),
+        );
+        fake.answer(
+            "ListMicrovmImageVersions",
+            Answer::ok(list_versions_page(&["2"], None)),
+        );
+        fake.answer("DeleteMicrovmImageVersion", Answer::ok("{}"));
         fake.answer(
             "DeleteMicrovmImage",
             Answer::ok(r#"{"imageIdentifier":"arn:old","state":"DELETING"}"#),
@@ -396,6 +430,13 @@ mod tests {
         assert_eq!(report.microvms_terminated, ["mvm-old"]);
         assert_eq!(report.images_deleted, ["arn:old"]);
         assert!(report.images_in_use.is_empty() && report.failures.is_empty());
+        assert_eq!(fake.call_count("ListMicrovmImages"), 3);
+        assert_eq!(fake.call_count("ListMicrovmImageVersions"), 2);
+        assert_eq!(fake.call_count("DeleteMicrovmImageVersion"), 1);
+        assert!(fake.calls().iter().any(|call| {
+            call.operation == "ListMicrovmImageVersions"
+                && call.path.contains("nextToken=versions-next")
+        }));
         let calls = fake.calls();
         let deleted = calls
             .iter()
@@ -425,9 +466,10 @@ mod tests {
 
     #[tokio::test]
     async fn cleanup_reports_held_images_without_deleting_them() {
-        let (fake, _, plane) = fixture();
+        let (fake, clock, plane) = fixture();
         fake.answer("ListMicrovmImages", Answer::ok(IMAGES));
         fake.answer("ListMicrovms", Answer::ok(VMS));
+        polls_through_deadline(&fake, VMS);
         fake.answer("TerminateMicrovm", Answer::failure(403, "denied"));
         let report = plane
             .sweep(
@@ -442,6 +484,7 @@ mod tests {
         assert_eq!(report.images_in_use, ["arn:old"]);
         assert_eq!(report.failures.len(), 1);
         assert_eq!(report.failures[0].resource, "mvm-old");
+        assert!(clock.now() >= DEFAULT_LIFECYCLE_TIMEOUT);
         assert!(report.microvms_terminated.is_empty() && report.images_deleted.is_empty());
         assert!(
             fake.calls()
@@ -455,7 +498,7 @@ mod tests {
         let (fake, _, plane) = fixture();
         fake.answer("ListMicrovmImages", Answer::ok(IMAGES));
         fake.answer("ListMicrovms", Answer::ok(VMS));
-        fake.answer("ListMicrovms", Answer::ok(EMPTY));
+        polls_through_deadline(&fake, EMPTY);
         fake.answer("TerminateMicrovm", Answer::ok("{}"));
         let report = plane
             .sweep(
@@ -469,6 +512,7 @@ mod tests {
             .unwrap();
         assert!(report.microvms_terminated.is_empty());
         assert_eq!(report.images_in_use, ["arn:old"]);
+        assert!(report.failures.is_empty());
         assert!(
             fake.calls()
                 .iter()
@@ -496,6 +540,11 @@ mod tests {
         fake.answer("ListMicrovmImages", Answer::ok(IMAGES));
         fake.answer("ListMicrovmImages", Answer::failure(403, "denied"));
         fake.answer("ListMicrovms", Answer::ok(EMPTY));
+        fake.answer("ListMicrovms", Answer::ok(EMPTY));
+        fake.answer(
+            "ListMicrovms",
+            Answer::failure(403, "termination was already confirmed"),
+        );
         fake.answer("ListMicrovmImageVersions", Answer::ok(EMPTY));
         fake.answer(
             "DeleteMicrovmImage",
