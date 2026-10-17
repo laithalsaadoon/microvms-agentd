@@ -1,0 +1,14 @@
+{
+  "capability": "resume-by-id",
+  "input": {
+    "microvm_id": "mvm-parity",
+    "provider_stderr": "SYNTHETIC_CREDENTIAL_SENTINEL",
+    "message_mentions": ["credential provider failed"]
+  },
+  "expect": {
+    "error": {"code": "ERR_CREDENTIALS", "wire_kind": null, "retryable": false},
+    "provider_invoked": true,
+    "message_mentions": {"credential provider failed": true},
+    "diagnostics_secret_free": true
+  }
+}

@@ -32,9 +32,10 @@ use microvms_core::{Error, Region, SizeClass};
 use parity_corpus::{Case, Run};
 use serde_json::{Value, json};
 
-const AREAS: [&str; 10] = [
+const AREAS: [&str; 11] = [
     "forward",
     "control-plane",
+    "credential-error",
     "image-name",
     "cost",
     "error",
@@ -54,6 +55,7 @@ async fn core_answers_the_shared_case_corpus() {
     for case in run.cases() {
         let answer = match case.area.as_str() {
             "control-plane" => control_plane_case(&case).await,
+            "credential-error" => credential_error(&case),
             "forward" => forward(&case).await,
             "image-name" => image_name(&case),
             "cost" => cost(&case),
@@ -68,6 +70,25 @@ async fn core_answers_the_shared_case_corpus() {
         run.judge(&case, answer);
     }
     run.finish();
+}
+
+fn credential_error(case: &Case) -> Value {
+    use std::process::{Command, Stdio};
+
+    let fixture = parity_corpus::credentials::fixture_path();
+    let child = Command::new(&fixture)
+        .args(["credentials", "launch"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("build the credential fixture with mise run parity:fixtures");
+    parity_corpus::credentials::run(
+        child,
+        "core",
+        fixture,
+        &["credentials", "core"],
+        &case.input,
+    )
 }
 
 async fn tunnel(case: &Case) -> Value {

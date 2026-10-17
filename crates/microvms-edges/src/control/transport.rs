@@ -40,12 +40,11 @@ impl SignedTransport {
     /// Because the credentials a developer actually has are in SSO, a credential process,
     /// or an instance profile, and re-implementing that resolution is how a client ends up
     /// working only on the machine it was written on. `aws-config`'s default chain is the
-    /// whole reason to depend on it at all — the manifest turns off its HTTP client, since
-    /// reqwest is the one here, but keeps `sso` and `credentials-process`.
+    /// whole reason to depend on it at all. Its HTTP client serves credential endpoints;
+    /// reqwest sends the signed service requests. SSO and credential processes stay enabled.
     ///
-    /// The provider is held rather than the resolved credentials: instance-profile creds
-    /// are temporary, so each request re-resolves and picks up a rotation. That is why
-    /// this is a provider field and not a `Credentials` field.
+    /// The shared provider keeps the SDK identity cache: temporary credentials refresh
+    /// before expiry, and concurrent requests share the same refresh.
     pub async fn new(region: Region) -> Result<Self, Error> {
         let credentials = default_credentials(&region).await?;
         // Generous rather than tight: a control-plane call is not a hot path, and a timeout
@@ -68,26 +67,17 @@ impl SignedTransport {
     }
 }
 
-/// The default credential chain for `region`, as a provider re-asked per request.
+/// The process-wide default credential chain and identity cache for `region`.
 ///
 /// Shared by [`SignedTransport`] and [`crate::control::SignedBuildServices`], so the STS and
 /// S3 calls `ensure_image` makes resolve exactly the identity the control-plane calls do.
 pub(crate) async fn default_credentials(
     region: &Region,
 ) -> Result<aws_credential_types::provider::SharedCredentialsProvider, Error> {
-    let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-        .region(aws_config::Region::new(region.as_str().to_string()))
-        .load()
-        .await;
-    config.credentials_provider().ok_or_else(|| {
-        Error::new(
-            ErrorKind::Credentials,
-            "no credentials provider resolved. The default chain looks at environment \
-             variables, the shared config files, SSO, a credential process, then the EC2 \
-             instance metadata service; none of them answered. `aws sts get-caller-identity` \
-             is the cheapest way to see the same failure.",
-        )
-    })
+    // Loading SDK configuration makes a large future. Keep it off callers' async
+    // state so a debug CLI dispatch fits the Windows main thread's stack even when
+    // the selected command never loads credentials (for example, `manifest`).
+    Box::pin(super::credentials::shared(region)).await
 }
 
 /// A reqwest client with a 10-second connect timeout and the given overall `timeout`.
@@ -113,11 +103,12 @@ pub(crate) async fn resolve_credentials(
     use aws_credential_types::provider::ProvideCredentials as _;
 
     provider.provide_credentials().await.map_err(|error| {
+        let error = super::credentials::diagnostic(&error);
         Error::new(
             ErrorKind::Credentials,
             format!(
-                "could not resolve credentials for {operation}: {error}. Waiting will not fix \
-                 this — the identity is wrong or absent."
+                "could not resolve credentials for {operation}: {error}. Check the provider \
+                 source: credentials may be missing or their endpoint unavailable."
             ),
         )
         .with_source(error)
@@ -139,6 +130,7 @@ impl Transport for SignedTransport {
                 .await
                 .map(|_| ())
                 .map_err(|error| {
+                    let error = super::credentials::diagnostic(&error);
                     Error::new(
                         ErrorKind::Credentials,
                         format!(
@@ -160,8 +152,8 @@ impl Transport for SignedTransport {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Reply, Error>> + Send + '_>>
     {
         Box::pin(async move {
-            // Re-resolved per request so an instance-profile rotation is picked up. The
-            // provider caches internally, so this is not a metadata call per request.
+            // The shared wrapper resolves through the SDK identity cache, which refreshes
+            // temporary credentials before expiry and coalesces concurrent cache misses.
             let credentials = resolve_credentials(&self.credentials, call.operation).await?;
 
             let url = self.url(&call);
@@ -361,6 +353,78 @@ mod tests {
             };
             let port: &dyn Transport = &transport;
             assert_eq!(port.region(), Some(&region));
+        }
+    }
+
+    #[derive(Debug)]
+    struct LeakySource(std::env::VarError);
+
+    impl std::fmt::Display for LeakySource {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "provider failed: {}", self.0)
+        }
+    }
+
+    impl std::error::Error for LeakySource {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            Some(&self.0)
+        }
+    }
+
+    #[derive(Debug)]
+    struct BrokenCredentials;
+
+    impl aws_credential_types::provider::ProvideCredentials for BrokenCredentials {
+        fn provide_credentials<'a>(
+            &'a self,
+        ) -> aws_credential_types::provider::future::ProvideCredentials<'a>
+        where
+            Self: 'a,
+        {
+            aws_credential_types::provider::future::ProvideCredentials::new(async {
+                Err(
+                    aws_credential_types::provider::error::CredentialsError::unhandled(
+                        LeakySource(std::env::VarError::NotUnicode(
+                            "SYNTHETIC_CREDENTIAL_SENTINEL".into(),
+                        )),
+                    ),
+                )
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn credential_diagnostics_discard_secret_values_on_both_resolution_paths() {
+        let provider =
+            aws_credential_types::provider::SharedCredentialsProvider::new(BrokenCredentials);
+        let transport = SignedTransport {
+            region: Region::UsEast1,
+            endpoint: endpoint_for(&Region::UsEast1),
+            credentials: provider.clone(),
+            http: http_client(std::time::Duration::from_secs(1)).unwrap(),
+        };
+        let errors = [
+            resolve_credentials(&provider, "TestOperation")
+                .await
+                .unwrap_err(),
+            transport.resolve_credentials().await.unwrap_err(),
+        ];
+        for error in errors {
+            assert_eq!(error.code(), "ERR_CREDENTIALS");
+            let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+            while let Some(inner) = source {
+                assert!(
+                    !format!("{inner} {inner:?}").contains("SYNTHETIC_CREDENTIAL_SENTINEL"),
+                    "credential diagnostics must discard secret values"
+                );
+                source = inner.source();
+            }
+            assert!(
+                error
+                    .to_string()
+                    .contains("credential environment variable is not valid Unicode")
+            );
+            assert!(!error.retryable());
         }
     }
 

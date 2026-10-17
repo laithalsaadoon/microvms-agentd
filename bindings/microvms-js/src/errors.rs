@@ -71,6 +71,20 @@ use microvms_core::{Error, ErrorKind};
 use napi::ValueType;
 use napi::bindgen_prelude::{FromNapiValue, JsObjectValue, Object, Unknown};
 
+/// Preserve source diagnostics in the message without changing the published cause levels:
+/// those carry the error code and optional wire kind, so inserting a provider there would
+/// make a credential failure look like a daemon status to existing callers.
+fn diagnostic(error: &Error) -> String {
+    let mut message = error.to_string();
+    let mut source = std::error::Error::source(error);
+    while let Some(inner) = source {
+        message.push_str(": ");
+        message.push_str(&inner.to_string());
+        source = inner.source();
+    }
+    message
+}
+
 /// The chain that carries the code, and the wire kind under it.
 ///
 /// Built once here so the sync and async paths differ only in the outer error's status — the
@@ -92,7 +106,7 @@ fn code_chain(error: &Error) -> napi::Error {
 /// `Error<String>` so `.code` really is the `ERR_*` string on this path. The cause chain is
 /// attached regardless, so the uniform rule holds here too.
 pub(crate) fn to_napi(error: &Error) -> napi::Error<String> {
-    let mut mapped = napi::Error::new(error.code().to_string(), error.to_string());
+    let mut mapped = napi::Error::new(error.code().to_string(), diagnostic(error));
     mapped.set_cause(code_chain(error));
     mapped
 }
@@ -133,7 +147,7 @@ impl From<AsyncError> for napi::Error {
         // `Status::InvalidArg` would look tidier and would be a lie, because napi's
         // `InvalidArg` is about a napi argument conversion and not about this library's
         // taxonomy. A caller reads the cause.
-        let mut mapped = napi::Error::new(napi::Status::GenericFailure, inner.to_string());
+        let mut mapped = napi::Error::new(napi::Status::GenericFailure, diagnostic(&inner));
         mapped.set_cause(code_chain(&inner));
         mapped
     }
@@ -189,4 +203,25 @@ fn code_of(error: Unknown<'_>) -> Option<String> {
     let error = Object::from_unknown(error).ok()?;
     let cause = error.get_named_property::<Option<Object>>("cause").ok()??;
     cause.get_named_property::<Option<String>>("message").ok()?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_sources_survive_without_changing_the_code_chain() {
+        let error = Error::new(ErrorKind::Credentials, "credential resolution failed")
+            .with_source(std::io::Error::other("metadata request timed out"));
+        let sync = to_napi(&error);
+        assert_eq!(
+            sync.reason,
+            "credential resolution failed: metadata request timed out"
+        );
+        assert_eq!(sync.cause.as_ref().unwrap().reason, "ERR_CREDENTIALS");
+        assert!(sync.cause.as_ref().unwrap().cause.is_none());
+        let asynchronous: napi::Error = AsyncError(error).into();
+        assert_eq!(asynchronous.reason, sync.reason);
+        assert_eq!(asynchronous.cause.unwrap().reason, "ERR_CREDENTIALS");
+    }
 }

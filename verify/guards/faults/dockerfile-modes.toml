@@ -25,7 +25,7 @@ transform = { file = "crates/microvms-cli/src/commands/local.rs", replace = "   
 [[fault]]
 id = "cli-corpus-wrap-prints-the-default"
 guard = "the_cli_process_answers_the_shared_case_corpus"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "parity_cases", "--", "--exact", "the_cli_process_answers_the_shared_case_corpus"]
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["cargo", "test", "-p", "microvms-cli", "--test", "parity_cases", "--", "--exact", "the_cli_process_answers_the_shared_case_corpus"]]
 expect = "test-failed"
 suite = "rust"
 transform = { file = "crates/microvms-cli/src/commands/local.rs", replace = "    if let Some(task) = &args.wrap {\n        return wrapped_dockerfile(args, task);\n    }\n", with = "    let _ = wrapped_dockerfile;\n" }

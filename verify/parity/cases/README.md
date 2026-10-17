@@ -92,7 +92,20 @@ the tunnel report, the peer's verdict, and the local TCP reset against the same
 `expect`. Refused verified connections must reset; a complete stream must end
 without a reset.
 
+Credential-error cases use a separate fixture from `parity:fixtures`. It starts each
+actual surface in a fresh process with an isolated AWS configuration. The configured
+`credential_process` writes a synthetic marker to stderr and fails. A separate file
+confirms the provider ran; no credentials are returned and every other source is disabled.
+The shared verdict checks the error category and all rendered diagnostics, including
+Python causes, JavaScript causes, Rust sources and Debug output, and CLI stdout/stderr.
+These cases reach the production credential provider, not the scripted transport.
+
 ## The areas
+
+- `credential-error`: production credential failures before a `resume-by-id` request
+  can be signed. The case supplies the provider's synthetic stderr and required safe
+  diagnostic text. Every surface must report the same refusal, preserve the safe
+  category, and omit the provider text. HTTPS is directed at a closed loopback port.
 
 - `forward`: each runner sends HTTP Host fields through a local forward to a
   loopback server. `{port}` is the bound port and `{wrong_port}` is another valid

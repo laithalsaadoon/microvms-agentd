@@ -1,0 +1,9 @@
+# Whole-corpus Rust source proofs build their process fixture without narrowing the test.
+[[fault]]
+id = "f2p-rust-corpus-peer-prerequisite"
+guard = "test_fail_to_pass.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_fail_to_pass.py", "-k", "test_rust_corpus_sources_build_the_peer_before_running"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_rust_corpus_sources_build_the_peer_before_running ("
+transform = { file = "tools/fail-to-pass.py", replace = "            run = (\n                [PARITY_PEER, argv]\n                if (test.path, test.guard) in PARITY_RUST_TESTS\n                else [argv]\n            )", with = "            run = [argv]" }

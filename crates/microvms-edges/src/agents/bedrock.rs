@@ -51,32 +51,12 @@ const VERSION_SUFFIX: &str = "&Version=1";
 
 /// Mints a token from the default credential chain.
 ///
-/// One chain resolution per call, deliberately separate from the control plane's: a
-/// token is minted once per `agent-up`, and holding a provider for it would keep a
-/// second credential chain alive for the life of a `Sandbox`.
+/// Uses the same process-wide regional credential cache as the control plane and
+/// image build services, so repeated agent launches do not create more metadata pools.
 pub async fn mint(region: &Region, lifetime: Duration) -> Result<Minted, Error> {
-    use aws_credential_types::provider::ProvideCredentials as _;
-
-    let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-        .region(aws_config::Region::new(region.as_str().to_string()))
-        .load()
-        .await;
-    let provider = config.credentials_provider().ok_or_else(|| {
-        Error::new(
-            ErrorKind::Credentials,
-            "no credentials provider resolved, so no Bedrock token can be minted. The \
-             default chain looks at environment variables, the shared config files, SSO, a \
-             credential process, then the EC2 instance metadata service; none of them \
-             answered.",
-        )
-    })?;
-    let credentials = provider.provide_credentials().await.map_err(|error| {
-        Error::new(
-            ErrorKind::Credentials,
-            format!("the credential chain resolved but could not provide credentials: {error}"),
-        )
-        .with_source(error)
-    })?;
+    let provider = crate::control::transport::default_credentials(region).await?;
+    let credentials =
+        crate::control::transport::resolve_credentials(&provider, "Bedrock token mint").await?;
     mint_with(&credentials, region, lifetime, SystemTime::now())
 }
 

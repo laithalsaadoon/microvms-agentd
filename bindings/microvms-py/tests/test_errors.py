@@ -22,6 +22,11 @@ the wire-reachable half.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 
 import microvms
@@ -325,3 +330,69 @@ def test_every_other_five_hundred_is_still_retryable(sse_server: object) -> None
     assert server.requested_paths[-1].startswith("/v1/fs/file?")
     assert raised.value.wire_kind == "ServerError"
     assert raised.value.retryable is True
+
+
+def test_transport_sources_survive_as_python_exception_causes() -> None:
+    session = microvms.Session.direct("http://127.0.0.1:9", "test-token")
+    with pytest.raises(microvms.RetryableError) as raised:
+        session.health()
+    assert raised.value.code == "ERR_RETRYABLE"
+    assert raised.value.wire_kind == "Transport"
+    cause = raised.value.__cause__
+    assert isinstance(cause, Exception)
+    messages = []
+    while cause is not None:
+        messages.append(str(cause))
+        cause = cause.__cause__
+    assert any("connect" in message.lower() for message in messages), messages
+
+
+@pytest.mark.skipif(
+    not os.supports_bytes_environ, reason="requires byte-valued environment"
+)
+def test_malformed_credential_values_never_reach_exception_causes(
+    tmp_path: Path,
+) -> None:
+    """A fresh provider reads only synthetic input, before any signed request can be sent."""
+    code = """
+import asyncio
+import os
+import microvms
+
+os.environb[b"AWS_SECRET_ACCESS_KEY"] = b"SYNTHETIC_CREDENTIAL_SENTINEL\\xff"
+os.environb[b"SECRET_ACCESS_KEY"] = b"SYNTHETIC_CREDENTIAL_SENTINEL\\xff"
+sandbox = microvms.Sandbox(microvms.Region.us_east_1())
+for asynchronous in (False, True):
+    try:
+        if asynchronous:
+            asyncio.run(sandbox.run_async(image_identifier="wanted-image"))
+        else:
+            sandbox.run(image_identifier="wanted-image")
+    except microvms.CredentialsError as error:
+        assert error.code == "ERR_CREDENTIALS"
+        assert not error.retryable
+        messages = []
+        while error is not None:
+            messages.append(str(error))
+            assert "SYNTHETIC_CREDENTIAL_SENTINEL" not in str(error) + repr(error)
+            error = error.__cause__
+        assert any("not valid Unicode" in message for message in messages), messages
+    else:
+        raise AssertionError("malformed credentials must fail before a request")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        env={
+            "AWS_ACCESS_KEY_ID": "AKIDEXAMPLE",
+            "AWS_EC2_METADATA_DISABLED": "true",
+            "AWS_CONFIG_FILE": str(tmp_path / "config"),
+            "AWS_SHARED_CREDENTIALS_FILE": str(tmp_path / "credentials"),
+            "HTTPS_PROXY": "http://127.0.0.1:9",
+            "NO_PROXY": "",
+        },
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

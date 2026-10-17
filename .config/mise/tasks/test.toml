@@ -10,7 +10,7 @@ description = "Linux upload handoff with root and non-root owners; requires pass
 run = "cargo test -p microvms-core --test upload_ownership -- --ignored"
 
 ["parity:fixtures"]
-description = "Build the portable peer used by every surface's verified tunnel cases"
+description = "Build the portable fixtures used by every surface's shared cases"
 run = "cargo build -p microvms-core --example parity-tunnel-peer"
 
 # `test:python` was here: 83 client-library tests against a fake daemon over a real

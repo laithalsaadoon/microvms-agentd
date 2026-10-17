@@ -25,6 +25,24 @@ fn the_cli_process_answers_the_shared_case_corpus() {
     let mut run = Run::plan("cli", &CLI_PROCESS_AREAS, &CLI_FAKE_AREAS);
     for case in run.cases() {
         let answer = match case.area.as_str() {
+            "credential-error" => parity_corpus::credentials::run(
+                support::command(parity_corpus::credentials::fixture_path())
+                    .args(["credentials", "launch"])
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped())
+                    .spawn()
+                    .expect("build the credential fixture with mise run parity:fixtures"),
+                "cli",
+                support::binary(),
+                &[
+                    "--json",
+                    "resume",
+                    case.input_str("microvm_id"),
+                    "--region",
+                    "us-east-1",
+                ],
+                &case.input,
+            ),
             "cost" => cost(&case),
             "egress" => egress(&case),
             "size-class" => size(&case),

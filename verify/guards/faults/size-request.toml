@@ -50,7 +50,7 @@ transform = { file = "crates/microvms-cli/src/cli.rs", replace = "    #[arg(long
 [[fault]]
 id = "parity-cli-size-class-drops-the-request"
 guard = "the_cli_process_answers_the_shared_case_corpus"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "parity_cases", "--", "--exact", "the_cli_process_answers_the_shared_case_corpus"]
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["cargo", "test", "-p", "microvms-cli", "--test", "parity_cases", "--", "--exact", "the_cli_process_answers_the_shared_case_corpus"]]
 expect = "test-failed"
 suite = "rust"
 message = "size-class/cpu-only"

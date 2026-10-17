@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 
+pub mod credentials;
 pub mod tunnel;
 
 pub const SURFACES: [&str; 4] = ["core", "cli", "py", "ts"];
@@ -33,7 +34,13 @@ pub const SENTINEL: &str = "wrap-dockerfile/sentinel";
 /// (`crates/microvms-cli/src/guards/parity.rs`). Each tier owns one list and leaves the other's cases
 /// alone. The split is stated once, here, so a tier can't hand an area to the other without the
 /// other one planning it and failing on a case it has no handler for.
-pub const CLI_PROCESS_AREAS: [&str; 4] = ["cost", "egress", "size-class", "wrap-dockerfile"];
+pub const CLI_PROCESS_AREAS: [&str; 5] = [
+    "cost",
+    "egress",
+    "size-class",
+    "wrap-dockerfile",
+    "credential-error",
+];
 pub const CLI_FAKE_AREAS: [&str; 6] = [
     "image-name",
     "error",
