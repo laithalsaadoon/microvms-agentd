@@ -3048,6 +3048,7 @@ mod tests {
                 "names",
                 "logs",
                 "image-versions",
+                "gc",
                 "image-set-status",
                 "image-builds",
                 "cost",
