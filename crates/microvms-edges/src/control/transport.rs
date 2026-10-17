@@ -74,7 +74,10 @@ impl SignedTransport {
 pub(crate) async fn default_credentials(
     region: &Region,
 ) -> Result<aws_credential_types::provider::SharedCredentialsProvider, Error> {
-    super::credentials::shared(region).await
+    // Loading SDK configuration makes a large future. Keep it off callers' async
+    // state so a debug CLI dispatch fits the Windows main thread's stack even when
+    // the selected command never loads credentials (for example, `manifest`).
+    Box::pin(super::credentials::shared(region)).await
 }
 
 /// A reqwest client with a 10-second connect timeout and the given overall `timeout`.
