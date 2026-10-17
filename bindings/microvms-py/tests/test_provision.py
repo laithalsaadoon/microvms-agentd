@@ -84,27 +84,31 @@ def test_bind19_a_recorded_cache_entry_is_served_and_a_changed_one_is_not(
     entry.mkdir(parents=True)
     data = elf(0xB7, b"cached")
     (entry / "agentd").write_bytes(data)
-    (entry / "agentd.verified.json").write_text(
-        json.dumps(
-            {
-                "version": version,
-                "sha256": hashlib.sha256(data).hexdigest(),
-                "verification": "checksum",
-            }
-        )
+    record = json.dumps(
+        {
+            "version": version,
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "verification": "checksum",
+        }
     )
+    (entry / "agentd.verified.json").write_text(record)
     report = microvms.provision_agentd_report(version=version, state_dir=tmp_path)
     assert report.source == "cache"
     assert report.verification == "checksum"
     assert report.data == data
 
-    # Changed after it was recorded: discarded and fetched again, and with GitHub out of
-    # reach the fetch fails closed rather than serving the changed bytes.
-    (entry / "agentd").write_bytes(elf(0xB7, b"changed"))
+    # Leave an invalid entry in place until a verified replacement is ready: removing
+    # it could unlink another caller's install while that caller writes its record.
+    changed = elf(0xB7, b"changed")
+    (entry / "agentd").write_bytes(changed)
     unreachable_release(monkeypatch)
-    with pytest.raises(microvms.PreconditionError, match="could not download agentd"):
-        microvms.provision_agentd(version=version, state_dir=tmp_path)
-    assert not (entry / "agentd").exists()
+    for provision in (microvms.provision_agentd, microvms.provision_agentd_report):
+        with pytest.raises(
+            microvms.PreconditionError, match="could not download agentd"
+        ):
+            provision(version=version, state_dir=tmp_path)
+        assert (entry / "agentd").read_bytes() == changed
+        assert (entry / "agentd.verified.json").read_text() == record
 
 
 def test_bind18_a_fetch_that_cannot_run_is_an_error_naming_every_way_out(
