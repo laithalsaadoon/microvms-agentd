@@ -86,6 +86,13 @@ def native_box_checks(report: dict[str, Any], results: Results) -> None:
         )
 
 
+class NativeCleanupResults(CleanupResults):
+    def check(self, name: str, ok: bool, detail: str = "") -> bool:
+        # The shared cleanup details contain resource identifiers. Only verdicts
+        # belong in this example's hosted report, just like the scenario results.
+        return super().check(name, ok)
+
+
 def drive_native_box(cli: Cli, binary: Path, aws: Any, results: Results) -> None:
     directory = EXAMPLE / ".box-bin"
     if not results.check(
@@ -143,5 +150,5 @@ def drive_native_box(cli: Cli, binary: Path, aws: Any, results: Results) -> None
                 os.environ["MICROVM_BUCKET"],
                 prefix,
                 aws,
-                CleanupResults(results, "native Box"),
+                NativeCleanupResults(results, "native Box"),
             )

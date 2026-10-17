@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import hashlib
 import importlib.util
+import io
 import json
 import re
 import tomllib
@@ -16,12 +18,22 @@ from lanes.native_box import (
     BINARIES,
     EXAMPLE,
     SCENARIOS,
+    NativeCleanupResults,
     native_box_checks,
     native_build_ok,
 )
 
 
 def check_native_box(results: Results, temporary: Path) -> None:
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        NativeCleanupResults(Results(), "native Box").check(
+            "cleaned", True, "private-resource-id"
+        )
+    results.check(
+        "native Box cleanup omits resource identifiers from logs",
+        "private-resource-id" not in captured.getvalue(),
+    )
     check_region_staging(results, temporary)
     directory = temporary / "native-box"
     directory.mkdir()

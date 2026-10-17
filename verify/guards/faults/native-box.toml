@@ -28,3 +28,8 @@ transform = { file = "conformance/lanes/native_box.py", replace = 'all(check.get
 id = "native-box-region"
 message = "FAIL  native Box stages the gateway, policy and model for us-west-2"
 transform = { file = "examples/strands-box-codex-sdk/stage_box.py", replace = 'path.write_text(text.replace("us-east-1", region))', with = 'path.write_text(text)' }
+
+[[family.fault]]
+id = "native-box-cleanup-privacy"
+message = "FAIL  native Box cleanup omits resource identifiers from logs"
+transform = { file = "conformance/lanes/native_box.py", replace = 'return super().check(name, ok)', with = 'return super().check(name, ok, detail)' }
