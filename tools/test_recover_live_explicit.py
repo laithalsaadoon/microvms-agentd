@@ -156,3 +156,24 @@ def test_explicit_image_cannot_be_reported_by_independent_verifier_after_cleanup
         )["leakCount"]
         == 1
     )
+
+
+@pytest.mark.parametrize("escape", ["\x1b[m", "\x1b[31m", "\x1b[K"])
+def test_cleanup_name_resolution_accepts_lowercase_and_uppercase_ansi(escape):
+    line = (
+        "real AWS\tverify again after destroy\t"
+        f"2026-10-17T16:00:00Z {escape}LEAK image {NAME} in CREATE_FAILED\n"
+    )
+    assert recovery.source_leaked_images(line) == {NAME}
+
+
+def test_receipt_validation_retains_legacy_parser_one_and_resource_shape():
+    receipt = {
+        "kind": "live-recovery",
+        "conformance_verified": False,
+        "status": "passed",
+        "sourceRun": 1,
+        "parserVersion": 1,
+        "resources": [{"kind": "image", "sha256": KEY, "status": "absent"}],
+    }
+    assert recovery.validate_receipt(receipt) is receipt
