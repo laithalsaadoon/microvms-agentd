@@ -685,6 +685,7 @@ async fn no_local_command_touches_a_seam_door() {
             port: 9000,
             workdir: Some("/workspace".into()),
             wrap: None,
+            preserve_user: false,
             inherit_workdir: false,
             agent: Vec::new(),
             claude_version: None,

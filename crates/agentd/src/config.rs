@@ -94,7 +94,8 @@ pub struct Config {
     /// outside tests, for `passwd_path`'s reason.
     pub group_path: std::path::PathBuf,
     /// The user a start request runs as when it names no `user`, from
-    /// [`DEFAULT_USER_VAR`] (AGENTD-22). `None` keeps the daemon's own user, which is root.
+    /// [`DEFAULT_USER_VAR`] or the sealed builder capture (AGENTD-22).
+    /// `None` keeps the daemon's own user, which is root.
     ///
     /// Kept as the image wrote it and resolved per request exactly as a request's `user`
     /// string is: a passwd name, or digits that name no row as a uid. Per request because a
@@ -106,6 +107,9 @@ pub struct Config {
     /// say is the image author's decision. Workload hook handlers don't take it; they are
     /// image-owned code and run as the daemon's user.
     pub default_user: Option<String>,
+    /// The default is the sealed builder capture, whose numeric uid:gid needs no
+    /// passwd row. Explicit AGENTD_DEFAULT_USER values retain their stricter policy.
+    pub captured_user: bool,
 }
 
 /// The variable naming [`Config::default_user`]. A refusal of the default names it, so an
@@ -146,6 +150,7 @@ impl Default for Config {
             passwd_path: std::path::PathBuf::from("/etc/passwd"),
             group_path: std::path::PathBuf::from("/etc/group"),
             default_user: None,
+            captured_user: false,
         }
     }
 }
@@ -193,10 +198,14 @@ impl Config {
         if let Some(secs) = env_parse::<u64>("AGENTD_HOOK_HANDLER_TIMEOUT_SECS") {
             cfg.hook_handler_timeout = Duration::from_secs(secs.clamp(1, MAX_HOOK_HANDLER_SECS));
         }
-        cfg.default_user = default_user(std::env::var_os(DEFAULT_USER_VAR));
-        // Logged to the image's log group because `/v1/health` can't carry it yet: `Health` is
-        // constructible field by field, so a new field is a breaking change to the protocol
-        // crate.
+        cfg.captured_user = std::env::var_os(DEFAULT_USER_VAR).is_none()
+            && std::env::var_os(crate::image_user::SETTING).is_some();
+        cfg.default_user = configured_default(
+            std::env::var_os(DEFAULT_USER_VAR),
+            std::env::var_os(crate::image_user::SETTING),
+            || crate::image_user::default_user(std::path::Path::new(crate::image_user::RECORD)),
+        );
+        // Log the effective default at startup; authenticated discovery also exposes it.
         if let Some(user) = &cfg.default_user {
             tracing::info!(
                 default_user = %user,
@@ -217,6 +226,31 @@ impl Config {
 /// refused the same way rather than dropped.
 fn default_user(raw: Option<std::ffi::OsString>) -> Option<String> {
     raw.map(|raw| raw.to_string_lossy().into_owned())
+}
+
+fn configured_default(
+    explicit: Option<std::ffi::OsString>,
+    preserve: Option<std::ffi::OsString>,
+    captured: impl FnOnce() -> std::io::Result<String>,
+) -> Option<String> {
+    if explicit.is_some() {
+        return default_user(explicit);
+    }
+    preserve.map(|flag| preserved_user(flag, captured()))
+}
+
+fn preserved_user(flag: std::ffi::OsString, captured: std::io::Result<String>) -> String {
+    match (flag.to_str(), captured) {
+        (Some("1"), Ok(user)) => user,
+        _ => {
+            tracing::warn!(
+                "preserved image user is unavailable; implicit-user execs will be refused"
+            );
+            // Config errors must retain the control API for an explicit-user repair,
+            // but must never downgrade an omitted user to the daemon's root identity.
+            "<invalid preserved image user>".into()
+        }
+    }
 }
 
 /// Parses a boolean knob, accepting the spellings a Dockerfile or a Terraform
@@ -249,6 +283,34 @@ fn env_parse<T: std::str::FromStr>(key: &str) -> Option<T> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn preserved_defaults_honor_explicit_values_and_fail_closed() {
+        use super::configured_default;
+        for explicit in ["root", "0", "", "missing"] {
+            assert_eq!(
+                configured_default(Some(explicit.into()), Some("1".into()), || panic!(
+                    "explicit user must not read capture"
+                )),
+                Some(explicit.into()),
+            );
+        }
+        assert_eq!(
+            configured_default(None, None, || panic!("opt-in only")),
+            None
+        );
+        assert_eq!(
+            configured_default(None, Some("1".into()), || Ok("4242:4343".into())),
+            Some("4242:4343".into())
+        );
+        for flag in ["1", "0", "invalid"] {
+            let user = configured_default(None, Some(flag.into()), || {
+                Err(std::io::Error::other("missing"))
+            })
+            .unwrap();
+            assert!(user.contains("invalid preserved image user"));
+        }
+    }
+
     use super::*;
 
     #[test]
@@ -277,21 +339,25 @@ mod tests {
         assert_eq!(lossy, "a\u{fffd}");
     }
 
-    /// **AGENTD-22.** `from_env` reads the default user from the daemon's environment. The
-    /// read happens in a copy of this test binary started with the variable set, because this
-    /// crate can't set its own environment: `set_var` is `unsafe`, which the crate forbids.
+    /// **AGENTD-22.** `from_env` reads an explicit default user without treating it as a
+    /// captured identity, even when image-user preservation is enabled. The read happens in
+    /// a copy of this test binary because this crate can't set its own environment:
+    /// `set_var` is `unsafe`, which the crate forbids.
     #[test]
     fn from_env_reads_the_default_user_from_the_environment() {
         const CHILD: &str = "AGENTD_TEST_FROM_ENV_CHILD";
         const NAME: &str = "config::tests::from_env_reads_the_default_user_from_the_environment";
         if std::env::var_os(CHILD).is_some() {
-            assert_eq!(Config::from_env().default_user.as_deref(), Some("probe"));
+            let cfg = Config::from_env();
+            assert_eq!(cfg.default_user.as_deref(), Some("probe"));
+            assert!(!cfg.captured_user);
             return;
         }
         let output = std::process::Command::new(std::env::current_exe().expect("test binary"))
             .args(["--exact", NAME])
             .env(CHILD, "1")
             .env(DEFAULT_USER_VAR, "probe")
+            .env(crate::image_user::SETTING, "1")
             .output()
             .expect("child test");
         let stdout = String::from_utf8_lossy(&output.stdout);

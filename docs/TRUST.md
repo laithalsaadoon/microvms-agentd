@@ -19,11 +19,16 @@ daemon memory with `ptrace` or `/proc/<pid>/mem`, change files, or exhaust guest
 resources. User demotion changes the workload UID within the same sandbox. The model
 and authentication tests do not prove isolation from guest root.
 
-A start request that omits `user` runs as root unless the image sets
-`AGENTD_DEFAULT_USER`. With it set, that start runs as the image's user, with
+A start request that omits `user` uses the image's default. An explicit
+`AGENTD_DEFAULT_USER` takes precedence over an opt-in Dockerfile user capture.
+With neither default, the start runs as root. With `AGENTD_DEFAULT_USER` set,
+that start runs as the image's user, with
 its passwd row's uid and primary gid, whether the image gives the user's name
 or its uid. A value with no passwd row, digits included, refuses the start
-instead of running it as root or in root's group. Direct `PUT /v1/fs/tar` and
+instead of running it as root or in root's group. A Dockerfile user capture
+supplies both uid and primary gid, so it can use a uid without a passwd row.
+The daemon reads only a sealed, root-owned record. A missing or invalid record
+refuses implicit-user starts. Direct `PUT /v1/fs/tar` and
 `PUT /v1/fs/file` uploads are still written as root. For a non-root default, the
 shared client stages uploads privately and transfers ownership to that user.
 It then installs them with that user's privileges. Sync deletions also run with
@@ -164,7 +169,7 @@ and it renders the table in [Traceability](TRACEABILITY.md). A guard is written
 | A guest answers a verified tunnel's handshake with a key other than the pinned VM key | `BIND-21` | `crates/microvms-core/tests/tunnel_end_to_end.rs::a_wrong_pin_fails_closed_with_a_diagnosis`, `crates/microvms-core/tests/tunnel_end_to_end.rs::a_reply_that_does_not_verify_against_the_pin_fails_the_tunnel` | guarded |
 | A guest or the path replays, reorders or forges tunnel frames after the handshake | `AGENTD-21`, `BIND-24` | `crates/agentd/tests/tunnel_relay.rs::agentd_21_a_replayed_frame_ends_the_tunnel_unrelayed`, `crates/agentd/tests/tunnel_relay.rs::agentd_21_a_forged_frame_ends_the_tunnel_unrelayed`, `crates/microvms-edges/tests/tunnel_end_of_stream.rs::bind_24_a_replayed_frame_fails_the_tunnel_unwritten`, `crates/microvms-edges/tests/tunnel_end_of_stream.rs::bind_24_a_forged_frame_fails_the_tunnel_unwritten`, `crates/model/src/tunnel.rs::bind_24_the_model_finds_a_replay_when_frames_carry_no_position`, `crates/agentd/src/tunnel_fuzz.rs::frames_open_in_order_and_the_callers_end_only_after_every_chunk`, `crates/microvms-edges/src/session/tunnel_fuzz.rs::frames_open_in_order_and_the_daemons_end_only_after_every_chunk` | guarded |
 | A guest streams hostile server-sent events to the client | `BIND-22` | `crates/microvms-app/src/session/sse.rs::an_unterminated_stream_is_refused_at_the_pending_ceiling`, `crates/microvms-app/src/session/sse.rs::an_unrecognized_or_unparseable_frame_is_dropped_rather_than_raised`, `crates/microvms-app/src/session/sse_fuzz.rs::hostile_stream_bytes_stay_bounded_and_every_event_round_trips` | guarded |
-| A workload whose caller omits `user` runs as guest root | `AGENTD-22`, `AGENTD-24` | `crates/agentd/src/exec.rs::a_start_that_names_no_user_runs_as_the_default_resolved_per_request`, `crates/agentd/src/exec.rs::a_numeric_default_runs_as_its_row_and_one_with_no_row_is_refused`, `crates/agentd/src/exec_start.rs::a_default_that_names_nobody_is_refused_naming_the_variable`, `crates/model/src/exec_start.rs::an_unknown_default_falling_back_to_the_daemon_starts_as_root`, `crates/model/src/exec_start.rs::a_default_read_as_a_request_string_keeps_the_daemons_group` | guarded when the image sets `AGENTD_DEFAULT_USER`. Without it such a workload runs as root, and with it an authorized caller can still ask for root |
+| A workload whose caller omits `user` runs as guest root | `AGENTD-22`, `AGENTD-24` | `crates/agentd/src/exec.rs::a_start_that_names_no_user_runs_as_the_default_resolved_per_request`, `crates/agentd/src/exec.rs::a_numeric_default_runs_as_its_row_and_one_with_no_row_is_refused`, `crates/agentd/src/exec_start.rs::a_default_that_names_nobody_is_refused_naming_the_variable`, `crates/model/src/exec_start.rs::an_unknown_default_falling_back_to_the_daemon_starts_as_root`, `crates/model/src/exec_start.rs::a_default_read_as_a_request_string_keeps_the_daemons_group`, `crates/agentd/src/exec_start.rs::captured_numeric_identity_preserves_the_primary_gid_and_explicit_precedence` | guarded when the image sets a non-root `AGENTD_DEFAULT_USER` or preserves a non-root Dockerfile user. An authorized caller can still ask for root |
 | A replaced or tampered daemon release asset | `BIND-18` | `crates/microvms-edges/src/provision/release.rs::another_signer_identity_is_refused`, `crates/microvms-edges/src/provision/release.rs::one_flipped_byte_in_the_asset_is_refused` | guarded |
 | A release directory (`$MICROVM_RELEASE_DIR`) holding an asset and a matching `SHA256SUMS` but no bundle, or another release's files under the requested tag | `BIND-18` | `crates/microvms-edges/src/provision/release.rs::a_release_directory_without_its_bundle_is_refused_despite_a_matching_checksum`, `crates/microvms-edges/src/provision/release.rs::another_releases_files_under_the_requested_tag_are_refused` | guarded |
 | An on-path party ends a verified tunnel early, with a plaintext close frame or by dropping the connection | `BIND-23`, `AGENTD-19`, `AGENTD-20` | `crates/microvms-edges/tests/tunnel_end_of_stream.rs::a_verified_tcp_consumer_observes_the_stream_verdict`, `crates/model-conformance/tests/tunnel_end_of_stream.rs::bind_23_a_close_frame_forged_mid_stream_ends_truncated`, `crates/model-conformance/tests/tunnel_end_of_stream.rs::bind_23_a_connection_dropped_mid_stream_ends_truncated`, `crates/model-conformance/tests/tunnel_end_of_stream.rs::bind_23_the_daemons_end_of_stream_withheld_ends_truncated`, `crates/model-conformance/tests/tunnel_end_of_stream.rs::agentd_20_the_clients_end_of_stream_withheld_resets_the_guest`, `crates/agentd/tests/tunnel_relay.rs::agentd_19_a_guest_eof_reaches_the_caller_as_the_end_of_stream` | guarded. A protocol 2 peer that omits the end-of-stream offer ends `ClosedUnproven`. Each side refuses a protocol 1 handshake |
@@ -242,7 +247,7 @@ An executable at `<hooks dir>/<hook>` runs when the platform posts that
 lifecycle hook ([Protocol](PROTOCOL.md), "Workload hook handlers"). It is
 image-owned code with the daemon's privileges:
 
-- It runs as root, like the daemon, whatever user `AGENTD_DEFAULT_USER` holds,
+- It runs as root, like the daemon, regardless of the image's default exec user,
   with the daemon's environment, the launch environment, and `AGENTD_HOOK`. The agent token is never in either
   environment. Keep secrets out of shared images; a handler is part of the image.
 - The hook routes are unauthenticated and reachable over loopback from inside
@@ -315,7 +320,7 @@ guest's host route for `169.254.169.254` with a blackhole. Afterward, a process
 that isn't root can neither reach MMDS nor remove the route
 ([Platform](PLATFORM.md), measured 2026-10-12). Any root process can remove it,
 including an exec started with `user: 0`, and one started without `user` on an
-image without `AGENTD_DEFAULT_USER`. The block protects only workloads that run as
+image whose default exec user is root. The block protects only workloads that run as
 another user. VPC internet isolation does not remove metadata access or make an
 overprivileged role safe.
 

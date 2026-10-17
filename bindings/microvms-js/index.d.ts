@@ -2975,3 +2975,11 @@ export interface WrapDockerfileOptions {
   /** Refuse a result with no `WORKDIR` anywhere, because the exec would inherit `/`. */
   inheritWorkdir?: boolean
 }
+
+/**
+ * Preserve the final Dockerfile USER's uid and primary gid as the workload default.
+ * The builder resolves stage inheritance, variables and names. Explicit image
+ * AGENTD_DEFAULT_USER and request users win. The daemon starts as root and
+ * workloads start only after readiness. Requires COPY --chmod.
+ */
+export declare function wrapDockerfilePreservingUser(taskDockerfile: string, options?: WrapDockerfileOptions | undefined | null): string

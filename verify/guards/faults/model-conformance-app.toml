@@ -139,7 +139,7 @@ run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--
 expect = "test-failed"
 suite = "rust"
 message = "ends on the generator's stanza, intact"
-transform = { file = "crates/microvms-app/src/control/artifact.rs", replace = "    wrapped.push_str(&stanza);\n    Ok(wrapped)\n", with = "    let _ = &stanza;\n    Ok(wrapped)\n" }
+transform = { file = "crates/microvms-app/src/control/artifact.rs", replace = "        wrapped.push_str(\"USER root\\n\");\n    }\n    wrapped.push_str(&stanza);\n", with = "        wrapped.push_str(\"USER root\\n\");\n    }\n    let _ = &stanza;\n" }
 
 # A row function that stops ranging over one flag (here the advisory deny) still returns rows,
 # and the rows it keeps all agree with the app. The pinned count is what fails.

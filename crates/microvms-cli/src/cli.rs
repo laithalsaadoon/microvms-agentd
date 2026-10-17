@@ -2420,6 +2420,11 @@ pub struct DockerfileArgs {
     #[arg(long, value_name = "FILE", conflicts_with = "agent")]
     pub wrap: Option<PathBuf>,
 
+    /// With --wrap: preserve the builder-resolved final USER as the workload default.
+    /// The daemon still starts as root. Explicit image and request users take precedence.
+    #[arg(long, requires = "wrap")]
+    pub preserve_user: bool,
+
     /// With --wrap: the exec working directory is the image's own `WORKDIR`, so one must be
     /// declared, by the task or by --workdir.
     #[arg(long, requires = "wrap")]

@@ -72,3 +72,12 @@ def test_a_dockerfile_with_no_from_has_no_base() -> None:
     """IMAGE-5: core's refusal of a task with no `FROM` raises `InvalidArgError`."""
     with pytest.raises(microvms.InvalidArgError, match="no FROM"):
         microvms.BaseImage.from_dockerfile("RUN echo hello\n")
+
+
+def test_preserving_user_wrapper_is_available():
+    from microvms import wrap_dockerfile_preserving_user
+
+    result = wrap_dockerfile_preserving_user("FROM x\nUSER 4242:4343\n")
+    assert result.index("--capture-image-user") < result.index("USER 0:0")
+    assert "ENV AGENTD_PRESERVE_IMAGE_USER=1" in result
+    assert result.endswith('CMD ["/agentd"]\n')

@@ -472,17 +472,41 @@ pub(crate) fn wrap_dockerfile(
     workdir: Option<String>,
     inherit_workdir: bool,
 ) -> PyCoreResult<String> {
-    // IMAGE-5: a pass-through; the stanza, the guards and their messages are core's.
+    Ok(microvms_core::control::wrap_dockerfile(
+        task_dockerfile,
+        &wrap_options(port, workdir, inherit_workdir),
+    )?)
+}
+
+/// Preserve the final Dockerfile USER's uid and primary gid as the workload default.
+/// The builder resolves stage inheritance, variables and names. Explicit image
+/// AGENTD_DEFAULT_USER and request users win. The daemon starts as root and
+/// workloads start only after readiness. Requires COPY --chmod.
+#[pyfunction]
+#[pyo3(signature = (task_dockerfile, *, port=None, workdir=None, inherit_workdir=false))]
+pub(crate) fn wrap_dockerfile_preserving_user(
+    task_dockerfile: &str,
+    port: Option<u16>,
+    workdir: Option<String>,
+    inherit_workdir: bool,
+) -> PyCoreResult<String> {
+    Ok(microvms_core::control::wrap_dockerfile_preserving_user(
+        task_dockerfile,
+        &wrap_options(port, workdir, inherit_workdir),
+    )?)
+}
+
+fn wrap_options(
+    port: Option<u16>,
+    workdir: Option<String>,
+    inherit_workdir: bool,
+) -> microvms_core::control::WrapOptions {
     let defaults = microvms_core::control::WrapOptions::default();
-    let opts = microvms_core::control::WrapOptions {
+    microvms_core::control::WrapOptions {
         port: port.unwrap_or(defaults.port),
         workdir,
         inherit_workdir,
-    };
-    Ok(microvms_core::control::wrap_dockerfile(
-        task_dockerfile,
-        &opts,
-    )?)
+    }
 }
 
 /// The per-VM `logging` a binding's three keyword arguments ask for.

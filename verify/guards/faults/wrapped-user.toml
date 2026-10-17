@@ -1,0 +1,163 @@
+# The additive wrapper cannot compile on the base. Each mutation compiles and
+# proves one boundary of builder capture or workload identity selection.
+
+[[fault]]
+id = "wrap-user-capture-removed"
+guard = "control::artifact::tests::preserving_user_captures_before_root_and_keeps_the_daemon_as_cmd"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::artifact::tests::preserving_user_captures_before_root_and_keeps_the_daemon_as_cmd"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/artifact.rs", replace = "        \"RUN [\\\"/agentd\\\", \\\"--capture-image-user\\\"]\\n\",\n", with = "" }
+
+[[fault]]
+id = "wrap-user-workdir-dropped"
+guard = "control::artifact::tests::preserving_user_keeps_the_requested_workdir"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::artifact::tests::preserving_user_keeps_the_requested_workdir"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/artifact.rs", replace = "pub fn wrap_dockerfile_preserving_user(task: &str, opts: &WrapOptions) -> Result<String, Error> {\n    validate_wrap(task, opts)?;\n    let workdir = opts.workdir.as_deref().filter(|dir| !dir.is_empty());", with = "pub fn wrap_dockerfile_preserving_user(task: &str, opts: &WrapOptions) -> Result<String, Error> {\n    validate_wrap(task, opts)?;\n    let workdir = opts.workdir.as_deref().filter(|dir| dir.is_empty());" }
+
+[[fault]]
+id = "wrap-user-task-boundary"
+guard = "control::artifact::tests::preserving_user_normalizes_the_task_boundary"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::artifact::tests::preserving_user_normalizes_the_task_boundary"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/artifact.rs", replace = "    let mut wrapped = String::with_capacity(task.len() + stanza.len() + 256);\n    wrapped.push_str(task);\n    if !task.ends_with('\\n') {", with = "    let mut wrapped = String::with_capacity(task.len() + stanza.len() + 256);\n    wrapped.push_str(task);\n    if task.ends_with('\\n') {" }
+
+[[fault]]
+id = "wrap-user-capture-ignored"
+guard = "exec_start::tests::captured_numeric_identity_preserves_the_primary_gid_and_explicit_precedence"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec_start::tests::captured_numeric_identity_preserves_the_primary_gid_and_explicit_precedence"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/exec_start.rs", replace = "(None, Some(name)) if captured_user =>", with = "(None, Some(name)) if false =>" }
+
+[[fault]]
+id = "wrap-user-root-gid"
+guard = "exec_start::tests::captured_numeric_identity_preserves_the_primary_gid_and_explicit_precedence"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec_start::tests::captured_numeric_identity_preserves_the_primary_gid_and_explicit_precedence"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/exec_start.rs", replace = ".map(|(_, gid)| gid)", with = ".map(|(_, _gid)| 0)" }
+
+[[fault]]
+id = "wrap-user-explicit-ignored"
+guard = "config::tests::preserved_defaults_honor_explicit_values_and_fail_closed"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "config::tests::preserved_defaults_honor_explicit_values_and_fail_closed"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/config.rs", replace = "    if explicit.is_some() {", with = "    if false {" }
+
+[[fault]]
+id = "wrap-user-explicit-capture-mode"
+guard = "config::tests::from_env_reads_the_default_user_from_the_environment"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "config::tests::from_env_reads_the_default_user_from_the_environment"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/config.rs", replace = "cfg.captured_user = std::env::var_os(DEFAULT_USER_VAR).is_none()\n            && std::env::var_os(crate::image_user::SETTING).is_some();", with = "cfg.captured_user = std::env::var_os(DEFAULT_USER_VAR).is_none()\n            || std::env::var_os(crate::image_user::SETTING).is_some();" }
+
+[[fault]]
+id = "wrap-user-unsealed-record"
+guard = "image_user::tests::a_writable_capture_is_never_a_runtime_default"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "image_user::tests::a_writable_capture_is_never_a_runtime_default"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "    if file.metadata()?.mode() & 0o022 != 0 {", with = "    if false {" }
+
+[[fault]]
+id = "wrap-user-symlink-record"
+guard = "image_user::tests::a_symlink_cannot_select_an_image_user_record"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "image_user::tests::a_symlink_cannot_select_an_image_user_record"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/image_user.rs", replace = ".custom_flags(nix::libc::O_NOFOLLOW)", with = ".custom_flags(0)" }
+
+
+[[family]]
+guard = "image_user::tests::build_modes_capture_and_seal_the_selected_record"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "image_user::tests::build_modes_capture_and_seal_the_selected_record"]
+expect = "test-failed"
+suite = "rust"
+
+[[family.fault]]
+id = "wrap-user-build-dispatch-none"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "    let mode = args.next()?;", with = "    let mode = args.next()?;\n    if !mode.is_empty() { return None; }" }
+
+[[family.fault]]
+id = "wrap-user-build-dispatch-capture"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "        \"--capture-image-user\" => Some(capture(record)),\n", with = "" }
+
+[[family.fault]]
+id = "wrap-user-build-dispatch-seal"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "        \"--seal-image-user\" => Some(seal(record)),\n", with = "" }
+
+[[fault]]
+id = "wrap-user-build-dispatch-extra-args"
+guard = "image_user::tests::build_modes_ignore_other_arguments_and_preserve_errors"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "image_user::tests::build_modes_ignore_other_arguments_and_preserve_errors"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "    if args.next().is_some() {", with = "    if false {" }
+
+[[family]]
+guard = "image_user::tests::open_requires_a_root_owned_regular_file"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "image_user::tests::open_requires_a_root_owned_regular_file"]
+expect = "test-failed"
+suite = "rust"
+
+[[family.fault]]
+id = "wrap-user-record-both-invalid"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "!metadata.is_file() || metadata.uid() != 0", with = "!metadata.is_file() && metadata.uid() != 0" }
+
+[[family.fault]]
+id = "wrap-user-record-file-inverted"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "!metadata.is_file() || metadata.uid() != 0", with = "metadata.is_file() || metadata.uid() != 0" }
+
+[[family.fault]]
+id = "wrap-user-record-owner-inverted"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "!metadata.is_file() || metadata.uid() != 0", with = "!metadata.is_file() || metadata.uid() == 0" }
+
+[[fault]]
+id = "wrap-user-record-owner-ignored"
+guard = "image_user::tests::open_refuses_a_non_root_owned_regular_file"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "image_user::tests::open_refuses_a_non_root_owned_regular_file"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "!metadata.is_file() || metadata.uid() != 0", with = "!metadata.is_file()" }
+
+[[family]]
+guard = "image_user::tests::captured_identity_is_bounded_and_explicit"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "image_user::tests::captured_identity_is_bounded_and_explicit"]
+expect = "test-failed"
+suite = "rust"
+
+[[family.fault]]
+id = "wrap-user-record-read-short"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "file.take(MAX_RECORD_BYTES + 1)", with = "file.take(MAX_RECORD_BYTES - 1)" }
+
+[[family.fault]]
+id = "wrap-user-record-read-truncated"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "file.take(MAX_RECORD_BYTES + 1)", with = "file.take(MAX_RECORD_BYTES * 1)" }
+
+[[family.fault]]
+id = "wrap-user-record-cap-equality"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "bytes.len() as u64 > MAX_RECORD_BYTES", with = "bytes.len() as u64 == MAX_RECORD_BYTES" }
+
+[[family.fault]]
+id = "wrap-user-record-cap-exclusive"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "bytes.len() as u64 > MAX_RECORD_BYTES", with = "bytes.len() as u64 >= MAX_RECORD_BYTES" }
+
+[[family]]
+guard = "image_user::tests::default_user_requires_a_valid_sealed_record"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "image_user::tests::default_user_requires_a_valid_sealed_record"]
+expect = "test-failed"
+suite = "rust"
+
+[[family.fault]]
+id = "wrap-user-default-empty"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "    read_sealed(open(path, false)?)", with = "    Ok(String::new())" }
+
+[[family.fault]]
+id = "wrap-user-default-other"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "    read_sealed(open(path, false)?)", with = '    Ok("xyzzy".into())' }

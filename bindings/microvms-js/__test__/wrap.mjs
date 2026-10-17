@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { baseImageFromDockerfile, defaultBaseImage, wrapDockerfile } from '../index.js';
+import { baseImageFromDockerfile, defaultBaseImage, wrapDockerfile, wrapDockerfilePreservingUser } from '../index.js';
 import { codeOf } from './support/sse.mjs';
 
 test('a bare FROM wraps to the default stanza', () => {
@@ -72,4 +72,12 @@ test('IMAGE-5: a Dockerfile with no FROM has no base', () => {
       return true;
     },
   );
+});
+
+
+test('preserving-user wrapper is available', () => {
+  const result = wrapDockerfilePreservingUser('FROM x\nUSER 4242:4343\n');
+  assert.ok(result.indexOf('--capture-image-user') < result.indexOf('USER 0:0'));
+  assert.ok(result.includes('ENV AGENTD_PRESERVE_IMAGE_USER=1'));
+  assert.ok(result.endsWith('CMD ["/agentd"]\n'));
 });
