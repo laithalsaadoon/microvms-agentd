@@ -102,9 +102,14 @@ before scanning VM history. These reads are not an atomic snapshot. Every
 regional image's full version list is recorded, including deleted versions, with
 an exact Get for each version. Per-image coverage records distinguish an empty list from a failed or
 partial list. Approved image Get calls also run when the image is absent from
-List, using the source ARN when available. If the name now resolves to another
-image, the source and current List identities remain separately identifiable by
-their hashes.
+List, using the source ARN when available. An approved name without an original
+ARN is read using the authenticated shared image's canonical account and region
+namespace. A missing or invalid source namespace leaves the observation
+incomplete. This derived request does not add an original ARN or deletion
+authority to the source proof. If Get finds an image absent from List, its
+version coverage is unknown and the image and version sections remain
+incomplete. If the name now resolves to another image, the source and current
+List identities remain separately identifiable by their hashes.
 
 A separate API boundary permits only the observer's List, Get, and log-group
 description operations. The observer does not invoke cleanup selectors or log

@@ -1489,6 +1489,38 @@ def observation_snapshot(record: dict, region: str, states=VERSION_STATES) -> di
     return result
 
 
+def observation_image_arn(name: str, region: str, ownership: dict) -> str:
+    """Resolve one exact read in the authenticated source image's namespace."""
+    require(
+        isinstance(name, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", name),
+        "observation_identity",
+    )
+    sources = [
+        (source_name, source_arn)
+        for proof, source_name, source_arn in ownership.values()
+        if proof == "shared-image"
+    ]
+    require(len(sources) == 1, "observation_identity")
+    source_name, source_arn = sources[0]
+    require(
+        isinstance(source_arn, str)
+        and isinstance(source_name, str)
+        and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", source_name),
+        "observation_identity",
+    )
+    namespace = re.fullmatch(
+        r"(arn:aws:lambda:"
+        + re.escape(region)
+        + r":[0-9]{12}:microvm-image:)"
+        + re.escape(source_name),
+        source_arn,
+    )
+    require(namespace is not None, "observation_identity")
+    # Get accepts an ARN or ID, not a List name. This constructs only a read
+    # address; it does not add an original ARN or authority to ownership.
+    return namespace[1] + name
+
+
 def observation_error(
     report: dict, section: str, exc: BaseException, **context
 ) -> None:
@@ -1681,8 +1713,17 @@ def observe(manifest: dict, ownership: dict, api: ReadOnlyApi, report: dict) -> 
             for row in manifest["resources"]
         )
     }
+    derived = set()
     for name in sorted(approved.keys() - names):
-        requested = approved[name] or name
+        try:
+            requested = approved[name] or observation_image_arn(name, region, ownership)
+        except Refused as exc:
+            observation_error(
+                report, "images", exc, imageSha256=identity("image", region, name)
+            )
+            continue
+        if approved[name] is None:
+            derived.add(name)
         if requested in images:
             # Preserve the listed identity and its versions when source and
             # current names disagree about the same ARN.
@@ -1727,10 +1768,25 @@ def observe(manifest: dict, ownership: dict, api: ReadOnlyApi, report: dict) -> 
                 identityMatches=current.get("name") == name
                 and (listed is None or current.get("imageArn") == arn),
             )
+            if name in derived:
+                row["identityMatches"] = (
+                    current.get("imageArn") == requested and current.get("name") == name
+                )
             if approved.get(name):
                 row["sourceIdentityMatches"] = (
                     current.get("imageArn") == requested and current.get("name") == name
                 )
+            if listed is None:
+                # An image that appeared after List has no enumerated versions.
+                # Retain its Get, but do not claim this census covered it fully.
+                if report["sections"]["images"] == "completed":
+                    observation_error(
+                        report,
+                        "images",
+                        Refused("observation_identity"),
+                        imageSha256=image_key,
+                    )
+                report["sections"]["versions"] = "incomplete"
         except (Exception, KeyboardInterrupt) as exc:  # noqa: BLE001 - exact absence remains a read result
             if isinstance(exc, Refused) and str(exc) == "not_found":
                 row["getOutcome"] = "not_found"
