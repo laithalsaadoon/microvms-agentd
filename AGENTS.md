@@ -164,8 +164,8 @@ capabilities, or `verify/parity/capabilities.toml` says why one doesn't.
   also records public types, values, callables, and inputs. Each collected item
   needs one contract row. The row lists its declarations in each API or explains
   why that API omits it. Review decides which forms express the same contract
-  across APIs. The check compares the recorded shapes and rejects missing or
-  duplicate mappings.
+  across APIs. The check compares each declaration with its reviewed record and
+  rejects missing or duplicate mappings.
 - Defaults live at or below core. The CLI and the bindings use the constant
   core re-exports from the layer that owns it, and don't add a duration, size
   or retry literal of their own without a decision in `verify/ratchet/decisions.toml`.
