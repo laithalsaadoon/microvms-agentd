@@ -69,7 +69,7 @@ suite = "script"
 [[family.fault]]
 id = "readonly-observation-availability-source"
 message = "test_missing_and_unknown_state_and_availability_are_not_inferred"
-transform = { file = "tools/recover-live.py", replace = "(\"availability\", \"status\", {\"ACTIVE\", \"INACTIVE\"}),", with = "(\"availability\", \"availability\", {\"ACTIVE\", \"INACTIVE\"})," }
+transform = { file = "tools/recover-live.py", replace = "observation_field(record, \"status\", {\"ACTIVE\", \"INACTIVE\"})", with = "observation_field(record, \"availability\", {\"ACTIVE\", \"INACTIVE\"})" }
 
 [[family]]
 guard = "test_recover_live_observation.py"

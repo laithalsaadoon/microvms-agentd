@@ -1434,29 +1434,34 @@ class ReadOnlyApi(Api):
             kwargs["nextToken"] = continuation
 
 
+def observation_field(record: dict, source: str, known: set[str]) -> str:
+    """Preserve optional-field uncertainty without exposing unrecognized values."""
+    value = record.get(source)
+    return (
+        "missing"
+        if source not in record
+        else "null"
+        if value is None
+        else value
+        if isinstance(value, str) and value in known
+        else "malformed"
+    )
+
+
 def observation_snapshot(record: dict, region: str, states=VERSION_STATES) -> dict:
     """Project optional metadata into fixed classifications, never provider text."""
-    result = {}
-    for field, source, known in (
-        ("state", "state", states),
-        ("availability", "status", {"ACTIVE", "INACTIVE"}),
-    ):
-        value = record.get(source)
-        result[field] = (
-            "missing"
-            if source not in record
-            else "null"
-            if value is None
-            else value
-            if isinstance(value, str) and value in known
-            else "malformed"
-        )
+    result = {
+        "state": observation_field(record, "state", states),
+        "availability": observation_field(record, "status", {"ACTIVE", "INACTIVE"}),
+    }
     result["createdAtKind"] = "missing" if "createdAt" not in record else "null"
     if record.get("createdAt") is not None:
         try:
             value = stamp(record["createdAt"])
-            require(math.isfinite(value) and value >= 0, "invalid_timestamp")
-            result.update(createdAtKind="valid", createdAt=value)
+            if math.isfinite(value) and value >= 0:
+                result.update(createdAtKind="valid", createdAt=value)
+            else:
+                result["createdAtKind"] = "malformed"
         except (Refused, TypeError, ValueError, OverflowError):
             result["createdAtKind"] = "malformed"
     value = record.get("logging")
@@ -1583,7 +1588,7 @@ def observe(manifest: dict, ownership: dict, api: ReadOnlyApi, report: dict) -> 
                     names.add(name)
                     images[identifier] = (name, raw)
                 elif section == "microvms":
-                    state = observation_snapshot(raw, region, VM_STATES)["state"]
+                    state = observation_field(raw, "state", VM_STATES)
                     observation_append(
                         report,
                         section,
