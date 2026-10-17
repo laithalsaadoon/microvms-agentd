@@ -39,6 +39,7 @@ pub mod split;
 pub mod sse;
 mod upload;
 
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -61,6 +62,10 @@ pub use split::{GapLog, GapPolicy, OutputGap, Split, SplitItem};
 pub use sse::{ExecEvent, Frame, SseParser};
 
 use crate::error::{Error, ErrorKind, WireKind};
+
+/// Where a tunnel or port-forward listens by default: loopback, on a port the OS picks.
+/// Loopback keeps the VM's credentials from being exposed to remote connections.
+pub const DEFAULT_BIND: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0));
 
 /// How long one non-streaming request may take.
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);

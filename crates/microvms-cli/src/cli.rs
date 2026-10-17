@@ -1635,7 +1635,7 @@ pub struct TunnelArgs {
     ///
     /// The same reasoning `port-forward` gives, and it matters more here: a raw-TCP tunnel into
     /// a VM running untrusted code is not something to expose on a LAN by accident.
-    #[arg(long, default_value = "127.0.0.1")]
+    #[arg(long, default_value_t = microvms_core::session::DEFAULT_BIND.ip().to_string())]
     pub bind: String,
 
     /// Stop after this many connections, instead of running until Ctrl-C.
@@ -1748,7 +1748,7 @@ pub struct PortForwardArgs {
     ///
     /// A tunnel into a VM running untrusted code is not something to expose on a LAN by
     /// accident, so widening it is a typed choice rather than the default.
-    #[arg(long, default_value = "127.0.0.1")]
+    #[arg(long, default_value_t = microvms_core::session::DEFAULT_BIND.ip().to_string())]
     pub bind: String,
 
     /// Stop after serving this many connections, instead of running until Ctrl-C.
@@ -2974,6 +2974,32 @@ mod tests {
         assert_eq!(parse_port_pair("8080"), Ok((8080, 8080)));
         assert_eq!(parse_port_pair("3000:8080"), Ok((3000, 8080)));
         assert_eq!(parse_port_pair(" 3000 : 8080 "), Ok((3000, 8080)));
+    }
+
+    #[test]
+    fn listener_flags_follow_the_shared_bind_ip_and_preserve_overrides() {
+        for command in ["tunnel", "port-forward"] {
+            for explicit in [None, Some("192.0.2.1")] {
+                let mut argv = vec!["microvm", command, "8080", "--name", "listener-test"];
+                if let Some(ip) = explicit {
+                    argv.extend(["--bind", ip]);
+                }
+                let parsed = Cli::try_parse_from(argv).expect("listener arguments parse");
+                let bind = match parsed.command {
+                    Command::Tunnel(args) => args.bind,
+                    Command::PortForward(args) => args.bind,
+                    _ => unreachable!("one of the listener commands"),
+                };
+                assert_eq!(
+                    bind,
+                    explicit.map_or_else(
+                        || microvms_core::session::DEFAULT_BIND.ip().to_string(),
+                        str::to_owned,
+                    ),
+                    "{command}",
+                );
+            }
+        }
     }
 
     /// **Port 0 is refused on both sides, and the two refusals say different things.**

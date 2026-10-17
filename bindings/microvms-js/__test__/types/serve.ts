@@ -4,9 +4,13 @@
 import type {
   PortForwardReport,
   Sandbox,
+  ServeOptions,
   Session,
   TunnelReport,
 } from 'microvms'
+
+// The effective default annotation does not make the input required.
+export const omittedListenerOptions: ServeOptions = {}
 
 export async function verified(sandbox: Sandbox, session: Session): Promise<TunnelReport> {
   const identity = await sandbox.tunnelIdentity()

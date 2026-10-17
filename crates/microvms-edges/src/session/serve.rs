@@ -27,7 +27,7 @@
 //! port ([`super::forward::direct_url`]), since there is no proxy to route it by header.
 
 use std::future::Future;
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -365,9 +365,8 @@ where
 
 // ── the SDKs' handles ────────────────────────────────────────────────────────
 
-/// Where an SDK's tunnel or forward listens unless told otherwise: loopback, on a port the OS
-/// picks. Loopback because a forward carries the VM's credentials to whoever connects.
-pub const DEFAULT_BIND: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0));
+/// The shared listener default, retained at its existing public path.
+pub use microvms_app::session::DEFAULT_BIND;
 
 /// A local address to listen on: `bind` when given, [`DEFAULT_BIND`] otherwise.
 pub fn bind_address(bind: Option<&str>) -> Result<SocketAddr, Error> {

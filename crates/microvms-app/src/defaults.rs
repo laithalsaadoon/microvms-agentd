@@ -52,6 +52,10 @@ pub fn client_defaults() -> Value {
         "sizeMib": SizeClass::DEFAULT.baseline_mib(),
         "agentSizeMib": DEFAULT_SIZE.baseline_mib(),
         "agentPort": DEFAULT_AGENT_PORT,
+        "listener": {
+            "bindAddress": crate::session::DEFAULT_BIND.to_string(),
+            "bindIp": crate::session::DEFAULT_BIND.ip().to_string(),
+        },
         "execWaitSeconds": seconds(DEFAULT_EXEC_WAIT),
         // The daemon wait a launch makes after RUNNING, and the RUNNING wait before it (#254).
         "readyTimeoutSeconds": seconds(crate::session::DEFAULT_BOOTSTRAP_TIMEOUT),

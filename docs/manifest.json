@@ -52,6 +52,10 @@
       "launchTimeoutSeconds": 300.0,
       "lifecyclePollIntervalSeconds": 5.0,
       "lifecycleTimeoutSeconds": 300.0,
+      "listener": {
+        "bindAddress": "127.0.0.1:0",
+        "bindIp": "127.0.0.1"
+      },
       "prompt": {
         "execId": null,
         "permissionMode": "agent-default",

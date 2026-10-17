@@ -1930,7 +1930,7 @@ ts = ["Sandbox.waitUntilRunning(timeout)"]
 id = "omitted-ts-serveoptions"
 exempt = "ServeOptions accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
 value = "undefined"
-ts = ["ServeOptions.bind", "ServeOptions.maxConnections"]
+ts = ["ServeOptions.maxConnections"]
 
 [[default]]
 id = "omitted-ts-session-attach"
@@ -2131,16 +2131,16 @@ value = "echo hello from a microvm"
 cli = ["quickstart --exec"]
 
 [[default]]
-id = "cli-tunnel-bind"
-exempt = "The CLI states only the listening IP; the shared edge listener owns the socket address and chooses a port separately."
-value = "127.0.0.1"
-cli = ["tunnel --bind"]
+id = "listener-bind-ip"
+core = "listener.bindIp"
+cli = ["tunnel --bind", "port-forward --bind"]
 
 [[default]]
-id = "cli-port-forward-bind"
-exempt = "The CLI states only the listening IP; the shared edge listener owns the socket address and chooses a port separately."
-value = "127.0.0.1"
-cli = ["port-forward --bind"]
+id = "listener-bind-address"
+core = "listener.bindAddress"
+# The tag states the effective fallback; the field remains optional. Its omission
+# is checked by the declaration contract and the runtime listener regression.
+ts = ["ServeOptions.bind"]
 
 [[default]]
 id = "cli-cost-build-sec"
