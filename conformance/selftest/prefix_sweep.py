@@ -58,21 +58,35 @@ def check_prefix_sweep(results: Results) -> None:
             any(name == CLEANED for name, _ in bad.failed),
         )
 
-    cli = Mock(region="us-east-1")
-    aws = Mock()
-    aws.client.return_value.get_microvm.return_value = {"state": "TERMINATED"}
-    control = SimpleNamespace(data={"microvmId": "fresh-control"})
-    cleanup = Results()
-    with patch("lanes.prefix_sweep.launch_image", return_value=control):
-        try:
-            with outside_control(cli, SimpleNamespace(), aws, cleanup) as launched:
-                assert launched is control
-                raise ValueError("sweep failed")
-        except ValueError:
-            pass
-    results.check(
-        "prefix sweep owns and cleans its fresh outside control even after failure",
-        cli.call.call_args.args
-        == ("terminate", "fresh-control", "--wait", "--region", "us-east-1")
-        and not cleanup.failed,
-    )
+    for failure in ("body", "launch"):
+        cli = Mock(region="us-east-1")
+        aws = Mock()
+        aws.client.return_value.get_microvm.return_value = {"state": "TERMINATED"}
+        control = SimpleNamespace(data={"microvmId": "fresh-control"})
+        source = SimpleNamespace(data={"imageIdentifier": "suite-image"})
+        cleanup = Results()
+        launch = (
+            {"return_value": control}
+            if failure == "body"
+            else {"side_effect": ValueError("readiness failed")}
+        )
+        with (
+            patch("lanes.prefix_sweep.launch_image", **launch),
+            patch(
+                "lanes.prefix_sweep.image_vm_ids",
+                side_effect=[{"suite-vm"}, {"suite-vm", "fresh-control"}],
+            ),
+        ):
+            try:
+                with outside_control(cli, source, aws, cleanup) as launched:
+                    assert launched is control
+                    raise ValueError("sweep failed")
+            except ValueError:
+                pass
+        results.check(
+            f"prefix sweep owns and cleans its fresh outside control after {failure} failure",
+            cli.call.call_count == 1
+            and cli.call.call_args.args
+            == ("terminate", "fresh-control", "--wait", "--region", "us-east-1")
+            and not cleanup.failed,
+        )

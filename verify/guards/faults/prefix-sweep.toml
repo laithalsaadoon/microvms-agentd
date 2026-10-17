@@ -96,5 +96,15 @@ guard = "conformance/run_rs.py --self-test: fresh outside control cleanup"
 run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
 expect = "exit-nonzero"
 suite = "script"
-message = "FAIL  prefix sweep owns and cleans its fresh outside control even after failure"
+message = "FAIL  prefix sweep owns and cleans its fresh outside control after body failure"
 transform = { file = "conformance/lanes/prefix_sweep.py", replace = 'cli.call("terminate", identifier, "--wait", "--region", cli.region)', with = 'cli.call("ls", identifier, "--wait", "--region", cli.region)' }
+
+
+[[fault]]
+id = "sweep-failed-launch-cleanup"
+guard = "conformance/run_rs.py --self-test: failed outside launch cleanup"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  prefix sweep owns and cleans its fresh outside control after launch failure"
+transform = { file = "conformance/lanes/prefix_sweep.py", replace = "known.update(discovered)", with = "known.update(before)" }

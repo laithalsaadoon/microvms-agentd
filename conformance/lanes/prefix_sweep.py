@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import secrets
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -53,31 +54,59 @@ def check_reports(
     )
 
 
+def image_vm_ids(plane: Any, image_arn: str) -> set[str]:
+    return {
+        str(item["microvmId"])
+        for page in plane.get_paginator("list_microvms").paginate()
+        for item in page.get("items", [])
+        if item.get("imageArn") == image_arn
+    }
+
+
 @contextlib.contextmanager
 def outside_control(
     cli: Any, image: Envelope, aws: Any, results: Results
 ) -> Iterator[Envelope]:
-    """Launch after the builds so the preservation control cannot age out during them."""
-    control = launch_image(cli, image, {})
-    identifier = str(control.data["microvmId"])
+    """Launch after the builds and recover accepted VMs even if readiness fails."""
+    plane = aws.client(SERVICE)
+    image_arn = str(image.data["imageIdentifier"])
+    before = image_vm_ids(plane, image_arn)
+    known: set[str] = set()
     try:
+        control = launch_image(cli, image, {})
+        known.add(str(control.data["microvmId"]))
         yield control
     finally:
+        # This lane launches alone. A before/after inventory recovers an accepted
+        # request whose CLI failed before returning its VM id; existing suite VMs
+        # are never cleanup candidates. Allow the new VM to become list-visible.
         try:
-            cli.call("terminate", identifier, "--wait", "--region", cli.region)
-            results.eq(
-                "prefix sweep outside control is independently terminated (#675)",
-                aws.client(SERVICE)
-                .get_microvm(microvmIdentifier=identifier)
-                .get("state"),
-                "TERMINATED",
-            )
-        except Exception as error:  # noqa: BLE001 - cleanup must preserve the original failure
+            for _ in range(10):
+                discovered = image_vm_ids(plane, image_arn) - before
+                known.update(discovered)
+                if known:
+                    break
+                time.sleep(1)
+        except Exception as error:  # noqa: BLE001 - still clean up any known id
             results.check(
-                "prefix sweep outside control cleanup completed (#675)",
+                "prefix sweep outside control discovery completed (#675)",
                 False,
                 repr(error),
             )
+        for identifier in sorted(known):
+            try:
+                cli.call("terminate", identifier, "--wait", "--region", cli.region)
+                results.eq(
+                    "prefix sweep outside control is independently terminated (#675)",
+                    plane.get_microvm(microvmIdentifier=identifier).get("state"),
+                    "TERMINATED",
+                )
+            except Exception as error:  # noqa: BLE001 - cleanup must preserve the original failure
+                results.check(
+                    "prefix sweep outside control cleanup completed (#675)",
+                    False,
+                    repr(error),
+                )
 
 
 def drive_prefix_sweep(
