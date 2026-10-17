@@ -83,10 +83,10 @@ transform = { file = "crates/microvms-app/src/control/sweep.rs", replace = "repo
 
 [[fault]]
 id = "parity-list-timestamps"
-guard = "core_answers_the_shared_case_corpus"
-run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]]
+guard = "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[control-plane/list-timestamps]"
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml", "--features", "parity-fixtures"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[control-plane/list-timestamps]"]]
 expect = "test-failed"
-suite = "rust"
+suite = "bindings"
 transform = { file = "crates/microvms-app/src/control/ops.rs", replace = "#[serde(default)]\n    pub started_at: Option<f64>,", with = "#[serde(skip_deserializing)]\n    pub started_at: Option<f64>," }
 
 

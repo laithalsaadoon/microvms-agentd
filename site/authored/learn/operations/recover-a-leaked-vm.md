@@ -60,15 +60,16 @@ microvm gc --prefix my-job- --keep my-job-current --json
 microvm gc --prefix my-job- --keep my-job-current --yes --json
 ```
 
-The first command only lists candidates. `--yes` terminates VMs using the selected
-images, waits for termination, deletes their images, and waits for deletion. Repeat
-`--keep` for more exact image names or ARNs; a kept image's VMs are preserved too.
-The prefix must be nonempty and matches the start of an image name. The report
-separates matched and kept images, selected and terminated VMs, deleted and in-use
-images, and operation failures. Inspect `failures` and `imagesInUse` before declaring
-cleanup complete. A concurrent launch can keep an image in use; the sweep reports
-that image for a later attempt. Build log groups and local ledger records remain
-separate cleanup tasks.
+The first command only lists candidates. With `--yes`, cleanup stops the selected
+VMs and confirms their shutdown before requesting image deletion. It confirms each
+image deletion before reporting success. Repeat `--keep` for more exact image
+names or ARNs. Cleanup preserves those images and their VMs.
+
+The prefix must be nonempty and match the start of an image name. The report lists
+scoped resources and confirmed outcomes. Inspect `failures` and `imagesInUse`
+before declaring cleanup complete. A concurrent launch can keep an image in use.
+The sweep reports that image for a later attempt. Clean up build log groups and
+local ledger records separately.
 
 The SDKs expose the same operation:
 
@@ -84,9 +85,10 @@ const report = await plane.sweep('my-job-', {
 });
 ```
 
-List summaries also carry the VM's start time in Unix seconds (`started_at` in
-Python, `startedAt` in JavaScript and CLI JSON). It is absent when the service does
-not report it, so an age-based cleanup can preserve unknown ages conservatively.
+List summaries include the VM's start time in Unix seconds (`started_at` in
+Python, `startedAt` in JavaScript and command JSON). When the service omits the
+timestamp, the summary has no start time. Preserve resources with unknown ages
+when cleaning up by age.
 
 ## 4. Ask the account, never the teardown
 
