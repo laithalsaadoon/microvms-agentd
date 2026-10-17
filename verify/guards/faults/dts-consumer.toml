@@ -162,3 +162,36 @@ expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_tsc_still_checks_probes_whose_shape_is_refused ("
 transform = { file = "tools/check-dts-consumer.py", replace = "    found, problems = probes(directory)\n", with = "    found, problems = probes(directory)\n    if problems:\n        raise ConsumerError(\"\\n\".join(problems))\n" }
+
+# PromiseRaw carries structured errors without widening the published result types.
+# Seed each declaration independently so one exact-return assertion cannot mask another.
+[[family]]
+guard = "tools/check-dts-consumer.py"
+run = ["./tools/check-dts-consumer.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "dts-consumer-find-image-undefined"
+message = "typed-promises.ts(7,14): error TS2322"
+transform = { file = "bindings/microvms-js/index.d.ts", replace = "  findImage(options: AgentImageOptions, size?: SizeClass | undefined | null): Promise<string | null>\n", with = "  findImage(options: AgentImageOptions, size?: SizeClass | undefined | null): Promise<string | null | undefined>\n" }
+
+[[family.fault]]
+id = "dts-consumer-suspend-undefined"
+message = "typed-promises.ts(8,14): error TS2322"
+transform = { file = "bindings/microvms-js/index.d.ts", replace = "  suspend(microvmId: string): Promise<void>\n", with = "  suspend(microvmId: string): Promise<undefined>\n" }
+
+[[family.fault]]
+id = "dts-consumer-resume-undefined"
+message = "typed-promises.ts(9,14): error TS2322"
+transform = { file = "bindings/microvms-js/index.d.ts", replace = "  resume(microvmId: string): Promise<void>\n", with = "  resume(microvmId: string): Promise<undefined>\n" }
+
+[[family.fault]]
+id = "dts-consumer-terminate-undefined"
+message = "typed-promises.ts(10,14): error TS2322"
+transform = { file = "bindings/microvms-js/index.d.ts", replace = "  terminate(microvmId: string): Promise<void>\n", with = "  terminate(microvmId: string): Promise<undefined>\n" }
+
+[[family.fault]]
+id = "dts-consumer-preflight-undefined"
+message = "typed-promises.ts(11,14): error TS2322"
+transform = { file = "bindings/microvms-js/index.d.ts", replace = "  preflight(options: BuildImageOptions, size?: SizeClass | undefined | null, runHookTimeout?: RunHookTimeout | undefined | null, buildHookTimeout?: BuildHookTimeout | undefined | null): Promise<void>\n", with = "  preflight(options: BuildImageOptions, size?: SizeClass | undefined | null, runHookTimeout?: RunHookTimeout | undefined | null, buildHookTimeout?: BuildHookTimeout | undefined | null): Promise<undefined>\n" }
