@@ -66,6 +66,48 @@ def source_log():
     )
 
 
+def source_representation(annotated):
+    """Build test-only direct text and independently numbered contiguous spans."""
+    raw = []
+    spans = []
+    steps = []
+    for line in annotated.splitlines(keepends=True):
+        _, name, payload = line.split("\t", 2)
+        if not spans or spans[-1]["name"] != name:
+            number = len(spans) + 1
+            spans.append(
+                {"number": number, "name": name, "start": len(raw) + 1, "count": 0}
+            )
+            steps.append(
+                {
+                    "number": number,
+                    "name": name,
+                    "status": "completed",
+                    "conclusion": "success",
+                }
+            )
+        spans[-1]["count"] += 1
+        raw.append(payload)
+    for span in spans:
+        start = span["start"] - 1
+        span["sha256"] = recovery.digest(
+            "".join(raw[start : start + span["count"]]).encode()
+        )
+    return "".join(raw), steps, spans
+
+
+def set_source_manifest(value, annotated):
+    raw, steps, spans = source_representation(annotated)
+    value["source_log_sha256"] = recovery.digest(raw.encode())
+    value["source_job_steps_sha256"] = recovery.digest(
+        json.dumps(
+            steps, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+        ).encode()
+    )
+    value["source_log_spans"] = spans
+    return raw, steps
+
+
 def manifest():
     result = {
         "version": 1,
@@ -86,10 +128,10 @@ def manifest():
         "source_job_completed_at": END,
         "source_conclusion": "cancelled",
         "source_job_conclusion": "cancelled",
-        "source_log_sha256": recovery.digest(source_log().encode()),
         "source_workflow_sha256": recovery.digest(b"workflow"),
         "excluded": ["f" * 64],
     }
+    set_source_manifest(result, source_log())
     owned = recovery.source_ownership(source_log(), REGION)
     result["resources"] = [
         {
@@ -104,7 +146,7 @@ def manifest():
 
 class FakeGithub:
     def __init__(self):
-        self.log_value = source_log()
+        self.log_value, steps, _ = source_representation(source_log())
         self.values = {
             "": {"id": 7, "owner": {"login": "maintainer"}},
             "actions/runs/9/attempts/1": {
@@ -123,6 +165,7 @@ class FakeGithub:
             },
             "actions/runs/9": {"run_attempt": 1, "status": "completed"},
             "actions/jobs/10": {
+                "steps": steps,
                 "run_id": 9,
                 "run_attempt": 1,
                 "name": "real AWS",

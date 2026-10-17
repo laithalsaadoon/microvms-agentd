@@ -14,7 +14,7 @@
   "version": 1,
   "hash_scheme": "sha256-kind-nul-region-nul-name-v1",
   "region": "us-east-1",
-  "source_log_sha256": "99eea1393f5fdf4f11c2204140dda850f2e17e9bc4f2d4500b5af1903cf42fbe",
+  "source_log_sha256": "8c8a3d6b3c34d72219267616d7c10b3da0ccd994a733a58b0b43407b0efd5595",
   "source_workflow_sha256": "182c650ca8d73a5b43521ec05b373dd16fe10f3d65d6e589bced67dd18cc7e94",
   "resources": [
     {
@@ -50,6 +50,170 @@
     "bucket_sha256": "0317ddbb3f0542317438a809cfa2879c4ac476b8bbaff7256b1101e6aa59b6b2",
     "build_role_arn_sha256": "e0b1b911f182e46dea5a09d929e145e0c05d8e900fc0a37626b4a24734e1874e"
   },
-  "parser_version": 2,
-  "source_log_representation": "gh-run-view-job-log-python-text-utf8-v1"
+  "parser_version": 3,
+  "source_log_representation": "gh-api-job-log-python-text-utf8-lf-spans-v1",
+  "source_job_steps_sha256": "d8f30a63c1a78ecad6aa34023c468a9c23809eedd1c87a535c662942e990adf0",
+  "source_log_spans": [
+    {
+      "number": 1,
+      "name": "Set up job",
+      "start": 1,
+      "count": 40,
+      "sha256": "a1b5e8179ced06c75990b499b5903e9294db4360c8270253a953f137658f763d"
+    },
+    {
+      "number": 2,
+      "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "start": 41,
+      "count": 259,
+      "sha256": "e09f5799afe2cde90e84ddf34a8df8e0bf5a4fb4c85510c8d3bf003be0392304"
+    },
+    {
+      "number": 3,
+      "name": "Run dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c",
+      "start": 300,
+      "count": 167,
+      "sha256": "3055a6d2d05f2bee963a5643cb7c6c9b3581180ef54d40605e6478548ee8bd5d"
+    },
+    {
+      "number": 4,
+      "name": "Run Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6",
+      "start": 467,
+      "count": 62,
+      "sha256": "23e3988194606a482f7dd7e351053faffa24058191b22a0660e7b848bfe6cff1"
+    },
+    {
+      "number": 5,
+      "name": "Run astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884",
+      "start": 529,
+      "count": 43,
+      "sha256": "3e053e3b9670312327dd4e7b559dcc60c26b6d83b928f6360e91ba63e998e909"
+    },
+    {
+      "number": 6,
+      "name": "Run actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1",
+      "start": 572,
+      "count": 19,
+      "sha256": "6df713893e91eece279c0aa5c4ef960277270b2c12e018eeb45678f31b70760c"
+    },
+    {
+      "number": 7,
+      "name": "Run hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e",
+      "start": 591,
+      "count": 13,
+      "sha256": "74b5e8280381e4ff6222ba8ac136eec2970b5c323935a650df80482888eb5a9b"
+    },
+    {
+      "number": 8,
+      "name": "assume AWS role",
+      "start": 604,
+      "count": 15,
+      "sha256": "3c5434984cece2e85152b6515de2010437a553f8db0e0d6bdd13b9cc54a86bf7"
+    },
+    {
+      "number": 9,
+      "name": "build the shipping binary",
+      "start": 619,
+      "count": 302,
+      "sha256": "647523fa16d663fe652285c0be307c9dc5d2b961d8070e3c64cab7b6bb732b53"
+    },
+    {
+      "number": 10,
+      "name": "build the microvm CLI",
+      "start": 921,
+      "count": 633,
+      "sha256": "166c13a841a65cd9f5bdde4aaaa910105f89f2dd201a1679e83dae34df35bae6"
+    },
+    {
+      "number": 11,
+      "name": "the binaries under test are the ones just built",
+      "start": 1554,
+      "count": 18,
+      "sha256": "2a1893d204406d8b78450f2e52bb2e1bc261d93dcea26a8d7c91c03c34b9b75e"
+    },
+    {
+      "number": 12,
+      "name": "Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
+      "start": 1572,
+      "count": 34,
+      "sha256": "40ef13236149f7c8308ccb8cfca5022ea1b36dc31c0596572d6386d2dd3a3f53"
+    },
+    {
+      "number": 13,
+      "name": "Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
+      "start": 1606,
+      "count": 34,
+      "sha256": "050c1bcfdcb95d10e29e3decae71d202f458c7aa760043b448124d251866f816"
+    },
+    {
+      "number": 14,
+      "name": "restore executable modes on native Box artifacts",
+      "start": 1640,
+      "count": 17,
+      "sha256": "715f3a4bc2cae6b6da4cd571bf33288f79e7866c845b5fa66697e94f453d9032"
+    },
+    {
+      "number": 15,
+      "name": "the matching release is available for provisioning",
+      "start": 1657,
+      "count": 17,
+      "sha256": "d6c8435f4511da543abcbcc33e1580d56c5b004a2b11813611c6154a3261a1bb"
+    },
+    {
+      "number": 17,
+      "name": "apply the conformance stack",
+      "start": 1674,
+      "count": 395,
+      "sha256": "ab9647b55741798e0ffedd15ba1a55d198b538ca16a48cb92cf86247c447955d"
+    },
+    {
+      "number": 18,
+      "name": "conformance suite",
+      "start": 2069,
+      "count": 504,
+      "sha256": "eaa66de9b638ec836d5cf79652a7998f631b3978bcd6469e4bfb8bd5fb910a10"
+    },
+    {
+      "number": 20,
+      "name": "verify nothing leaked",
+      "start": 2573,
+      "count": 133,
+      "sha256": "b998d806e02e15ef043273658dca6849ae5e233854ff032fa9b7b7f3ae398a0a"
+    },
+    {
+      "number": 21,
+      "name": "destroy the stack",
+      "start": 2706,
+      "count": 471,
+      "sha256": "49ef4473a4f9a413ad35d102be9209cb7cf9c95ed7e782872e04b554a550ed24"
+    },
+    {
+      "number": 22,
+      "name": "verify again after destroy",
+      "start": 3177,
+      "count": 129,
+      "sha256": "75f73f03176d9309174c7310ec3f807d4dc5f369c9730b1fefb712727e00d0b9"
+    },
+    {
+      "number": 44,
+      "name": "Post assume AWS role",
+      "start": 3306,
+      "count": 1,
+      "sha256": "5a5f121025d9173be34446f6fa7a9b99876aba7d34dc18c8be2f861cd4f9ffb7"
+    },
+    {
+      "number": 48,
+      "name": "Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "start": 3307,
+      "count": 32,
+      "sha256": "7fcc89af20d4b5784506e72faae759d610245448a673e0a3ff76667eb327d710"
+    },
+    {
+      "number": 49,
+      "name": "Complete job",
+      "start": 3339,
+      "count": 4,
+      "sha256": "67eb4d17679716eca8d93cf9fe5c5f37f9a55c472fa82bafe35a3b7395ff71df"
+    }
+  ]
 }

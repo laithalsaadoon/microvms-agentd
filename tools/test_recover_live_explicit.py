@@ -30,7 +30,7 @@ def selected_source():
 
 def manifest():
     value = fixtures.manifest()
-    value["source_log_sha256"] = recovery.digest(selected_source().encode())
+    fixtures.set_source_manifest(value, selected_source())
     value["resources"].append(
         {"kind": "image", "proof": "explicit-incident-image", "sha256": KEY}
     )
@@ -40,7 +40,8 @@ def manifest():
 
 def owned(value):
     github = fixtures.FakeGithub()
-    github.log_value = selected_source()
+    github.log_value, steps, _ = fixtures.source_representation(selected_source())
+    github.values["actions/jobs/10"]["steps"] = steps
     return recovery.provenance(value, github, fixtures.environment())
 
 
@@ -131,10 +132,9 @@ def test_manifest_hash_and_explicit_observation_must_both_agree():
         owned(value)
     value = manifest()
     github = fixtures.FakeGithub()
-    github.log_value = selected_source().replace(
-        "verify again after destroy", "different step"
-    )
-    value["source_log_sha256"] = recovery.digest(github.log_value.encode())
+    changed = selected_source().replace("verify again after destroy", "different step")
+    github.log_value, steps = fixtures.set_source_manifest(value, changed)
+    github.values["actions/jobs/10"]["steps"] = steps
     with pytest.raises(
         recovery.Refused,
         match="^source_ownership_incomplete$|^source_capability_ambiguous$",
