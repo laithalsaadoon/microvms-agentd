@@ -1095,6 +1095,9 @@ VERDICT = re.compile(
     r"(?:: (?P<why>.*?))?(?: \(\d+\.\d s\))?$",
     re.MULTILINE,
 )
+RESTORED = re.compile(
+    r"^guards: restored, every command passes again \([^)]+\)$", re.MULTILINE
+)
 
 
 def judge(kind: str, why: str) -> tuple[bool, str]:
@@ -1162,6 +1165,12 @@ def fire(
                 for candidate in pending:
                     verdicts.pop(candidate.id, None)
                 continue
+            # A surviving fault legitimately exits 1, but an incomplete restored pass
+            # cannot prove even the candidates whose earlier fault verdict was green.
+            expected_exit = int(any(kind != "fired" for kind, _ in lines.values()))
+            completed = (
+                bool(RESTORED.search(done.stdout)) and done.returncode == expected_exit
+            )
             for candidate in pending:
                 verdicts.setdefault(
                     candidate.id,
@@ -1170,6 +1179,13 @@ def fire(
                         f"the fire never judged it (exit {done.returncode}):\n{done.stderr[-2000:]}",
                     ),
                 )
+                verdict = verdicts[candidate.id]
+                if not completed and (verdict[0] or parity_base_pass(verdict)):
+                    verdicts[candidate.id] = (
+                        False,
+                        "the fire did not complete its restored verification "
+                        f"(exit {done.returncode}):\n{done.stderr[-2000:]}",
+                    )
             break
     finally:
         subprocess.run(

@@ -423,6 +423,52 @@ class ParityTests(Fixture):
         self.assertIn("test_a_case[", entries[0]["guard"])
         self.assertExit(self.run_script("check"), 0)
 
+    def test_a_skipped_node_surface_cannot_complete_a_shared_proof(self):
+        import contextlib
+        import io
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        self.fix()
+        self.add_case()
+        branch = TOOL["Branch"](self.root, "origin/main")
+        guard = "wrap-dockerfile/changed"
+        harness = TOOL["FIRE"]
+        fault = harness["Fault"](
+            id="node",
+            guard=guard,
+            expect="test-failed",
+            suite="bindings",
+            run=[["node", "--test", "--test-reporter=tap", "case.mjs"]],
+        )
+        key = harness["command_key"](fault)
+        for directive in ("SKIP", "TODO"):
+            with self.subTest(directive=directive):
+                output = f"ok 1 - {guard} # {directive} reason\n"
+                board = harness["Board"]([[]], False)
+                board.done[key] = [(0, output, output, 0.1, 1)]
+                with contextlib.redirect_stdout(io.StringIO()):
+                    node_passed = harness["check_pass"](
+                        [fault], board, {key: 1}, lambda *_: None, "clean"
+                    )
+
+                def fire(_branch, made, _patch, _args):
+                    return {
+                        candidate.id: (True, "proven")
+                        if candidate.test.surface == "core"
+                        else TOOL["judge"]("guard not found", "")
+                        if candidate.test.surface == "ts" and not node_passed
+                        else (
+                            False,
+                            "passes with the fix taken out, so it proves nothing about the fix",
+                        )
+                        for candidate in made
+                    }
+
+                with patch.dict(TOOL["prove"].__globals__, {"fire": fire}):
+                    code = TOOL["prove"](branch, SimpleNamespace(any=False, emit=None))
+                self.assertEqual(code, 1)
+
     def test_every_case_needs_a_regression_even_when_another_case_is_proven(self):
         from types import SimpleNamespace
         from unittest.mock import patch
@@ -447,6 +493,113 @@ class ParityTests(Fixture):
         with patch.dict(TOOL["prove"].__globals__, {"fire": fire}):
             code = TOOL["prove"](branch, SimpleNamespace(any=False, emit=None))
         self.assertEqual(code, 1)
+
+
+class FireCompletionTests(Fixture):
+    """Only a completed restored pass can support the earlier fault verdicts."""
+
+    def fire_results(self, replies):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        made = [
+            TOOL["Candidate"](
+                TOOL["Test"](
+                    "parity",
+                    TOOL["PARITY_SENTINEL"],
+                    f"guard-{surface}",
+                    surface,
+                    1,
+                    1,
+                    case="wrap-dockerfile/sentinel",
+                    surface=surface,
+                ),
+                surface,
+                [["cargo", "test"]],
+                "rust",
+            )
+            for surface in ("core", "py")
+        ]
+        real_run = subprocess.run
+        calls = []
+
+        def run(argv, **kwargs):
+            if len(argv) > 1 and argv[1] == str(TOOL["GUARDS_FIRE"]):
+                calls.append(argv)
+                code, output = replies[len(calls) - 1]
+                return subprocess.CompletedProcess(argv, code, output, "")
+            return real_run(argv, **kwargs)
+
+        with patch("subprocess.run", side_effect=run):
+            verdicts = TOOL["fire"](
+                TOOL["Branch"](self.root, "origin/main"),
+                made,
+                "",
+                SimpleNamespace(
+                    target_dir=str(self.top / "target"), timeout=30, jobs=1
+                ),
+            )
+        self.assertEqual(len(calls), len(replies))
+        return verdicts
+
+    def test_an_unfinished_restored_pass_cannot_prove_a_fault(self):
+        for code, ending in (
+            (0, ""),
+            (1, ""),
+            (1, "guards: restored, every command passes again (0.1 s)\n"),
+        ):
+            with self.subTest(code=code, ending=ending):
+                verdicts = self.fire_results(
+                    [(code, "fired: core (0.1 s)\nfired: py (0.1 s)\n" + ending)]
+                )
+                self.assertFalse(verdicts["core"][0])
+                self.assertFalse(verdicts["py"][0])
+                self.assertIn("restored verification", verdicts["core"][1])
+
+    def test_a_surviving_candidate_does_not_discard_an_independent_proof(self):
+        verdicts = self.fire_results(
+            [
+                (
+                    1,
+                    "fired: core (0.1 s)\n"
+                    "DID NOT FIRE: py: the command passed with the fault seeded (0.1 s)\n"
+                    "guards: restored, every command passes again (0.1 s)\n",
+                )
+            ]
+        )
+        self.assertTrue(verdicts["core"][0])
+        self.assertTrue(TOOL["parity_base_pass"](verdicts["py"]))
+
+    def test_an_unrestored_unchanged_surface_is_not_a_passing_surface(self):
+        verdicts = self.fire_results(
+            [
+                (
+                    1,
+                    "fired: core (0.1 s)\n"
+                    "DID NOT FIRE: py: the command passed with the fault seeded (0.1 s)\n",
+                )
+            ]
+        )
+        self.assertFalse(verdicts["core"][0])
+        self.assertFalse(TOOL["parity_base_pass"](verdicts["py"]))
+
+    def test_an_already_red_candidate_is_removed_before_retrying_the_rest(self):
+        verdicts = self.fire_results(
+            [
+                (
+                    1,
+                    "already red: py: the command exits 1 with no fault seeded (clean run)\n",
+                ),
+                (
+                    0,
+                    "fired: core (0.1 s)\n"
+                    "guards: restored, every command passes again (0.1 s)\n",
+                ),
+            ]
+        )
+        self.assertTrue(verdicts["core"][0])
+        self.assertFalse(verdicts["py"][0])
+        self.assertIn("doesn't pass on the head", verdicts["py"][1])
 
 
 class PatchTests(Fixture):

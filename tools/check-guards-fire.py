@@ -476,6 +476,8 @@ PYTEST_OK = re.compile(r"^PASSED (\S+)", re.MULTILINE)
 PYTEST_FAILED = re.compile(r"^FAILED (\S+?)(?: - .*)?$", re.MULTILINE)
 NODE_OK = re.compile(r"^\s*ok \d+ - (.+?)(?: # .*)?$", re.MULTILINE)
 NODE_FAILED = re.compile(r"^\s*not ok \d+ - (.+?)(?: # .*)?$", re.MULTILINE)
+# TAP also labels skipped and TODO rows as ok; neither establishes a guard's verdict.
+NODE_DIRECTIVE = re.compile(r"\s+#\s*(?:SKIP|TODO)\b", re.IGNORECASE)
 BUILD_BROKE = re.compile(r"^error(?:\[(E\d{4})\])?: ", re.MULTILINE)
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
@@ -1688,7 +1690,11 @@ def reported(output: str, kind: str, passed: bool) -> set[str]:
         ("node", True): NODE_OK,
         ("node", False): NODE_FAILED,
     }[(kind, passed)]
-    return {m.group(1).strip() for m in pattern.finditer(output)}
+    return {
+        m.group(1).strip()
+        for m in pattern.finditer(output)
+        if kind != "node" or not NODE_DIRECTIVE.search(m.group(0))
+    }
 
 
 def verdict(fault: Fault, code: int, output: str) -> str | None:

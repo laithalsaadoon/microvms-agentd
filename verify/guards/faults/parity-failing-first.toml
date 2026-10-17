@@ -66,3 +66,57 @@ run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_selection", "--
 expect = "test-failed"
 suite = "rust"
 transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "if !self.sentinel_loaded {", with = "if false {" }
+
+
+# Earlier fault lines cannot stand in for a completed restored pass.
+[[family]]
+guard = "test_fail_to_pass.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_fail_to_pass.py", "-k", "FireCompletionTests"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "f2p-restored-completion"
+message = "FAIL: test_an_unfinished_restored_pass_cannot_prove_a_fault ("
+transform = { file = "tools/fail-to-pass.py", replace = 'if not completed and (verdict[0] or parity_base_pass(verdict)):', with = 'if False and (verdict[0] or parity_base_pass(verdict)):' }
+
+[[family.fault]]
+id = "f2p-mixed-verdicts"
+message = "FAIL: test_a_surviving_candidate_does_not_discard_an_independent_proof ("
+transform = { file = "tools/fail-to-pass.py", replace = 'expected_exit = int(any(kind != "fired" for kind, _ in lines.values()))', with = 'expected_exit = 0' }
+
+[[family.fault]]
+id = "f2p-red-candidate-retry"
+message = "FAIL: test_an_already_red_candidate_is_removed_before_retrying_the_rest ("
+transform = { file = "tools/fail-to-pass.py", replace = 'if red and len(red) < len(pending):', with = 'if False:' }
+
+[[family.fault]]
+id = "f2p-restored-base-pass"
+message = "FAIL: test_an_unrestored_unchanged_surface_is_not_a_passing_surface ("
+transform = { file = "tools/fail-to-pass.py", replace = 'if not completed and (verdict[0] or parity_base_pass(verdict)):', with = 'if not completed and verdict[0]:' }
+
+# TAP directives describe tests that did not establish a passing or failing verdict.
+[[family]]
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_node_"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "guards-node-skipped-pass"
+message = "FAIL: test_node_skipped_and_todo_tests_are_not_clean_guards ("
+transform = { file = "tools/check-guards-fire.py", replace = 'if kind != "node" or not NODE_DIRECTIVE.search(m.group(0))', with = 'if True' }
+
+[[family.fault]]
+id = "guards-node-todo-failure"
+message = "FAIL: test_node_todo_and_skip_failures_are_not_failure_proofs ("
+transform = { file = "tools/check-guards-fire.py", replace = 'if kind != "node" or not NODE_DIRECTIVE.search(m.group(0))', with = 'if kind != "node" or not passed or not NODE_DIRECTIVE.search(m.group(0))' }
+
+[[fault]]
+id = "f2p-node-skipped-surface"
+guard = "test_fail_to_pass.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_fail_to_pass.py", "-k", "test_a_skipped_node_surface"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_skipped_node_surface_cannot_complete_a_shared_proof ("
+transform = { file = "tools/check-guards-fire.py", replace = 'if kind != "node" or not NODE_DIRECTIVE.search(m.group(0))', with = 'if True' }
