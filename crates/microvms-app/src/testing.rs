@@ -116,6 +116,7 @@ pub fn control_plane(
 /// callers cannot silently consume a response for a different operation or repeat the last.
 #[derive(Debug)]
 pub struct ParityControlPlane {
+    region: Region,
     exchanges: std::sync::Mutex<std::collections::VecDeque<serde_json::Value>>,
     calls: std::sync::Mutex<Vec<String>>,
 }
@@ -141,6 +142,7 @@ impl ParityControlPlane {
             ));
         }
         Ok(Arc::new(Self {
+            region: Region::UsEast1,
             exchanges: std::sync::Mutex::new(exchanges.into()),
             calls: std::sync::Mutex::new(Vec::new()),
         }))
@@ -149,7 +151,7 @@ impl ParityControlPlane {
     pub fn plane(self: &Arc<Self>) -> ControlPlane {
         control_plane(
             self.clone(),
-            Region::UsEast1,
+            self.region.clone(),
             Arc::new(YieldingClock::new()),
         )
     }
@@ -160,6 +162,10 @@ impl ParityControlPlane {
 }
 
 impl Transport for ParityControlPlane {
+    fn region(&self) -> Option<&Region> {
+        Some(&self.region)
+    }
+
     fn send(
         &self,
         call: crate::control::transport::Call,
