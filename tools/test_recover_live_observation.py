@@ -700,6 +700,156 @@ def test_observation_schema_accepts_exact_snapshot_classifications(
 
 
 @pytest.mark.parametrize(
+    "invalid", [-1, -0.1, float("nan"), float("inf"), float("-inf"), "1", True, None]
+)
+def test_observation_schema_refuses_invalid_snapshot_timestamp(census, invalid):
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    value["versions"][0]["observed"]["createdAt"] = invalid
+    with pytest.raises(recovery.Refused, match="^receipt_schema$"):
+        recovery.validate_observation(value)
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        None,
+        [],
+        {},
+        {"kind": "cloudWatch"},
+        {"kind": "cloudWatch", "logGroupSha256": "invalid"},
+        {"kind": "cloudWatch", "logGroupSha256": None},
+        {"kind": "disabled", "logGroupSha256": "d" * 64},
+        {"kind": "unknown"},
+    ],
+)
+def test_observation_schema_refuses_malformed_logging(census, invalid):
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    value["versions"][0]["observed"]["logging"] = invalid
+    with pytest.raises(recovery.Refused, match="^receipt_schema$"):
+        recovery.validate_observation(value)
+
+
+def test_observation_schema_accepts_required_only_incomplete_report():
+    value = {
+        "kind": "live-recovery-observation",
+        "schemaVersion": 1,
+        "conformance_verified": False,
+        "recoveryAccepted": False,
+        "mutationsPerformed": False,
+        "status": "incomplete",
+    }
+    assert recovery.validate_observation(value) is value
+
+
+def test_observation_schema_accepts_every_optional_top_level_field(census):
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    value.update(status="incomplete", reason="interrupted_or_invalid_input")
+    assert recovery.validate_observation(value) is value
+
+
+@pytest.mark.parametrize(
+    "field,invalid",
+    [
+        ("sourceRun", False),
+        ("sourceRun", 0),
+        ("sourceSha", "a" * 39),
+        ("region", "invalid"),
+        ("manifestSha256", "g" * 64),
+        ("parserVersion", True),
+        ("sourceLogRepresentation", "unrecognized"),
+    ],
+)
+def test_observation_schema_validates_shared_bindings(census, field, invalid):
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    value[field] = invalid
+    with pytest.raises(recovery.Refused, match="^receipt_schema$"):
+        recovery.validate_observation(value)
+
+
+@pytest.mark.parametrize(
+    "field,invalid",
+    [
+        ("summary_present", 1),
+        ("summary_present", False),
+        ("leakCount", True),
+        ("leakCount", -1),
+        ("leakCount", 1),
+        ("exitCode", None),
+        ("resources", None),
+        (
+            "resources",
+            [{"kind": "log-group", "sha256": "bad", "category": "unclassified"}],
+        ),
+        (
+            "resources",
+            [{"kind": "invalid", "sha256": "d" * 64, "category": "unclassified"}],
+        ),
+        (
+            "resources",
+            [{"kind": "log-group", "sha256": "d" * 64, "category": "invalid"}],
+        ),
+    ],
+)
+def test_observation_schema_validates_independent_verifier(census, field, invalid):
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    value["independentVerifier"][field] = invalid
+    with pytest.raises(recovery.Refused, match="^receipt_schema$"):
+        recovery.validate_observation(value)
+
+
+@pytest.mark.parametrize("count", [999, 1000, 1001])
+def test_observation_schema_enforces_independent_verifier_row_boundary(census, count):
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    value["independentVerifier"]["resources"] = [
+        {"kind": "log-group", "sha256": f"{index:064x}", "category": "unclassified"}
+        for index in range(count)
+    ]
+    if count <= 1000:
+        assert recovery.validate_observation(value) is value
+    else:
+        with pytest.raises(recovery.Refused, match="^receipt_schema$"):
+            recovery.validate_observation(value)
+
+
+@pytest.mark.parametrize(
+    "status,reason", [("completed", "api_failed"), ("incomplete", "unrecognized")]
+)
+def test_observation_schema_refuses_invalid_reason_status_pairs(census, status, reason):
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    value.update(status=status, reason=reason)
+    with pytest.raises(recovery.Refused, match="^receipt_schema$"):
+        recovery.validate_observation(value)
+
+
+@pytest.mark.parametrize(
+    "corruption", ["missing", "extra", "value", "verifier", "unfinished"]
+)
+def test_observation_schema_refuses_inconsistent_sections(census, corruption):
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    if corruption == "missing":
+        del value["sections"]["versions"]
+    elif corruption == "extra":
+        value["sections"]["unknown"] = "completed"
+    elif corruption == "value":
+        value["sections"]["versions"] = "invalid"
+    elif corruption == "verifier":
+        value["status"] = "incomplete"
+        value["sections"]["independentVerifier"] = "not_run"
+    else:
+        value["sections"]["versions"] = "incomplete"
+    with pytest.raises(recovery.Refused, match="^receipt_schema$"):
+        recovery.validate_observation(value)
+
+
+@pytest.mark.parametrize(
     "target,key,value",
     [
         ("image", "imageArn", ARN),
