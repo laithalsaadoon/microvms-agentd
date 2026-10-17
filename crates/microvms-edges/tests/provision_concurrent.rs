@@ -56,7 +56,10 @@ fn concurrent_cache_misses_own_their_temporary_files() {
             _: &mut dyn FnMut(&str),
         ) -> Result<Verification, String> {
             self.paths.lock().unwrap().push(dest.to_path_buf());
-            std::fs::write(dest, &self.bytes).unwrap();
+            // Fetch implementations may atomically replace the supplied path.
+            let downloaded = tempfile::NamedTempFile::new_in(dest.parent().unwrap()).unwrap();
+            std::fs::write(downloaded.path(), &self.bytes).unwrap();
+            downloaded.persist(dest).unwrap();
             self.written.wait();
             Ok(Verification::Attestation)
         }
@@ -89,6 +92,18 @@ fn concurrent_cache_misses_own_their_temporary_files() {
         .expect("a complete verified cache entry remains");
     assert_eq!(cached.bytes, bytes);
     assert_eq!(cached.source, Source::Cache(Verification::Attestation));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        assert_eq!(
+            std::fs::metadata(&cached.path)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755
+        );
+    }
     let entries: Vec<_> = std::fs::read_dir(cached.path.parent().unwrap())
         .unwrap()
         .map(|entry| entry.unwrap().file_name())

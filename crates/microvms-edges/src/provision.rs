@@ -567,13 +567,13 @@ fn fetched(
     std::fs::create_dir_all(dir).map_err(|error| io_error(dir, "create", &error))?;
     // Every call owns its temporary files. A PID-only name lets a second thread
     // truncate a verified download before the first thread reads or installs it.
-    let mut partial = tempfile::NamedTempFile::new_in(dir)
-        .map_err(|error| io_error(dir, "create temporary binary in", &error))?;
+    let download = tempfile::NamedTempFile::new_in(dir)
+        .map_err(|error| io_error(dir, "create temporary download in", &error))?;
     let Fetched {
         bytes,
         verification,
     } = fetch
-        .fetch_bytes(&tag, partial.path(), progress)
+        .fetch_bytes(&tag, download.path(), progress)
         .map_err(|reason| fetch_error(&tag, &reason))?;
     if let Some(why) = not_aarch64(&bytes) {
         return Err(ProvisionError::new(
@@ -586,6 +586,11 @@ fn fetched(
         .remedy("this is a release-asset defect worth reporting, not a local mistake"));
     }
 
+    // A legacy Fetch may atomically replace its destination. Use a fresh install
+    // handle so its bytes and permissions always belong to the file we persist.
+    drop(download);
+    let mut partial = tempfile::NamedTempFile::new_in(dir)
+        .map_err(|error| io_error(dir, "create temporary binary in", &error))?;
     partial
         .as_file_mut()
         .set_len(0)
