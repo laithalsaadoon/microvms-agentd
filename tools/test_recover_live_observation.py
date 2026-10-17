@@ -313,6 +313,7 @@ def test_observation_reads_both_version_responses_and_never_cleanup_paths(
         {"sha256": recovery.identity("log-group", REGION, GROUP)}
     ]
     assert value["images"][0]["approved"] is True
+    assert value["images"][0]["identityMatches"] is True
     row = value["versions"][0]
     assert row["imageSha256"] == recovery.identity("image", REGION, NAME)
     assert row["versionSha256"] == recovery.digest(VERSION.encode())
@@ -439,6 +440,7 @@ def test_observation_does_not_drop_deleted_or_unknown_state_versions(census):
         "unknownMember",
     }
     assert census.plane.get_microvm_image_version.call_count == 2
+    assert all(row["loggingMatches"] is None for row in value["versions"])
 
 
 @pytest.mark.parametrize(
@@ -478,6 +480,12 @@ def test_incomplete_version_scan_preserves_other_sections_and_marks_failure(
             "provider_error": "api_failed",
         }[failure]
     }
+    assert all(
+        row["imageSha256"] == recovery.identity("image", REGION, NAME)
+        and row["operation"] == "list_microvm_image_versions"
+        for row in value["errors"]
+    )
+    assert value["versionCoverage"][0]["paginationComplete"] is False
     assert "synthetic-provider-secret" not in json.dumps(value)
     census.logs.delete_log_group.assert_not_called()
 
@@ -503,6 +511,10 @@ def test_complete_version_pagination_reads_every_exact_pair(census):
         call.kwargs["imageVersion"]
         for call in census.plane.get_microvm_image_version.call_args_list
     ] == [VERSION, "later-version"]
+    assert all(
+        value["versionCoverage"][0][key] == 2
+        for key in ("listedCount", "getCount", "observedCount")
+    )
 
 
 @pytest.mark.parametrize(
@@ -620,6 +632,121 @@ def test_exact_version_read_failure_retains_listed_snapshot_and_uncertain_matche
         )
     )
     assert "synthetic-provider-diagnostic" not in json.dumps(value)
+
+
+@pytest.mark.parametrize(
+    "code,outcome,section_status",
+    [
+        ("ResourceNotFoundException", "not_found", "completed"),
+        ("AccessDeniedException", "api_error", "incomplete"),
+    ],
+)
+def test_exact_image_read_failure_retains_listed_snapshot_and_unknown_identity(
+    census, code, outcome, section_status
+):
+    error = RuntimeError("synthetic-private-image-diagnostic")
+    error.response = {"Error": {"Code": code}}
+    census.plane.get_microvm_image.side_effect = error
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    row = value["images"][0]
+    assert row["getOutcome"] == outcome
+    assert row["identityMatches"] is None
+    assert row["sourceIdentityMatches"] is None
+    assert "observed" not in row
+    assert row["listed"] == recovery.observation_snapshot(
+        census.image, REGION, recovery.IMAGE_STATES
+    )
+    assert value["sections"]["images"] == section_status
+    assert value["sections"]["versions"] == "completed"
+    assert value["errors"] == (
+        []
+        if outcome == "not_found"
+        else [
+            {
+                "section": "images",
+                "code": "api_failed",
+                "imageSha256": recovery.identity("image", REGION, NAME),
+                "operation": "get_microvm_image",
+            }
+        ]
+    )
+    assert "synthetic-private-image-diagnostic" not in json.dumps(value)
+    assert recovery.validate_observation(value) is value
+
+
+def test_image_snapshots_hash_listed_and_observed_logging_separately(census):
+    census.image["logging"] = {"cloudWatch": {"logGroup": GROUP}}
+    census.plane.get_microvm_image.return_value["state"] = "UPDATED"
+    observed_group = GROUP + "-observed"
+    census.plane.get_microvm_image.return_value["logging"] = {
+        "cloudWatch": {"logGroup": observed_group}
+    }
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    row = value["images"][0]
+    assert row["observed"]["state"] == "UPDATED"
+    for snapshot, group in (("listed", GROUP), ("observed", observed_group)):
+        assert row[snapshot]["logging"] == {
+            "kind": "cloudWatch",
+            "logGroupSha256": recovery.identity("log-group", REGION, group),
+        }
+    assert value["status"] == "completed"
+    assert GROUP not in json.dumps(value)
+    assert recovery.validate_observation(value) is value
+
+
+@pytest.mark.parametrize("field", ["name", "imageArn"])
+def test_image_source_identity_requires_both_matching_name_and_arn(census, field):
+    census.plane.get_microvm_image.return_value[field] += "-different"
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    row = value["images"][0]
+    assert row["identityMatches"] is False
+    assert row["sourceIdentityMatches"] is False
+    assert row["getOutcome"] == "observed"
+    assert value["status"] == "completed"
+    assert recovery.validate_observation(value) is value
+
+
+@pytest.mark.parametrize(
+    "code,outcome,counter,error_code",
+    [
+        ("ResourceNotFoundException", "not_found", "notFoundCount", "not_found"),
+        ("AccessDeniedException", "api_error", "apiErrorCount", "api_failed"),
+    ],
+)
+def test_multiple_failed_version_reads_accumulate_counts_and_exact_error_context(
+    census, code, outcome, counter, error_code
+):
+    versions = [
+        census.version,
+        {**census.version, "imageVersion": VERSION + "-second"},
+    ]
+    census.plane.list_microvm_image_versions.return_value = {"items": versions}
+    error = RuntimeError("synthetic-private-version-diagnostic")
+    error.response = {"Error": {"Code": code}}
+    census.plane.get_microvm_image_version.side_effect = error
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    coverage = value["versionCoverage"][0]
+    assert coverage["listedCount"] == coverage["getCount"] == coverage[counter] == 2
+    assert coverage["observedCount"] == 0
+    assert coverage["paginationComplete"] is True
+    assert [row["getOutcome"] for row in value["versions"]] == [outcome, outcome]
+    assert value["errors"] == [
+        {
+            "section": "versions",
+            "code": error_code,
+            "imageSha256": recovery.identity("image", REGION, NAME),
+            "versionSha256": recovery.digest(version["imageVersion"].encode()),
+            "operation": "get_microvm_image_version",
+        }
+        for version in versions
+    ]
+    assert value["status"] == "incomplete"
+    assert "synthetic-private-version-diagnostic" not in json.dumps(value)
+    assert recovery.validate_observation(value) is value
 
 
 def test_failed_independent_verifier_still_collects_census_without_claiming_completion(
@@ -1196,16 +1323,21 @@ def test_observed_disagreement_is_evidence_not_a_recovery_default(census):
     ],
 )
 @pytest.mark.parametrize("uncertainty", ["missing", "null", "malformed"])
+@pytest.mark.parametrize("side", ["both", "listed", "observed"])
 def test_unknown_version_metadata_never_becomes_an_equality_claim(
-    census, source, match, uncertainty
+    census, source, match, uncertainty, side
 ):
     record = copy.deepcopy(census.version)
     if uncertainty == "missing":
         del record[source]
     else:
         record[source] = None if uncertainty == "null" else "synthetic-unknown-value"
-    census.plane.list_microvm_image_versions.return_value = {"items": [record]}
-    census.plane.get_microvm_image_version.return_value = copy.deepcopy(record)
+    census.plane.list_microvm_image_versions.return_value = {
+        "items": [record if side != "observed" else census.version]
+    }
+    census.plane.get_microvm_image_version.return_value = copy.deepcopy(
+        record if side != "listed" else census.version
+    )
     value = report()
     recovery.observe(census.manifest, census.owned, census.api, value)
     assert value["status"] == "completed"
@@ -1432,6 +1564,36 @@ def test_conflicting_source_arn_keeps_listed_image_and_versions_in_incomplete_ce
     census.plane.get_microvm_image_version.assert_called_once_with(
         imageIdentifier=ARN, imageVersion=VERSION
     )
+    assert recovery.validate_observation(value) is value
+
+
+def test_source_identity_conflict_does_not_skip_later_unlisted_source_image(census):
+    listed = {**census.image, "name": NAME + "-other"}
+    later = {**census.image, "name": "zzz-source-image", "imageArn": ARN + "-later"}
+    last = {**later, "name": later["name"] + "-last", "imageArn": ARN + "-last"}
+    for image in (later, last):
+        image_key = recovery.identity("image", REGION, image["name"])
+        census.manifest["resources"].append({"kind": "image", "sha256": image_key})
+        census.owned[image_key] = ("shared-image", image["name"], image["imageArn"])
+    census.plane.list_microvm_images.return_value = {"items": [listed]}
+    current = {image["imageArn"]: image for image in (listed, later, last)}
+    census.plane.get_microvm_image.side_effect = lambda **kwargs: current[
+        kwargs["imageIdentifier"]
+    ]
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    rows = {row["imageSha256"]: row for row in value["images"]}
+    assert len(rows) == 3
+    for image in (later, last):
+        row = rows[recovery.identity("image", REGION, image["name"])]
+        assert row["approved"] is True
+        assert row["getOutcome"] == "observed"
+        assert row["sourceIdentityMatches"] is True
+        assert row["identityMatches"] is True
+        assert "listed" not in row
+        assert row["requestedArnSha256"] == recovery.digest(image["imageArn"].encode())
+    assert value["status"] == "incomplete"
+    assert value["errors"][0]["code"] == "observation_identity"
     assert recovery.validate_observation(value) is value
 
 
