@@ -30,6 +30,8 @@ from unittest.mock import patch
 SCRIPT = Path(__file__).with_name("fail-to-pass.py")
 REPO = SCRIPT.parent.parent
 TOOL = runpy.run_path(str(SCRIPT), run_name="tools.fail-to-pass")
+# mutmut's trampoline has its own globals; fakes must replace the wrapped script's ports.
+TOOL_GLOBALS = inspect.unwrap(TOOL["main"]).__globals__
 SENTINELS = TOOL["SENTINELS"]
 REGISTRY_DIR = TOOL["REGISTRY_DIR"]
 
@@ -367,9 +369,7 @@ class ParityTests(Fixture):
     def test_the_parity_sentinel_refuses_a_finder_that_reads_no_cases(self):
         from unittest.mock import patch
 
-        with patch.dict(
-            TOOL["sentinel_problems"].__globals__, {"parity_tests": lambda *_: []}
-        ):
+        with patch.dict(TOOL_GLOBALS, {"parity_tests": lambda *_: []}):
             problems = TOOL["sentinel_problems"](self.root)
         self.assertIn(
             "the parity finder doesn't find every surface of wrap-dockerfile/sentinel",
@@ -390,7 +390,7 @@ class ParityTests(Fixture):
                 for candidate in made
             }
 
-        with patch.dict(TOOL["prove"].__globals__, {"fire": fire}):
+        with patch.dict(TOOL_GLOBALS, {"fire": fire}):
             code = TOOL["prove"](branch, SimpleNamespace(any=False, emit=None))
         self.assertEqual(code, 1)
 
@@ -413,7 +413,7 @@ class ParityTests(Fixture):
                 for candidate in made
             }
 
-        with patch.dict(TOOL["prove"].__globals__, {"fire": fire}):
+        with patch.dict(TOOL_GLOBALS, {"fire": fire}):
             code = TOOL["prove"](branch, SimpleNamespace(any=False, emit="adapter"))
         self.assertEqual(code, 0)
         entries = tomllib.loads(
@@ -465,7 +465,7 @@ class ParityTests(Fixture):
                         for candidate in made
                     }
 
-                with patch.dict(TOOL["prove"].__globals__, {"fire": fire}):
+                with patch.dict(TOOL_GLOBALS, {"fire": fire}):
                     code = TOOL["prove"](branch, SimpleNamespace(any=False, emit=None))
                 self.assertEqual(code, 1)
 
@@ -490,7 +490,7 @@ class ParityTests(Fixture):
                 for candidate in made
             }
 
-        with patch.dict(TOOL["prove"].__globals__, {"fire": fire}):
+        with patch.dict(TOOL_GLOBALS, {"fire": fire}):
             code = TOOL["prove"](branch, SimpleNamespace(any=False, emit=None))
         self.assertEqual(code, 1)
 
