@@ -2,6 +2,22 @@
 # The image clauses retain the exceptional paths as well as ordinary reuse.
 
 [[fault]]
+id = "formal-image-accepted-vanished-no-recovery"
+guard = "control::ensure::tests::an_accepted_build_that_vanishes_is_rebuilt_without_another_upload"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::ensure::tests::an_accepted_build_that_vanishes_is_rebuilt_without_another_upload"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/ensure.rs", replace = "                    return Ok(done(built, false, true));\n                }\n                Err(error) => {\n                    if !progress.redescribed && control.vanished(&arn).await? {", with = "                    return Ok(done(built, false, true));\n                }\n                Err(error) => {\n                    if false {" }
+
+[[fault]]
+id = "formal-image-winner-vanished-no-recovery"
+guard = "control::ensure::tests::a_vanished_race_winner_is_replaced_by_a_fresh_ready_image"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::ensure::tests::a_vanished_race_winner_is_replaced_by_a_fresh_ready_image"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/ensure.rs", replace = "                                if !progress.redescribed && control.vanished(&arn).await? {", with = "                                if false {" }
+
+[[fault]]
 id = "formal-image-vanished-no-recovery"
 guard = "control::ensure::tests::a_vanished_build_is_redescribed_and_rebuilt_once"
 run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::ensure::tests::a_vanished_build_is_redescribed_and_rebuilt_once"]

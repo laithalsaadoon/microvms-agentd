@@ -1481,6 +1481,121 @@ mod tests {
         assert_eq!(services.account_calls.load(Ordering::SeqCst), 1);
     }
 
+    /// IMAGE-9: a build accepted for this caller may disappear during its readiness wait.
+    /// Recovery creates its replacement using the upload already made (IMAGE-8).
+    #[tokio::test]
+    async fn an_accepted_build_that_vanishes_is_rebuilt_without_another_upload() {
+        let name = expected_name();
+        let fake = Arc::new(FakeControlPlane::new());
+        for answer in [
+            absent(),
+            absent(),
+            absent(),
+            absent(),
+            Answer::ok(ready(&name)),
+        ] {
+            fake.answer("GetMicrovmImage", answer);
+        }
+        fake.answer(
+            "CreateMicrovmImage",
+            Answer::created(fake::create_image_response(&name)),
+        );
+        let services = Arc::new(FakeServices {
+            before_create: Some(Arc::clone(&fake)),
+            ..FakeServices::default()
+        });
+        let ensured = sandbox(&fake, &services)
+            .ensure_image(request())
+            .await
+            .expect("the accepted build gets one recovery");
+
+        assert_eq!(
+            fake.operations(),
+            [
+                "GetMicrovmImage",
+                "CreateMicrovmImage",
+                "GetMicrovmImage",
+                "GetMicrovmImage",
+                "GetMicrovmImage",
+                "CreateMicrovmImage",
+                "GetMicrovmImage",
+            ]
+        );
+        assert_eq!(ensured.image.state, "CREATED");
+        assert!(!ensured.reused);
+        assert!(ensured.uploaded);
+        assert_eq!(
+            uploads(&services),
+            [(
+                BUCKET.to_string(),
+                format!("harbor/images/{name}/artifact.zip")
+            ),]
+        );
+        for index in 0..2 {
+            assert_eq!(
+                fake.body_of("CreateMicrovmImage", index)["codeArtifact"]["uri"],
+                ensured.artifact_uri
+            );
+        }
+        assert_eq!(services.account_calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// IMAGE-9 and IMAGE-11: a race winner can vanish while this caller waits. A fresh
+    /// describe can find its replacement ready; that image is reused without another create.
+    #[tokio::test]
+    async fn a_vanished_race_winner_is_replaced_by_a_fresh_ready_image() {
+        let name = expected_name();
+        let fake = Arc::new(FakeControlPlane::new());
+        for answer in [
+            absent(),
+            state(&name, "CREATING"),
+            absent(),
+            absent(),
+            Answer::ok(ready(&name)),
+        ] {
+            fake.answer("GetMicrovmImage", answer);
+        }
+        fake.answer(
+            "CreateMicrovmImage",
+            Answer::failure(409, "another caller won"),
+        );
+        let services = Arc::new(FakeServices {
+            before_create: Some(Arc::clone(&fake)),
+            ..FakeServices::default()
+        });
+        let ensured = sandbox(&fake, &services)
+            .ensure_image(request())
+            .await
+            .expect("the winner's replacement is reusable");
+
+        assert_eq!(
+            fake.operations(),
+            [
+                "GetMicrovmImage",
+                "CreateMicrovmImage",
+                "GetMicrovmImage",
+                "GetMicrovmImage",
+                "GetMicrovmImage",
+                "GetMicrovmImage",
+            ]
+        );
+        assert_eq!(ensured.image.state, "CREATED");
+        assert!(ensured.reused);
+        assert!(ensured.uploaded);
+        assert_eq!(
+            uploads(&services),
+            [(
+                BUCKET.to_string(),
+                format!("harbor/images/{name}/artifact.zip")
+            ),]
+        );
+        assert_eq!(
+            fake.first_body("CreateMicrovmImage")["codeArtifact"]["uri"],
+            ensured.artifact_uri
+        );
+        assert_eq!(services.account_calls.load(Ordering::SeqCst), 1);
+    }
+
     /// **IMAGE-8, the build.** No image under the name: the artifact goes to the
     /// content-addressed key before create, the create names that URI and the derived name,
     /// and the image this call built is not reused.
