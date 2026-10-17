@@ -53,6 +53,13 @@ const DEFAULT_BOOTSTRAP_TIMEOUT: f64 =
 /// same way.
 const DEFAULT_RUN_SYNC_TIMEOUT: f64 = microvms_core::session::DEFAULT_EXEC_WAIT.as_secs_f64();
 
+/// Image configuration. A missing discovery response means an older daemon.
+#[napi(object)]
+pub struct Discovery {
+    /// Configured user, or undefined for the daemon/root default. Resolved per exec.
+    pub default_user: Option<String>,
+}
+
 /// The daemon's liveness answer. `bootstrapped` is the useful field.
 #[napi(object)]
 pub struct Health {
@@ -649,6 +656,21 @@ impl Session {
     pub async fn port(&self) -> Result<u16, AsyncError> {
         let live = self.live().await;
         Ok(live.session().map_err(js_async)?.port())
+    }
+
+    /// Image configuration, or null if this daemon predates discovery.
+    #[napi]
+    pub async fn discovery(&self) -> Result<Option<Discovery>, AsyncError> {
+        let live = self.live().await;
+        Ok(live
+            .session()
+            .map_err(js_async)?
+            .discovery()
+            .await
+            .map_err(js_async)?
+            .map(|value| Discovery {
+                default_user: value.default_user,
+            }))
     }
 
     /// Unauthenticated liveness.

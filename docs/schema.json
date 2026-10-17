@@ -1,5 +1,21 @@
 {
   "$defs": {
+    "Discovery": {
+      "description": "`GET /v1/discovery`: authenticated image configuration, not resolved identity.\n\nA missing route means an older daemon; a present response with `default_user:\nnull` means no image default. Resolution still happens for each exec request.",
+      "properties": {
+        "default_user": {
+          "description": "The image's `AGENTD_DEFAULT_USER`, or `None` for the daemon/root default.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "default_user"
+      ],
+      "type": "object"
+    },
     "DiskHealth": {
       "description": "The disk half of [`Health`].",
       "properties": {
@@ -1538,6 +1554,36 @@
         }
       ],
       "summary": "upload and extract a tar under ?path=, confined to that root — the one confined write path, because member paths come from the archive rather than from the caller. Mirrors the CPython tarfile `data` filter: in-tree symlinks preserved, absolute link targets refused, relative targets resolved lexically so a symlink written earlier in the same archive cannot redirect a later member."
+    },
+    {
+      "auth": "bearer",
+      "method": "GET",
+      "path": "/v1/discovery",
+      "request": null,
+      "response": {
+        "media_type": "application/json",
+        "schema": {
+          "$ref": "#/$defs/Discovery"
+        }
+      },
+      "statuses": [
+        {
+          "code": 200,
+          "error": "",
+          "meaning": "the image's configured default exec user, without resolving a passwd row"
+        },
+        {
+          "code": 401,
+          "error": "",
+          "meaning": "the presented bearer token does not match the installed one"
+        },
+        {
+          "code": 503,
+          "error": "",
+          "meaning": "no token is installed yet, so the control API is closed. Never 404: a client mapping 404 onto \"not found\" would report a phantom absent artifact."
+        }
+      ],
+      "summary": "image configuration: the configured default exec user, or null for the daemon/root default; resolution still occurs for each request"
     },
     {
       "auth": "none",

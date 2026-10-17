@@ -1135,3 +1135,10 @@ ts = { exempt = "the tunnel relay applies the wire context internally; it is not
 # @napi-rs/cli 3.10's generated loader stamps the binding it loaded with this name. It reports
 # which build artifact loaded, which is no capability, and no other surface loads one.
 __napiBindingTarget = { exempt = "napi-rs's generated loader reports the artifact it loaded" }
+
+[[capability]]
+id = "discovery"
+core = "microvms_core::session::Session::discovery"
+cli = "discovery"
+py = ["Session.discovery", "Session.discovery_async"]
+ts = "Session.discovery"

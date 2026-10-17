@@ -235,3 +235,24 @@ async fn an_unbootstrapped_daemon_is_reported_with_a_non_zero_code_and_a_null_di
         rendered.text
     );
 }
+
+#[tokio::test]
+async fn discovery_reports_unavailable_root_and_named_user_without_conflating_them() {
+    for (status, body, available, user) in [
+        (404, "{}", false, None),
+        (200, r#"{"default_user":null}"#, true, None),
+        (200, r#"{"default_user":"worker"}"#, true, Some("worker")),
+    ] {
+        let script = DaemonScript::new();
+        script.reply(status, body);
+        let command = Command::Discovery(HealthArgs {
+            attach: attach_flags(),
+            region: region_flags(),
+        });
+        let (result, _, _) = against_daemon(&script, &command).await;
+        let rendered = result.unwrap();
+        assert_eq!(script.paths(), ["GET /v1/discovery"]);
+        assert_eq!(rendered.data["available"], available);
+        assert_eq!(rendered.data["defaultUser"].as_str(), user);
+    }
+}

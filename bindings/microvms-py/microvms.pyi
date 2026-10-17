@@ -738,6 +738,17 @@ class Detached:
         """
 
 @final
+class Discovery:
+    """
+    Image configuration. A missing discovery response means an older daemon.
+    """
+    @property
+    def default_user(self, /) -> str |None:
+        """
+        Configured user, or None for the daemon/root default. Resolved per exec.
+        """
+
+@final
 class DownloadedFile:
     """
     One file `Session.download_dir` wrote, relative to the local directory.
@@ -2900,6 +2911,14 @@ class Session:
         is deliberately no constructor that takes a proxy token: minting one is the
         control plane's job and it happens inside every request (TRAP-9), so a caller
         handing a token in would be handing in one that expires.
+        """
+    def discovery(self, /) -> Discovery |None:
+        """
+        Image configuration, or None if this daemon predates discovery.
+        """
+    async def discovery_async(self, /) -> Discovery |None:
+        """
+        The awaitable twin of `discovery`.
         """
     def download_dir(self, /, remote: str, local_dir: str |PathLike[str], globs: Sequence[str]) -> list[DownloadedFile]:
         """

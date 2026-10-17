@@ -1,0 +1,42 @@
+# Additive discovery calls do not compile on the base. These compiling mutations
+# prove old-peer fallback, authorization, and the returned image configuration.
+
+[[fault]]
+id = "discovery-route-auth"
+guard = "routes::tests::discovery_reports_configuration_behind_the_control_guard"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "routes::tests::discovery_reports_configuration_behind_the_control_guard"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/routes.rs", replace = "                \"/v1/discovery\".into(),\n                Auth::Bearer,", with = "                \"/v1/discovery\".into(),\n                Auth::Open," }
+
+[[fault]]
+id = "discovery-client-old-peer"
+guard = "session::tests::discovery_distinguishes_old_peers_from_root_and_named_defaults"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::tests::discovery_distinguishes_old_peers_from_root_and_named_defaults"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/session/mod.rs", replace = "if response.status == 404 {", with = "if response.status == 200 {" }
+
+[[fault]]
+id = "discovery-client-auth"
+guard = "session::tests::discovery_distinguishes_old_peers_from_root_and_named_defaults"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::tests::discovery_distinguishes_old_peers_from_root_and_named_defaults"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/session/mod.rs", replace = "            .request(HttpRequest::new(\"GET\", \"/v1/discovery\"))", with = "            .request(unauthenticated(HttpRequest::new(\"GET\", \"/v1/discovery\")))" }
+
+[[fault]]
+id = "discovery-route-value"
+guard = "routes::tests::discovery_reports_configuration_behind_the_control_guard"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "routes::tests::discovery_reports_configuration_behind_the_control_guard"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/routes.rs", replace = "        state.config().default_user.clone(),", with = "        None," }
+
+[[fault]]
+id = "discovery-required-default"
+guard = "session::tests::discovery_distinguishes_old_peers_from_root_and_named_defaults"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::tests::discovery_distinguishes_old_peers_from_root_and_named_defaults"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/protocol/src/discovery.rs", replace = "    #[serde(deserialize_with = \"Option::<String>::deserialize\")]\n", with = "" }

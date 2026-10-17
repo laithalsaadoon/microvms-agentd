@@ -476,6 +476,7 @@ async fn handle<O: std::io::Write, E: std::io::Write>(
         Command::Exec(args) => commands::attached::exec(ctx, args).await,
         Command::Wait(args) => commands::lifecycle::wait(ctx, args).await,
         Command::Health(args) => commands::attached::health(ctx, args).await,
+        Command::Discovery(args) => commands::attached::discovery(ctx, args).await,
         Command::Keepalive(args) => commands::attached::keepalive(ctx, args, interrupt).await,
         Command::Ack(args) => commands::attached::ack(ctx, args).await,
         Command::Kill(args) => commands::attached::kill(ctx, args).await,

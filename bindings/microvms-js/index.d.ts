@@ -1071,6 +1071,8 @@ export declare class Session {
   egressPosture(): Promise<string>
   /** The port the proxy token is scoped to. */
   port(): Promise<number>
+  /** Image configuration, or null if this daemon predates discovery. */
+  discovery(): Promise<Discovery | null>
   /** Unauthenticated liveness. */
   health(): Promise<Health>
   /**
@@ -1694,6 +1696,12 @@ export interface DetachedObject {
   region: string
   port: number
   agentToken: string
+}
+
+/** Image configuration. A missing discovery response means an older daemon. */
+export interface Discovery {
+  /** Configured user, or undefined for the daemon/root default. Resolved per exec. */
+  defaultUser?: string
 }
 
 /** One file `downloadDir` wrote. */
