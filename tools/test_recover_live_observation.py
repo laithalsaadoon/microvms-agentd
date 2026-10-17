@@ -849,6 +849,15 @@ def test_observation_schema_refuses_inconsistent_sections(census, corruption):
         recovery.validate_observation(value)
 
 
+def test_observation_schema_requires_sections_for_independent_verifier(census):
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    value["status"] = "incomplete"
+    del value["sections"]
+    with pytest.raises(recovery.Refused, match="^receipt_schema$"):
+        recovery.validate_observation(value)
+
+
 @pytest.mark.parametrize(
     "target,key,value",
     [
