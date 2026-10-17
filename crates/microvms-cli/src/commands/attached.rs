@@ -33,6 +33,8 @@
 //! releases output, and it is a separate command precisely so that is a decision rather than a
 //! side effect.
 
+use microvms_core::prelude::HistoryExt as _;
+
 use std::ops::ControlFlow;
 use std::time::Duration;
 

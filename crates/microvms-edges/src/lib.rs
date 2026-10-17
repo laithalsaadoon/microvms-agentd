@@ -10,6 +10,7 @@
 //! * [`session::forward`], [`session::tunnel`] and [`session::shell`]: the sockets, from the
 //!   port forwarder's listener to the WebSocket tunnel and its Noise identity proof;
 //! * [`names::FileNameStore`]: the CLI's name registry on disk;
+//! * [`run_store::FileRunStore`]: run ledgers and append-only VM history on disk;
 //! * [`agents::bedrock::mint`]: a Bedrock bearer token from the caller's credentials;
 //! * [`provision`]: the verified `agentd` binary, fetched and cached;
 //! * [`clock::TokioClock`], [`entropy::OsEntropy`], and [`adapters::SystemAdapters`], which
@@ -45,3 +46,5 @@ pub mod workspace;
 /// holds every published crate in the workspace at one version, so the client and the daemon it
 /// provisions come from the same release (BIND-17).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub mod run_store;
