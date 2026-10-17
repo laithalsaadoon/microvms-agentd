@@ -67,7 +67,7 @@ transform = { file = "conformance/lanes/retry_telemetry.py", replace = 'read_ok 
 [[family.fault]]
 id = "retry-live-cleanup-call-bound"
 message = "FAIL  retry cleanup bounds each SDK call without automatic retries"
-transform = { file = "conformance/lanes/retry_telemetry.py", replace = 'retries={"max_attempts": 0}', with = 'retries={"max_attempts": 5}' }
+transform = { file = "conformance/harness/observation.py", replace = 'retries={"max_attempts": 0}', with = 'retries={"max_attempts": 5}' }
 
 [[family.fault]]
 id = "retry-live-python-policy"

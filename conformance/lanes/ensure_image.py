@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from harness.constants import REPO, SERVICE
+from harness.observation import bounded_plane, retry_observation
 from harness.results import Results
 
 #: What `drive_ensure_image` names the image it ensures: a fresh nonce per run, so the
@@ -236,7 +237,7 @@ def ensure_image_cleanup(
     VMs go first, so no VM still runs from an image the next step deletes.
     """
     plane = aws.client(SERVICE)
-    ensure_image_vm_cleanup(report, prefix, plane, results, sleep, clock)
+    ensure_image_vm_cleanup(report, prefix, bounded_plane(aws), results, sleep, clock)
     ensure_image_image_cleanup(report, prefix, plane, results, sleep, clock)
 
     s3 = aws.client("s3")
@@ -348,21 +349,29 @@ def ensure_image_vm_cleanup(
     """Terminates every VM of the run that isn't yet, and waits for each to read TERMINATED.
 
     The VMs are the listing's, matched by the image each was launched from, plus the one
-    the report names, read by its id. An error from either read ends the wait as a failure.
-    The detail keeps the first read, which is what the test's own teardown left.
+    the report names, read by its id. A throttle retries the whole snapshot within the
+    cleanup deadline; another read error ends the wait as a failure. The detail keeps
+    the first complete read, which is what the test's own teardown left.
     """
     vm_id = (report.get("vm") or {}).get("id")
     states: dict[str, str] = {}
     first: dict[str, str] | None = None
     error = None
     deadline = clock() + CLEANUP_SECONDS
+
+    def read_states() -> dict[str, str]:
+        snapshot = ensure_image_vms(plane, prefix)
+        if vm_id:
+            snapshot[vm_id] = str(
+                plane.get_microvm(microvmIdentifier=vm_id).get("state")
+            )
+        return snapshot
+
     while True:
         try:
-            states = ensure_image_vms(plane, prefix)
-            if vm_id:
-                states[vm_id] = str(
-                    plane.get_microvm(microvmIdentifier=vm_id).get("state")
-                )
+            states = retry_observation(
+                read_states, deadline=deadline, clock=clock, sleep=sleep
+            )
         except Exception as exc:  # noqa: BLE001 - the error class is the finding
             error = type(exc).__name__
             break

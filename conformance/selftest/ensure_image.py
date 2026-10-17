@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from botocore.exceptions import ClientError
 from harness.results import Results
 from lanes.ensure_image import (
     ENSURE_GROUP_GONE,
@@ -41,6 +42,7 @@ class FakeEnsureImageAws:
         stuck_vms: bool = False,
         stuck_groups: bool = False,
         refusals: int = 0,
+        read_failures: dict[str, list[str]] | None = None,
     ) -> None:
         self.blind = blind
         self.listing_raises = listing_raises
@@ -48,13 +50,19 @@ class FakeEnsureImageAws:
         self.stuck_vms = stuck_vms
         self.stuck_groups = stuck_groups
         self.refusals = refusals
+        self.read_failures = read_failures or {}
         self.images: dict[str, dict[str, Any]] = {}
         self.vms: dict[str, dict[str, Any]] = {}
         self.objects: set[str] = set()
         self.groups: set[str] = set()
 
-    def client(self, _service: str) -> FakeEnsureImageAws:
+    def client(self, _service: str, **_kwargs: Any) -> FakeEnsureImageAws:
         return self
+
+    def read(self, operation: str) -> None:
+        failures = self.read_failures.get(operation, [])
+        if failures:
+            raise ClientError({"Error": {"Code": failures.pop(0)}}, operation)
 
     def get_paginator(self, operation: str) -> FakeEnsureImagePages:
         return FakeEnsureImagePages(self, operation)
@@ -73,6 +81,7 @@ class FakeEnsureImageAws:
             self.images.pop(imageIdentifier, None)
 
     def get_microvm(self, *, microvmIdentifier: str) -> dict[str, Any]:
+        self.read("GetMicrovm")
         return dict(self.vms[microvmIdentifier])
 
     def terminate_microvm(self, *, microvmIdentifier: str) -> None:
@@ -127,6 +136,7 @@ class FakeEnsureImagePages:
             images = [] if self.aws.blind else list(self.aws.images.values())
             return [{"items": [dict(image) for image in images]}]
         if self.operation == "list_microvms":
+            self.aws.read("ListMicrovms")
             return [{"items": [dict(vm) for vm in self.aws.vms.values()]}]
         if self.operation == "describe_log_groups":
             return [self.aws.describe_log_groups(**kwargs)]
@@ -296,6 +306,26 @@ def check_ensure_image_cleanup(results: "Results") -> None:
             complete,
             account(listing_raises=True),
             [ENSURE_IMAGE_GONE],
+        ),
+        "a VM listing throttle": (
+            complete,
+            account(read_failures={"ListMicrovms": ["ThrottlingException"]}),
+            [],
+        ),
+        "an explicit VM read throttle": (
+            complete,
+            account(read_failures={"GetMicrovm": ["ThrottlingException"]}),
+            [],
+        ),
+        "a persistent VM read throttle": (
+            complete,
+            account(read_failures={"GetMicrovm": ["ThrottlingException"] * 400}),
+            [ENSURE_VM_TERMINATED],
+        ),
+        "a nonretryable VM listing error": (
+            complete,
+            account(read_failures={"ListMicrovms": ["AccessDeniedException"]}),
+            [ENSURE_VM_TERMINATED],
         ),
     }
     wrong: list[str] = []
