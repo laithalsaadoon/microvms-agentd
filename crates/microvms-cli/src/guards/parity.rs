@@ -486,7 +486,15 @@ async fn parity_control_plane(case: &parity_corpus::Case) -> serde_json::Value {
                     answer["message_mentions"] = case.message_mentions(&error.message);
                 }
                 if case.input.get("report_retry").is_some() {
-                    answer["retry"] = serde_json::json!({"attempt_count": error.data["attemptCount"], "backoff_positive": error.data["backoffSeconds"].as_f64().unwrap() > 0.0, "throttled": error.data["throttled"]});
+                    // Missing telemetry belongs in the shared verdict, rather than a
+                    // map lookup panic that hides which fields the adapter omitted.
+                    answer["retry"] = serde_json::json!({
+                        "attempt_count": error.data.get("attemptCount"),
+                        "backoff_positive": error.data.get("backoffSeconds")
+                            .and_then(serde_json::Value::as_f64)
+                            .map(|seconds| seconds > 0.0),
+                        "throttled": error.data.get("throttled"),
+                    });
                 }
                 answer["calls"] = serde_json::json!(transport.calls());
                 return answer;
