@@ -72,3 +72,56 @@ run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "image_user::t
 expect = "test-failed"
 suite = "rust"
 transform = { file = "crates/agentd/src/image_user.rs", replace = ".custom_flags(nix::libc::O_NOFOLLOW)", with = ".custom_flags(0)" }
+
+
+[[family]]
+guard = "image_user::tests::build_modes_capture_and_seal_the_selected_record"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "image_user::tests::build_modes_capture_and_seal_the_selected_record"]
+expect = "test-failed"
+suite = "rust"
+
+[[family.fault]]
+id = "wrap-user-build-dispatch-none"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "    let mode = args.next()?;", with = "    let mode = args.next()?;\n    if !mode.is_empty() { return None; }" }
+
+[[family.fault]]
+id = "wrap-user-build-dispatch-capture"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "        \"--capture-image-user\" => Some(capture(record)),\n", with = "" }
+
+[[family.fault]]
+id = "wrap-user-build-dispatch-seal"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "        \"--seal-image-user\" => Some(seal(record)),\n", with = "" }
+
+[[fault]]
+id = "wrap-user-build-dispatch-extra-args"
+guard = "image_user::tests::build_modes_ignore_other_arguments_and_preserve_errors"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "image_user::tests::build_modes_ignore_other_arguments_and_preserve_errors"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "    if args.next().is_some() {", with = "    if false {" }
+
+[[family]]
+guard = "image_user::tests::open_requires_a_root_owned_regular_file"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "image_user::tests::open_requires_a_root_owned_regular_file"]
+expect = "test-failed"
+suite = "rust"
+
+[[family.fault]]
+id = "wrap-user-record-both-invalid"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "!metadata.is_file() || metadata.uid() != 0", with = "!metadata.is_file() && metadata.uid() != 0" }
+
+[[family.fault]]
+id = "wrap-user-record-file-inverted"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "!metadata.is_file() || metadata.uid() != 0", with = "metadata.is_file() || metadata.uid() != 0" }
+
+[[family.fault]]
+id = "wrap-user-record-owner-inverted"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "!metadata.is_file() || metadata.uid() != 0", with = "!metadata.is_file() || metadata.uid() == 0" }
+
+[[fault]]
+id = "wrap-user-record-owner-ignored"
+guard = "image_user::tests::open_refuses_a_non_root_owned_regular_file"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "image_user::tests::open_refuses_a_non_root_owned_regular_file"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "!metadata.is_file() || metadata.uid() != 0", with = "!metadata.is_file()" }

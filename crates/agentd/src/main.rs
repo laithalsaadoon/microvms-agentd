@@ -12,7 +12,10 @@ use agentd::{AppState, Config, disk, exec, exec_start, identity, routes, serve};
 use tokio::net::TcpListener;
 
 fn main() -> std::io::Result<()> {
-    if let Some(result) = agentd::image_user::build_mode() {
+    if let Some(result) = agentd::image_user::build_mode(
+        std::env::args_os().skip(1),
+        std::path::Path::new(agentd::image_user::RECORD),
+    ) {
         return result;
     }
     // Thread credentials are inherited at creation. Apply before even tracing
