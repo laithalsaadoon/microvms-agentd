@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: Apache-2.0
+# Case discovery must see its sentinel and require each surface's selected proof.
+
+[[family]]
+guard = "tools/fail-to-pass.py"
+run = ["./tools/fail-to-pass.py", "check", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "f2p-parity-empty"
+message = "the parity finder doesn't find every surface of wrap-dockerfile/sentinel"
+transform = { file = "tools/fail-to-pass.py", replace = "    return found\n\n\ndef ast_grep", with = "    return []\n\n\ndef ast_grep" }
+
+[[family.fault]]
+id = "f2p-parity-sentinel"
+message = "the parity finder doesn't find every surface of wrap-dockerfile/sentinel"
+transform = { file = "verify/parity/cases/wrap-dockerfile/sentinel.json", replace = '"capability": "wrap-dockerfile"', with = '"capability": "build-artifact"' }
+
+[[family]]
+guard = "test_fail_to_pass.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_fail_to_pass.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "f2p-parity-partial-entry"
+message = "FAIL: test_one_cases_entry_does_not_prove_another_case ("
+transform = { file = "tools/fail-to-pass.py", replace = "    if parity_missing:\n", with = "    if False:\n" }
+
+[[family.fault]]
+id = "f2p-parity-partial-proof"
+message = "FAIL: test_a_head_failure_is_rejected_even_if_another_surface_is_proven ("
+transform = { file = "tools/fail-to-pass.py", replace = 'return int(parity_errors or bool(cases - proven_cases))', with = "return 0" }
+
+[[family.fault]]
+id = "f2p-parity-base-pass"
+message = "FAIL: test_an_adapter_only_fix_allows_other_surfaces_to_pass_on_both_trees ("
+transform = { file = "tools/fail-to-pass.py", replace = 'not verdict[0]', with = 'False' }
+
+[[family.fault]]
+id = "f2p-parity-cargo-config"
+message = "FAIL: test_rust_case_config_is_accepted_by_cargo ("
+transform = { file = "tools/fail-to-pass.py", replace = 'config = f"env.{PARITY_SELECTOR}.value={json.dumps(test.case)}"', with = 'config = f"env.{PARITY_SELECTOR}={{value={json.dumps(test.case)},force=true}}"' }
+
+[[fault]]
+id = "parity-select-only"
+guard = "a_proof_selects_only_its_case_and_compares_the_shared_expectation"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_selection", "--", "--exact", "a_proof_selects_only_its_case_and_compares_the_shared_expectation"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "self.to_run.retain(|case| case.id == id);", with = "self.to_run.retain(|_| true);" }
+
+[[fault]]
+id = "parity-select-missing"
+guard = "a_proof_refuses_an_absent_case_instead_of_passing_empty"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_selection", "--", "--exact", "a_proof_refuses_an_absent_case_instead_of_passing_empty"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "if self.to_run.len() != 1 {", with = "if false {" }
+
+[[fault]]
+id = "parity-select-sentinel"
+guard = "a_selected_proof_still_requires_the_corpus_sentinel"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_selection", "--", "--exact", "a_selected_proof_still_requires_the_corpus_sentinel"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "if !self.sentinel_loaded {", with = "if false {" }

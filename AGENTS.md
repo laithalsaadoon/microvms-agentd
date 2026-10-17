@@ -174,8 +174,10 @@ capabilities, or `verify/parity/capabilities.toml` says why one doesn't.
 - A bug in behavior the surfaces share is a case in `verify/parity/cases/`,
   which every surface's runner checks against one `expect`, not a new test and
   seeded fault on each surface. The case lands with the fix, and its
-  failing-first proof is the case failing on the merge base. Review holds that
-  for now, because `tools/fail-to-pass.py` doesn't yet read a parity case file.
+  failing-first proof runs every applicable runner against the fixed and merge-base
+  behavior through `mise run fail-to-pass -- --emit <owner>`. Every runner must pass
+  with the fix. At least one must fail with the fix reverted. `fail-to-pass:check`
+  requires a case-selected proof entry for each changed case.
   No case marks a surface as disagreeing: the ratchet enforces parity-drift, so
   every runner refuses a `known_drift` marker, and a skip takes a decision. The
   runners' own seeded faults prove each runner can fail. CONTRIBUTING.md has the

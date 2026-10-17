@@ -34,6 +34,10 @@ base with `--base` (origin/main by default), as tools/changelog.py reads it.
   ast-grep. A function is changed when a line of it, its attributes or decorators included,
   differs from the merge base. Its guard is what its runner reports: the Rust path inside its
   target, the pytest node id, the node test's title.
+- Changed JSON files in verify/parity/cases/ select each surface named by their capability,
+  excluding explicit exemptions and skips. Each surface runs just that case against its one
+  shared expectation. Every applicable surface must pass on the head; at least one must fail
+  with the fix reverted. A surface passing both is unchanged, not a FAIL_TO_PASS proof.
 
 Two subcommands:
 
@@ -75,6 +79,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -118,6 +123,18 @@ PARITY_JS_BUILD = [
     "parity-fixtures",
     "--dts",
     "parity-fixtures.d.ts",
+]
+PARITY_DIR = "verify/parity/cases"
+PARITY_TABLE = "verify/parity/capabilities.toml"
+PARITY_SENTINEL = f"{PARITY_DIR}/wrap-dockerfile/sentinel.json"
+PARITY_SELECTOR = "MICROVMS_PARITY_CASE"
+PARITY_PEER = [
+    "cargo",
+    "build",
+    "-p",
+    "microvms-core",
+    "--example",
+    "parity-tunnel-peer",
 ]
 # A test each finder must find in its file on every run, so a finder that stopped reading
 # fails here instead of reading every fix as one with no test.
@@ -343,13 +360,79 @@ def is_rust_test_file(path: str) -> bool:
 
 @dataclass(frozen=True)
 class Test:
-    kind: str  # rust | pytest | node
+    kind: str  # rust | pytest | node | parity
     path: str
     guard: str
     name: str
     first: int  # its first line, attributes and decorators included, from 1
     last: int
     inline: bool = False  # in a `#[cfg(test)]` module of a product file
+    case: str | None = None
+    surface: str | None = None
+
+
+def parity_tests(root: Path, files: list[str]) -> list[Test]:
+    """Each changed case, once per surface its capability and skip table require."""
+    if not files:
+        return []
+    table = tomllib.loads((root / PARITY_TABLE).read_text(encoding="utf-8"))
+    rows = {row["id"]: row for row in table["capability"]}
+    found = []
+    for path in files:
+        text = (root / path).read_text(encoding="utf-8")
+        case = json.loads(text)
+        case_id = Path(path).relative_to(PARITY_DIR).with_suffix("").as_posix()
+        row = rows.get(case.get("capability"))
+        if row is None:
+            raise Failure(f"{path}: capability names no row in {PARITY_TABLE}")
+        for surface in ("core", "cli", "py", "ts"):
+            cell = row.get(surface)
+            if isinstance(cell, dict) and cell.get("exempt"):
+                continue
+            if not isinstance(cell, (str, list)) or not cell:
+                raise Failure(f"{path}: capability has no {surface} surface")
+            if surface in case.get("skip", {}):
+                continue
+            if surface == "core":
+                guard = "core_answers_the_shared_case_corpus"
+            elif surface == "cli":
+                source = (
+                    root / "crates/microvms-core/tests/parity_corpus/mod.rs"
+                ).read_text()
+                area = case_id.split("/", 1)[0]
+                tiers = {}
+                for tier in ("PROCESS", "FAKE"):
+                    match = re.search(
+                        rf"pub const CLI_{tier}_AREAS:.*?=\s*\[(.*?)\];", source, re.S
+                    )
+                    if match is None:
+                        raise Failure(
+                            f"cannot read CLI_{tier}_AREAS from parity_corpus"
+                        )
+                    tiers[tier] = re.findall(r'"([^"\\]+)"', match[1])
+                if area in tiers["PROCESS"]:
+                    guard = "the_cli_process_answers_the_shared_case_corpus"
+                elif area in tiers["FAKE"]:
+                    guard = "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"
+                else:
+                    raise Failure(f"{path}: no CLI runner owns area {area!r}")
+            elif surface == "py":
+                guard = f"bindings/microvms-py/tests/test_parity_cases.py::test_a_case[{case_id}]"
+            else:
+                guard = case_id
+            found.append(
+                Test(
+                    "parity",
+                    path,
+                    guard,
+                    f"parity-{surface}-{case_id}",
+                    1,
+                    len(text.splitlines()),
+                    case=case_id,
+                    surface=surface,
+                )
+            )
+    return found
 
 
 def ast_grep(root: Path, files: list[str]) -> list[dict]:
@@ -539,6 +622,17 @@ def sentinel_problems(root: Path) -> list[str]:
                 f"the {kind} finder doesn't find {guard} in {path}, so it would read a fix's"
                 " tests as none"
             )
+    if not (root / PARITY_SENTINEL).is_file():
+        problems.append(f"the parity sentinel's file {PARITY_SENTINEL} doesn't exist")
+    elif {test.surface for test in parity_tests(root, [PARITY_SENTINEL])} != {
+        "core",
+        "cli",
+        "py",
+        "ts",
+    }:
+        problems.append(
+            "the parity finder doesn't find every surface of wrap-dockerfile/sentinel"
+        )
     return problems
 
 
@@ -550,6 +644,14 @@ def branch_tests(branch: Branch) -> list[Test]:
         *rust_tests(branch.root, [p for p in files if is_product(p)], True),
         *python_tests(branch.root, [p for p in files if PY_TESTS.match(p)]),
         *node_tests(branch.root, [p for p in files if JS_TESTS.match(p)]),
+        *parity_tests(
+            branch.root,
+            [
+                p
+                for p in files
+                if p.startswith(f"{PARITY_DIR}/") and p.endswith(".json")
+            ],
+        ),
     ]
     tests: dict[tuple[str, str], Test] = {}
     lines = {path: branch.changed_lines(path) for path in {t.path for t in candidates}}
@@ -700,10 +802,30 @@ def check(branch: Branch) -> int:
     if why:
         print(f"fail-to-pass: {why} (against {branch.base})")
         return 0
+    entries = new_entries(branch)
+    parity_cases = {test.case for test in tests if test.kind == "parity"}
+    parity_proven = set()
+    for test in (test for test in tests if test.kind == "parity"):
+        run, _ = parity_command(test)
+        if any(
+            e.get("guard") == test.guard and e.get("run") == run
+            for e in entries.values()
+        ):
+            parity_proven.add(test.case)
+    parity_missing = sorted(parity_cases - parity_proven)
+    if parity_missing:
+        print(
+            "fail-to-pass: changed parity cases lack a case-selected proof: "
+            + ", ".join(parity_missing)
+        )
+        print(
+            "Run `mise run fail-to-pass -- --emit <owner>` to test every applicable surface."
+        )
+        return 1
     guards = {t.guard: t for t in tests}
     proven = sorted(
         (entry_id, str(e.get("guard")))
-        for entry_id, e in new_entries(branch).items()
+        for entry_id, e in entries.items()
         if e.get("guard") in guards
     )
     if proven:
@@ -824,7 +946,9 @@ def candidates(branch: Branch, tests: list[Test]) -> tuple[list[Candidate], list
     made: list[Candidate] = []
     skipped: list[str] = []
     for test in tests:
-        if test.kind == "rust":
+        if test.kind == "parity":
+            run, suite = parity_command(test)
+        elif test.kind == "rust":
             argv = rust_command(test, targets)
             if argv is None:
                 skipped.append(
@@ -859,6 +983,52 @@ def candidates(branch: Branch, tests: list[Test]) -> tuple[list[Candidate], list
         taken.add(entry_id)
         made.append(Candidate(test, entry_id, run, suite))
     return made, skipped
+
+
+def parity_command(test: Test) -> tuple[list[list[str]], str]:
+    """Run exactly this case through its real surface runner, retaining the shared expect."""
+    if test.surface in ("core", "cli"):
+        if test.surface == "core":
+            target = ["-p", "microvms-core", "--test", "parity_cases"]
+        elif test.guard.startswith("guards::"):
+            target = ["-p", "microvms-cli", "--bin", "microvm"]
+        else:
+            target = ["-p", "microvms-cli", "--test", "parity_cases"]
+        config = f"env.{PARITY_SELECTOR}.value={json.dumps(test.case)}"
+        force = f"env.{PARITY_SELECTOR}.force=true"
+        return [
+            PARITY_PEER,
+            [
+                "cargo",
+                "test",
+                "--config",
+                config,
+                "--config",
+                force,
+                *target,
+                "--",
+                "--exact",
+                test.guard,
+            ],
+        ], "rust"
+    if test.surface == "py":
+        return [
+            PARITY_PEER,
+            PARITY_PY_BUILD,
+            ["python", "-m", "pytest", "-q", "-rA", test.guard],
+        ], "bindings"
+    pattern = f"^{re.escape(test.case or '')}$"
+    return [
+        PARITY_PEER,
+        PARITY_JS_BUILD,
+        [
+            "node",
+            "--test",
+            "--test-reporter=tap",
+            f"--test-name-pattern={pattern}",
+            "bindings/microvms-js/__test__/parity_cases.mjs",
+        ],
+    ], "bindings"
 
 
 def toml_str(value: str) -> str:
@@ -1036,7 +1206,18 @@ def prove(branch: Branch, args) -> int:
         f"fail-to-pass: against {branch.fork[:12]}, the merge base with {branch.base}:"
     )
     for candidate in made:
-        print(f"  {candidate.test.guard}: {verdicts[candidate.id][1]}")
+        verdict = verdicts[candidate.id]
+        label = (
+            f"{candidate.test.case} on {candidate.test.surface}"
+            if candidate.test.kind == "parity"
+            else candidate.test.guard
+        )
+        message = (
+            "passes on the head and merge base: unchanged surface, not FAIL_TO_PASS"
+            if candidate.test.kind == "parity" and parity_base_pass(verdict)
+            else verdict[1]
+        )
+        print(f"  {label}: {message}")
     if not proven:
         print("fail-to-pass: no test of this fix is proven")
         return 1
@@ -1050,7 +1231,25 @@ def prove(branch: Branch, args) -> int:
         print("fail-to-pass: the entries, for `--emit <owner>` to write:")
         for candidate in proven:
             print(entry_toml(candidate, branch.fork))
-    return 0
+    # A shared case can expose a bug in one adapter while the others already agree.
+    # Every head must pass, and each case needs a real regression on some surface.
+    cases = {c.test.case for c in made if c.test.kind == "parity"}
+    proven_cases = {c.test.case for c in proven if c.test.kind == "parity"}
+    parity_errors = any(
+        c.test.kind == "parity"
+        and not verdicts[c.id][0]
+        and not parity_base_pass(verdicts[c.id])
+        for c in made
+    )
+    return int(parity_errors or bool(cases - proven_cases))
+
+
+def parity_base_pass(verdict: tuple[bool, str]) -> bool:
+    return (
+        not verdict[0]
+        and verdict[1]
+        == "passes with the fix taken out, so it proves nothing about the fix"
+    )
 
 
 def check_patch(root: Path, patch: str) -> None:

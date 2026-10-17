@@ -13,6 +13,7 @@ finders are the real ast-grep, so run this through `mise run fail-to-pass:check`
 """
 
 import inspect
+import json
 import os
 import re
 import runpy
@@ -148,6 +149,12 @@ class Fixture(unittest.TestCase):
             "verify/guards/unregistered.txt": "",
             "changelog.d/.gitkeep": "",
         }
+        for path in (
+            TOOL["PARITY_SENTINEL"],
+            TOOL["PARITY_TABLE"],
+            "crates/microvms-core/tests/parity_corpus/mod.rs",
+        ):
+            files[path] = (REPO / path).read_text(encoding="utf-8")
         for path, _ in SENTINELS.values():
             files[path] = BLOCKS.sub("", (REPO / path).read_text(encoding="utf-8"))
         for path, text in files.items():
@@ -298,6 +305,150 @@ class CheckTests(Fixture):
         self.assertIn(f"the node finder doesn't find {guard}", done.stdout)
 
 
+class ParityTests(Fixture):
+    """Changed case files are proofs on every applicable surface, selected individually."""
+
+    def add_case(self, name="changed"):
+        path = f"{TOOL['PARITY_DIR']}/wrap-dockerfile/{name}.json"
+        self.write(path, (REPO / TOOL["PARITY_SENTINEL"]).read_text())
+        return path
+
+    def test_a_changed_case_selects_each_real_surface_without_copying_expectations(
+        self,
+    ):
+        self.fix()
+        path = self.add_case()
+        branch = TOOL["Branch"](self.root, "origin/main")
+        tests = TOOL["branch_tests"](branch)
+        self.assertEqual({test.surface for test in tests}, {"core", "cli", "py", "ts"})
+        self.assertTrue(all(test.path == path for test in tests))
+        made, skipped = TOOL["candidates"](branch, tests)
+        self.assertEqual(skipped, [])
+        self.assertEqual(len(made), 4)
+        for candidate in made:
+            argv = candidate.run[-1]
+            case = "wrap-dockerfile/changed"
+            self.assertIn(case, " ".join(argv).replace("\\", ""))
+            self.assertNotIn("expect", " ".join(argv))
+        self.assertIn("--test", made[1].run[-1])
+        self.assertIn("parity_cases", made[1].run[-1])
+        self.assertIn(
+            "--test-name-pattern=^wrap\\-dockerfile/changed$", made[3].run[-1]
+        )
+
+    def test_the_capability_and_case_skip_omit_only_their_surfaces(self):
+        path = self.add_case()
+        table = self.root / TOOL["PARITY_TABLE"]
+        text = table.read_text()
+        text = text.replace('py = "wrap_dockerfile"', 'py = { exempt = "fixture" }')
+        table.write_text(text)
+        case = json.loads((self.root / path).read_text())
+        case["skip"] = {"ts": "fixture (IMAGE-1)"}
+        self.write(path, json.dumps(case))
+        tests = TOOL["parity_tests"](self.root, [path])
+        self.assertEqual({test.surface for test in tests}, {"core", "cli"})
+
+    def test_one_cases_entry_does_not_prove_another_case(self):
+        self.fix()
+        self.add_case()
+        self.add_case("another")
+        branch = TOOL["Branch"](self.root, "origin/main")
+        tests = TOOL["branch_tests"](branch)
+        made, _ = TOOL["candidates"](branch, tests)
+        self.write(
+            f"{REGISTRY_DIR}/partial.toml", TOOL["entry_toml"](made[0], branch.fork)
+        )
+        done = self.run_script("check")
+        self.assertExit(done, 1)
+        self.assertIn("wrap-dockerfile/changed", done.stdout)
+        TOOL["write_entries"](self.root, "complete", made[4:5], "", branch.fork)
+        self.assertExit(self.run_script("check"), 0)
+
+    def test_the_parity_sentinel_refuses_a_finder_that_reads_no_cases(self):
+        from unittest.mock import patch
+
+        with patch.dict(
+            TOOL["sentinel_problems"].__globals__, {"parity_tests": lambda *_: []}
+        ):
+            problems = TOOL["sentinel_problems"](self.root)
+        self.assertIn(
+            "the parity finder doesn't find every surface of wrap-dockerfile/sentinel",
+            problems,
+        )
+
+    def test_a_head_failure_is_rejected_even_if_another_surface_is_proven(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        self.fix()
+        self.add_case()
+        branch = TOOL["Branch"](self.root, "origin/main")
+
+        def fire(_branch, made, _patch, _args):
+            return {
+                candidate.id: (candidate.test.surface != "ts", "fixture verdict")
+                for candidate in made
+            }
+
+        with patch.dict(TOOL["prove"].__globals__, {"fire": fire}):
+            code = TOOL["prove"](branch, SimpleNamespace(any=False, emit=None))
+        self.assertEqual(code, 1)
+
+    def test_an_adapter_only_fix_allows_other_surfaces_to_pass_on_both_trees(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        self.fix()
+        self.add_case()
+        branch = TOOL["Branch"](self.root, "origin/main")
+
+        def fire(_branch, made, _patch, _args):
+            return {
+                candidate.id: (True, "proven")
+                if candidate.test.surface == "py"
+                else (
+                    False,
+                    "passes with the fix taken out, so it proves nothing about the fix",
+                )
+                for candidate in made
+            }
+
+        with patch.dict(TOOL["prove"].__globals__, {"fire": fire}):
+            code = TOOL["prove"](branch, SimpleNamespace(any=False, emit="adapter"))
+        self.assertEqual(code, 0)
+        entries = tomllib.loads(
+            (self.root / REGISTRY_DIR / "adapter.toml").read_text()
+        )["fault"]
+        self.assertEqual(len(entries), 1)
+        self.assertIn("test_a_case[", entries[0]["guard"])
+        self.assertExit(self.run_script("check"), 0)
+
+    def test_every_case_needs_a_regression_even_when_another_case_is_proven(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        self.fix()
+        self.add_case()
+        self.add_case("already-correct")
+        branch = TOOL["Branch"](self.root, "origin/main")
+
+        def fire(_branch, made, _patch, _args):
+            return {
+                candidate.id: (True, "proven")
+                if candidate.test.case.endswith("/changed")
+                and candidate.test.surface == "py"
+                else (
+                    False,
+                    "passes with the fix taken out, so it proves nothing about the fix",
+                )
+                for candidate in made
+            }
+
+        with patch.dict(TOOL["prove"].__globals__, {"fire": fire}):
+            code = TOOL["prove"](branch, SimpleNamespace(any=False, emit=None))
+        self.assertEqual(code, 1)
+
+
 class PatchTests(Fixture):
     """The patch takes out the product hunks and nothing else, and applies to the head."""
 
@@ -426,6 +577,22 @@ class RegistryShapeTests(unittest.TestCase):
         for build in builds:
             if "maturin" in " ".join(build) or "napi" in build:
                 self.assertIn(build, known)
+
+    def test_rust_case_config_is_accepted_by_cargo(self):
+        test = TOOL["parity_tests"](REPO, [TOOL["PARITY_SENTINEL"]])[0]
+        run, _ = TOOL["parity_command"](test)
+        argv = run[-1]
+        configs = []
+        for index, value in enumerate(argv):
+            if value == "--config":
+                configs += [value, argv[index + 1]]
+        done = subprocess.run(
+            ["cargo", "metadata", "--no-deps", "--format-version", "1", *configs],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
 
 
 class CandidateBuildTests(unittest.TestCase):

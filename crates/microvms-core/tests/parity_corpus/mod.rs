@@ -387,6 +387,7 @@ pub struct Run {
     judged: BTreeSet<String>,
     sentinel_loaded: bool,
     sentinel_ran: bool,
+    selected: Option<String>,
 }
 
 impl Run {
@@ -394,7 +395,13 @@ impl Run {
     /// `elsewhere` is the areas another runner of the same surface handles (the CLI's two tiers),
     /// which this one leaves alone.
     pub fn plan(surface: &'static str, owned: &[&'static str], elsewhere: &[&'static str]) -> Run {
-        Self::plan_in(&cases_dir(), &table_path(), surface, owned, elsewhere)
+        let run = Self::plan_in(&cases_dir(), &table_path(), surface, owned, elsewhere);
+        // Cargo's per-command env config makes each proof select its own case while
+        // keeping the ordinary corpus and the CLI's production environment untouched.
+        match option_env!("MICROVMS_PARITY_CASE") {
+            Some(case) => run.select(case),
+            None => run,
+        }
     }
 
     pub fn plan_in(
@@ -452,7 +459,22 @@ impl Run {
             judged: BTreeSet::new(),
             sentinel_loaded,
             sentinel_ran: false,
+            selected: None,
         }
+    }
+
+    /// Select one already planned case. Missing, exempt, and skipped cases fail instead
+    /// of becoming an empty green proof; parsing and sentinel checks still cover the corpus.
+    pub fn select(mut self, id: &str) -> Self {
+        self.to_run.retain(|case| case.id == id);
+        if self.to_run.len() != 1 {
+            self.failures.push(format!(
+                "selected case {id:?} is not runnable on {}",
+                self.surface
+            ));
+        }
+        self.selected = Some(id.to_string());
+        self
     }
 
     /// The cases this runner has to answer, in corpus order.
@@ -484,7 +506,7 @@ impl Run {
             }
         }
         for area in &self.owned {
-            if self.ran.get(*area).copied().unwrap_or(0) == 0 {
+            if self.selected.is_none() && self.ran.get(*area).copied().unwrap_or(0) == 0 {
                 self.failures.push(format!(
                     "no case ran in area {area:?} on {}: the corpus is empty or unread there",
                     self.surface
@@ -496,7 +518,7 @@ impl Run {
                 .push(format!("the sentinel {SENTINEL}.json wasn't loaded"));
         }
         let area = SENTINEL.split('/').next().expect("an area");
-        if self.owned.contains(&area) && !self.sentinel_ran {
+        if self.owned.contains(&area) && !self.sentinel_ran && self.selected.is_none() {
             self.failures.push(format!(
                 "the sentinel {SENTINEL}.json didn't run on {}",
                 self.surface
