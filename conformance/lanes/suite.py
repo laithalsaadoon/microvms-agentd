@@ -62,6 +62,7 @@ from lanes.native_box import drive_native_box
 from lanes.platform_measurements import drive_platform_measurements
 from lanes.posture import drive_platform_posture, drive_posture_parity
 from lanes.poweroff import drive_poweroff
+from lanes.prefix_sweep import drive_prefix_sweep
 from lanes.project_build import drive_project_build
 from lanes.quickstart import drive_provisioned_quickstart
 from lanes.sessions import (
@@ -223,6 +224,16 @@ def run_suite(args: argparse.Namespace) -> int:
             )
             run_section(results, "daemon_lane", drive_daemon_lane, daemon, results)
 
+            run_section(
+                results,
+                "prefix_sweep",
+                drive_prefix_sweep,
+                cli,
+                binary,
+                aws,
+                launched,
+                results,
+            )
             run_section(results, "exec", drive_exec, cli, launched, results)
             run_section(results, "health", drive_health, cli, launched, results)
             # `adopt` (#269) reads the suite's VM through core's guards and launches nothing.

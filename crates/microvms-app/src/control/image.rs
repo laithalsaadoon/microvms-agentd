@@ -1242,19 +1242,42 @@ impl ControlPlane {
     /// page-by-page, because deleting from under a cursor is how a paginated traversal
     /// skips items: the service's page boundaries move as the collection shrinks.
     async fn try_delete_image(&self, identifier: &str) -> Result<(), Error> {
+        self.try_delete_image_paced(identifier, None).await
+    }
+
+    pub(super) async fn try_delete_image_paced(
+        &self,
+        identifier: &str,
+        mut pacing: Option<&mut Option<Duration>>,
+    ) -> Result<(), Error> {
         let mut versions: Vec<String> = Vec::new();
         let mut next_token: Option<String> = None;
+        let mut seen = std::collections::HashSet::new();
         loop {
             let call = Call::get(
                 "ListMicrovmImageVersions",
                 paths::image_versions(identifier, next_token.as_deref()),
             );
-            let page: ops::ListImageVersionsResponseWire = send_with_retry(self.transport(), call)
-                .await?
-                .json("ListMicrovmImageVersions")?;
+            let page: ops::ListImageVersionsResponseWire = if let Some(last) = pacing.as_deref_mut()
+            {
+                self.sweep_page("ListMicrovmImageVersions", call.path, last)
+                    .await?
+            } else {
+                send_with_retry(self.transport(), call)
+                    .await?
+                    .json("ListMicrovmImageVersions")?
+            };
             versions.extend(page.items.into_iter().map(|item| item.image_version));
             match page.next_token {
-                Some(token) => next_token = Some(token),
+                Some(token) if pacing.is_none() || seen.insert(token.clone()) => {
+                    next_token = Some(token)
+                }
+                Some(_) => {
+                    return Err(Error::new(
+                        ErrorKind::Platform,
+                        "version listing repeated its pagination token",
+                    ));
+                }
                 None => break,
             }
         }

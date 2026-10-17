@@ -785,13 +785,27 @@ impl ControlPlane {
         &self,
         filter: &MicrovmFilter,
     ) -> Result<Vec<ops::MicrovmItemWire>, Error> {
+        Ok(self
+            .list_microvm_summaries(filter)
+            .await?
+            .into_iter()
+            .map(Into::into)
+            .collect())
+    }
+
+    /// The paginated listing with optional `started_at` metadata. This adds metadata without
+    /// changing the exhaustively constructible item returned by the original listing methods.
+    pub async fn list_microvm_summaries(
+        &self,
+        filter: &MicrovmFilter,
+    ) -> Result<Vec<ops::MicrovmSummaryWire>, Error> {
         if let Some(image) = filter.image_identifier.as_deref() {
             super::require_valid_identifier("imageIdentifier", image)?;
         }
         if let Some(version) = filter.image_version.as_deref() {
             super::require_valid_version("imageVersion", version)?;
         }
-        let mut items: Vec<ops::MicrovmItemWire> = Vec::new();
+        let mut items: Vec<ops::MicrovmSummaryWire> = Vec::new();
         // Where each id sits in `items`. The service can return one VM on two pages while VMs
         // change state (docs/PLATFORM.md, "A paginated `ListMicrovms` can return one VM on two
         // of its pages"), so a repeat replaces the earlier entry, the older reading, in place.
@@ -808,7 +822,7 @@ impl ControlPlane {
                 ),
             );
             let reply = send_with_retry(self.transport(), call).await?;
-            let page: ops::ListMicrovmsResponseWire = reply.json("ListMicrovms")?;
+            let page: ops::ListMicrovmSummariesResponseWire = reply.json("ListMicrovms")?;
             for item in page.items {
                 match position.get(&item.microvm_id) {
                     Some(&at) => items[at] = item,

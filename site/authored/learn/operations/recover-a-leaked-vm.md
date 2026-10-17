@@ -50,6 +50,44 @@ microvm terminate <microvm-id> --delete-image --image-identifier <image-arn> --i
 
 An image refuses deletion while its VM is still terminating, so one pass is sometimes not enough. Deleting the image early also saves nothing, because its snapshot has a one-week minimum retention; a leaked image is a small bill and a leaked running VM is the one to hurry for.
 
+## Clean up a job's images by prefix
+
+Preview the images and VMs belonging to an image-name prefix, preserving the image
+currently in use:
+
+```bash
+microvm gc --prefix my-job- --keep my-job-current --json
+microvm gc --prefix my-job- --keep my-job-current --yes --json
+```
+
+The first command only lists candidates. `--yes` terminates VMs using the selected
+images, waits for termination, deletes their images, and waits for deletion. Repeat
+`--keep` for more exact image names or ARNs; a kept image's VMs are preserved too.
+The prefix must be nonempty and matches the start of an image name. The report
+separates matched and kept images, selected and terminated VMs, deleted and in-use
+images, and operation failures. Inspect `failures` and `imagesInUse` before declaring
+cleanup complete. A concurrent launch can keep an image in use; the sweep reports
+that image for a later attempt. Build log groups and local ledger records remain
+separate cleanup tasks.
+
+The SDKs expose the same operation:
+
+```python
+preview = plane.sweep("my-job-", keep=["my-job-current"])
+report = plane.sweep("my-job-", keep=["my-job-current"], dry_run=False)
+```
+
+```javascript
+const preview = await plane.sweep('my-job-', { keep: ['my-job-current'] });
+const report = await plane.sweep('my-job-', {
+  keep: ['my-job-current'], dryRun: false,
+});
+```
+
+List summaries also carry the VM's start time in Unix seconds (`started_at` in
+Python, `startedAt` in JavaScript and CLI JSON). It is absent when the service does
+not report it, so an age-based cleanup can preserve unknown ages conservatively.
+
 ## 4. Ask the account, never the teardown
 
 ```bash

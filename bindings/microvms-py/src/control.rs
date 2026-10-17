@@ -151,6 +151,7 @@ pub struct PyMicrovmSummary {
     state: String,
     image_arn: String,
     image_version: String,
+    started_at: Option<f64>,
 }
 
 #[pymethods]
@@ -175,8 +176,70 @@ impl PyMicrovmSummary {
         &self.image_version
     }
 
+    /// When the VM started, in Unix seconds, when the service reported it.
+    #[getter]
+    fn started_at(&self) -> Option<f64> {
+        self.started_at
+    }
+
     fn __repr__(&self) -> String {
         format!("MicrovmSummary(id={:?}, state={:?})", self.id, self.state)
+    }
+}
+
+/// One resource operation that failed during a sweep.
+#[pyclass(frozen, name = "SweepFailure", module = "microvms", get_all)]
+pub struct PySweepFailure {
+    resource: String,
+    message: String,
+}
+
+/// Inventory and confirmed outcomes of prefix cleanup.
+#[pyclass(frozen, name = "SweepReport", module = "microvms")]
+pub struct PySweepReport {
+    inner: microvms_core::control::SweepReport,
+}
+
+#[pymethods]
+impl PySweepReport {
+    #[getter]
+    fn dry_run(&self) -> bool {
+        self.inner.dry_run
+    }
+    #[getter]
+    fn images_matched(&self) -> Vec<String> {
+        self.inner.images_matched.clone()
+    }
+    #[getter]
+    fn images_kept(&self) -> Vec<String> {
+        self.inner.images_kept.clone()
+    }
+    #[getter]
+    fn microvms_matched(&self) -> Vec<String> {
+        self.inner.microvms_matched.clone()
+    }
+    #[getter]
+    fn microvms_terminated(&self) -> Vec<String> {
+        self.inner.microvms_terminated.clone()
+    }
+    #[getter]
+    fn images_deleted(&self) -> Vec<String> {
+        self.inner.images_deleted.clone()
+    }
+    #[getter]
+    fn images_in_use(&self) -> Vec<String> {
+        self.inner.images_in_use.clone()
+    }
+    #[getter]
+    fn failures(&self) -> Vec<PySweepFailure> {
+        self.inner
+            .failures
+            .iter()
+            .map(|failure| PySweepFailure {
+                resource: failure.resource.clone(),
+                message: failure.message.clone(),
+            })
+            .collect()
     }
 }
 
@@ -473,6 +536,25 @@ macro_rules! plane_op {
 }
 
 impl PyControlPlane {
+    fn sweep_op(
+        &self,
+        prefix: String,
+        keep: Option<Vec<String>>,
+        dry_run: Option<bool>,
+    ) -> impl Future<Output = Result<PySweepReport, microvms_core::Error>> + Send + 'static {
+        let mut request = microvms_core::control::SweepOptions::default();
+        if let Some(keep) = keep {
+            request.keep = keep;
+        }
+        if let Some(dry_run) = dry_run {
+            request.dry_run = dry_run;
+        }
+        plane_op!(self, |plane| plane
+            .sweep(&prefix, &request)
+            .await
+            .map(|inner| PySweepReport { inner }))
+    }
+
     fn get_op(
         &self,
         microvm_id: String,
@@ -489,7 +571,7 @@ impl PyControlPlane {
     ) -> impl Future<Output = Result<Vec<PyMicrovmSummary>, microvms_core::Error>> + Send + 'static
     {
         plane_op!(self, |plane| Ok(plane
-            .list_microvms_matching(&filter)
+            .list_microvm_summaries(&filter)
             .await?
             .into_iter()
             .map(|item| PyMicrovmSummary {
@@ -497,6 +579,7 @@ impl PyControlPlane {
                 state: item.state,
                 image_arn: item.image_arn,
                 image_version: item.image_version,
+                started_at: item.started_at,
             })
             .collect()))
     }
@@ -784,6 +867,30 @@ impl PyControlPlane {
         let opts = state_wait_opts(timeout, poll_interval)?;
         let op = self.wait_for_state_op(microvm_id, wanted, fail_on.unwrap_or_default(), opts);
         Ok(runtime::spawn(op).await?)
+    }
+
+    /// Discover prefix-matched images and VMs. Set dry_run=False to clean them up.
+    /// Keep entries preserve exact image names or ARNs and every VM using them.
+    #[pyo3(signature = (prefix, *, keep=None, dry_run=None))]
+    fn sweep(
+        &self,
+        py: Python<'_>,
+        prefix: String,
+        keep: Option<Vec<String>>,
+        dry_run: Option<bool>,
+    ) -> PyCoreResult<PySweepReport> {
+        Ok(runtime::block_on(py, self.sweep_op(prefix, keep, dry_run))?)
+    }
+
+    /// The awaitable twin of sweep. Once cleanup starts, cancellation leaves it running.
+    #[pyo3(signature = (prefix, *, keep=None, dry_run=None))]
+    async fn sweep_async(
+        &self,
+        prefix: String,
+        keep: Option<Vec<String>>,
+        dry_run: Option<bool>,
+    ) -> PyCoreResult<PySweepReport> {
+        Ok(runtime::spawn_shielded(self.sweep_op(prefix, keep, dry_run)).await?)
     }
 
     /// `ListMicrovmImages`, every page: every image in the account and region.

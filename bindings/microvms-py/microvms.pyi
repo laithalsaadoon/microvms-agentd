@@ -612,6 +612,15 @@ class ControlPlane:
         The awaitable twin of `suspend`. A lifecycle call: cancelling the awaitable leaves the
         request running to its answer.
         """
+    def sweep(self, /, prefix: str, *, keep: Sequence[str] |None = None, dry_run: bool |None = None) -> SweepReport:
+        """
+        Discover prefix-matched images and VMs. Set dry_run=False to clean them up.
+        Keep entries preserve exact image names or ARNs and every VM using them.
+        """
+    async def sweep_async(self, /, prefix: str, *, keep: Sequence[str] |None = None, dry_run: bool |None = None) -> SweepReport:
+        """
+        The awaitable twin of sweep. Once cleanup starts, cancellation leaves it running.
+        """
     def terminate(self, /, microvm_id: str) -> None:
         """
         `TerminateMicrovm`. Returns once accepted; `wait_for_state` for TERMINATED.
@@ -1795,6 +1804,11 @@ class MicrovmSummary:
     def image_arn(self, /) -> str: ...
     @property
     def image_version(self, /) -> str: ...
+    @property
+    def started_at(self, /) -> float |None:
+        """
+        When the VM started, in Unix seconds, when the service reported it.
+        """
     @property
     def state(self, /) -> str: ...
 
@@ -3313,6 +3327,38 @@ class StdinAck:
     def exec_id(self, /) -> str: ...
     @property
     def written(self, /) -> int: ...
+
+@final
+class SweepFailure:
+    """
+    One resource operation that failed during a sweep.
+    """
+    @property
+    def message(self, /) -> str: ...
+    @property
+    def resource(self, /) -> str: ...
+
+@final
+class SweepReport:
+    """
+    Inventory and confirmed outcomes of prefix cleanup.
+    """
+    @property
+    def dry_run(self, /) -> bool: ...
+    @property
+    def failures(self, /) -> list[SweepFailure]: ...
+    @property
+    def images_deleted(self, /) -> list[str]: ...
+    @property
+    def images_in_use(self, /) -> list[str]: ...
+    @property
+    def images_kept(self, /) -> list[str]: ...
+    @property
+    def images_matched(self, /) -> list[str]: ...
+    @property
+    def microvms_matched(self, /) -> list[str]: ...
+    @property
+    def microvms_terminated(self, /) -> list[str]: ...
 
 @final
 class SyncReport:

@@ -54,6 +54,7 @@ TWINS: dict[str, set[str]] = {
         "terminate_async",
     },
     "ControlPlane": {
+        "sweep_async",
         "create_async",
         "delete_image_async",
         "get_async",
