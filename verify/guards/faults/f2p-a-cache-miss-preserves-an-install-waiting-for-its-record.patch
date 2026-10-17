@@ -1,7 +1,7 @@
-diff --git a/crates/microvms-edges/src/provision.rs b/crates/microvms-edges/src/provision.rs
-index ecf893a..29f0901 100644
---- a/crates/microvms-edges/src/provision.rs
-+++ b/crates/microvms-edges/src/provision.rs
+diff --git b/crates/microvms-edges/src/provision.rs a/crates/microvms-edges/src/provision.rs
+index 33e8e58c..29f0901b 100644
+--- b/crates/microvms-edges/src/provision.rs
++++ a/crates/microvms-edges/src/provision.rs
 @@ -62,7 +62,7 @@
  //! truncated binary where the next request reads. Beside each entry sits a digest record
  //! written after verification, and a cache hit is served only when the bytes still hash to
@@ -74,19 +74,22 @@ index ecf893a..29f0901 100644
              Ok(None)
          }
      }
-@@ -565,17 +550,23 @@ fn fetched(
+@@ -565,20 +550,23 @@ fn fetched(
      ));
      let dir = cached.parent().expect("the cache path has a parent");
      std::fs::create_dir_all(dir).map_err(|error| io_error(dir, "create", &error))?;
 -    // Every call owns its temporary files. A PID-only name lets a second thread
 -    // truncate a verified download before the first thread reads or installs it.
+-    // Keep the path guard but close its handle: a legacy fetch may replace the
+-    // destination, which Windows refuses while this file is still open.
 -    let download = tempfile::NamedTempFile::new_in(dir)
--        .map_err(|error| io_error(dir, "create temporary download in", &error))?;
+-        .map_err(|error| io_error(dir, "create temporary download in", &error))?
+-        .into_temp_path();
 -    let Fetched {
 -        bytes,
 -        verification,
 -    } = fetch
--        .fetch_bytes(&tag, download.path(), progress)
+-        .fetch_bytes(&tag, &download, progress)
 -        .map_err(|reason| fetch_error(&tag, &reason))?;
 +    // A partial name in the same directory, so the final `rename` is atomic on the same
 +    // filesystem: an interrupted download leaves a `.partial` nothing trusts, never a
@@ -108,7 +111,7 @@ index ecf893a..29f0901 100644
          return Err(ProvisionError::new(
              Failure::NotAarch64,
              format!(
-@@ -586,39 +577,27 @@ fn fetched(
+@@ -589,41 +577,27 @@ fn fetched(
          .remedy("this is a release-asset defect worth reporting, not a local mistake"));
      }
  
@@ -133,6 +136,7 @@ index ecf893a..29f0901 100644
 +            .map_err(|error| io_error(&partial, "chmod", &error))?;
      }
 -    partial
+-        .into_temp_path()
 -        .persist(cached)
 -        .map_err(|error| io_error(cached, "install", &error.error))?;
 +    std::fs::rename(&partial, cached).map_err(|error| io_error(cached, "install", &error))?;
@@ -147,6 +151,7 @@ index ecf893a..29f0901 100644
 -        .write_all(record_json(&version, &sha256, verification).as_bytes())
 -        .map_err(|error| io_error(&record, "write record", &error))?;
 -    record_partial
+-        .into_temp_path()
 -        .persist(&record)
 -        .map_err(|error| io_error(&record, "record", &error.error))?;
 +    let record_partial = dir.join(format!(".{RECORD}.partial-{}", std::process::id()));
@@ -162,10 +167,10 @@ index ecf893a..29f0901 100644
      progress(&format!(
          "fetched and verified agentd {tag} ({}); cached at {}",
          verification.as_str(),
-diff --git a/crates/microvms-edges/src/provision/release.rs b/crates/microvms-edges/src/provision/release.rs
-index 5781a87..5c8abb9 100644
---- a/crates/microvms-edges/src/provision/release.rs
-+++ b/crates/microvms-edges/src/provision/release.rs
+diff --git b/crates/microvms-edges/src/provision/release.rs a/crates/microvms-edges/src/provision/release.rs
+index 5781a872..5c8abb9e 100644
+--- b/crates/microvms-edges/src/provision/release.rs
++++ a/crates/microvms-edges/src/provision/release.rs
 @@ -519,20 +519,11 @@ impl<S: ReleaseSource, V: AttestationVerifier> Fetch for PolicyFetch<S, V> {
          dest: &Path,
          progress: &mut dyn FnMut(&str),

@@ -567,13 +567,16 @@ fn fetched(
     std::fs::create_dir_all(dir).map_err(|error| io_error(dir, "create", &error))?;
     // Every call owns its temporary files. A PID-only name lets a second thread
     // truncate a verified download before the first thread reads or installs it.
+    // Keep the path guard but close its handle: a legacy fetch may replace the
+    // destination, which Windows refuses while this file is still open.
     let download = tempfile::NamedTempFile::new_in(dir)
-        .map_err(|error| io_error(dir, "create temporary download in", &error))?;
+        .map_err(|error| io_error(dir, "create temporary download in", &error))?
+        .into_temp_path();
     let Fetched {
         bytes,
         verification,
     } = fetch
-        .fetch_bytes(&tag, download.path(), progress)
+        .fetch_bytes(&tag, &download, progress)
         .map_err(|reason| fetch_error(&tag, &reason))?;
     if let Some(why) = not_aarch64(&bytes) {
         return Err(ProvisionError::new(
@@ -605,6 +608,7 @@ fn fetched(
             .map_err(|error| io_error(partial.path(), "chmod", &error))?;
     }
     partial
+        .into_temp_path()
         .persist(cached)
         .map_err(|error| io_error(cached, "install", &error.error))?;
     // The record after the binary: a crash between the two leaves a binary with no record,
@@ -617,6 +621,7 @@ fn fetched(
         .write_all(record_json(&version, &sha256, verification).as_bytes())
         .map_err(|error| io_error(&record, "write record", &error))?;
     record_partial
+        .into_temp_path()
         .persist(&record)
         .map_err(|error| io_error(&record, "record", &error.error))?;
     progress(&format!(
