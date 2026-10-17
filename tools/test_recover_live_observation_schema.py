@@ -5,6 +5,7 @@ import copy
 import json
 import runpy
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -94,6 +95,57 @@ def report(*, completed=False):
 def rejected(value):
     with pytest.raises(Refused, match="^receipt_schema$"):
         validate(value)
+
+
+@pytest.mark.parametrize("count", [999, 1000, 1001])
+def test_readonly_iterator_bounds_the_accumulated_rows_across_pages(count):
+    api = CORE["ReadOnlyApi"](None, None)
+    expected = [{"index": index} for index in range(count)]
+    api.call = Mock(
+        side_effect=[
+            {"items": expected[:500], "nextToken": "second-page"},
+            {"items": expected[500:]},
+        ]
+    )
+    iterator = api.iter_rows(None, "list_microvms", "items")
+    if count <= 1000:
+        assert list(iterator) == expected
+    else:
+        with pytest.raises(Refused, match="^observation_limit$"):
+            list(iterator)
+
+
+@pytest.mark.parametrize(
+    "pages,reason",
+    [
+        ([{}], "missing_page_items"),
+        ([{"items": [None]}], "invalid_page_item"),
+        ([{"items": [], "nextToken": ""}], "pagination_token"),
+        ([{"items": [], "nextToken": 3}], "pagination_token"),
+        (
+            [
+                {"items": [], "nextToken": "duplicate"},
+                {"items": [], "nextToken": "duplicate"},
+            ],
+            "pagination_token",
+        ),
+    ],
+)
+def test_readonly_iterator_preserves_the_fixed_refusal_reason(pages, reason):
+    api = CORE["ReadOnlyApi"](None, None)
+    api.call = Mock(side_effect=pages)
+    with pytest.raises(Refused, match=f"^{reason}$"):
+        list(api.iter_rows(None, "list_microvms", "items"))
+
+
+def test_append_row_limit_preserves_the_fixed_refusal_reason_and_prior_rows():
+    value = report()
+    value.update({key: [] for key in rows()})
+    value["logGroups"] = [{"sha256": f"{index:064x}"} for index in range(1000)]
+    before = copy.deepcopy(value)
+    with pytest.raises(Refused, match="^observation_limit$"):
+        CORE["observation_append"](value, "images", rows()["images"])
+    assert value == before
 
 
 @pytest.mark.parametrize("section", tuple(rows()))
@@ -318,18 +370,17 @@ def test_observation_limits_accumulated_metadata_but_counts_errors_separately():
     rejected(value)
 
 
-@pytest.mark.parametrize("difference", [-1, 0, 1])
-def test_observation_enforces_serialized_byte_boundary(difference):
+def sized_report(target, count):
     value = report()
     value.update({key: [] for key in rows()})
-    for index in range(1000):
+    for index in range(count):
         row = rows()["versions"]
         row["versionSha256"] = f"{index:064x}"
         for field in ("listed", "observed"):
             row[field]["createdAt"] = 10**308
         value["versions"].append(row)
-    target = CORE["OBSERVATION_MAX_BYTES"] + difference
     excess = len(json.dumps(value).encode()) - target
+    assert excess >= 0
     # Finite numeric timestamps vary the size without adding an unrecognized field.
     for row in value["versions"]:
         for field in ("listed", "observed"):
@@ -338,10 +389,33 @@ def test_observation_enforces_serialized_byte_boundary(difference):
             excess -= reduction
     assert excess == 0
     assert len(json.dumps(value).encode()) == target
+    return value
+
+
+@pytest.mark.parametrize("difference", [-1, 0, 1])
+def test_observation_enforces_serialized_byte_boundary(difference):
+    target = CORE["OBSERVATION_MAX_BYTES"] + difference
+    value = sized_report(target, 1000)
     if difference <= 0:
         assert validate(value) is value
     else:
         rejected(value)
+
+
+@pytest.mark.parametrize("difference", [-1, 0, 1])
+def test_append_reserves_half_the_artifact_budget_for_later_errors(difference):
+    row = rows()["images"]
+    target = CORE["OBSERVATION_MAX_BYTES"] // 2 + difference
+    value = sized_report(target - len(json.dumps(row)), 500)
+    before = copy.deepcopy(value)
+    if difference < 0:
+        CORE["observation_append"](value, "images", row)
+        assert value["images"] == [row]
+        assert len(value["versions"]) == 500
+    else:
+        with pytest.raises(Refused, match="^observation_limit$"):
+            CORE["observation_append"](value, "images", row)
+        assert value == before
 
 
 @pytest.mark.parametrize(
