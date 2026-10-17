@@ -17,14 +17,16 @@ per accessor, and no arithmetic or coercion the core doesn't have. The crate doc
   `stubs:check` in `mise run check` fails on a stale stub. Don't change the stub generator's
   maturin pin without checking its output path. A new public function, or a new method
   of a class `verify/parity/capabilities.toml` names, needs its row there, or `parity:check` fails.
-- `mise run check` doesn't build this crate as a Python module or run its tests. Build and
-  run them the way CI's `python and node bindings` job does:
+- `mise run check` doesn't run this crate's Python tests. Build and run the whole suite
+  the way CI's `python and node bindings` job does:
 
   ```bash
-  uv venv .venv-bindings && . .venv-bindings/bin/activate
-  uvx maturin@1.14.1 develop -m bindings/microvms-py/Cargo.toml
-  uv pip install pytest && pytest bindings/microvms-py/tests -q
+  mise run bindings:py
   ```
+
+  The task builds with `parity-fixtures` in its own `.venv-bindings` environment; the
+  whole suite needs those test helpers. Ordinary wheel builds omit that feature.
+  `mise run ci:bindings` also checks the declarations, typed consumers, and npm package.
 
 - Tests stay offline. To make the daemon fetch fail in a test, point `HTTPS_PROXY` at a closed
   local port and clear `NO_PROXY` (see `tests/test_provision.py`); emptying `PATH` no longer

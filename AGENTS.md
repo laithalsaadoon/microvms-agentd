@@ -21,10 +21,10 @@ mise run live:verify-clean
 installation or advisory/rule updates. It does not run the documentation,
 formal requirements, or live AWS tiers, and it doesn't run the Python and Node
 bindings' test suites: `stubs:check` and `dts:check` build each binding only to
-compare its declarations. When a change reaches behavior a binding exposes, build each
-binding and run its suite the way CI's `python and node bindings` job does
-(`pytest bindings/microvms-py/tests`, `node --test "bindings/microvms-js/__test__/*.mjs"`), or run
-`mise run ci:bindings`, which is that job.
+compare its declarations. When a change reaches behavior a binding exposes, run
+`mise run bindings:py` and `mise run bindings:js` to build with the test helpers the
+whole suites need, or run `mise run ci:bindings` for CI's `python and node bindings`
+job, including the declaration, typed consumer, and package checks.
 
 CI's jobs run mise tasks: each job of ci.yml and fuzz.yml installs mise and mise.lock's tools
 through `.github/actions/mise`, then runs one `mise run ci:<job>`, whose task holds the job's

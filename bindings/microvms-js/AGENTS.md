@@ -15,14 +15,17 @@ converts types and maps errors; behavior belongs in the Rust layers below.
   `@ts-expect-error` directive as its control, so a declaration that types a value as `any`
   fails. The script refuses a probe that mentions `@ts-nocheck` and any other file in the
   directory (a `.mts`, a subdirectory), since `tsc` would skip or silence it.
-- `mise run check` doesn't build the addon or run its tests. Build and run them the way CI's
-  `python and node bindings` job does:
+- `mise run check` doesn't run the addon's Node tests. Build and run the whole suite
+  the way CI's `python and node bindings` job does:
 
   ```bash
-  npx -y -p @napi-rs/cli@3.10.8 napi build --manifest-path Cargo.toml --package microvms-js \
-    --platform --output-dir . --cwd bindings/microvms-js
-  node --test "bindings/microvms-js/__test__/*.mjs"
+  mise run bindings:js
   ```
+
+  `npm test` in this directory runs the same task. It builds with `parity-fixtures`,
+  which the whole suite needs, then restores the ordinary addon and declarations after
+  the tests pass. `npm run build` remains an ordinary build without those test helpers.
+  `mise run ci:bindings` also checks the declarations, typed consumers, and npm package.
 
 - Tests stay offline. To make the daemon fetch fail in a test, point `HTTPS_PROXY` at a closed
   local port and clear `NO_PROXY` (see `__test__/provision.mjs`).

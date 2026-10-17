@@ -66,8 +66,12 @@ Use `-p microvms-protocol` for the protocol package; its Rust import is
 `protocol`. The shipping daemon target is `aarch64-unknown-linux-musl`.
 `.cargo/config.toml` selects `rust-lld`; no external cross compiler is needed.
 
-Python builds with maturin and tests under `bindings/microvms-py/tests/`. Node builds
-with `npm run build` and tests with `npm test` in `bindings/microvms-js/`.
+Run `mise run bindings:py` and `mise run bindings:js` for the whole binding test suites.
+They build with the `parity-fixtures` feature the suites need; the Python task uses its
+own `.venv-bindings`, and the Node task restores the ordinary addon and declarations
+after the tests pass. `npm test` in `bindings/microvms-js/` runs the Node task, while
+`npm run build` makes an ordinary addon without the test helpers. Run
+`mise run ci:bindings` for CI's declaration, typed consumer, and package checks too.
 
 A fix's regression test is proven by FAIL_TO_PASS rather than by a fault you
 write: it fails on the merge base, where the fix isn't, and passes with the fix.

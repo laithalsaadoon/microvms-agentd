@@ -12,6 +12,7 @@ regardless, and `// <test>: needs new_api` breaks the build where lib.rs has no 
 finders are the real ast-grep, so run this through `mise run fail-to-pass:check`.
 """
 
+import inspect
 import os
 import re
 import runpy
@@ -22,10 +23,12 @@ import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).with_name("fail-to-pass.py")
 REPO = SCRIPT.parent.parent
-TOOL = runpy.run_path(str(SCRIPT))
+TOOL = runpy.run_path(str(SCRIPT), run_name="tools.fail-to-pass")
 SENTINELS = TOOL["SENTINELS"]
 REGISTRY_DIR = TOOL["REGISTRY_DIR"]
 
@@ -423,6 +426,47 @@ class RegistryShapeTests(unittest.TestCase):
         for build in builds:
             if "maturin" in " ".join(build) or "napi" in build:
                 self.assertIn(build, known)
+
+
+class CandidateBuildTests(unittest.TestCase):
+    def test_fixture_sources_choose_their_required_binding_builds(self):
+        cases = [
+            (
+                "pytest",
+                "bindings/microvms-py/tests/test_parity_cases.py",
+                "PARITY_PY_BUILD",
+            ),
+            ("pytest", "bindings/microvms-py/tests/test_control.py", "PY_BUILD"),
+            (
+                "node",
+                "bindings/microvms-js/__test__/parity_cases.mjs",
+                "PARITY_JS_BUILD",
+            ),
+            ("node", "bindings/microvms-js/__test__/control.mjs", "JS_BUILD"),
+        ]
+        for kind, path, expected in cases:
+            with self.subTest(kind=kind, path=path):
+                guard = (
+                    f"{path}::test_changed" if kind == "pytest" else "a changed test"
+                )
+                selected = TOOL["Test"](kind, path, guard, "changed", 1, 1)
+                with patch.dict(
+                    inspect.unwrap(TOOL["candidates"]).__globals__,
+                    {"registry_texts": lambda *_args, **_kwargs: {}},
+                ):
+                    made, skipped = TOOL["candidates"](
+                        SimpleNamespace(root=REPO), [selected]
+                    )
+                runner = (
+                    ["python", "-m", "pytest", "-q", "-rA", guard]
+                    if kind == "pytest"
+                    else ["node", "--test", "--test-reporter=tap", path]
+                )
+                self.assertEqual(skipped, [])
+                self.assertEqual(len(made), 1)
+                self.assertEqual(made[0].run, [TOOL[expected], runner])
+                self.assertEqual(made[0].suite, "bindings")
+                self.assertEqual(made[0].test, selected)
 
 
 class RegistryReaderTests(unittest.TestCase):
