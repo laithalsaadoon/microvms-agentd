@@ -732,6 +732,68 @@ def test_bind_27_a_cancelled_lifecycle_transition_runs_on(
         )
 
 
+def _cancel_ensure_image_and_exit(monkeypatch: pytest.MonkeyPatch, agent: bool) -> None:
+    """Cancel a content-addressed ensure while its request is held by the proxy."""
+    with stalling_proxy(monkeypatch) as proxy:
+
+        async def run() -> None:
+            owner = (
+                microvms.AgentVm(microvms.Region.us_east_1())
+                if agent
+                else microvms.Sandbox(microvms.Region.us_east_1())
+            )
+            await owner.__aenter__()
+            arguments = {
+                "binary": b"\x7fELF\x02\x01" + bytes(12) + b"\xb7\x00",
+                "s3_bucket": "agentd-conformance-bucket",
+                "build_role_arn": "arn:aws:iam::123456789012:role/build",
+            }
+            if not agent:
+                arguments.update(
+                    name_prefix="cancel-test",
+                    dockerfile=microvms.wrap_dockerfile("FROM python:3.12-slim\n"),
+                )
+            task = asyncio.create_task(owner.ensure_image_async(**arguments))
+            try:
+
+                async def connected() -> None:
+                    while not proxy.connected.is_set():
+                        if task.done():
+                            await task
+                        await asyncio.sleep(0.01)
+
+                await asyncio.wait_for(connected(), 10)
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+                # No build has completed, so exit has no image to delete and must not
+                # wait behind the abandoned ensure's network operation.
+                await asyncio.wait_for(owner.__aexit__(None, None, None), 2)
+                sandbox = owner.sandbox if agent else owner
+                assert sandbox.image is None
+                assert not sandbox.image_exists
+            finally:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+
+        asyncio.run(run())
+
+
+def test_cancelled_ensure_image_releases_the_sandbox_for_context_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BIND-26: canceling a Sandbox ensure leaves no image and releases its lock."""
+    _cancel_ensure_image_and_exit(monkeypatch, agent=False)
+
+
+def test_cancelled_agent_ensure_image_releases_the_sandbox_for_context_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BIND-26: canceling an AgentVm ensure leaves no image and releases its lock."""
+    _cancel_ensure_image_and_exit(monkeypatch, agent=True)
+
+
 def test_a_cancelled_anext_leaves_the_event_for_the_next_one(sse_server) -> None:
     frames = [output_frame(0, b"ab"), exit_frame(2)]
     server = sse_server([frames])  # type: ignore[operator]

@@ -1,0 +1,68 @@
+diff --git a/bindings/microvms-py/src/agents.rs b/bindings/microvms-py/src/agents.rs
+index df20176..159fdd2 100644
+--- a/bindings/microvms-py/src/agents.rs
++++ b/bindings/microvms-py/src/agents.rs
+@@ -964,9 +964,8 @@ impl PyAgentVm {
+         Ok(runtime::block_on(py, op)?)
+     }
+ 
+-    /// The awaitable twin of `ensure_image`. Cancellation stops the local wait and releases
+-    /// this sandbox without recording an image. A build already accepted by the service
+-    /// keeps running; ensure the same inputs again to join it.
++    /// The awaitable twin of `ensure_image`. A lifecycle transition: cancelling the awaitable
++    /// leaves the build or reuse running to completion.
+     #[pyo3(signature = (*, binary, build_role_arn, s3_bucket, size=None, s3_key_prefix=None))]
+     async fn ensure_image_async(
+         &self,
+@@ -977,7 +976,7 @@ impl PyAgentVm {
+         s3_key_prefix: Option<String>,
+     ) -> PyCoreResult<PyEnsuredImage> {
+         let op = self.ensure_image_op(binary, build_role_arn, s3_bucket, size, s3_key_prefix);
+-        Ok(runtime::spawn(op).await?)
++        Ok(runtime::spawn_shielded(op).await?)
+     }
+ 
+     /// The artifact bytes to upload to `s3://<bucket>/<image_name>.zip` before `build_image`.
+diff --git a/bindings/microvms-py/src/runtime.rs b/bindings/microvms-py/src/runtime.rs
+index 53e33db..d47579a 100644
+--- a/bindings/microvms-py/src/runtime.rs
++++ b/bindings/microvms-py/src/runtime.rs
+@@ -31,9 +31,7 @@
+ //! * [`spawn`] (BIND-26): the task is aborted at its next `.await`, the way dropping a Rust
+ //!   future cancels it. For reads, waits, polls, transfers and exec starts: nothing billable is
+ //!   half-made by stopping one, and a wait that went on without its caller would hold the
+-//!   sandbox's lock for the rest of its deadline. Content-addressed `ensure_image` uses
+-//!   this path too: an accepted build remains discoverable by name, and the sandbox records
+-//!   an image only after the wait succeeds.
++//!   sandbox's lock for the rest of its deadline.
+ //! * [`spawn_shielded`] (BIND-27): the task runs to completion with nobody awaiting it, and its
+ //!   effect lands on the sandbox it holds. For the lifecycle transitions (launch, build,
+ //!   suspend, resume, terminate and the control plane's own): aborting a launch between
+diff --git a/bindings/microvms-py/src/sandbox.rs b/bindings/microvms-py/src/sandbox.rs
+index bfd06d0..a8e09cd 100644
+--- a/bindings/microvms-py/src/sandbox.rs
++++ b/bindings/microvms-py/src/sandbox.rs
+@@ -1446,9 +1446,8 @@ impl PySandbox {
+         )?)
+     }
+ 
+-    /// The awaitable twin of `ensure_image`, with its keywords. Cancellation stops the
+-    /// local wait and releases this sandbox without recording an image. A build already
+-    /// accepted by the service keeps running; ensure the same inputs again to join it.
++    /// The awaitable twin of `ensure_image`, with its keywords. A lifecycle transition:
++    /// cancelling the awaitable leaves the build or reuse running to completion.
+     #[pyo3(signature = (
+         *,
+         name_prefix,
+@@ -1504,7 +1503,10 @@ impl PySandbox {
+             tags,
+             wait_timeout,
+         )?;
+-        Ok(runtime::spawn(self.ensure_image_op(request, context_dir, project_dir)).await?)
++        Ok(
++            runtime::spawn_shielded(self.ensure_image_op(request, context_dir, project_dir))
++                .await?,
++        )
+     }
+ 
+     /// Every local guard `build_image` runs, with zero calls: raises the refusal `build_image`

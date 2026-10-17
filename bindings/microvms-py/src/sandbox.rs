@@ -1446,8 +1446,9 @@ impl PySandbox {
         )?)
     }
 
-    /// The awaitable twin of `ensure_image`, with its keywords. A lifecycle transition:
-    /// cancelling the awaitable leaves the build or reuse running to completion.
+    /// The awaitable twin of `ensure_image`, with its keywords. Cancellation stops the
+    /// local wait and releases this sandbox without recording an image. A build already
+    /// accepted by the service keeps running; ensure the same inputs again to join it.
     #[pyo3(signature = (
         *,
         name_prefix,
@@ -1503,10 +1504,7 @@ impl PySandbox {
             tags,
             wait_timeout,
         )?;
-        Ok(
-            runtime::spawn_shielded(self.ensure_image_op(request, context_dir, project_dir))
-                .await?,
-        )
+        Ok(runtime::spawn(self.ensure_image_op(request, context_dir, project_dir)).await?)
     }
 
     /// Every local guard `build_image` runs, with zero calls: raises the refusal `build_image`

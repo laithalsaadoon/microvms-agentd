@@ -31,7 +31,9 @@
 //! * [`spawn`] (BIND-26): the task is aborted at its next `.await`, the way dropping a Rust
 //!   future cancels it. For reads, waits, polls, transfers and exec starts: nothing billable is
 //!   half-made by stopping one, and a wait that went on without its caller would hold the
-//!   sandbox's lock for the rest of its deadline.
+//!   sandbox's lock for the rest of its deadline. Content-addressed `ensure_image` uses
+//!   this path too: an accepted build remains discoverable by name, and the sandbox records
+//!   an image only after the wait succeeds.
 //! * [`spawn_shielded`] (BIND-27): the task runs to completion with nobody awaiting it, and its
 //!   effect lands on the sandbox it holds. For the lifecycle transitions (launch, build,
 //!   suspend, resume, terminate and the control plane's own): aborting a launch between
