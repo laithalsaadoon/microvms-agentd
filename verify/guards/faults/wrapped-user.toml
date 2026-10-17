@@ -10,6 +10,22 @@ suite = "rust"
 transform = { file = "crates/microvms-app/src/control/artifact.rs", replace = "        \"RUN [\\\"/agentd\\\", \\\"--capture-image-user\\\"]\\n\",\n", with = "" }
 
 [[fault]]
+id = "wrap-user-workdir-dropped"
+guard = "control::artifact::tests::preserving_user_keeps_the_requested_workdir"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::artifact::tests::preserving_user_keeps_the_requested_workdir"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/artifact.rs", replace = "pub fn wrap_dockerfile_preserving_user(task: &str, opts: &WrapOptions) -> Result<String, Error> {\n    validate_wrap(task, opts)?;\n    let workdir = opts.workdir.as_deref().filter(|dir| !dir.is_empty());", with = "pub fn wrap_dockerfile_preserving_user(task: &str, opts: &WrapOptions) -> Result<String, Error> {\n    validate_wrap(task, opts)?;\n    let workdir = opts.workdir.as_deref().filter(|dir| dir.is_empty());" }
+
+[[fault]]
+id = "wrap-user-task-boundary"
+guard = "control::artifact::tests::preserving_user_normalizes_the_task_boundary"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::artifact::tests::preserving_user_normalizes_the_task_boundary"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/artifact.rs", replace = "    let mut wrapped = String::with_capacity(task.len() + stanza.len() + 256);\n    wrapped.push_str(task);\n    if !task.ends_with('\\n') {", with = "    let mut wrapped = String::with_capacity(task.len() + stanza.len() + 256);\n    wrapped.push_str(task);\n    if task.ends_with('\\n') {" }
+
+[[fault]]
 id = "wrap-user-capture-ignored"
 guard = "exec_start::tests::captured_numeric_identity_preserves_the_primary_gid_and_explicit_precedence"
 run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec_start::tests::captured_numeric_identity_preserves_the_primary_gid_and_explicit_precedence"]
@@ -32,6 +48,14 @@ run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "config::tests
 expect = "test-failed"
 suite = "rust"
 transform = { file = "crates/agentd/src/config.rs", replace = "    if explicit.is_some() {", with = "    if false {" }
+
+[[fault]]
+id = "wrap-user-explicit-capture-mode"
+guard = "config::tests::from_env_reads_the_default_user_from_the_environment"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "config::tests::from_env_reads_the_default_user_from_the_environment"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/config.rs", replace = "cfg.captured_user = std::env::var_os(DEFAULT_USER_VAR).is_none()\n            && std::env::var_os(crate::image_user::SETTING).is_some();", with = "cfg.captured_user = std::env::var_os(DEFAULT_USER_VAR).is_none()\n            || std::env::var_os(crate::image_user::SETTING).is_some();" }
 
 [[fault]]
 id = "wrap-user-unsealed-record"

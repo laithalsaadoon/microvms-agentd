@@ -2167,6 +2167,56 @@ mod tests {
         }
     }
 
+    /// **IMAGE-2.** The capture stanza starts on its own line, whether the task already
+    /// ends with a newline or needs one, and preserves either existing line ending.
+    #[test]
+    fn preserving_user_normalizes_the_task_boundary() {
+        for (task, prefix) in [
+            (
+                "FROM x\nUSER app",
+                "FROM x\nUSER app\nCOPY --chmod=0755 agentd /agentd\n",
+            ),
+            (
+                "FROM x\nUSER app\n",
+                "FROM x\nUSER app\nCOPY --chmod=0755 agentd /agentd\n",
+            ),
+            (
+                "FROM x\r\nUSER app\r\n",
+                "FROM x\r\nUSER app\r\nCOPY --chmod=0755 agentd /agentd\n",
+            ),
+        ] {
+            let wrapped = wrap_dockerfile_preserving_user(task, &WrapOptions::default())
+                .expect("the task wraps");
+            assert!(wrapped.starts_with(prefix), "{wrapped:?}");
+        }
+    }
+
+    /// **IMAGE-1.** Preserving the image user still honors the wrapper's workdir option;
+    /// an empty option leaves the image's workdir alone, like an omitted option.
+    #[test]
+    fn preserving_user_keeps_the_requested_workdir() {
+        for (workdir, expected) in [
+            (None, vec![]),
+            (Some(""), vec![]),
+            (Some("/srv/task"), vec!["/srv/task"]),
+        ] {
+            let opts = WrapOptions {
+                workdir: workdir.map(str::to_string),
+                ..WrapOptions::default()
+            };
+            let wrapped = wrap_dockerfile_preserving_user("FROM x\nUSER app\n", &opts)
+                .expect("the task wraps");
+            let declared: Vec<_> = wrapped
+                .lines()
+                .filter_map(|line| line.strip_prefix("WORKDIR "))
+                .collect();
+            assert_eq!(declared, expected, "{wrapped}");
+            if workdir == Some("/srv/task") {
+                assert!(wrapped.contains("RUN mkdir -p /srv/task\n"), "{wrapped}");
+            }
+        }
+    }
+
     /// **IMAGE-3.** Each refusal on its own, against an otherwise wrappable task, names its
     /// cause: no `FROM`, a trailing continuation (in the default and a custom escape
     /// character, across blank and comment lines, in either line ending), an open heredoc, a

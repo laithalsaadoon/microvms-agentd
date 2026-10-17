@@ -339,21 +339,25 @@ mod tests {
         assert_eq!(lossy, "a\u{fffd}");
     }
 
-    /// **AGENTD-22.** `from_env` reads the default user from the daemon's environment. The
-    /// read happens in a copy of this test binary started with the variable set, because this
-    /// crate can't set its own environment: `set_var` is `unsafe`, which the crate forbids.
+    /// **AGENTD-22.** `from_env` reads an explicit default user without treating it as a
+    /// captured identity, even when image-user preservation is enabled. The read happens in
+    /// a copy of this test binary because this crate can't set its own environment:
+    /// `set_var` is `unsafe`, which the crate forbids.
     #[test]
     fn from_env_reads_the_default_user_from_the_environment() {
         const CHILD: &str = "AGENTD_TEST_FROM_ENV_CHILD";
         const NAME: &str = "config::tests::from_env_reads_the_default_user_from_the_environment";
         if std::env::var_os(CHILD).is_some() {
-            assert_eq!(Config::from_env().default_user.as_deref(), Some("probe"));
+            let cfg = Config::from_env();
+            assert_eq!(cfg.default_user.as_deref(), Some("probe"));
+            assert!(!cfg.captured_user);
             return;
         }
         let output = std::process::Command::new(std::env::current_exe().expect("test binary"))
             .args(["--exact", NAME])
             .env(CHILD, "1")
             .env(DEFAULT_USER_VAR, "probe")
+            .env(crate::image_user::SETTING, "1")
             .output()
             .expect("child test");
         let stdout = String::from_utf8_lossy(&output.stdout);
