@@ -1,0 +1,19 @@
+[[family]]
+guard = "test_recover_live_integration.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_integration.py::test_positive_list_logging_is_consulted_only_after_image_absence"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "recovery-integration-phase-boundary"
+message = "test_positive_list_logging_is_consulted_only_after_image_absence"
+transform = { file = "tools/recover-live.py", replace = "    initial, _ = settled_selection(manifest, ownership, api, image_phase=True)", with = "    initial, _ = settled_selection(manifest, ownership, api, image_phase=False)" }
+
+[[family]]
+guard = "test_recover_live_integration.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_integration.py::test_unproven_list_logging_preserves_image_progress_without_log_deletion"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "recovery-integration-log-verdict"
+message = "test_unproven_list_logging_preserves_image_progress_without_log_deletion"
+transform = { file = "tools/recover-live.py", replace = "                destination = self.version_log_destination(record, listed)", with = "                destination = None" }
