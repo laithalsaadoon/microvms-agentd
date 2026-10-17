@@ -30,6 +30,16 @@ message = "FAIL  delayed readiness relay forwards to the configured backend"
 transform = { file = "conformance/fixtures/delayed_ready.py", replace = 'int(os.environ["AGENTD_RELAY_BACKEND_PORT"])', with = "9001" }
 
 [[family.fault]]
+id = "conformance-agent-port-stale-backend-assertion"
+message = "FAIL  delayed readiness full self-test accepts shared port 9001"
+transform = { file = "conformance/selftest/delayed_readiness.py", replace = 'and "\\nexec /real-agentd\\n" in recipe,', with = 'and "export AGENTD_PORT=9001\\nexec /real-agentd" in recipe,' }
+
+[[family.fault]]
+id = "conformance-agent-port-daemon-exec"
+message = "FAIL  delayed readiness image runs the supplied daemon behind the relay"
+transform = { file = "conformance/lanes/delayed_readiness.py", replace = 'exec /real-agentd\\n', with = '/real-agentd\\n' }
+
+[[family.fault]]
 id = "conformance-agent-port-missing-fallback"
 message = "FAIL  conformance rejects missing agentPort"
 transform = { file = "conformance/harness/constants.py", replace = ']["agentPort"]', with = '].get("agentPort", 9000)' }

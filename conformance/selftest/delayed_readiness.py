@@ -102,7 +102,7 @@ def check_delayed_readiness(results: Results) -> None:
         and "ENTRYPOINT []" in recipe
         and 'CMD ["/agentd"]' in recipe
         and "mv /agentd /real-agentd" in recipe
-        and "export AGENTD_PORT=9001\\nexec /real-agentd" in recipe,
+        and "\\nexec /real-agentd\\n" in recipe,
     )
     for front_port in dict.fromkeys((AGENT_PORT, 9001, 65535)):
         with (
@@ -111,6 +111,22 @@ def check_delayed_readiness(results: Results) -> None:
         ):
             check_launcher_ports(results, delayed_recipe(), front_port)
     check_relay(results)
+
+
+def check_changed_shared_port(results: Results) -> None:
+    probe = Results(probe=True)
+    with (
+        patch("selftest.delayed_readiness.AGENT_PORT", 9001),
+        patch("lanes.delayed_readiness.AGENT_PORT", 9001),
+        patch("harness.image.AGENT_PORT", 9001),
+        contextlib.redirect_stdout(io.StringIO()),
+    ):
+        check_delayed_readiness(probe)
+    results.check(
+        "delayed readiness full self-test accepts shared port 9001",
+        not probe.failed,
+        repr(probe.failed),
+    )
 
 
 def check_launcher_ports(results: Results, recipe: str, front_port: int) -> None:
