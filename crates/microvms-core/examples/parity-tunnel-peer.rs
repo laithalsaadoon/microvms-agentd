@@ -2,6 +2,9 @@
 //! A portable peer for the shared tunnel cases. Its inputs state the wire contract
 //! independently of the client implementation; stdout contains ready and verdict JSON.
 
+#[path = "parity_support/credentials.rs"]
+mod credentials;
+
 use std::io::{BufRead, Write};
 use std::time::Duration;
 
@@ -52,6 +55,10 @@ fn emit(value: Value) {
 
 #[tokio::main]
 async fn main() {
+    if std::env::args().nth(1).as_deref() == Some("credentials") {
+        credentials::run();
+        return;
+    }
     let input: Value = serde_json::from_str(
         &std::io::stdin()
             .lock()

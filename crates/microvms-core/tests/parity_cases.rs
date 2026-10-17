@@ -32,9 +32,10 @@ use microvms_core::{Error, Region, SizeClass};
 use parity_corpus::{Case, Run};
 use serde_json::{Value, json};
 
-const AREAS: [&str; 10] = [
+const AREAS: [&str; 11] = [
     "forward",
     "control-plane",
+    "credential-error",
     "image-name",
     "cost",
     "error",
@@ -54,6 +55,12 @@ async fn core_answers_the_shared_case_corpus() {
     for case in run.cases() {
         let answer = match case.area.as_str() {
             "control-plane" => control_plane_case(&case).await,
+            "credential-error" => parity_corpus::credentials::run(
+                "core",
+                parity_corpus::credentials::fixture_path(),
+                &["credentials", "core"],
+                &case.input,
+            ),
             "forward" => forward(&case).await,
             "image-name" => image_name(&case),
             "cost" => cost(&case),

@@ -559,7 +559,44 @@ async function controlPlane(testCase) {
   assert.fail('a control-plane case must end with a refusal');
 }
 
+const CREDENTIAL_WORKER = `
+import { readFileSync } from 'node:fs';
+const { ControlPlane, Region, isRetryable } = await import(process.argv[1]);
+const input = JSON.parse(readFileSync(0, 'utf8'));
+try {
+  const plane = await ControlPlane.create(Region.usEast1());
+  await plane.resume(input.microvm_id);
+} catch (error) {
+  const answer = { error: { code: error.cause?.message,
+    wire_kind: error.cause?.cause?.message ?? null, retryable: isRetryable(error) } };
+  const diagnostics = [];
+  for (let current = error; current; current = current.cause) {
+    diagnostics.push(String(current), current.stack ?? '', JSON.stringify(current));
+  }
+  const text = diagnostics.join(' ');
+  answer.message_mentions = Object.fromEntries(input.message_mentions.map(s => [s, text.includes(s)]));
+  answer.diagnostics_secret_free = !text.includes(input.provider_stderr);
+  console.log(JSON.stringify(answer));
+  process.exit(0);
+}
+throw new Error('credential process must fail before sending a request');
+`;
+
+async function credentialError(testCase) {
+  const target = resolve(ROOT, process.env.CARGO_TARGET_DIR ?? 'target');
+  const suffix = process.platform === 'win32' ? '.exe' : '';
+  const binary = join(target, 'debug', 'examples', `parity-tunnel-peer${suffix}`);
+  const output = execFileSync(binary, ['credentials', 'launch'], {
+    input: JSON.stringify({ surface: 'ts', program: process.execPath,
+      args: ['--input-type=module', '-e', CREDENTIAL_WORKER, new URL('../index.js', import.meta.url).href],
+      input: testCase.input }),
+    encoding: 'utf8', timeout: 45_000,
+  });
+  return JSON.parse(output);
+}
+
 const HANDLERS = new Map([
+  ['credential-error', credentialError],
   ['control-plane', controlPlane],
   ['forward', forward],
   ['tunnel', tunnel],

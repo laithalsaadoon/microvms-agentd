@@ -533,6 +533,54 @@ def tunnel(case: Case, _servers: Callable[..., SseServer]) -> dict[str, Any]:
                     handle.stop(timeout=1)
 
 
+CREDENTIAL_WORKER = """
+import json, sys
+import microvms
+case = json.load(sys.stdin)
+try:
+    plane = microvms.ControlPlane(microvms.Region.us_east_1())
+    plane.resume(case["microvm_id"])
+except microvms.MicrovmError as error:
+    answer = {"error": {"code": error.code, "wire_kind": error.wire_kind,
+                        "retryable": error.retryable}}
+    diagnostics = []
+    while error is not None:
+        diagnostics.extend((str(error), repr(error)))
+        error = error.__cause__
+    text = " ".join(diagnostics)
+    answer["message_mentions"] = {s: s in text for s in case["message_mentions"]}
+    answer["diagnostics_secret_free"] = case["provider_stderr"] not in text
+    print(json.dumps(answer))
+else:
+    raise AssertionError("credential process must fail before sending a request")
+"""
+
+
+def credential_error(case: Case, _servers: Callable[..., SseServer]) -> dict[str, Any]:
+    """Use a new interpreter so the production provider registry starts empty."""
+    target = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
+    if not target.is_absolute():
+        target = ROOT / target
+    suffix = ".exe" if sys.platform == "win32" else ""
+    binary = target / "debug" / "examples" / f"parity-tunnel-peer{suffix}"
+    result = subprocess.run(
+        [str(binary), "credentials", "launch"],
+        input=json.dumps(
+            {
+                "surface": "py",
+                "program": sys.executable,
+                "args": ["-c", CREDENTIAL_WORKER],
+                "input": case.input,
+            }
+        ),
+        capture_output=True,
+        text=True,
+        timeout=45,
+        check=True,
+    )
+    return json.loads(result.stdout)
+
+
 def control_plane_case(
     case: Case, _servers: Callable[..., SseServer]
 ) -> dict[str, Any]:
@@ -559,6 +607,7 @@ def control_plane_case(
 
 
 HANDLERS: dict[str, Callable[[Case, Callable[..., SseServer]], dict[str, Any]]] = {
+    "credential-error": credential_error,
     "control-plane": control_plane_case,
     "forward": forward,
     "tunnel": tunnel,
