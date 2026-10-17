@@ -113,6 +113,25 @@ pub use services::BuildServices;
 pub use sweep::{SweepFailure, SweepOptions, SweepReport};
 
 use crate::error::{Error, ErrorKind};
+
+/// A successful HTTP response retains its request telemetry through decoding.
+struct ReportedReply {
+    reply: transport::Reply,
+    details: transport::RetryDetails,
+}
+
+impl ReportedReply {
+    fn json<T: serde::de::DeserializeOwned>(&self, operation: &str) -> Result<T, Error> {
+        self.reply
+            .json(operation)
+            .map_err(|error| self.error(error))
+    }
+
+    fn error(&self, error: Error) -> Error {
+        error.with_retry_details(self.details.attempt_count, self.details.backoff)
+    }
+}
+
 use crate::hooks::{BuildHookTimeout, RunHookTimeout};
 use crate::region::Region;
 use crate::sizing::SizeClass;
@@ -141,6 +160,7 @@ pub struct ControlPlane {
     adapters: Arc<dyn Adapters>,
     /// The agent port, which the hooks block and the proxy token both need.
     port: u16,
+    retry: Option<transport::RetryPolicy>,
 }
 
 impl std::fmt::Debug for ControlPlane {
@@ -177,7 +197,35 @@ impl ControlPlane {
             entropy,
             adapters,
             port: DEFAULT_AGENT_PORT,
+            retry: None,
         }
+    }
+
+    /// Uses a custom budget for throttles only; other retries retain their defaults.
+    #[must_use]
+    pub fn with_retry(mut self, retry: transport::RetryPolicy) -> Self {
+        self.retry = Some(retry);
+        self
+    }
+
+    async fn send(&self, call: transport::Call) -> Result<ReportedReply, Error> {
+        self.send_reported(call, &[]).await
+    }
+
+    async fn send_reported(
+        &self,
+        call: transport::Call,
+        accept: &[u16],
+    ) -> Result<ReportedReply, Error> {
+        let (reply, details) = transport::send_configured(
+            self.transport(),
+            call,
+            accept,
+            self.retry,
+            self.clock.as_ref(),
+        )
+        .await?;
+        Ok(ReportedReply { reply, details })
     }
 
     /// Replaces the source client-token nonces, agent tokens and identity seeds are drawn

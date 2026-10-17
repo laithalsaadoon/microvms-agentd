@@ -2,7 +2,7 @@
 +++ b/crates/microvms-app/src/control/microvm.rs
 @@ -821,9 +821,7 @@
          let call = Call::post_empty("ResumeMicrovm", paths::resume(id));
-         match send_with_retry(self.transport(), call).await {
+         match self.send(call).await {
              Ok(_) => Ok(()),
 -            Err(refused) if refused.kind() == ErrorKind::Platform => {
 -                Err(self.ended_before_resume(id, refused).await)

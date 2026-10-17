@@ -35,6 +35,9 @@ pub struct Error {
     kind: ErrorKind,
     wire_kind: Option<WireKind>,
     message: String,
+    throttled: bool,
+    attempts: u32,
+    backoff: std::time::Duration,
     #[source]
     source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
 }
@@ -46,6 +49,9 @@ impl Error {
             kind,
             wire_kind: None,
             message: message.into(),
+            throttled: false,
+            attempts: 0,
+            backoff: std::time::Duration::ZERO,
             source: None,
         }
     }
@@ -70,6 +76,9 @@ impl Error {
             kind: wire_kind.error_kind(),
             wire_kind: Some(wire_kind),
             message: message.into(),
+            throttled: false,
+            attempts: 0,
+            backoff: std::time::Duration::ZERO,
             source: None,
         }
     }
@@ -77,8 +86,48 @@ impl Error {
     /// Attaches the underlying error, reachable through [`std::error::Error::source`].
     #[must_use]
     pub fn with_source(mut self, source: impl std::error::Error + Send + Sync + 'static) -> Self {
+        // Wrapping a refusal (for example, a resume of an ended VM) keeps the
+        // work already done by the underlying control-plane request visible.
+        if self.attempts == 0
+            && let Some(error) =
+                (&source as &(dyn std::error::Error + 'static)).downcast_ref::<Self>()
+        {
+            self.attempts = error.attempts;
+            self.backoff = error.backoff;
+            self.throttled = error.throttled;
+        }
         self.source = Some(Box::new(source));
         self
+    }
+
+    /// Marks a control-plane throttle without parsing its explanation.
+    #[must_use]
+    pub fn with_throttled(mut self, throttled: bool) -> Self {
+        self.throttled = throttled;
+        self
+    }
+
+    /// Attaches the attempts and completed retry sleeps for this control-plane call.
+    #[must_use]
+    pub fn with_retry_details(mut self, attempts: u32, backoff: std::time::Duration) -> Self {
+        self.attempts = attempts;
+        self.backoff = backoff;
+        self
+    }
+
+    /// Whether the service refused this call because of throttling.
+    pub fn throttled(&self) -> bool {
+        self.throttled
+    }
+
+    /// Attempts sent for the failed call, or zero when no request telemetry is available.
+    pub fn attempt_count(&self) -> u32 {
+        self.attempts
+    }
+
+    /// Total completed retry sleeps for this call.
+    pub fn backoff(&self) -> std::time::Duration {
+        self.backoff
     }
 
     /// The coarse class, one per row of the exit-code table.
@@ -442,6 +491,61 @@ impl fmt::Display for WireKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retry_details_distinguish_unmeasured_and_observed_failures() {
+        for error in [
+            Error::new(ErrorKind::Platform, "local failure"),
+            Error::wire(WireKind::Transport, "daemon failure"),
+        ] {
+            assert!(!error.throttled());
+            assert_eq!(error.attempt_count(), 0);
+            assert_eq!(error.backoff(), std::time::Duration::ZERO);
+        }
+
+        let delay = std::time::Duration::from_millis(750);
+        let error = Error::new(ErrorKind::Retryable, "service throttle")
+            .with_throttled(true)
+            .with_retry_details(4, delay);
+        assert!(error.throttled());
+        assert_eq!(error.attempt_count(), 4);
+        assert_eq!(error.backoff(), delay);
+    }
+
+    #[test]
+    fn wrapping_retry_details_inherits_only_when_outer_has_no_attempts() {
+        let source = || {
+            Error::new(ErrorKind::Retryable, "service throttle")
+                .with_throttled(true)
+                .with_retry_details(4, std::time::Duration::from_millis(750))
+        };
+        let inherited = Error::new(ErrorKind::WindowClosed, "wrapped").with_source(source());
+        assert_eq!(inherited.kind(), ErrorKind::WindowClosed);
+        assert!(inherited.throttled());
+        assert_eq!(inherited.attempt_count(), 4);
+        assert_eq!(inherited.backoff(), std::time::Duration::from_millis(750));
+
+        let own_delay = std::time::Duration::from_millis(200);
+        let own = Error::new(ErrorKind::Platform, "outer request")
+            .with_retry_details(2, own_delay)
+            .with_source(source());
+        assert!(!own.throttled());
+        assert_eq!(own.attempt_count(), 2);
+        assert_eq!(own.backoff(), own_delay);
+        assert!(
+            std::error::Error::source(&own)
+                .unwrap()
+                .downcast_ref::<Error>()
+                .unwrap()
+                .throttled()
+        );
+
+        let unrelated =
+            Error::new(ErrorKind::Platform, "formatting failure").with_source(std::fmt::Error);
+        assert_eq!(unrelated.attempt_count(), 0);
+        assert!(!unrelated.throttled());
+        assert_eq!(unrelated.backoff(), std::time::Duration::ZERO);
+    }
 
     /// The thirteen codes, spelled as `cli.py` spells them. Written out rather
     /// than generated, because a generated list would agree with a typo.

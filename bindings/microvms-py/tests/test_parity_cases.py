@@ -584,7 +584,13 @@ def credential_error(case: Case, _servers: Callable[..., SseServer]) -> dict[str
 def control_plane_case(
     case: Case, _servers: Callable[..., SseServer]
 ) -> dict[str, Any]:
-    plane = microvms.ControlPlane._parity_from_script(json.dumps(case.input["script"]))
+    retry = case.input.get("retry")
+    plane = microvms.ControlPlane._parity_from_script(
+        json.dumps(case.input["script"]),
+        None
+        if retry is None
+        else (retry["max_attempts"], retry["max_elapsed_seconds"]),
+    )
     if case.input["actions"] == ["sweep"]:
         report = plane.sweep(
             case.input["prefix"],
@@ -637,6 +643,12 @@ def control_plane_case(
             if "message_mentions" in case.input:
                 answer["message_mentions"] = {
                     text: text in str(error) for text in case.input["message_mentions"]
+                }
+            if case.input.get("report_retry"):
+                answer["retry"] = {
+                    "attempt_count": error.attempt_count,
+                    "backoff_positive": error.backoff_seconds > 0,
+                    "throttled": error.throttled,
                 }
             answer["calls"] = plane._parity_calls()
             return answer

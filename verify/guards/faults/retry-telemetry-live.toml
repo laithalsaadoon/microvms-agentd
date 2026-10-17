@@ -1,0 +1,85 @@
+[[family]]
+guard = "conformance/run_rs.py --self-test: conformance/selftest/retry_telemetry.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "retry-live-empty"
+message = "FAIL  retry telemetry rejects an empty report"
+transform = { file = "conformance/lanes/retry_telemetry.py", replace = 'len(phases) == len(POLICIES)', with = 'True' }
+
+[[family.fault]]
+id = "retry-live-attempts"
+message = "FAIL  retry telemetry rejects excess attempts"
+transform = { file = "conformance/lanes/retry_telemetry.py", replace = '1 <= attempts <= cap', with = 'attempts >= 1' }
+
+[[family.fault]]
+id = "retry-live-backoff"
+message = "FAIL  retry telemetry rejects negative backoff"
+transform = { file = "conformance/lanes/retry_telemetry.py", replace = 'and backoff >= 0', with = 'and True' }
+
+[[family.fault]]
+id = "retry-live-typed-throttle"
+message = "FAIL  retry telemetry rejects untyped throttle"
+transform = { file = "conformance/lanes/retry_telemetry.py", replace = 'and row["details"].get("throttled") is True', with = 'and True' }
+
+[[family.fault]]
+id = "retry-live-ready-order"
+message = "FAIL  retry telemetry rejects reversed phase timestamps"
+transform = { file = "conformance/lanes/retry_telemetry.py", replace = 'and 0 < started <= running_at <= ready_at', with = 'and running_at > 0' }
+
+[[family.fault]]
+id = "retry-live-node-observation-resolution"
+message = "FAIL  retry telemetry accepts readiness within the Node observation millisecond"
+transform = { file = "conformance/lanes/retry_telemetry.py", replace = 'ready_at < (observed_ms + 1) / 1000', with = 'ready_at <= observed_ms / 1000' }
+
+[[family.fault]]
+id = "retry-live-node-observation-upper-bound"
+message = "FAIL  retry telemetry rejects readiness at the next Node millisecond"
+transform = { file = "conformance/lanes/retry_telemetry.py", replace = 'ready_at < (observed_ms + 1) / 1000', with = 'ready_at <= (observed_ms + 1) / 1000' }
+
+[[family.fault]]
+id = "retry-live-node-observation-integer"
+message = "FAIL  retry telemetry rejects malformed Node observation 101000.0"
+transform = { file = "conformance/lanes/retry_telemetry.py", replace = 'type(observed_ms) is int', with = 'finite(observed_ms)' }
+
+[[family.fault]]
+id = "retry-live-node-observation-sample"
+message = "FAIL  retry node driver reports raw millisecond observations"
+transform = { file = "conformance/drivers/retry.mjs", replace = 'observedAtMilliseconds: Date.now()', with = 'observedAt: Date.now() / 1000' }
+
+[[family.fault]]
+id = "retry-live-partial-timeout"
+message = "FAIL  retry driver preserves accepted IDs after its deadline"
+transform = { file = "conformance/lanes/retry_telemetry.py", replace = 'output = error.stdout or ""', with = 'output = ""' }
+
+[[family.fault]]
+id = "retry-live-cleanup-baseline"
+message = "FAIL  retry cleanup finds delayed and hidden VMs without touching the baseline"
+transform = { file = "conformance/lanes/retry_telemetry.py", replace = 'owned.update(set(inventory(plane, image)) - baseline)', with = 'owned.update(set(inventory(plane, image)))' }
+
+[[family.fault]]
+id = "retry-live-cleanup-terminal"
+message = "FAIL  retry cleanup rejects a VM that never terminates"
+transform = { file = "conformance/lanes/retry_telemetry.py", replace = 'read_ok and terminal == owned and elapsed >= VISIBILITY_SECONDS', with = 'read_ok and elapsed >= VISIBILITY_SECONDS' }
+
+[[family.fault]]
+id = "retry-live-cleanup-call-bound"
+message = "FAIL  retry cleanup bounds each SDK call without automatic retries"
+transform = { file = "conformance/lanes/retry_telemetry.py", replace = 'retries={"max_attempts": 0}', with = 'retries={"max_attempts": 5}' }
+
+[[family.fault]]
+id = "retry-live-python-policy"
+message = "FAIL  retry python driver forwards policy and stable launch fields"
+transform = { file = "conformance/drivers/retry.py", replace = 'retry=(policy["maxAttempts"], request["budgetSeconds"])', with = 'retry=None' }
+
+[[family.fault]]
+id = "retry-live-node-policy"
+message = "FAIL  retry node driver forwards policy and stable launch fields"
+transform = { file = "conformance/drivers/retry.mjs", replace = 'maxAttempts: policy.maxAttempts', with = 'maxAttempts: 6' }
+
+[[family.fault]]
+id = "retry-live-node-pending-timestamps"
+message = "FAIL  retry node driver forwards policy and stable launch fields"
+transform = { file = "conformance/drivers/retry.mjs", replace = 'runningAt: value.runningAt ?? null', with = 'runningAt: value.runningAt' }

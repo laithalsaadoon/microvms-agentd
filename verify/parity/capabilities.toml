@@ -1170,3 +1170,24 @@ core = "microvms_core::control::ControlPlane::sweep"
 cli = "gc"
 py = ["ControlPlane.sweep", "ControlPlane.sweep_async"]
 ts = "ControlPlane.sweep"
+
+[[capability]]
+id = "throttle-retry-budget"
+core = "microvms_core::control::ControlPlane::with_retry"
+cli = { exempt = "the CLI uses the default budget; embedding callers configure their shared client" }
+py = ["ControlPlane", "Sandbox"]
+ts = ["ControlPlane.create", "Sandbox.create"]
+
+[[capability]]
+id = "launch-metrics"
+core = "microvms_core::session::Session::launch_metrics"
+cli = { exempt = "the CLI reports lifecycle progress as it runs; library sessions retain timing snapshots" }
+py = "Session.launch_metrics"
+ts = "Session.launchMetrics"
+
+[[capability]]
+id = "retry-details"
+core = ["microvms_core::error::Error::attempt_count", "microvms_core::error::Error::backoff", "microvms_core::error::Error::throttled"]
+cli = { exempt = "control-plane failures include retry telemetry in the JSON data object" }
+py = "MicrovmError"
+ts = "retryDetails"

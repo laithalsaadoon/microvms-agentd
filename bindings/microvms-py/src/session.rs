@@ -984,6 +984,25 @@ impl PySession {
         })
     }
 
+    /// Launch observations, or None for a session not created by a launch.
+    #[getter]
+    fn launch_metrics<'py>(&self, py: Python<'py>) -> PyCoreResult<Option<Bound<'py, PyDict>>> {
+        let metrics = self.with(py, |session| Ok(session.launch_metrics()))?;
+        metrics
+            .map(|metrics| {
+                let result = PyDict::new(py);
+                result.set_item("attempt_count", metrics.attempt_count)?;
+                result.set_item("backoff_seconds", metrics.backoff_seconds)?;
+                result.set_item("running_at", metrics.running_at)?;
+                result.set_item("ready_at", metrics.ready_at)?;
+                Ok(result)
+            })
+            .transpose()
+            .map_err(|error: PyErr| {
+                crate::errors::CoreError::from(Error::new(ErrorKind::Unexpected, error.to_string()))
+            })
+    }
+
     /// The guest bearer credential. Store only in a private encrypted control record.
     /// It is never included in repr or ordinary status output.
     #[getter]

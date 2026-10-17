@@ -49,7 +49,7 @@ use super::artifact::{BaseImage, artifact_content_hash_with_context, build_artif
 use super::context::BuildContext;
 use super::image::{DEFAULT_BUILD_TIMEOUT, Image, WaitOpts};
 use super::services::BuildServices;
-use super::transport::{Call, paths, send_accepting};
+use super::transport::{Call, paths};
 use super::{ControlPlane, CreateImageRequest, ops};
 use crate::error::{Error, ErrorKind};
 use crate::sizing::SizeClass;
@@ -609,8 +609,8 @@ impl ControlPlane {
     ) -> Result<Option<ops::GetMicrovmImageResponseWire>, Error> {
         super::require_valid_identifier("imageIdentifier", identifier)?;
         let call = Call::get("GetMicrovmImage", paths::microvm_image(identifier));
-        let reply = send_accepting(self.transport(), call, &[404]).await?;
-        if reply.status == 404 {
+        let reply = self.send_reported(call, &[404]).await?;
+        if reply.reply.status == 404 {
             return Ok(None);
         }
         Ok(Some(reply.json("GetMicrovmImage")?))

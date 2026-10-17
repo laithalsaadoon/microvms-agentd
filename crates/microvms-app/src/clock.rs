@@ -111,8 +111,10 @@ pub(crate) mod testing {
         /// Moves the clock forward by `duration`, as if a sleep had happened.
         pub fn advance(&self, duration: Duration) {
             let mut readings = self.readings.lock().unwrap_or_else(PoisonError::into_inner);
-            readings.elapsed += duration;
-            readings.unix += duration;
+            // Deadline-boundary tests can advance to MAX; a later sleep must remain
+            // observable without overflowing the test clock before an assertion.
+            readings.elapsed = readings.elapsed.saturating_add(duration);
+            readings.unix = readings.unix.saturating_add(duration);
         }
 
         /// The current elapsed reading.

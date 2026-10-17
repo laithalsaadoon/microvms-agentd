@@ -339,15 +339,45 @@ pub struct ControlPlane {
     parity: Option<Arc<microvms_core::testing::ParityControlPlane>>,
 }
 
+/// Optional throttle-only budget; attempts include the first request.
+#[napi(object)]
+pub struct RetryOptions {
+    pub max_attempts: f64,
+    pub max_elapsed_seconds: f64,
+}
+
+impl RetryOptions {
+    pub(crate) fn policy(
+        self,
+    ) -> Result<microvms_core::control::transport::RetryPolicy, microvms_core::Error> {
+        microvms_core::control::transport::RetryPolicy::new(
+            crate::numbers::u32_number(self.max_attempts, "maxAttempts")?,
+            microvms_core::duration::of_secs_f64(self.max_elapsed_seconds)?,
+        )
+    }
+}
+
 #[cfg(feature = "parity-fixtures")]
 #[napi]
 impl ControlPlane {
     #[napi(factory)]
-    pub fn parity_from_script(script: String) -> napi::Result<Self, String> {
+    pub fn parity_from_script(
+        script: String,
+        retry: Option<RetryOptions>,
+    ) -> napi::Result<Self, String> {
         let parity = microvms_core::testing::ParityControlPlane::from_json(&script)
             .map_err(crate::errors::js)?;
         Ok(Self {
-            inner: Arc::new(parity.plane()),
+            inner: Arc::new(
+                match retry
+                    .map(RetryOptions::policy)
+                    .transpose()
+                    .map_err(crate::errors::js)?
+                {
+                    Some(policy) => parity.plane().with_retry(policy),
+                    None => parity.plane(),
+                },
+            ),
             parity: Some(parity),
         })
     }
@@ -362,13 +392,34 @@ impl ControlPlane {
 impl ControlPlane {
     /// Resolves credentials for `region` from the default chain. A factory because
     /// credential resolution is async.
-    #[napi(factory)]
-    pub async fn create(region: &Region) -> Result<ControlPlane, AsyncError> {
+    #[napi]
+    pub fn create<'env>(
+        env: &'env napi::Env,
+        region: &Region,
+        retry: Option<RetryOptions>,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, ControlPlane>> {
+        let region = region.clone();
+        crate::errors::spawn_with_retry_details(env, async move {
+            Self::create_impl(&region, retry).await
+        })
+    }
+
+    async fn create_impl(
+        region: &Region,
+        retry: Option<RetryOptions>,
+    ) -> Result<ControlPlane, AsyncError> {
+        let policy = retry
+            .map(RetryOptions::policy)
+            .transpose()
+            .map_err(js_async)?;
         let plane = CoreControlPlane::new(region.inner.clone())
             .await
             .map_err(js_async)?;
         Ok(ControlPlane {
-            inner: Arc::new(plane),
+            inner: Arc::new(match policy {
+                Some(policy) => plane.with_retry(policy),
+                None => plane,
+            }),
             #[cfg(feature = "parity-fixtures")]
             parity: None,
         })
@@ -376,7 +427,23 @@ impl ControlPlane {
 
     /// `GetMicrovm`.
     #[napi]
-    pub async fn get(&self, microvm_id: String) -> Result<Microvm, AsyncError> {
+    pub fn get<'env>(
+        &self,
+        env: &'env napi::Env,
+        microvm_id: String,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, Microvm>> {
+        let owned = Self {
+            inner: Arc::clone(&self.inner),
+            #[cfg(feature = "parity-fixtures")]
+            parity: self.parity.clone(),
+        };
+        crate::errors::spawn_with_retry_details(
+            env,
+            async move { owned.get_impl(microvm_id).await },
+        )
+    }
+
+    async fn get_impl(&self, microvm_id: String) -> Result<Microvm, AsyncError> {
         let vm = self
             .inner
             .get_microvm(&microvm_id)
@@ -387,7 +454,20 @@ impl ControlPlane {
 
     /// `ListMicrovms`, every page, optionally narrowed to one image and version.
     #[napi]
-    pub async fn list(
+    pub fn list<'env>(
+        &self,
+        env: &'env napi::Env,
+        options: Option<ListMicrovmsOptions>,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, Vec<MicrovmSummary>>> {
+        let owned = Self {
+            inner: Arc::clone(&self.inner),
+            #[cfg(feature = "parity-fixtures")]
+            parity: self.parity.clone(),
+        };
+        crate::errors::spawn_with_retry_details(env, async move { owned.list_impl(options).await })
+    }
+
+    async fn list_impl(
         &self,
         options: Option<ListMicrovmsOptions>,
     ) -> Result<Vec<MicrovmSummary>, AsyncError> {
@@ -414,21 +494,69 @@ impl ControlPlane {
     }
 
     /// `SuspendMicrovm`. Resolves once accepted; `waitForState` for SUSPENDED.
-    #[napi]
-    pub async fn suspend(&self, microvm_id: String) -> Result<(), AsyncError> {
+    // PromiseRaw carries structured errors without changing the published unit return.
+    #[napi(ts_return_type = "Promise<void>")]
+    pub fn suspend<'env>(
+        &self,
+        env: &'env napi::Env,
+        microvm_id: String,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, ()>> {
+        let owned = Self {
+            inner: Arc::clone(&self.inner),
+            #[cfg(feature = "parity-fixtures")]
+            parity: self.parity.clone(),
+        };
+        crate::errors::spawn_with_retry_details(
+            env,
+            async move { owned.suspend_impl(microvm_id).await },
+        )
+    }
+
+    async fn suspend_impl(&self, microvm_id: String) -> Result<(), AsyncError> {
         self.inner.suspend(&microvm_id).await.map_err(js_async)
     }
 
     /// `ResumeMicrovm`. Resolves once accepted; `waitForState` for RUNNING. A VM that ended
     /// before the resume, whatever ended it, rejects with `ERR_WINDOW_CLOSED` (STATE-12).
-    #[napi]
-    pub async fn resume(&self, microvm_id: String) -> Result<(), AsyncError> {
+    #[napi(ts_return_type = "Promise<void>")]
+    pub fn resume<'env>(
+        &self,
+        env: &'env napi::Env,
+        microvm_id: String,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, ()>> {
+        let owned = Self {
+            inner: Arc::clone(&self.inner),
+            #[cfg(feature = "parity-fixtures")]
+            parity: self.parity.clone(),
+        };
+        crate::errors::spawn_with_retry_details(
+            env,
+            async move { owned.resume_impl(microvm_id).await },
+        )
+    }
+
+    async fn resume_impl(&self, microvm_id: String) -> Result<(), AsyncError> {
         self.inner.resume(&microvm_id).await.map_err(js_async)
     }
 
     /// `TerminateMicrovm`. Resolves once accepted; `waitForState` for TERMINATED.
-    #[napi]
-    pub async fn terminate(&self, microvm_id: String) -> Result<(), AsyncError> {
+    #[napi(ts_return_type = "Promise<void>")]
+    pub fn terminate<'env>(
+        &self,
+        env: &'env napi::Env,
+        microvm_id: String,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, ()>> {
+        let owned = Self {
+            inner: Arc::clone(&self.inner),
+            #[cfg(feature = "parity-fixtures")]
+            parity: self.parity.clone(),
+        };
+        crate::errors::spawn_with_retry_details(env, async move {
+            owned.terminate_impl(microvm_id).await
+        })
+    }
+
+    async fn terminate_impl(&self, microvm_id: String) -> Result<(), AsyncError> {
         self.inner.terminate(&microvm_id).await.map_err(js_async)
     }
 
@@ -437,7 +565,24 @@ impl ControlPlane {
     /// Reaching one of `failOn` first rejects naming the state and `stateReason`; running
     /// past `timeout` rejects with a timeout.
     #[napi]
-    pub async fn wait_for_state(
+    pub fn wait_for_state<'env>(
+        &self,
+        env: &'env napi::Env,
+        microvm_id: String,
+        wanted: Vec<String>,
+        options: Option<WaitForStateOptions>,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, Microvm>> {
+        let owned = Self {
+            inner: Arc::clone(&self.inner),
+            #[cfg(feature = "parity-fixtures")]
+            parity: self.parity.clone(),
+        };
+        crate::errors::spawn_with_retry_details(env, async move {
+            owned.wait_for_state_impl(microvm_id, wanted, options).await
+        })
+    }
+
+    async fn wait_for_state_impl(
         &self,
         microvm_id: String,
         wanted: Vec<String>,
@@ -470,7 +615,23 @@ impl ControlPlane {
     /// Discover prefix-matched images and their VMs; set dryRun false to clean them up.
     /// Keep entries preserve an exact image name or ARN and every VM using it.
     #[napi]
-    pub async fn sweep(
+    pub fn sweep<'env>(
+        &self,
+        env: &'env napi::Env,
+        prefix: String,
+        options: Option<SweepOptions>,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, SweepReport>> {
+        let owned = Self {
+            inner: Arc::clone(&self.inner),
+            #[cfg(feature = "parity-fixtures")]
+            parity: self.parity.clone(),
+        };
+        crate::errors::spawn_with_retry_details(env, async move {
+            owned.sweep_impl(prefix, options).await
+        })
+    }
+
+    async fn sweep_impl(
         &self,
         prefix: String,
         options: Option<SweepOptions>,
@@ -492,7 +653,19 @@ impl ControlPlane {
 
     /// `ListMicrovmImages`, every page: every image in the account and region.
     #[napi]
-    pub async fn list_images(&self) -> Result<Vec<ImageSummary>, AsyncError> {
+    pub fn list_images<'env>(
+        &self,
+        env: &'env napi::Env,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, Vec<ImageSummary>>> {
+        let owned = Self {
+            inner: Arc::clone(&self.inner),
+            #[cfg(feature = "parity-fixtures")]
+            parity: self.parity.clone(),
+        };
+        crate::errors::spawn_with_retry_details(env, async move { owned.list_images_impl().await })
+    }
+
+    async fn list_images_impl(&self) -> Result<Vec<ImageSummary>, AsyncError> {
         let items = self.inner.list_images().await.map_err(js_async)?;
         Ok(items
             .into_iter()
@@ -511,7 +684,23 @@ impl ControlPlane {
     /// failed or `identifier` is not one the service accepts. It doesn't reject, as a
     /// teardown's delete shouldn't.
     #[napi]
-    pub async fn delete_image(
+    pub fn delete_image<'env>(
+        &self,
+        env: &'env napi::Env,
+        identifier: String,
+        options: Option<DeleteImageOptions>,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, bool>> {
+        let owned = Self {
+            inner: Arc::clone(&self.inner),
+            #[cfg(feature = "parity-fixtures")]
+            parity: self.parity.clone(),
+        };
+        crate::errors::spawn_with_retry_details(env, async move {
+            owned.delete_image_impl(identifier, options).await
+        })
+    }
+
+    async fn delete_image_impl(
         &self,
         identifier: String,
         options: Option<DeleteImageOptions>,
@@ -533,7 +722,22 @@ impl ControlPlane {
     /// `ListMicrovmImageVersions`, every page: each version, its status, and its build
     /// configuration.
     #[napi]
-    pub async fn list_image_versions(
+    pub fn list_image_versions<'env>(
+        &self,
+        env: &'env napi::Env,
+        identifier: String,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, Vec<ImageVersion>>> {
+        let owned = Self {
+            inner: Arc::clone(&self.inner),
+            #[cfg(feature = "parity-fixtures")]
+            parity: self.parity.clone(),
+        };
+        crate::errors::spawn_with_retry_details(env, async move {
+            owned.list_image_versions_impl(identifier).await
+        })
+    }
+
+    async fn list_image_versions_impl(
         &self,
         identifier: String,
     ) -> Result<Vec<ImageVersion>, AsyncError> {
@@ -551,7 +755,26 @@ impl ControlPlane {
     /// keep running, and the version's readback stays. Resolves with the readback, and rejects
     /// when it doesn't carry the status asked for, so a 200 that didn't take isn't a rollback.
     #[napi]
-    pub async fn set_image_version_status(
+    pub fn set_image_version_status<'env>(
+        &self,
+        env: &'env napi::Env,
+        identifier: String,
+        version: String,
+        status: String,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, ImageVersion>> {
+        let owned = Self {
+            inner: Arc::clone(&self.inner),
+            #[cfg(feature = "parity-fixtures")]
+            parity: self.parity.clone(),
+        };
+        crate::errors::spawn_with_retry_details(env, async move {
+            owned
+                .set_image_version_status_impl(identifier, version, status)
+                .await
+        })
+    }
+
+    async fn set_image_version_status_impl(
         &self,
         identifier: String,
         version: String,
@@ -569,7 +792,23 @@ impl ControlPlane {
     /// `ListMicrovmImageBuilds` for one version, every page: one build per Graviton
     /// generation. Each `buildId` is what `getImageBuild` takes.
     #[napi]
-    pub async fn list_image_builds(
+    pub fn list_image_builds<'env>(
+        &self,
+        env: &'env napi::Env,
+        identifier: String,
+        version: String,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, Vec<ImageBuild>>> {
+        let owned = Self {
+            inner: Arc::clone(&self.inner),
+            #[cfg(feature = "parity-fixtures")]
+            parity: self.parity.clone(),
+        };
+        crate::errors::spawn_with_retry_details(env, async move {
+            owned.list_image_builds_impl(identifier, version).await
+        })
+    }
+
+    async fn list_image_builds_impl(
         &self,
         identifier: String,
         version: String,
@@ -584,7 +823,26 @@ impl ControlPlane {
 
     /// `GetMicrovmImageBuild`: one build, with the snapshot sizes the listing doesn't carry.
     #[napi]
-    pub async fn get_image_build(
+    pub fn get_image_build<'env>(
+        &self,
+        env: &'env napi::Env,
+        identifier: String,
+        version: String,
+        build_id: String,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, ImageBuild>> {
+        let owned = Self {
+            inner: Arc::clone(&self.inner),
+            #[cfg(feature = "parity-fixtures")]
+            parity: self.parity.clone(),
+        };
+        crate::errors::spawn_with_retry_details(env, async move {
+            owned
+                .get_image_build_impl(identifier, version, build_id)
+                .await
+        })
+    }
+
+    async fn get_image_build_impl(
         &self,
         identifier: String,
         version: String,

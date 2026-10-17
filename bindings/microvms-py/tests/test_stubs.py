@@ -188,8 +188,8 @@ def test_exception_bases_match_runtime(tree: ast.Module) -> None:
         )
 
 
-def test_base_exception_declares_the_four_attributes(tree: ast.Module) -> None:
-    """`code`, `kind`, `wire_kind`, `retryable` are annotated on `MicrovmError`.
+def test_base_exception_declares_error_and_retry_attributes(tree: ast.Module) -> None:
+    """Error classification and retry telemetry are annotated on `MicrovmError`.
 
     `to_py_err` attaches them with `setattr`, so nothing about the type reveals them and
     nothing generated them. They are the entire reason `errors.rs` says nobody should parse
@@ -200,7 +200,15 @@ def test_base_exception_declares_the_four_attributes(tree: ast.Module) -> None:
         for node in declared_classes(tree)["MicrovmError"].body
         if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
     }
-    assert {"code", "kind", "wire_kind", "retryable"} <= annotated
+    assert {
+        "code",
+        "kind",
+        "wire_kind",
+        "retryable",
+        "throttled",
+        "attempt_count",
+        "backoff_seconds",
+    } <= annotated
 
 
 # -- the stub can fail --------------------------------------------------------

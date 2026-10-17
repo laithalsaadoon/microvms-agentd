@@ -25,7 +25,7 @@
 
 use std::time::Duration;
 
-use super::transport::{Call, paths, send_with_retry};
+use super::transport::{Call, paths};
 use super::{ControlPlane, CreateImageRequest, artifact, hooks_block, ops, timed_out, token};
 use crate::error::{Error, ErrorKind};
 use crate::sizing::SizeClass;
@@ -241,7 +241,7 @@ impl ControlPlane {
         };
 
         let call = Call::post_json("CreateMicrovmImage", paths::microvm_images(), &wire)?;
-        let reply = send_with_retry(self.transport(), call).await?;
+        let reply = self.send(call).await?;
         let created: ops::CreateMicrovmImageResponseWire = reply.json("CreateMicrovmImage")?;
 
         Ok(Image {
@@ -404,7 +404,7 @@ impl ControlPlane {
 
         loop {
             let call = Call::get("GetMicrovmImage", paths::microvm_image(identifier));
-            let reply = send_with_retry(self.transport(), call).await?;
+            let reply = self.send(call).await?;
             let got: ops::GetMicrovmImageResponseWire = reply.json("GetMicrovmImage")?;
 
             if Image::is_ready(&got.state) {
@@ -535,7 +535,8 @@ impl ControlPlane {
                 "ListMicrovmImageBuilds",
                 paths::image_builds(identifier, version, next_token.as_deref()),
             );
-            let page: ops::ListImageBuildsResponseWire = send_with_retry(self.transport(), call)
+            let page: ops::ListImageBuildsResponseWire = self
+                .send(call)
                 .await
                 .ok()?
                 .json("ListMicrovmImageBuilds")
@@ -559,7 +560,8 @@ impl ControlPlane {
             "ListMicrovmImageVersions",
             paths::image_versions(identifier, None),
         );
-        let versions: ops::ListImageVersionsResponseWire = send_with_retry(self.transport(), call)
+        let versions: ops::ListImageVersionsResponseWire = self
+            .send(call)
             .await
             .ok()?
             .json("ListMicrovmImageVersions")
@@ -720,7 +722,8 @@ impl ControlPlane {
                 "ListMicrovmImageVersions",
                 paths::image_versions(&got.image_arn, next_token.as_deref()),
             );
-            let page: ops::ListImageVersionsResponseWire = send_with_retry(self.transport(), call)
+            let page: ops::ListImageVersionsResponseWire = self
+                .send(call)
                 .await
                 .ok()?
                 .json("ListMicrovmImageVersions")
@@ -769,7 +772,7 @@ impl ControlPlane {
             "GetMicrovmImageBuild",
             paths::image_build(identifier, version, build_id),
         );
-        let reply = send_with_retry(self.transport(), call).await?;
+        let reply = self.send(call).await?;
         reply.json("GetMicrovmImageBuild")
     }
 
@@ -803,7 +806,7 @@ impl ControlPlane {
             "GetMicrovmImageVersion",
             paths::image_version(identifier, version),
         );
-        let reply = send_with_retry(self.transport(), call).await?;
+        let reply = self.send(call).await?;
         reply.json("GetMicrovmImageVersion")
     }
 
@@ -845,7 +848,7 @@ impl ControlPlane {
             paths::image_version(identifier, version),
             &wire,
         )?;
-        let reply = send_with_retry(self.transport(), call).await?;
+        let reply = self.send(call).await?;
         let updated: ops::MicrovmImageVersionSummaryWire =
             reply.json("UpdateMicrovmImageVersion")?;
 
@@ -855,7 +858,7 @@ impl ControlPlane {
         // applied, and here the consequence is a version a caller believes is retired while
         // `RunMicrovm` still launches it.
         if updated.status != status.as_str() {
-            return Err(Error::new(
+            return Err(reply.error(Error::new(
                 ErrorKind::Platform,
                 format!(
                     "UpdateMicrovmImageVersion answered 2xx for version {version} of \
@@ -865,7 +868,7 @@ impl ControlPlane {
                      reachable.",
                     updated.status,
                 ),
-            ));
+            )));
         }
         Ok(updated)
     }
@@ -922,7 +925,7 @@ impl ControlPlane {
                 "ListManagedMicrovmImageVersions",
                 paths::managed_image_versions(base_image_arn, next_token.as_deref()),
             );
-            let reply = send_with_retry(self.transport(), call).await?;
+            let reply = self.send(call).await?;
             let page: ops::ListManagedVersionsResponseWire =
                 reply.json("ListManagedMicrovmImageVersions")?;
             items.extend(page.items);
@@ -959,7 +962,7 @@ impl ControlPlane {
                 "ListManagedMicrovmImages",
                 paths::managed_microvm_images(next_token.as_deref()),
             );
-            let reply = send_with_retry(self.transport(), call).await?;
+            let reply = self.send(call).await?;
             let page: ops::ListManagedImagesResponseWire =
                 reply.json("ListManagedMicrovmImages")?;
             items.extend(page.items);
@@ -983,7 +986,7 @@ impl ControlPlane {
             "ListManagedMicrovmImages",
             paths::managed_microvm_images(None),
         );
-        let reply = send_with_retry(self.transport(), call).await?;
+        let reply = self.send(call).await?;
         let page: ops::ListManagedImagesResponseWire = reply.json("ListManagedMicrovmImages")?;
         Ok(page.items.len())
     }
@@ -1013,7 +1016,7 @@ impl ControlPlane {
                 "ListMicrovmImages",
                 paths::microvm_images_list(None, next_token.as_deref()),
             );
-            let reply = send_with_retry(self.transport(), call).await?;
+            let reply = self.send(call).await?;
             let page: ops::ListImagesResponseWire = reply.json("ListMicrovmImages")?;
             items.extend(page.items);
             match page.next_token {
@@ -1041,7 +1044,7 @@ impl ControlPlane {
                 "ListMicrovmImageVersions",
                 paths::image_versions(identifier, next_token.as_deref()),
             );
-            let reply = send_with_retry(self.transport(), call).await?;
+            let reply = self.send(call).await?;
             let page: ops::ListImageVersionsResponseWire =
                 reply.json("ListMicrovmImageVersions")?;
             items.extend(page.items);
@@ -1071,7 +1074,7 @@ impl ControlPlane {
                 "ListMicrovmImageBuilds",
                 paths::image_builds(identifier, version, next_token.as_deref()),
             );
-            let reply = send_with_retry(self.transport(), call).await?;
+            let reply = self.send(call).await?;
             let page: ops::ListImageBuildsResponseWire = reply.json("ListMicrovmImageBuilds")?;
             items.extend(page.items);
             match page.next_token {
@@ -1113,7 +1116,7 @@ impl ControlPlane {
                 "ListMicrovmImages",
                 paths::microvm_images_list(Some(name), next_token.as_deref()),
             );
-            let reply = send_with_retry(self.transport(), call).await?;
+            let reply = self.send(call).await?;
             let listed: ops::ListImagesResponseWire = reply.json("ListMicrovmImages")?;
 
             if let Some(hit) = listed.items.into_iter().find(|item| item.name == name) {
@@ -1263,9 +1266,7 @@ impl ControlPlane {
                 self.sweep_page("ListMicrovmImageVersions", call.path, last)
                     .await?
             } else {
-                send_with_retry(self.transport(), call)
-                    .await?
-                    .json("ListMicrovmImageVersions")?
+                self.send(call).await?.json("ListMicrovmImageVersions")?
             };
             versions.extend(page.items.into_iter().map(|item| item.image_version));
             match page.next_token {
@@ -1288,11 +1289,11 @@ impl ControlPlane {
                 "DeleteMicrovmImageVersion",
                 paths::image_version(identifier, version),
             );
-            send_with_retry(self.transport(), call).await?;
+            self.send(call).await?;
         }
 
         let call = Call::delete("DeleteMicrovmImage", paths::microvm_image(identifier));
-        let reply = send_with_retry(self.transport(), call).await?;
+        let reply = self.send(call).await?;
 
         // The readback is parsed rather than discarded, so `DeleteImageResponseWire` is a
         // live shape. See [`ops::DeleteImageResponseWire`] for why the state is checked
@@ -1300,7 +1301,7 @@ impl ControlPlane {
         // worked, and treating DELETING as incomplete would retry a deletion in progress.
         let deleted: ops::DeleteImageResponseWire = reply.json("DeleteMicrovmImage")?;
         if Image::is_failed(&deleted.state) {
-            return Err(Error::new(
+            return Err(reply.error(Error::new(
                 ErrorKind::Platform,
                 format!(
                     "DeleteMicrovmImage answered 2xx for {} but reported state {}, so the image \
@@ -1309,7 +1310,7 @@ impl ControlPlane {
                      of the identical request fixes.",
                     deleted.image_identifier, deleted.state,
                 ),
-            ));
+            )));
         }
         Ok(())
     }
@@ -1330,6 +1331,45 @@ mod tests {
         let clock = Arc::new(TestClock::new());
         let plane = crate::testing::control_plane(fake.clone(), Region::UsEast1, clock.clone());
         (plane, fake, clock)
+    }
+
+    #[tokio::test]
+    async fn list_images_returns_all_pages_after_configured_throttle_retries() {
+        let (plane, fake, _) = planted();
+        let plane = plane.with_retry(
+            super::super::transport::RetryPolicy::new(7, Duration::from_secs(3600)).unwrap(),
+        );
+        for _ in 0..6 {
+            fake.answer("ListMicrovmImages", Answer::throttled_as_400());
+        }
+        fake.answer(
+            "ListMicrovmImages",
+            Answer::ok(fake::list_images_response(
+                &["first-image"],
+                Some("page/two"),
+            )),
+        );
+        fake.answer(
+            "ListMicrovmImages",
+            Answer::ok(fake::list_images_response(&["second-image"], None)),
+        );
+
+        let images = plane.list_images().await.unwrap();
+        assert_eq!(
+            images
+                .iter()
+                .map(|image| image.name.as_str())
+                .collect::<Vec<_>>(),
+            ["first-image", "second-image"]
+        );
+        let calls = fake.calls();
+        assert_eq!(calls.len(), 8);
+        assert!(calls[..7].iter().all(|call| call == &calls[0]));
+        assert_eq!(calls[0].path, "/2025-09-09/microvm-images");
+        assert_eq!(
+            calls[7].path,
+            "/2025-09-09/microvm-images?nextToken=page%2Ftwo"
+        );
     }
 
     fn a_request() -> CreateImageRequest {
@@ -2250,10 +2290,18 @@ mod tests {
         fake.answer(
             "GetMicrovmImage",
             Answer::ok(fake::get_image_response("img", "CREATING")),
-        )
-        .answer(
+        );
+        for _ in 0..6 {
+            fake.answer(
+                "ListMicrovmImageVersions",
+                Answer::failure(429, "Rate exceeded"),
+            );
+        }
+        // Keep the listing unreadable after exhaustion without letting a broken
+        // retry counter repeat a transient response forever.
+        fake.answer(
             "ListMicrovmImageVersions",
-            Answer::failure(429, "Rate exceeded"),
+            Answer::failure(403, "listing denied"),
         );
 
         let error = plane
@@ -2466,10 +2514,18 @@ mod tests {
         fake.answer(
             "GetMicrovmImage",
             Answer::ok(fake::get_image_response("img", "CREATE_FAILED")),
-        )
-        .answer(
+        );
+        for _ in 0..6 {
+            fake.answer(
+                "ListMicrovmImageVersions",
+                Answer::failure(429, "Rate exceeded"),
+            );
+        }
+        // Keep the listing unreadable after exhaustion without letting a broken
+        // retry counter repeat a transient response forever.
+        fake.answer(
             "ListMicrovmImageVersions",
-            Answer::failure(429, "Rate exceeded"),
+            Answer::failure(403, "listing denied"),
         );
 
         let error = plane

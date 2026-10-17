@@ -1,0 +1,51 @@
+{
+  "capability": "resume-by-id",
+  "input": {
+    "microvm_id": "mvm-parity",
+    "actions": [
+      "resume"
+    ],
+    "retry": {
+      "max_attempts": 3,
+      "max_elapsed_seconds": 60
+    },
+    "report_retry": true,
+    "script": [
+      {
+        "operation": "ResumeMicrovm",
+        "status": 400,
+        "body": "{}",
+        "error_type": "ThrottlingException"
+      },
+      {
+        "operation": "ResumeMicrovm",
+        "status": 400,
+        "body": "{}",
+        "error_type": "ThrottlingException"
+      },
+      {
+        "operation": "ResumeMicrovm",
+        "status": 400,
+        "body": "{}",
+        "error_type": "ThrottlingException"
+      }
+    ]
+  },
+  "expect": {
+    "error": {
+      "code": "ERR_RETRYABLE",
+      "wire_kind": null,
+      "retryable": true
+    },
+    "calls": [
+      "ResumeMicrovm",
+      "ResumeMicrovm",
+      "ResumeMicrovm"
+    ],
+    "retry": {
+      "attempt_count": 3,
+      "backoff_positive": true,
+      "throttled": true
+    }
+  }
+}

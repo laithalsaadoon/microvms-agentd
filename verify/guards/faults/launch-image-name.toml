@@ -9,7 +9,7 @@ expect = "test-failed"
 suite = "rust"
 message = "the name is resolved, once, before the launch"
 note = "crates/microvms-app/src/sandbox.rs::a_launch_by_bare_image_name_sends_the_listed_arn"
-transform = { file = "crates/microvms-app/src/sandbox.rs", replace = "        wire.image_identifier = self\n            .control\n            .resolve_image_arn(&wire.image_identifier)\n            .await?;\n", with = "" }
+transform = { file = "crates/microvms-app/src/sandbox.rs", replace = "        let resolution = self.control.resolve_image_arn(&wire.image_identifier);\n        wire.image_identifier = if let Some(cancellation) = cancellation {\n            // This lookup only reads images, so cancelling it cannot abandon a VM.\n            // The launch below remains shielded while its request is in flight.\n            tokio::select! {\n                biased;\n                _ = cancellation.cancelled() => {\n                    return Err(Error::new(\n                        ErrorKind::Interrupted,\n                        \"launch cancelled before a VM was assigned\",\n                    ));\n                }\n                resolved = resolution => resolved?,\n            }\n        } else {\n            resolution.await?\n        };\n", with = "" }
 
 # The ARN not recorded: a refused launch can't say which image it asked for.
 [[fault]]

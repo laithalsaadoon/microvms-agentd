@@ -108,3 +108,37 @@ expect = "exit-nonzero"
 suite = "script"
 message = "FAIL  prefix sweep owns and cleans its fresh outside control after launch failure"
 transform = { file = "conformance/lanes/prefix_sweep.py", replace = "known.update(discovered)", with = "known.update(before)" }
+
+
+[[fault]]
+id = "sweep-configured-retry-budget"
+guard = "control::sweep::tests::sweep_honors_the_control_plane_retry_attempt_budget"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::sweep::tests::sweep_honors_the_control_plane_retry_attempt_budget"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/sweep.rs", replace = "self.send(call)", with = "super::transport::send_with_retry(self.transport(), call)" }
+
+[[fault]]
+id = "sweep-decode-retry-details-lost"
+guard = "control::sweep::tests::sweep_decode_failures_retain_completed_request_retry_details"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::sweep::tests::sweep_decode_failures_retain_completed_request_retry_details"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/sweep.rs", replace = "self.send(call).await?.json(operation)", with = "self.send(call).await?.reply.json(operation)" }
+
+[[fault]]
+id = "sweep-node-retry-details-lost"
+guard = "ControlPlane sweep failures retain retry telemetry"
+run = [["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"], ["node", "--test", "--test-reporter=tap", "--test-name-pattern=^ControlPlane sweep failures retain retry telemetry$", "bindings/microvms-js/__test__/retry.mjs"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "bindings/microvms-js/src/control.rs", replace = "        crate::errors::spawn_with_retry_details(env, async move {\n            owned.sweep_impl(prefix, options).await\n        })", with = "        env.spawn_future(async move {\n            owned.sweep_impl(prefix, options).await.map_err(napi::Error::from)\n        })" }
+
+[[fault]]
+id = "sweep-node-promise-return-type"
+guard = "tools/check-dts-consumer.py"
+run = ["./tools/check-dts-consumer.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "sweep.ts(14,14): error TS2322"
+transform = { file = "bindings/microvms-js/index.d.ts", replace = "sweep(prefix: string, options?: SweepOptions | undefined | null): Promise<SweepReport>", with = "sweep(prefix: string, options?: SweepOptions | undefined | null): Promise<any>" }

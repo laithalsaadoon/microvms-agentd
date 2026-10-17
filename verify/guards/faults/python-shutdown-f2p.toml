@@ -1,6 +1,7 @@
 # ── python-shutdown-f2p: FAIL_TO_PASS entries tools/fail-to-pass.py emitted ──
 
-# FAIL_TO_PASS: fails on e919c83f87ec with the fix taken out (tools/fail-to-pass.py).
+# The parent proof predates retry cancellation. This inverse retains that behavior
+# by restoring the Python product source from adf4bfe9, before the wake fence.
 [[fault]]
 id = "f2p-test-async-shutdown-retires-pending-wakes-and-refuses"
 guard = "bindings/microvms-py/tests/test_errors.py::test_async_shutdown_retires_pending_wakes_and_refuses_later_awaits"
@@ -10,4 +11,4 @@ run = [
 ]
 expect = "test-failed"
 suite = "bindings"
-patch = "verify/guards/faults/f2p-test-async-shutdown-retires-pending-wakes-and-refuses.patch"
+patch = "verify/guards/faults/f2p-test-async-shutdown-with-retry.patch"

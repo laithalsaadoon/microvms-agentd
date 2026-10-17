@@ -96,6 +96,7 @@ fn json_string(text: &str) -> String {
 #[derive(Debug, Default)]
 pub struct FakeControlPlane {
     region: Option<crate::region::Region>,
+    send_gate: Mutex<Option<std::sync::Arc<tokio::sync::Notify>>>,
     inner: Mutex<Inner>,
 }
 
@@ -123,6 +124,13 @@ impl FakeControlPlane {
 
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Holds response delivery until the test releases it, after recording the request.
+    pub fn hold_responses(&self) -> std::sync::Arc<tokio::sync::Notify> {
+        let gate = std::sync::Arc::new(tokio::sync::Notify::new());
+        *self.send_gate.lock().expect("not poisoned") = Some(gate.clone());
+        gate
     }
 
     /// Queues `answer` for the next call to `operation`.
@@ -310,7 +318,13 @@ impl Transport for FakeControlPlane {
                 })
             }
         };
-        Box::pin(async move { result })
+        let gate = self.send_gate.lock().expect("not poisoned").clone();
+        Box::pin(async move {
+            if let Some(gate) = gate {
+                gate.notified().await;
+            }
+            result
+        })
     }
 
     fn resolve_credentials(

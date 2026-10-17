@@ -43,6 +43,7 @@ from selftest.poweroff import check_poweroff_lane
 from selftest.prefix_sweep import check_prefix_sweep
 from selftest.privacy import check_log_privacy
 from selftest.quickstart import check_gh_logged_out
+from selftest.retry_telemetry import check_retry_telemetry
 from selftest.skew import check_version_skew_helpers
 from selftest.state12 import check_state12, check_state12_driver
 from selftest.stub import STUB_SOURCE
@@ -94,6 +95,7 @@ def self_test() -> int:
         check_version_skew_helpers(results)
         check_cost_checks(results)
         check_binding_handles(results)
+        check_retry_telemetry(results)
         check_state12(results)
         check_state12_driver(results)
 

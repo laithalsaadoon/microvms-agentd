@@ -1,0 +1,259 @@
+# These entries were emitted by the stock prover using the signed synthetic
+# API-compatible baseline 77dfe341. That baseline keeps the current runner APIs
+# and omits recording attempts/backoff, reproducing the earlier missing telemetry.
+# The pre-feature historical parent lacks APIs these runners require; this is
+# seeded regression evidence, not execution of that historical parent.
+# Every selected surface passed on the head and failed the shared case verdict
+# with the omission patch; the restored commands then passed again.
+
+# ── retry-parity: FAIL_TO_PASS entries tools/fail-to-pass.py emitted ──
+
+# FAIL_TO_PASS: fails on 77dfe34180cd with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-parity-core-control-plane-malformed-success-retains"
+guard = "core_answers_the_shared_case_corpus"
+run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
+  ["cargo", "test", "--config", "env.MICROVMS_PARITY_CASE.value=\"control-plane/malformed-success-retains-retries\"", "--config", "env.MICROVMS_PARITY_CASE.force=true", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"],
+]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-parity-core-control-plane-malformed-success-retains.patch"
+
+# FAIL_TO_PASS: fails on 77dfe34180cd with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-parity-cli-control-plane-malformed-success-retains"
+guard = "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"
+run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
+  ["cargo", "test", "--config", "env.MICROVMS_PARITY_CASE.value=\"control-plane/malformed-success-retains-retries\"", "--config", "env.MICROVMS_PARITY_CASE.force=true", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"],
+]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-parity-cli-control-plane-malformed-success-retains.patch"
+
+# FAIL_TO_PASS: fails on 77dfe34180cd with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-parity-py-control-plane-malformed-success-retains"
+guard = "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[control-plane/malformed-success-retains-retries]"
+run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml", "--features", "parity-fixtures"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[control-plane/malformed-success-retains-retries]"],
+]
+expect = "test-failed"
+suite = "bindings"
+patch = "verify/guards/faults/f2p-parity-py-control-plane-malformed-success-retains.patch"
+
+# FAIL_TO_PASS: fails on 77dfe34180cd with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-parity-ts-control-plane-malformed-success-retains"
+guard = "control-plane/malformed-success-retains-retries"
+run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"],
+  ["node", "--test", "--test-reporter=tap", "--test-name-pattern=^control\\-plane/malformed\\-success\\-retains\\-retries$", "bindings/microvms-js/__test__/parity_cases.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+patch = "verify/guards/faults/f2p-parity-ts-control-plane-malformed-success-retains.patch"
+
+# FAIL_TO_PASS: fails on 77dfe34180cd with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-parity-core-control-plane-server-failures-keep-default"
+guard = "core_answers_the_shared_case_corpus"
+run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
+  ["cargo", "test", "--config", "env.MICROVMS_PARITY_CASE.value=\"control-plane/server-failures-keep-default-budget\"", "--config", "env.MICROVMS_PARITY_CASE.force=true", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"],
+]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-parity-core-control-plane-server-failures-keep-default.patch"
+
+# FAIL_TO_PASS: fails on 77dfe34180cd with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-parity-cli-control-plane-server-failures-keep-default"
+guard = "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"
+run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
+  ["cargo", "test", "--config", "env.MICROVMS_PARITY_CASE.value=\"control-plane/server-failures-keep-default-budget\"", "--config", "env.MICROVMS_PARITY_CASE.force=true", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"],
+]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-parity-cli-control-plane-server-failures-keep-default.patch"
+
+# FAIL_TO_PASS: fails on 77dfe34180cd with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-parity-py-control-plane-server-failures-keep-default"
+guard = "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[control-plane/server-failures-keep-default-budget]"
+run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml", "--features", "parity-fixtures"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[control-plane/server-failures-keep-default-budget]"],
+]
+expect = "test-failed"
+suite = "bindings"
+patch = "verify/guards/faults/f2p-parity-py-control-plane-server-failures-keep-default.patch"
+
+# FAIL_TO_PASS: fails on 77dfe34180cd with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-parity-ts-control-plane-server-failures-keep-default"
+guard = "control-plane/server-failures-keep-default-budget"
+run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"],
+  ["node", "--test", "--test-reporter=tap", "--test-name-pattern=^control\\-plane/server\\-failures\\-keep\\-default\\-budget$", "bindings/microvms-js/__test__/parity_cases.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+patch = "verify/guards/faults/f2p-parity-ts-control-plane-server-failures-keep-default.patch"
+
+# FAIL_TO_PASS: fails on 77dfe34180cd with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-parity-core-control-plane-throttle-attempt-budget"
+guard = "core_answers_the_shared_case_corpus"
+run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
+  ["cargo", "test", "--config", "env.MICROVMS_PARITY_CASE.value=\"control-plane/throttle-attempt-budget\"", "--config", "env.MICROVMS_PARITY_CASE.force=true", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"],
+]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-parity-core-control-plane-throttle-attempt-budget.patch"
+
+# FAIL_TO_PASS: fails on 77dfe34180cd with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-parity-cli-control-plane-throttle-attempt-budget"
+guard = "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"
+run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
+  ["cargo", "test", "--config", "env.MICROVMS_PARITY_CASE.value=\"control-plane/throttle-attempt-budget\"", "--config", "env.MICROVMS_PARITY_CASE.force=true", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"],
+]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-parity-cli-control-plane-throttle-attempt-budget.patch"
+
+# FAIL_TO_PASS: fails on 77dfe34180cd with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-parity-py-control-plane-throttle-attempt-budget"
+guard = "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[control-plane/throttle-attempt-budget]"
+run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml", "--features", "parity-fixtures"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[control-plane/throttle-attempt-budget]"],
+]
+expect = "test-failed"
+suite = "bindings"
+patch = "verify/guards/faults/f2p-parity-py-control-plane-throttle-attempt-budget.patch"
+
+# FAIL_TO_PASS: fails on 77dfe34180cd with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-parity-ts-control-plane-throttle-attempt-budget"
+guard = "control-plane/throttle-attempt-budget"
+run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"],
+  ["node", "--test", "--test-reporter=tap", "--test-name-pattern=^control\\-plane/throttle\\-attempt\\-budget$", "bindings/microvms-js/__test__/parity_cases.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+patch = "verify/guards/faults/f2p-parity-ts-control-plane-throttle-attempt-budget.patch"
+
+# FAIL_TO_PASS: fails on 77dfe34180cd with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-parity-core-control-plane-throttle-elapsed-budget"
+guard = "core_answers_the_shared_case_corpus"
+run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
+  ["cargo", "test", "--config", "env.MICROVMS_PARITY_CASE.value=\"control-plane/throttle-elapsed-budget\"", "--config", "env.MICROVMS_PARITY_CASE.force=true", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"],
+]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-parity-core-control-plane-throttle-elapsed-budget.patch"
+
+# FAIL_TO_PASS: fails on 77dfe34180cd with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-parity-cli-control-plane-throttle-elapsed-budget"
+guard = "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"
+run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
+  ["cargo", "test", "--config", "env.MICROVMS_PARITY_CASE.value=\"control-plane/throttle-elapsed-budget\"", "--config", "env.MICROVMS_PARITY_CASE.force=true", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"],
+]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-parity-cli-control-plane-throttle-elapsed-budget.patch"
+
+# FAIL_TO_PASS: fails on 77dfe34180cd with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-parity-py-control-plane-throttle-elapsed-budget"
+guard = "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[control-plane/throttle-elapsed-budget]"
+run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml", "--features", "parity-fixtures"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[control-plane/throttle-elapsed-budget]"],
+]
+expect = "test-failed"
+suite = "bindings"
+patch = "verify/guards/faults/f2p-parity-py-control-plane-throttle-elapsed-budget.patch"
+
+# FAIL_TO_PASS: fails on 77dfe34180cd with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-parity-ts-control-plane-throttle-elapsed-budget"
+guard = "control-plane/throttle-elapsed-budget"
+run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"],
+  ["node", "--test", "--test-reporter=tap", "--test-name-pattern=^control\\-plane/throttle\\-elapsed\\-budget$", "bindings/microvms-js/__test__/parity_cases.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+patch = "verify/guards/faults/f2p-parity-ts-control-plane-throttle-elapsed-budget.patch"
+
+# FAIL_TO_PASS: fails on 77dfe34180cd with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-parity-core-control-plane-window-closed"
+guard = "core_answers_the_shared_case_corpus"
+run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
+  ["cargo", "test", "--config", "env.MICROVMS_PARITY_CASE.value=\"control-plane/window-closed\"", "--config", "env.MICROVMS_PARITY_CASE.force=true", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"],
+]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-parity-core-control-plane-window-closed.patch"
+
+# FAIL_TO_PASS: fails on 77dfe34180cd with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-parity-cli-control-plane-window-closed"
+guard = "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"
+run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
+  ["cargo", "test", "--config", "env.MICROVMS_PARITY_CASE.value=\"control-plane/window-closed\"", "--config", "env.MICROVMS_PARITY_CASE.force=true", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"],
+]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-parity-cli-control-plane-window-closed.patch"
+
+# FAIL_TO_PASS: fails on 77dfe34180cd with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-parity-py-control-plane-window-closed"
+guard = "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[control-plane/window-closed]"
+run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml", "--features", "parity-fixtures"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[control-plane/window-closed]"],
+]
+expect = "test-failed"
+suite = "bindings"
+patch = "verify/guards/faults/f2p-parity-py-control-plane-window-closed.patch"
+
+# FAIL_TO_PASS: fails on 77dfe34180cd with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-parity-ts-control-plane-window-closed"
+guard = "control-plane/window-closed"
+run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"],
+  ["node", "--test", "--test-reporter=tap", "--test-name-pattern=^control\\-plane/window\\-closed$", "bindings/microvms-js/__test__/parity_cases.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+patch = "verify/guards/faults/f2p-parity-ts-control-plane-window-closed.patch"

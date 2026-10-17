@@ -391,6 +391,19 @@ pub fn classify(error: &Error) -> CliError {
         suggestions: Vec::new(),
         data: serde_json::Map::new(),
     };
+    if error.attempt_count() > 0 {
+        classified.data.insert(
+            "attemptCount".into(),
+            serde_json::json!(error.attempt_count()),
+        );
+        classified.data.insert(
+            "backoffSeconds".into(),
+            serde_json::json!(error.backoff().as_secs_f64()),
+        );
+        classified
+            .data
+            .insert("throttled".into(), serde_json::json!(error.throttled()));
+    }
     // Keyed on the *wire* kind where two conditions share an exit code and differ in
     // remedy. A 401 and an unresolvable credential chain are both `ERR_CREDENTIALS`, and
     // "check your agent token" is unhelpful for the second while "run doctor" is unhelpful

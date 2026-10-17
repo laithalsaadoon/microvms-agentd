@@ -738,6 +738,19 @@ impl Sandbox {
     }
 }
 
+#[cfg(feature = "parity-fixtures")]
+#[napi]
+impl Sandbox {
+    #[napi(factory)]
+    pub fn parity_from_script(script: String) -> napi::Result<Self, String> {
+        let parity = microvms_core::testing::ParityControlPlane::from_json(&script)
+            .map_err(crate::errors::js)?;
+        Ok(Self::from_arc(Arc::new(Mutex::new(
+            CoreSandbox::with_control_plane(parity.plane()),
+        ))))
+    }
+}
+
 #[napi]
 impl Sandbox {
     /// Resolves credentials for `region` and returns a sandbox with nothing launched.
@@ -745,11 +758,33 @@ impl Sandbox {
     /// A factory rather than a constructor because credential resolution is async, and a
     /// `#[napi(constructor)]` cannot be. `region` is a [`Region`] instance and not a string,
     /// which is TRAP-6 at this boundary.
-    #[napi(factory)]
-    pub async fn create(region: &Region) -> Result<Sandbox, AsyncError> {
-        let sandbox = CoreSandbox::new(region.inner.clone())
+    #[napi]
+    pub fn create<'env>(
+        env: &'env napi::Env,
+        region: &Region,
+        retry: Option<crate::control::RetryOptions>,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, Sandbox>> {
+        let region = region.clone();
+        crate::errors::spawn_with_retry_details(env, async move {
+            Self::create_impl(&region, retry).await
+        })
+    }
+
+    async fn create_impl(
+        region: &Region,
+        retry: Option<crate::control::RetryOptions>,
+    ) -> Result<Sandbox, AsyncError> {
+        let policy = retry
+            .map(crate::control::RetryOptions::policy)
+            .transpose()
+            .map_err(js_async)?;
+        let plane = microvms_core::control::ControlPlane::new(region.inner.clone())
             .await
             .map_err(js_async)?;
+        let sandbox = CoreSandbox::with_control_plane(match policy {
+            Some(policy) => plane.with_retry(policy),
+            None => plane,
+        });
         Ok(Sandbox {
             inner: Arc::new(Mutex::new(sandbox)),
         })
@@ -798,8 +833,22 @@ impl Sandbox {
     /// the service's state and keep every guard. The VM was bootstrapped by its own launch,
     /// so `run` is refused and no run-hook payload is ever sent. Never publish or log
     /// `agentToken`; it appears in no error.
-    #[napi(factory)]
-    pub async fn adopt(
+    #[napi]
+    pub fn adopt<'env>(
+        env: &'env napi::Env,
+        region: &Region,
+        microvm_id: String,
+        endpoint: String,
+        agent_token: String,
+        port: Option<u16>,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, Sandbox>> {
+        let region = region.clone();
+        crate::errors::spawn_with_retry_details(env, async move {
+            Self::adopt_impl(&region, microvm_id, endpoint, agent_token, port).await
+        })
+    }
+
+    async fn adopt_impl(
         region: &Region,
         microvm_id: String,
         endpoint: String,
@@ -823,8 +872,24 @@ impl Sandbox {
     /// Adopts the VM registered as `name` in `registry`; see `Sandbox.adopt`.
     ///
     /// `region` must match the record's: an id from another region addresses nothing here.
-    #[napi(factory)]
-    pub async fn from_name(
+    #[napi]
+    pub fn from_name<'env>(
+        env: &'env napi::Env,
+        region: &Region,
+        name: String,
+        registry: &crate::names::NameRegistry,
+        port: Option<u16>,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, Sandbox>> {
+        let region = region.clone();
+        let registry = crate::names::NameRegistry {
+            store: registry.store.clone(),
+        };
+        crate::errors::spawn_with_retry_details(env, async move {
+            Self::from_name_impl(&region, name, &registry, port).await
+        })
+    }
+
+    async fn from_name_impl(
         region: &Region,
         name: String,
         registry: &crate::names::NameRegistry,
@@ -855,7 +920,17 @@ impl Sandbox {
     /// `waitUntilRunning`, `suspend`, `resume`, and `terminate` are refused. Rejects with
     /// `ERR_PRECONDITION` without a live VM or when already detached.
     #[napi]
-    pub async fn detach(&self) -> Result<Detached, AsyncError> {
+    pub fn detach<'env>(
+        &self,
+        env: &'env napi::Env,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, Detached>> {
+        let owned = Self {
+            inner: Arc::clone(&self.inner),
+        };
+        crate::errors::spawn_with_retry_details(env, async move { owned.detach_impl().await })
+    }
+
+    async fn detach_impl(&self) -> Result<Detached, AsyncError> {
         let inner = self.inner.lock().await.detach().map_err(js_async)?;
         Ok(Detached { inner })
     }
@@ -963,7 +1038,33 @@ impl Sandbox {
     /// Every local guard runs **before** the call, which matters because the create happens
     /// after the caller's artifact upload: a rejection AWS raises costs the upload first.
     #[napi]
-    pub async fn build_image(
+    pub fn build_image<'env>(
+        &self,
+        env: &'env napi::Env,
+        options: BuildImageOptions,
+        size: Option<&SizeClass>,
+        run_hook_timeout: Option<&RunHookTimeout>,
+        build_hook_timeout: Option<&BuildHookTimeout>,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, Image>> {
+        let owned = Self {
+            inner: Arc::clone(&self.inner),
+        };
+        let size = size.copied();
+        let run_hook_timeout = run_hook_timeout.copied();
+        let build_hook_timeout = build_hook_timeout.copied();
+        crate::errors::spawn_with_retry_details(env, async move {
+            owned
+                .build_image_impl(
+                    options,
+                    size.as_ref(),
+                    run_hook_timeout.as_ref(),
+                    build_hook_timeout.as_ref(),
+                )
+                .await
+        })
+    }
+
+    async fn build_image_impl(
         &self,
         options: BuildImageOptions,
         size: Option<&SizeClass>,
@@ -989,7 +1090,22 @@ impl Sandbox {
     /// concurrent caller creates the name first, this call waits for that build and returns
     /// it with `reused: true`. Every local check runs before the first AWS call.
     #[napi]
-    pub async fn ensure_image(
+    pub fn ensure_image<'env>(
+        &self,
+        env: &'env napi::Env,
+        options: EnsureImageOptions,
+        size: Option<&SizeClass>,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, EnsuredImage>> {
+        let owned = Self {
+            inner: Arc::clone(&self.inner),
+        };
+        let size = size.copied();
+        crate::errors::spawn_with_retry_details(env, async move {
+            owned.ensure_image_impl(options, size.as_ref()).await
+        })
+    }
+
+    async fn ensure_image_impl(
         &self,
         options: EnsureImageOptions,
         size: Option<&SizeClass>,
@@ -1008,7 +1124,33 @@ impl Sandbox {
     /// options as [`Self::build_image`] so the bytes a caller puts in the bucket are the bytes
     /// the build will receive.
     #[napi]
-    pub async fn build_artifact(
+    pub fn build_artifact<'env>(
+        &self,
+        env: &'env napi::Env,
+        options: BuildImageOptions,
+        size: Option<&SizeClass>,
+        run_hook_timeout: Option<&RunHookTimeout>,
+        build_hook_timeout: Option<&BuildHookTimeout>,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, napi::bindgen_prelude::Buffer>> {
+        let owned = Self {
+            inner: Arc::clone(&self.inner),
+        };
+        let size = size.copied();
+        let run_hook_timeout = run_hook_timeout.copied();
+        let build_hook_timeout = build_hook_timeout.copied();
+        crate::errors::spawn_with_retry_details(env, async move {
+            owned
+                .build_artifact_impl(
+                    options,
+                    size.as_ref(),
+                    run_hook_timeout.as_ref(),
+                    build_hook_timeout.as_ref(),
+                )
+                .await
+        })
+    }
+
+    async fn build_artifact_impl(
         &self,
         options: BuildImageOptions,
         size: Option<&SizeClass>,
@@ -1025,8 +1167,35 @@ impl Sandbox {
     /// Every local guard `buildImage` runs, with zero calls: rejects with the refusal
     /// `buildImage` would, so a caller who uploads its own artifact checks the request before
     /// paying for the upload. Takes `buildImage`'s arguments.
-    #[napi]
-    pub async fn preflight(
+    // Keep the published unit return while PromiseRaw preserves structured failures.
+    #[napi(ts_return_type = "Promise<void>")]
+    pub fn preflight<'env>(
+        &self,
+        env: &'env napi::Env,
+        options: BuildImageOptions,
+        size: Option<&SizeClass>,
+        run_hook_timeout: Option<&RunHookTimeout>,
+        build_hook_timeout: Option<&BuildHookTimeout>,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, ()>> {
+        let owned = Self {
+            inner: Arc::clone(&self.inner),
+        };
+        let size = size.copied();
+        let run_hook_timeout = run_hook_timeout.copied();
+        let build_hook_timeout = build_hook_timeout.copied();
+        crate::errors::spawn_with_retry_details(env, async move {
+            owned
+                .preflight_impl(
+                    options,
+                    size.as_ref(),
+                    run_hook_timeout.as_ref(),
+                    build_hook_timeout.as_ref(),
+                )
+                .await
+        })
+    }
+
+    async fn preflight_impl(
         &self,
         options: BuildImageOptions,
         size: Option<&SizeClass>,
@@ -1046,7 +1215,20 @@ impl Sandbox {
     /// `baseImageArn` is the base's full ARN, such as
     /// `arn:aws:lambda:us-east-1:aws:microvm-image:al2023-1`; a bare name is refused.
     #[napi]
-    pub async fn managed_base_versions(
+    pub fn managed_base_versions<'env>(
+        &self,
+        env: &'env napi::Env,
+        base_image_arn: String,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, Vec<ManagedBaseVersion>>> {
+        let owned = Self {
+            inner: Arc::clone(&self.inner),
+        };
+        crate::errors::spawn_with_retry_details(env, async move {
+            owned.managed_base_versions_impl(base_image_arn).await
+        })
+    }
+
+    async fn managed_base_versions_impl(
         &self,
         base_image_arn: String,
     ) -> Result<Vec<ManagedBaseVersion>, AsyncError> {
@@ -1079,7 +1261,21 @@ impl Sandbox {
     /// installed at most once per VM lifetime (STATE-3), and a second VM needs a second
     /// `Sandbox`. A run with no image at all, before any call. Neither check is in this file.
     #[napi]
-    pub async fn run(&self, options: Option<RunOptions>) -> Result<Session, AsyncError> {
+    pub fn run<'env>(
+        &self,
+        env: &'env napi::Env,
+        options: Option<RunOptions>,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, Session>> {
+        let owned = Self {
+            inner: Arc::clone(&self.inner),
+        };
+        env.spawn_future_with_callback(
+            async move { Ok(owned.run_impl(options).await) },
+            |env, result| result.map_err(|error| crate::errors::with_retry_details(env, error)),
+        )
+    }
+
+    async fn run_impl(&self, options: Option<RunOptions>) -> Result<Session, AsyncError> {
         let defaults = RunRequest::new();
         let options = options.unwrap_or_default();
         // Every unset field falls back to the core's own default rather than to a number
@@ -1143,7 +1339,20 @@ impl Sandbox {
     /// fresh launch that reaches a terminal state first rejects with the service's
     /// `stateReason`. Refused unless the launch is still PENDING.
     #[napi]
-    pub async fn wait_until_running(&self, timeout: Option<f64>) -> Result<Session, AsyncError> {
+    pub fn wait_until_running<'env>(
+        &self,
+        env: &'env napi::Env,
+        timeout: Option<f64>,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, Session>> {
+        let owned = Self {
+            inner: Arc::clone(&self.inner),
+        };
+        crate::errors::spawn_with_retry_details(env, async move {
+            owned.wait_until_running_impl(timeout).await
+        })
+    }
+
+    async fn wait_until_running_impl(&self, timeout: Option<f64>) -> Result<Session, AsyncError> {
         let timeout = match timeout {
             Some(timeout) => seconds_async(timeout)?,
             None => RunRequest::new().ready_timeout,
@@ -1167,7 +1376,17 @@ impl Sandbox {
     /// that dies while suspending is a state to report rather than an error thrown out of the
     /// middle of a teardown.
     #[napi]
-    pub async fn suspend(&self) -> Result<String, AsyncError> {
+    pub fn suspend<'env>(
+        &self,
+        env: &'env napi::Env,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, String>> {
+        let owned = Self {
+            inner: Arc::clone(&self.inner),
+        };
+        crate::errors::spawn_with_retry_details(env, async move { owned.suspend_impl().await })
+    }
+
+    async fn suspend_impl(&self) -> Result<String, AsyncError> {
         let mut guard = self.inner.lock().await;
         guard.suspend().await.map_err(js_async)?;
         Ok(guard.lifecycle().as_str().to_string())
@@ -1198,7 +1417,17 @@ impl Sandbox {
     /// token survived the freeze, and re-delivering it would hit the daemon's one-shot
     /// bootstrap and be refused — a 409 that reads like a broken VM.
     #[napi]
-    pub async fn resume(&self) -> Result<Session, AsyncError> {
+    pub fn resume<'env>(
+        &self,
+        env: &'env napi::Env,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, Session>> {
+        let owned = Self {
+            inner: Arc::clone(&self.inner),
+        };
+        crate::errors::spawn_with_retry_details(env, async move { owned.resume_impl().await })
+    }
+
+    async fn resume_impl(&self) -> Result<Session, AsyncError> {
         {
             let mut guard = self.inner.lock().await;
             guard.resume().await.map_err(js_async)?;
@@ -1211,7 +1440,21 @@ impl Sandbox {
     /// Order: VM, then image, then the log group last, because the service can recreate a
     /// group deleted before its image.
     #[napi]
-    pub async fn terminate(
+    pub fn terminate<'env>(
+        &self,
+        env: &'env napi::Env,
+        options: Option<TeardownOptions>,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, TeardownReport>> {
+        let owned = Self {
+            inner: Arc::clone(&self.inner),
+        };
+        crate::errors::spawn_with_retry_details(
+            env,
+            async move { owned.terminate_impl(options).await },
+        )
+    }
+
+    async fn terminate_impl(
         &self,
         options: Option<TeardownOptions>,
     ) -> Result<TeardownReport, AsyncError> {

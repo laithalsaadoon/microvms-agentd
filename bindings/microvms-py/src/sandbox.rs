@@ -642,10 +642,20 @@ impl PySandbox {
     fn run_op(
         &self,
         request: RunRequest,
+        cancellation: Option<microvms_core::control::transport::RetryCancellation>,
     ) -> impl Future<Output = Result<PySession, Error>> + Send + 'static {
         let inner = Arc::clone(&self.inner);
         async move {
-            inner.lock().await.run(request).await?;
+            let mut sandbox = inner.lock().await;
+            match cancellation {
+                Some(cancellation) => {
+                    sandbox.run_cancellable(request, &cancellation).await?;
+                }
+                None => {
+                    sandbox.run(request).await?;
+                }
+            }
+            drop(sandbox);
             Ok(PySession::in_sandbox(inner))
         }
     }
@@ -731,8 +741,13 @@ pub(crate) fn teardown_opts(
 }
 
 /// Opens a sandbox for `region`: both spellings of the constructor.
-async fn open(region: Region) -> Result<PySandbox, Error> {
-    Sandbox::new(region).await.map(PySandbox::own)
+async fn open(region: Region, retry: Option<(u32, f64)>) -> Result<PySandbox, Error> {
+    let policy = crate::control::retry_policy(retry)?;
+    let plane = microvms_core::control::ControlPlane::new(region).await?;
+    Ok(PySandbox::own(Sandbox::with_control_plane(match policy {
+        Some(policy) => plane.with_retry(policy),
+        None => plane,
+    })))
 }
 
 /// `build_image`'s keywords, which `preflight` takes too, so the request a caller checks is
@@ -966,14 +981,16 @@ impl PySandbox {
     /// five supported regions are named constructors and everything else goes through
     /// `Region.parse` (refused) or `Region.unlisted` (opted into, at the call site).
     #[new]
-    fn new(py: Python<'_>, region: PyRegion) -> PyCoreResult<PySandbox> {
-        Ok(runtime::block_on(py, open(region.inner))?)
+    #[pyo3(signature = (region, *, retry=None))]
+    fn new(py: Python<'_>, region: PyRegion, retry: Option<(u32, f64)>) -> PyCoreResult<PySandbox> {
+        Ok(runtime::block_on(py, open(region.inner, retry))?)
     }
 
     /// The awaitable twin of `Sandbox(region)`: resolves credentials on the shared runtime.
     #[staticmethod]
-    async fn create_async(region: PyRegion) -> PyCoreResult<PySandbox> {
-        Ok(runtime::spawn(open(region.inner)).await??)
+    #[pyo3(signature = (region, *, retry=None))]
+    async fn create_async(region: PyRegion, retry: Option<(u32, f64)>) -> PyCoreResult<PySandbox> {
+        Ok(runtime::spawn(open(region.inner, retry)).await??)
     }
 
     /// The lifecycle state: `"PENDING"`, `"RUNNING"`, `"SUSPENDING"`, `"SUSPENDED"`,
@@ -1808,12 +1825,12 @@ impl PySandbox {
         // return value is discarded and the session is reached through the sandbox. That
         // is not a workaround: it is what makes a post-terminate session call report the
         // lifecycle instead of addressing a VM that is gone.
-        Ok(runtime::block_on(py, self.run_op(request))?)
+        Ok(runtime::block_on(py, self.run_op(request, None))?)
     }
 
     /// The awaitable twin of `run`, with its keywords. A lifecycle transition: cancelling the
-    /// awaitable leaves the launch running to completion, so the VM it starts is still this
-    /// sandbox's to terminate.
+    /// awaitable stops pending retries. An in-flight request finishes so an accepted VM
+    /// is still recorded on this sandbox and remains available to terminate.
     #[pyo3(signature = (
         *,
         image_identifier=None,
@@ -1889,7 +1906,12 @@ impl PySandbox {
             log_stream,
             disable_logging,
         })?;
-        Ok(runtime::spawn_shielded(self.run_op(request)).await??)
+        let cancellation = microvms_core::control::transport::RetryCancellation::default();
+        Ok(runtime::spawn_with_retry_cancellation(
+            self.run_op(request, Some(cancellation.clone())),
+            cancellation,
+        )
+        .await??)
     }
 
     /// Finishes a `run(wait=False)`: waits for RUNNING and for the daemon to answer, and

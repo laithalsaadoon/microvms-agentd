@@ -1,0 +1,50 @@
+# Source-test proofs for retry behavior whose API is absent from the historical parent.
+
+[[fault]]
+id = "retry-recovery-uses-configured-budget"
+guard = "control::transport::tests::configured_retries_recover_header_throttles_with_the_identical_call"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::transport::tests::configured_retries_recover_header_throttles_with_the_identical_call"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "details.attempt_count < policy.max_attempts", with = "details.attempt_count < 6" }
+
+[[fault]]
+id = "retry-dropped-future-starts-early-request"
+guard = "control::transport::tests::dropping_a_retry_future_prevents_another_request"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::transport::tests::dropping_a_retry_future_prevents_another_request"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "        } else {\n            clock.sleep(delay).await;\n        }", with = "        } else {\n            let _ = transport.send(call.clone()).await;\n            clock.sleep(delay).await;\n        }" }
+
+[[fault]]
+id = "retry-pre-cancelled-launch-sends-request"
+guard = "sandbox::tests::cancelled_retry_does_not_launch_before_any_request"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "sandbox::tests::cancelled_retry_does_not_launch_before_any_request"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "self.0.send_replace(true);", with = "self.0.send_replace(false);" }
+
+[[fault]]
+id = "py-retry-invalid-budget-kind"
+guard = "bindings/microvms-py/tests/test_retry.py::test_retry_budget_is_validated_before_credentials[ControlPlane]"
+run = [["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_retry.py::test_retry_budget_is_validated_before_credentials[ControlPlane]"]]
+expect = "test-failed"
+suite = "bindings"
+# Keep the early refusal: this fault must never fall through to credential resolution.
+transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "return Err(Error::invalid_arg(\n                \"retry max_attempts and max_elapsed must be positive\",", with = "return Err(Error::new(\n                ErrorKind::Platform,\n                \"retry max_attempts and max_elapsed must be positive\"," }
+
+[[fault]]
+id = "py-retry-async-invalid-budget-kind"
+guard = "bindings/microvms-py/tests/test_retry.py::test_async_retry_budget_is_validated_before_credentials[ControlPlane]"
+run = [["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_retry.py::test_async_retry_budget_is_validated_before_credentials[ControlPlane]"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "return Err(Error::invalid_arg(\n                \"retry max_attempts and max_elapsed must be positive\",", with = "return Err(Error::new(\n                ErrorKind::Platform,\n                \"retry max_attempts and max_elapsed must be positive\"," }
+
+[[fault]]
+id = "py-retry-stub-omits-throttled"
+guard = "bindings/microvms-py/tests/test_stubs.py::test_base_exception_declares_error_and_retry_attributes"
+run = [["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_stubs.py::test_base_exception_declares_error_and_retry_attributes"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "bindings/microvms-py/microvms.pyi", replace = "    throttled: bool\n", with = "" }

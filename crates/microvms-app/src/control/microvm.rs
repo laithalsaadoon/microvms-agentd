@@ -45,7 +45,7 @@
 //! Nothing on the exec or session path reaches it — the lifecycle test below drives
 //! everything exec can do and asserts zero shell calls were emitted. See [`super`].
 
-use super::transport::{Call, paths, send_with_retry};
+use super::transport::{Call, paths};
 use super::{ControlPlane, RunMicrovmRequest, WaitOpts, ops, timed_out, token};
 use crate::error::{Error, ErrorKind};
 
@@ -431,6 +431,16 @@ impl ControlPlane {
     /// here, and the connectors are derived from intents (TRAP-4). The `clientToken` is
     /// minted from a label (TRAP-1).
     pub async fn run_microvm(&self, request: RunMicrovmRequest) -> Result<Microvm, Error> {
+        self.run_microvm_reported(request, None)
+            .await
+            .map(|(vm, _)| vm)
+    }
+
+    pub(crate) async fn run_microvm_reported(
+        &self,
+        request: RunMicrovmRequest,
+        cancellation: Option<&super::transport::RetryCancellation>,
+    ) -> Result<(Microvm, super::transport::RetryDetails), Error> {
         let (ingress, egress) = self.launch_connectors(&request)?;
 
         let wire = ops::RunMicrovmWire {
@@ -464,9 +474,18 @@ impl ControlPlane {
         };
 
         let call = Call::post_json("RunMicrovm", paths::microvms(), &wire)?;
-        let reply = send_with_retry(self.transport(), call).await?;
+        let (reply, details) = super::transport::send_cancellable(
+            self.transport(),
+            call,
+            &[],
+            self.retry,
+            self.clock.as_ref(),
+            cancellation,
+        )
+        .await?;
+        let reply = super::ReportedReply { reply, details };
         let launched: ops::MicrovmResponseWire = reply.json("RunMicrovm")?;
-        Ok(launched.into())
+        Ok((launched.into(), details))
     }
 
     /// Every local refusal [`Self::run_microvm`] makes, then the ingress and egress connector
@@ -759,7 +778,7 @@ impl ControlPlane {
     pub async fn get_microvm(&self, id: &str) -> Result<Microvm, Error> {
         super::require_valid_identifier("microvmIdentifier", id)?;
         let call = Call::get("GetMicrovm", paths::microvm(id));
-        let reply = send_with_retry(self.transport(), call).await?;
+        let reply = self.send(call).await?;
         let got: ops::MicrovmResponseWire = reply.json("GetMicrovm")?;
         Ok(got.into())
     }
@@ -821,7 +840,7 @@ impl ControlPlane {
                     next_token.as_deref(),
                 ),
             );
-            let reply = send_with_retry(self.transport(), call).await?;
+            let reply = self.send(call).await?;
             let page: ops::ListMicrovmSummariesResponseWire = reply.json("ListMicrovms")?;
             for item in page.items {
                 match position.get(&item.microvm_id) {
@@ -843,7 +862,7 @@ impl ControlPlane {
     pub async fn suspend(&self, id: &str) -> Result<(), Error> {
         super::require_valid_identifier("microvmIdentifier", id)?;
         let call = Call::post_empty("SuspendMicrovm", paths::suspend(id));
-        send_with_retry(self.transport(), call).await?;
+        self.send(call).await?;
         Ok(())
     }
 
@@ -868,7 +887,7 @@ impl ControlPlane {
     pub async fn resume(&self, id: &str) -> Result<(), Error> {
         super::require_valid_identifier("microvmIdentifier", id)?;
         let call = Call::post_empty("ResumeMicrovm", paths::resume(id));
-        match send_with_retry(self.transport(), call).await {
+        match self.send(call).await {
             Ok(_) => Ok(()),
             Err(refused) if refused.kind() == ErrorKind::Platform => {
                 Err(self.ended_before_resume(id, refused).await)
@@ -910,7 +929,7 @@ impl ControlPlane {
     pub async fn terminate(&self, id: &str) -> Result<(), Error> {
         super::require_valid_identifier("microvmIdentifier", id)?;
         let call = Call::delete("TerminateMicrovm", paths::microvm(id));
-        send_with_retry(self.transport(), call).await?;
+        self.send(call).await?;
         Ok(())
     }
 
@@ -984,9 +1003,9 @@ impl ControlPlane {
             allowed_ports: ports.to_vec(),
         };
         let call = Call::post_json("CreateMicrovmAuthToken", paths::auth_token(id), &wire)?;
-        let reply = send_with_retry(self.transport(), call).await?;
+        let reply = self.send(call).await?;
         let minted: ops::CreateAuthTokenResponseWire = reply.json("CreateMicrovmAuthToken")?;
-        ProxyToken::from_map(&minted.auth_token, self.port())
+        ProxyToken::from_map(&minted.auth_token, self.port()).map_err(|error| reply.error(error))
     }
 
     /// Mints a shell token: the credential `microvm shell` opens the PTY WebSocket with.
@@ -1020,7 +1039,7 @@ impl ControlPlane {
             paths::shell_auth_token(id),
             &wire,
         )?;
-        let reply = send_with_retry(self.transport(), call).await?;
+        let reply = self.send(call).await?;
         let minted: ops::CreateShellAuthTokenResponseWire =
             reply.json("CreateMicrovmShellAuthToken")?;
         ProxyToken::from_operation_map(
@@ -1028,6 +1047,7 @@ impl ControlPlane {
             &minted.auth_token,
             self.port(),
         )
+        .map_err(|error| reply.error(error))
     }
 }
 
@@ -1064,6 +1084,31 @@ mod tests {
         let clock = Arc::new(TestClock::new());
         let plane = crate::testing::control_plane(fake.clone(), Region::UsEast1, clock.clone());
         (plane, fake, clock)
+    }
+
+    #[tokio::test]
+    async fn post_response_failures_keep_request_retry_details() {
+        let (plane, fake, _) = planted();
+        fake.answer("GetMicrovm", Answer::throttled_as_400())
+            .answer("GetMicrovm", Answer::ok("{}"));
+        let malformed = plane.get_microvm("mvm-one").await.unwrap_err();
+        assert_eq!(malformed.kind(), ErrorKind::Platform);
+        assert_eq!(malformed.attempt_count(), 2);
+        assert!(!malformed.backoff().is_zero());
+        assert!(!malformed.throttled());
+
+        let (plane, fake, _) = planted();
+        fake.answer("ResumeMicrovm", Answer::throttled_as_400())
+            .answer("ResumeMicrovm", terminated_refusal())
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("TERMINATED", None)),
+            );
+        let ended = plane.resume("mvm-one").await.unwrap_err();
+        assert_eq!(ended.kind(), ErrorKind::WindowClosed);
+        assert_eq!(ended.attempt_count(), 2);
+        assert!(!ended.backoff().is_zero());
+        assert!(!ended.throttled());
     }
 
     /// **TRAP-5, the boundary.** 4096 bytes passes, 4097 is rejected — inclusive, as

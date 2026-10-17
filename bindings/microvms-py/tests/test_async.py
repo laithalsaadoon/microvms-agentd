@@ -629,6 +629,7 @@ class StallingProxy:
 
     def __init__(self) -> None:
         self.connected = threading.Event()
+        self.connections: list[float] = []
         self.closed: list[float] = []
         self.release = threading.Event()
         owner = self
@@ -645,6 +646,7 @@ class StallingProxy:
                     if not chunk:
                         return
                     received += chunk
+                owner.connections.append(time.monotonic())
                 owner.connected.set()
                 while not owner.release.is_set():
                     try:
@@ -732,6 +734,55 @@ def test_bind_27_a_cancelled_lifecycle_transition_runs_on(
         assert proxy.closed == [], (
             "the transition's request was dropped with its awaitable"
         )
+
+
+def test_cancelled_run_releases_image_resolution_before_launch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BIND-27: cancelling a run's image lookup releases the sandbox without launching.
+
+    **Falsification**: omit the runtime cancellation callback and context exit waits
+    behind the held image lookup instead of acquiring the sandbox.
+    """
+    with stalling_proxy(monkeypatch) as proxy:
+
+        async def run() -> None:
+            sandbox = microvms.Sandbox(microvms.Region.us_east_1())
+            await sandbox.__aenter__()
+            # A bare name forces the read-only lookup; an ARN would reach the
+            # shielded launch, which must run on to retain any assigned VM.
+            task = asyncio.create_task(sandbox.run_async(image_identifier="held-image"))
+            try:
+
+                async def connected() -> None:
+                    while not proxy.connected.is_set():
+                        if task.done():
+                            await task
+                        await asyncio.sleep(0.01)
+
+                await asyncio.wait_for(connected(), 10)
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+                await asyncio.wait_for(sandbox.__aexit__(None, None, None), 2)
+                assert sandbox.microvm_id is None
+
+                async def closed() -> None:
+                    while not proxy.closed:
+                        await asyncio.sleep(0.01)
+
+                await asyncio.wait_for(closed(), 2)
+                assert len(proxy.connections) == 1, (
+                    "cancelled lookup sent another request"
+                )
+            finally:
+                # A failing callback fault must still release the held request.
+                proxy.release.set()
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+
+        asyncio.run(run())
 
 
 def _cancel_ensure_image_and_exit(monkeypatch: pytest.MonkeyPatch, agent: bool) -> None:

@@ -576,8 +576,34 @@ impl Session {
     }
 }
 
+/// Observations made by the client during launch.
+#[napi(object)]
+pub struct LaunchMetrics {
+    pub attempt_count: u32,
+    pub backoff_seconds: f64,
+    pub running_at: Option<f64>,
+    pub ready_at: Option<f64>,
+}
+
 #[napi]
 impl Session {
+    /// Launch observations, absent for sessions not created by a launch.
+    #[napi]
+    pub async fn launch_metrics(&self) -> Result<Option<LaunchMetrics>, AsyncError> {
+        Ok(self
+            .live()
+            .await
+            .session()
+            .map_err(js_async)?
+            .launch_metrics()
+            .map(|m| LaunchMetrics {
+                attempt_count: m.attempt_count,
+                backoff_seconds: m.backoff_seconds,
+                running_at: m.running_at,
+                ready_at: m.ready_at,
+            }))
+    }
+
     /// A session against a daemon reached **directly**, with no proxy headers.
     ///
     /// The shape for a local binary, a test server, or a VM reached over a tunnel. There is
