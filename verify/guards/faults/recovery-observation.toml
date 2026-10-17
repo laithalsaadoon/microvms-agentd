@@ -119,7 +119,7 @@ suite = "script"
 [[family.fault]]
 id = "readonly-observation-credential-routing"
 message = "test_credential_mode_routes_after_unchanged_preflight"
-transform = { file = "tools/recovery-credentials.py", replace = "\"observe\" if getattr(args, \"observe_only\", False) else \"apply\", args, child", with = "\"apply\", args, child" }
+transform = { file = "tools/recovery-credentials.py", replace = "\"observe\" if args.observe_only else \"apply\", args, child", with = "\"apply\", args, child" }
 
 [[family]]
 guard = "test_recovery_observation_boundary.py"
@@ -159,7 +159,7 @@ suite = "script"
 [[family.fault]]
 id = "readonly-observation-verifier-bound"
 message = "test_oversize_independent_verifier_retains_bounded_census_and_incomplete_receipt"
-transform = { file = "tools/recover-live.py", replace = "            len(verified[\"resources\"]) <= OBSERVATION_MAX_ROWS\n            and len(json.dumps(verified).encode()) <= OBSERVATION_MAX_BYTES // 4,", with = "            True," }
+transform = { file = "tools/recover-live.py", replace = "require(len(verified[\"resources\"]) <= OBSERVATION_MAX_ROWS, \"observation_limit\")", with = "require(True, \"observation_limit\")" }
 
 [[family]]
 guard = "test_recover_live_observation.py"

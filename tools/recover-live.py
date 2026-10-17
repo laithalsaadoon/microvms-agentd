@@ -1400,6 +1400,8 @@ OBSERVATION_REASONS = {
 }
 OBSERVATION_MAX_ROWS = 1000
 OBSERVATION_MAX_BYTES = 1048576
+OBSERVATION_APPEND_BYTES = OBSERVATION_MAX_BYTES // 2
+OBSERVATION_VERIFIER_BYTES = OBSERVATION_MAX_BYTES // 4
 
 
 class ReadOnlyApi(Api):
@@ -1511,7 +1513,7 @@ def observation_append(report: dict, section: str, row: dict) -> None:
     )
     # Leave space for fixed error records if a later page or exact read fails.
     require(
-        len(json.dumps(report)) + len(json.dumps(row)) < OBSERVATION_MAX_BYTES // 2,
+        len(json.dumps(report)) + len(json.dumps(row)) < OBSERVATION_APPEND_BYTES,
         "observation_limit",
     )
     report[section].append(row)
@@ -1546,11 +1548,15 @@ def observe(manifest: dict, ownership: dict, api: ReadOnlyApi, report: dict) -> 
         verified = captured_verifier(done, region)
         # Bound this separately before insertion so a large census cannot erase
         # the later bounded metadata when the credential wrapper validates it.
+        require(len(verified["resources"]) <= OBSERVATION_MAX_ROWS, "observation_limit")
+        # Keep this defense for future verifier schema growth. Its fixed fields and
+        # the row cap already bound the current schema below this byte budget.
+        # pragma: no mutate start (fixed verifier schema and row cap bound these bytes)
         require(
-            len(verified["resources"]) <= OBSERVATION_MAX_ROWS
-            and len(json.dumps(verified).encode()) <= OBSERVATION_MAX_BYTES // 4,
+            len(json.dumps(verified).encode()) <= OBSERVATION_VERIFIER_BYTES,
             "observation_limit",
         )
+        # pragma: no mutate end
         report["independentVerifier"] = verified
         report["sections"]["independentVerifier"] = "completed"
     except (Exception, KeyboardInterrupt) as exc:  # noqa: BLE001 - retain only fixed error categories
@@ -1888,15 +1894,15 @@ def validate_observation(value: Any) -> dict:
     )
     if "independentVerifier" in value:
         valid(len(value["independentVerifier"]["resources"]) <= OBSERVATION_MAX_ROWS)
+        # Preserve the byte contract if the fixed verifier schema grows later.
+        # pragma: no mutate start (fixed verifier schema and row cap bound these bytes)
         valid(
             len(json.dumps(value["independentVerifier"]).encode())
-            <= OBSERVATION_MAX_BYTES // 4
+            <= OBSERVATION_VERIFIER_BYTES
         )
+        # pragma: no mutate end
     if "reason" in value:
-        valid(
-            value["status"] == "incomplete"
-            and value["reason"] in REASONS + ["interrupted_or_invalid_input"]
-        )
+        valid(value["status"] == "incomplete" and value["reason"] in REASONS)
     if "sections" in value:
         sections = value["sections"]
         valid(isinstance(sections, dict) and set(sections) == OBSERVATION_SECTIONS)
@@ -2024,7 +2030,7 @@ def validate_observation(value: Any) -> dict:
         keys = [tuple(row[field] for field in fields) for row in value.get(section, [])]
         valid(len(keys) == len(set(keys)))
     if value["status"] == "completed":
-        valid(not value.get("errors") and binding <= set(value))
+        valid(not value.get("errors") and binding.issubset(value))
         valid(
             {
                 "images",
@@ -2034,8 +2040,7 @@ def validate_observation(value: Any) -> dict:
                 "versionCoverage",
                 "sections",
                 "independentVerifier",
-            }
-            <= set(value)
+            }.issubset(value)
         )
         coverage = {row["imageSha256"]: row for row in value["versionCoverage"]}
         listed_images = {

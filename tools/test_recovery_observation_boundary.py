@@ -87,9 +87,8 @@ def arguments(tmp_path, *, observe=True):
         manifest_sha256="a" * 64,
         report=tmp_path / "result.json",
         exclusive_names=True,
+        observe_only=observe,
     )
-    if observe is not None:
-        args.observe_only = observe
     return args
 
 

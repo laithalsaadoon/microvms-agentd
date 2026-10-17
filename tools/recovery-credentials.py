@@ -225,9 +225,7 @@ def recover(args, environ):
         ("SessionToken", "AWS_SESSION_TOKEN"),
     ):
         child[target] = safe_value(credentials[source], r"[A-Za-z0-9/+=]+", 16384)
-    run_child(
-        "observe" if getattr(args, "observe_only", False) else "apply", args, child
-    )
+    run_child("observe" if args.observe_only else "apply", args, child)
 
 
 def main():

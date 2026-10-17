@@ -59,6 +59,7 @@ class CredentialTests(unittest.TestCase):
             manifest_sha256="a" * 64,
             report=Path(self.temp.name) / "recovery.json",
             exclusive_names=False,
+            observe_only=False,
         )
         self.globals = vars(wrapper)
         self.clock = Mock()
