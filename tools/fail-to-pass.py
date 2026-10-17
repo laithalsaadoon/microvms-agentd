@@ -145,6 +145,22 @@ PARITY_PEER = [
     "--example",
     "parity-tunnel-peer",
 ]
+# Whole-corpus source tests need the same fixture as a case-selected proof, but
+# must retain the ordinary command so the proof still runs the complete corpus.
+PARITY_RUST_TESTS = {
+    (
+        "crates/microvms-core/tests/parity_cases.rs",
+        "core_answers_the_shared_case_corpus",
+    ),
+    (
+        "crates/microvms-cli/tests/parity_cases.rs",
+        "the_cli_process_answers_the_shared_case_corpus",
+    ),
+    (
+        "crates/microvms-cli/src/guards/parity.rs",
+        "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes",
+    ),
+}
 # A test each finder must find in its file on every run, so a finder that stopped reading
 # fails here instead of reading every fix as one with no test.
 SENTINELS = {
@@ -1183,7 +1199,12 @@ def candidates(branch: Branch, tests: list[Test]) -> tuple[list[Candidate], list
                     " a lib or bin target, so there's no one command that runs it"
                 )
                 continue
-            run, suite = [argv], "rust"
+            run = (
+                [PARITY_PEER, argv]
+                if (test.path, test.guard) in PARITY_RUST_TESTS
+                else [argv]
+            )
+            suite = "rust"
         elif test.kind == "pytest":
             # Source-test discovery can select the whole parametrized corpus runner,
             # whose control-plane case needs the opt-in fixture constructor.

@@ -26,7 +26,7 @@ transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace 
 [[fault]]
 id = "parity-cli-process-empty-corpus"
 guard = "the_cli_process_answers_the_shared_case_corpus"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "parity_cases", "--", "--exact", "the_cli_process_answers_the_shared_case_corpus"]
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["cargo", "test", "-p", "microvms-cli", "--test", "parity_cases", "--", "--exact", "the_cli_process_answers_the_shared_case_corpus"]]
 expect = "test-failed"
 suite = "rust"
 message = "no case ran in area \"cost\" on cli"
@@ -70,7 +70,7 @@ transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace 
 
 [[family]]
 guard = "the_cli_process_answers_the_shared_case_corpus"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "parity_cases", "--", "--exact", "the_cli_process_answers_the_shared_case_corpus"]
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["cargo", "test", "-p", "microvms-cli", "--test", "parity_cases", "--", "--exact", "the_cli_process_answers_the_shared_case_corpus"]]
 expect = "test-failed"
 suite = "rust"
 

@@ -1885,6 +1885,93 @@ class RegistryShapeTests(unittest.TestCase):
 
 
 class CandidateBuildTests(unittest.TestCase):
+    def test_rust_corpus_sources_build_the_peer_before_running(self):
+        core = "crates/microvms-core/tests/parity_cases.rs"
+        cli = "crates/microvms-cli/tests/parity_cases.rs"
+        fake = "crates/microvms-cli/src/guards/parity.rs"
+        core_guard = "core_answers_the_shared_case_corpus"
+        cases = [
+            (core, core_guard, "microvms-core", ["--test", "parity_cases"], True),
+            (
+                cli,
+                "the_cli_process_answers_the_shared_case_corpus",
+                "microvms-cli",
+                ["--test", "parity_cases"],
+                True,
+            ),
+            (
+                fake,
+                "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes",
+                "microvms-cli",
+                ["--bin", "microvm"],
+                True,
+            ),
+            (
+                core,
+                "unrelated_test",
+                "microvms-core",
+                ["--test", "parity_cases"],
+                False,
+            ),
+            (cli, core_guard, "microvms-cli", ["--test", "parity_cases"], False),
+        ]
+        targets = [
+            {
+                "package": package,
+                "name": name,
+                "kind": [kind],
+                "src": path,
+                "features": [],
+            }
+            for package, name, kind, path in (
+                ("microvms-core", "parity_cases", "test", core),
+                ("microvms-cli", "parity_cases", "test", cli),
+                ("microvms-cli", "microvm", "bin", "crates/microvms-cli/src/main.rs"),
+            )
+        ]
+        for path, guard, package, target, needs_peer in cases:
+            with self.subTest(path=path, guard=guard):
+                selected = TOOL["Test"]("rust", path, guard, "changed", 1, 1)
+                with patch.dict(
+                    TOOL_GLOBALS,
+                    {
+                        "registry_texts": lambda *_args, **_kwargs: {},
+                        "cargo_targets": lambda _root: targets,
+                    },
+                ):
+                    made, skipped = TOOL["candidates"](
+                        SimpleNamespace(root=REPO), [selected]
+                    )
+                runner = [
+                    "cargo",
+                    "test",
+                    "-p",
+                    package,
+                    *target,
+                    "--",
+                    "--exact",
+                    guard,
+                ]
+                prerequisite = (
+                    [
+                        [
+                            "cargo",
+                            "build",
+                            "-p",
+                            "microvms-core",
+                            "--example",
+                            "parity-tunnel-peer",
+                        ]
+                    ]
+                    if needs_peer
+                    else []
+                )
+                self.assertEqual(skipped, [])
+                self.assertEqual(len(made), 1)
+                self.assertEqual(made[0].run, [*prerequisite, runner])
+                self.assertEqual(made[0].suite, "rust")
+                self.assertEqual(made[0].test, selected)
+
     def test_fixture_sources_choose_their_required_binding_builds(self):
         cases = [
             (
