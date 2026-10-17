@@ -452,6 +452,11 @@ class MainTests(FixtureCase):
                 PARITY_GLOBALS["run_typedoc"].assert_called_once_with(dts, mock.ANY)
                 readers["core"].assert_called_once_with(self.core)
                 readers["cli"].assert_called_once_with(self.manifest)
+                readers["py"].assert_called_once_with(self.griffe)
+                if surface_error:
+                    readers["ts"].assert_not_called()
+                else:
+                    readers["ts"].assert_called_once_with(self.typedoc)
             return code, out.getvalue(), err.getvalue()
 
     def test_reviewed_inventory_passes_in_human_and_json_modes(self):
