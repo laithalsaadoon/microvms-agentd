@@ -533,7 +533,33 @@ def tunnel(case: Case, _servers: Callable[..., SseServer]) -> dict[str, Any]:
                     handle.stop(timeout=1)
 
 
+def control_plane_case(
+    case: Case, _servers: Callable[..., SseServer]
+) -> dict[str, Any]:
+    plane = microvms.ControlPlane._parity_from_script(json.dumps(case.input["script"]))
+    identifier = case.input["microvm_id"]
+    for action in case.input["actions"]:
+        try:
+            if action == "suspend":
+                assert plane.get(identifier).state == "RUNNING"
+                plane.suspend(identifier)
+                assert plane.get(identifier).state == "SUSPENDED"
+            else:
+                assert action == "resume"
+                plane.resume(identifier)
+        except microvms.MicrovmError as error:
+            answer = refusal(error)
+            if "message_mentions" in case.input:
+                answer["message_mentions"] = {
+                    text: text in str(error) for text in case.input["message_mentions"]
+                }
+            answer["calls"] = plane._parity_calls()
+            return answer
+    raise AssertionError("a control-plane case must end with a refusal")
+
+
 HANDLERS: dict[str, Callable[[Case, Callable[..., SseServer]], dict[str, Any]]] = {
+    "control-plane": control_plane_case,
     "forward": forward,
     "tunnel": tunnel,
     "image-name": image_name,

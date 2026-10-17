@@ -155,7 +155,7 @@ id = "parity-ts-wrap-newline"
 guard = "wrap-dockerfile/no-trailing-newline"
 run = [
   ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
-  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
 expect = "test-failed"
@@ -200,7 +200,7 @@ transform = { file = "bindings/microvms-py/tests/test_parity_cases.py", replace 
 guard = "every area and the sentinel run"
 run = [
   ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
-  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
 expect = "test-failed"
@@ -221,7 +221,7 @@ id = "parity-ts-no-handler"
 guard = "the corpus plans cleanly"
 run = [
   ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
-  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
 expect = "test-failed"
@@ -237,7 +237,7 @@ id = "parity-py-unjudged"
 guard = "bindings/microvms-py/tests/test_parity_cases.py::test_every_planned_case_was_judged"
 run = [
   ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
-  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml", "--features", "parity-fixtures"],
   ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py"],
 ]
 expect = "test-failed"
@@ -250,7 +250,7 @@ id = "parity-ts-unjudged"
 guard = "every planned case was judged"
 run = [
   ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
-  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
 expect = "test-failed"
@@ -276,7 +276,7 @@ id = "parity-ts-skip-without-reference"
 guard = "the corpus plans cleanly"
 run = [
   ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
-  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
 expect = "test-failed"
@@ -303,7 +303,7 @@ id = "parity-ts-refuses-known-drift"
 guard = "the corpus plans cleanly"
 run = [
   ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
-  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
 expect = "test-failed"
@@ -332,7 +332,7 @@ id = "parity-ts-suspended-dropped"
 guard = "cost/estimate-running-and-suspended"
 run = [
   ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
-  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
 expect = "test-failed"
@@ -417,7 +417,7 @@ id = "parity-ts-names-region"
 guard = "names/region-mismatch"
 run = [
   ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
-  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
 expect = "test-failed"
@@ -472,7 +472,7 @@ id = "parity-ts-estimate-label-plan"
 guard = "cost/estimate-with-running-time"
 run = [
   ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
-  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
 expect = "test-failed"
@@ -498,7 +498,7 @@ id = "parity-ts-estimate-launched-true"
 guard = "cost/estimate-suspended-only"
 run = [
   ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
-  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"],
   ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
 expect = "test-failed"

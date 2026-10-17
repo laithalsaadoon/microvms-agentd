@@ -59,6 +59,10 @@ tokio = { version = "1.53", features = ["time", "sync", "rt", "macros"] }
 # and both of those are std — so `src/exec.rs` advances the stream with nothing
 # but this crate's own dependencies. Retired 2026-08-09.
 
+[features]
+# Offline parity fixtures are opt-in and absent from published artifacts.
+parity-fixtures = ["microvms-core/test-support"]
+
 [dev-dependencies]
 # Standalone conversion tests do not run inside Node. Resolve dormant Node-API
 # symbols dynamically so the test executable can link; the addon uses its normal

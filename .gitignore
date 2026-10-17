@@ -75,3 +75,6 @@ mutants.out.old/
 # Optional formal verifier assets; package-lock.json is committed.
 /verify/formal/model/
 /verify/formal/node_modules/
+
+# Declarations of test-only constructors, never part of the package.
+bindings/microvms-js/parity-fixtures.d.ts

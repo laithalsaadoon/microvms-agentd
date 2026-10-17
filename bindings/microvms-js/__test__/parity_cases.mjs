@@ -35,6 +35,7 @@ import { isDeepStrictEqual } from 'node:util';
 
 import {
   AgentVm,
+  ControlPlane,
   Duration,
   NameRegistry,
   Region,
@@ -533,7 +534,33 @@ async function tunnel(testCase) {
   }
 }
 
+async function controlPlane(testCase) {
+  const plane = ControlPlane.parityFromScript(JSON.stringify(testCase.input.script));
+  const id = testCase.input.microvm_id;
+  for (const action of testCase.input.actions) {
+    try {
+      if (action === 'suspend') {
+        assert.equal((await plane.get(id)).state, 'RUNNING');
+        await plane.suspend(id);
+        assert.equal((await plane.get(id)).state, 'SUSPENDED');
+      } else {
+        assert.equal(action, 'resume');
+        await plane.resume(id);
+      }
+    } catch (error) {
+      const answer = refusal(error);
+      if (testCase.input.message_mentions) {
+        answer.message_mentions = Object.fromEntries(testCase.input.message_mentions.map(text => [text, error.message.includes(text)]));
+      }
+      answer.calls = plane.parityCalls();
+      return answer;
+    }
+  }
+  assert.fail('a control-plane case must end with a refusal');
+}
+
 const HANDLERS = new Map([
+  ['control-plane', controlPlane],
   ['forward', forward],
   ['tunnel', tunnel],
   ['image-name', imageName],

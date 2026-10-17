@@ -46,7 +46,7 @@ transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace 
 [[family.fault]]
 id = "parity-core-no-handler"
 message = "the core runner has no handler for area \"size-class\""
-transform = { file = "crates/microvms-core/tests/parity_cases.rs", replace = "const AREAS: [&str; 9] = [\n    \"forward\",\n    \"image-name\",\n    \"cost\",\n    \"error\",\n    \"egress\",\n    \"names\",\n    \"size-class\",\n    \"wrap-dockerfile\",\n    \"tunnel\",\n];\n", with = "const AREAS: [&str; 8] = [\n    \"forward\",\n    \"image-name\",\n    \"cost\",\n    \"error\",\n    \"egress\",\n    \"names\",\n    \"wrap-dockerfile\",\n    \"tunnel\",\n];\n" }
+transform = { file = "crates/microvms-core/tests/parity_cases.rs", replace = "const AREAS: [&str; 10] = [\n    \"forward\",\n    \"control-plane\",\n    \"image-name\",\n    \"cost\",\n    \"error\",\n    \"egress\",\n    \"names\",\n    \"size-class\",\n    \"wrap-dockerfile\",\n    \"tunnel\",\n];\n", with = "const AREAS: [&str; 9] = [\n    \"forward\",\n    \"control-plane\",\n    \"image-name\",\n    \"cost\",\n    \"error\",\n    \"egress\",\n    \"names\",\n    \"wrap-dockerfile\",\n    \"tunnel\",\n];\n" }
 
 # The issue's regression: `wrap_dockerfile` stops ending the task's last line before the stanza.
 # Core, Python and TypeScript each fail the case (the binding entries are in the bindings section).
@@ -66,7 +66,7 @@ run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-pee
 expect = "test-failed"
 suite = "rust"
 message = "gives the fakes tier area \"egress\", which it has no handler for"
-transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 4] = [\"cost\", \"egress\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 5] = [\"image-name\", \"error\", \"names\", \"forward\", \"tunnel\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 3] = [\"cost\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 6] = [\"image-name\", \"error\", \"names\", \"forward\", \"tunnel\", \"egress\"];\n" }
+transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 4] = [\"cost\", \"egress\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 6] = [\n    \"image-name\",\n    \"error\",\n    \"names\",\n    \"forward\",\n    \"tunnel\",\n    \"control-plane\",\n];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 3] = [\"cost\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 7] = [\"image-name\", \"error\", \"names\", \"forward\", \"tunnel\", \"egress\", \"control-plane\"];\n" }
 
 [[family]]
 guard = "the_cli_process_answers_the_shared_case_corpus"
@@ -77,12 +77,12 @@ suite = "rust"
 [[family.fault]]
 id = "parity-cli-area-dropped"
 message = "the cli runner has no handler for area \"egress\""
-transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 4] = [\"cost\", \"egress\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 5] = [\"image-name\", \"error\", \"names\", \"forward\", \"tunnel\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 3] = [\"cost\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 5] = [\"image-name\", \"error\", \"names\", \"forward\", \"tunnel\"];\n" }
+transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 4] = [\"cost\", \"egress\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 6] = [\n    \"image-name\",\n    \"error\",\n    \"names\",\n    \"forward\",\n    \"tunnel\",\n    \"control-plane\",\n];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 3] = [\"cost\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 6] = [\"image-name\", \"error\", \"names\", \"forward\", \"tunnel\", \"control-plane\"];\n" }
 
 [[family.fault]]
 id = "parity-cli-area-in-both-tiers"
 message = "area \"egress\" is both this cli runner's and another's"
-transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 4] = [\"cost\", \"egress\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 5] = [\"image-name\", \"error\", \"names\", \"forward\", \"tunnel\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 4] = [\"cost\", \"egress\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 6] = [\"image-name\", \"error\", \"names\", \"forward\", \"tunnel\", \"egress\"];\n" }
+transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 4] = [\"cost\", \"egress\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 6] = [\n    \"image-name\",\n    \"error\",\n    \"names\",\n    \"forward\",\n    \"tunnel\",\n    \"control-plane\",\n];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 4] = [\"cost\", \"egress\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 7] = [\"image-name\", \"error\", \"names\", \"forward\", \"tunnel\", \"egress\", \"control-plane\"];\n" }
 
 # A skip that doesn't name its issue or trace id fails the reader, in every runner.
 

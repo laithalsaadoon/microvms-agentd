@@ -90,7 +90,7 @@ shell = "bash -e -c"
 run = '''
 uv venv --python 3.11 --clear -q .venv-bindings
 . .venv-bindings/bin/activate
-uvx maturin@1.14.1 develop -m bindings/microvms-py/Cargo.toml
+uvx maturin@1.14.1 develop -m bindings/microvms-py/Cargo.toml --features parity-fixtures
 uv pip install pytest
 pytest bindings/microvms-py/tests -q
 '''
@@ -116,8 +116,9 @@ description = "Build the Node addon in place and run its tests"
 depends = ["parity:fixtures"]
 # `dts` is the build: it also rewrites `index.d.ts`, so run `dts:check` before this, not after.
 run = [
-  { task = "dts" },
+  "npx -y -p @napi-rs/cli@3.10.8 napi build --manifest-path Cargo.toml --package microvms-js --platform --output-dir . --cwd bindings/microvms-js --features parity-fixtures --dts parity-fixtures.d.ts",
   'node --test "bindings/microvms-js/__test__/*.mjs"',
+  { task = "dts" },
 ]
 
 ["npm:lambda:build"]

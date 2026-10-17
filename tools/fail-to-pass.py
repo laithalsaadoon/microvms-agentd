@@ -111,6 +111,14 @@ JS_BUILD = [
     "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd",
     "bindings/microvms-js",
 ]  # fmt: skip
+PARITY_PY_BUILD = [*PY_BUILD, "--features", "parity-fixtures"]
+PARITY_JS_BUILD = [
+    *JS_BUILD,
+    "--features",
+    "parity-fixtures",
+    "--dts",
+    "parity-fixtures.d.ts",
+]
 # A test each finder must find in its file on every run, so a finder that stopped reading
 # fails here instead of reading every fix as one with no test.
 SENTINELS = {

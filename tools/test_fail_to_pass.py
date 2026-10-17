@@ -416,7 +416,10 @@ class RegistryShapeTests(unittest.TestCase):
             if entry.get("suite") == "bindings" and run and isinstance(run[0], list):
                 builds.append(run[0])
         self.assertTrue(builds, "the registry has no bindings entry to compare with")
-        known = [TOOL["PY_BUILD"], TOOL["JS_BUILD"]]
+        known = [
+            TOOL[name]
+            for name in ("PY_BUILD", "JS_BUILD", "PARITY_PY_BUILD", "PARITY_JS_BUILD")
+        ]
         for build in builds:
             if "maturin" in " ".join(build) or "napi" in build:
                 self.assertIn(build, known)

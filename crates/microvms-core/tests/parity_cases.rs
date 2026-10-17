@@ -32,8 +32,9 @@ use microvms_core::{Error, Region, SizeClass};
 use parity_corpus::{Case, Run};
 use serde_json::{Value, json};
 
-const AREAS: [&str; 9] = [
+const AREAS: [&str; 10] = [
     "forward",
+    "control-plane",
     "image-name",
     "cost",
     "error",
@@ -52,6 +53,7 @@ async fn core_answers_the_shared_case_corpus() {
     let mut run = Run::plan("core", &AREAS, &[]);
     for case in run.cases() {
         let answer = match case.area.as_str() {
+            "control-plane" => control_plane_case(&case).await,
             "forward" => forward(&case).await,
             "image-name" => image_name(&case),
             "cost" => cost(&case),
@@ -481,4 +483,29 @@ async fn forward(case: &Case) -> Value {
     answer["refused"] = json!(summary.report.refused);
     answer["upstream_requests"] = json!(upstream.request_count());
     answer
+}
+
+async fn control_plane_case(case: &Case) -> Value {
+    let script =
+        microvms_app::testing::ParityControlPlane::from_json(&case.input("script").to_string())
+            .unwrap();
+    let plane = script.plane();
+    let id = case.input_str("microvm_id");
+    for action in case.input_strings("actions") {
+        if action == "suspend" {
+            assert_eq!(plane.get_microvm(id).await.unwrap().state, "RUNNING");
+            plane.suspend(id).await.unwrap();
+            assert_eq!(plane.get_microvm(id).await.unwrap().state, "SUSPENDED");
+        } else {
+            assert_eq!(action, "resume");
+            let error = plane.resume(id).await.unwrap_err();
+            let mut answer = refusal(&error);
+            if case.input.get("message_mentions").is_some() {
+                answer["message_mentions"] = case.message_mentions(&error.to_string());
+            }
+            answer["calls"] = json!(script.calls());
+            return answer;
+        }
+    }
+    panic!("a control-plane case must end with a refusal")
 }

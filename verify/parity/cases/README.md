@@ -131,3 +131,11 @@ without a reset.
 - `tunnel`: the guest port and data a guest sends first, through the public tunnel
   APIs and the same Rust peer.
 - `wrap-dockerfile`: a task Dockerfile with the agentd stanza appended.
+
+- `control-plane`: the same ordered service response script for each surface, with
+  literal JSON bodies and operation names. The resume case reads RUNNING, suspends,
+  observes SUSPENDED, and attempts a resume after the service ended the VM. Every
+  runner compares the refusal and the complete operation sequence with `expect`.
+  Bindings run with the opt-in `parity-fixtures` build feature; their normal builds
+  contain no scripted constructors. `bindings:js` rebuilds the normal addon after testing before npm packaging;
+  wheel and release builds use the default features.

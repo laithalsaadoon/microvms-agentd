@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: Apache-2.0
+# Revert the #601 classification: every surface must independently reject its verdict.
+
+[[fault]]
+id = "parity-window-closed-core"
+guard = "core_answers_the_shared_case_corpus"
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/microvm.rs", replace = "Err(refused) if refused.kind() == ErrorKind::Platform => {", with = "Err(refused) if false && refused.kind() == ErrorKind::Platform => {" }
+
+[[fault]]
+id = "parity-window-closed-cli"
+guard = "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"]]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/microvm.rs", replace = "Err(refused) if refused.kind() == ErrorKind::Platform => {", with = "Err(refused) if false && refused.kind() == ErrorKind::Platform => {" }
+
+[[fault]]
+id = "parity-window-closed-py"
+guard = "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[control-plane/window-closed]"
+run = [["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml", "--features", "parity-fixtures"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[control-plane/window-closed]"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "crates/microvms-app/src/control/microvm.rs", replace = "Err(refused) if refused.kind() == ErrorKind::Platform => {", with = "Err(refused) if false && refused.kind() == ErrorKind::Platform => {" }
+
+[[fault]]
+id = "parity-window-closed-ts"
+guard = "control-plane/window-closed"
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"], ["node", "--test", "--test-reporter=tap", "--test-name-pattern=control-plane/window-closed", "bindings/microvms-js/__test__/parity_cases.mjs"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "crates/microvms-app/src/control/microvm.rs", replace = "Err(refused) if refused.kind() == ErrorKind::Platform => {", with = "Err(refused) if false && refused.kind() == ErrorKind::Platform => {" }
+
+[[fault]]
+id = "parity-script-empty"
+guard = "the_parity_script_refuses_empty_input"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_transport", "--", "--exact", "the_parity_script_refuses_empty_input"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/testing.rs", replace = "exchanges.is_empty()", with = "false" }
+
+[[fault]]
+id = "parity-script-literal"
+guard = "the_parity_script_preserves_literal_responses_and_order"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_transport", "--", "--exact", "the_parity_script_preserves_literal_responses_and_order"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/testing.rs", replace = "body: answer[\"body\"].as_str().unwrap().as_bytes().to_vec(),", with = "body: Vec::new()," }
