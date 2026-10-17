@@ -122,6 +122,7 @@ def drive_native_box(cli: Cli, binary: Path, aws: Any, results: Results) -> None
                 MICROVM=str(cli.binary.resolve()),
                 AWS_REGION=cli.region,
                 BOX_IMAGE=str(cleanup["arn"]),
+                BOX_BIN_DIR=str(directory.resolve()),
                 BOX_OUT_DIR=str(out),
             )
             run = cli.run_process([str(EXAMPLE / "run.sh")], timeout=25 * 60, env=env)
