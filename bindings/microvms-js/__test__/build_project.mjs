@@ -90,6 +90,23 @@ test('a pin and a project pair pass preflight', async () => {
   );
 });
 
+test('an omitted base working directory follows the shared default', async () => {
+  // **Falsification**: change the shared base's default to a nonempty directory and
+  // make the binding substitute an empty string. The explicit base passes preflight,
+  // but the omitted field must pass too because it selects that same shared default.
+  const sandbox = await Sandbox.create(Region.usEast1());
+  const shared = defaultBaseImage();
+  const { workingDir, ...omitted } = shared;
+  for (const baseImage of [shared, omitted]) {
+    const preflight = sandbox.preflight(options({ baseImage, inheritWorkdir: true }));
+    if (workingDir === '') {
+      await rejectsWith(preflight, 'ERR_INVALID_ARG', /declares no WorkingDir/);
+    } else {
+      assert.equal(await preflight, undefined);
+    }
+  }
+});
+
 test('a bad pin is refused before any call', async () => {
   const sandbox = await Sandbox.create(Region.usEast1());
   await rejectsWith(

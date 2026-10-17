@@ -72,3 +72,18 @@ expect = "test-failed"
 suite = "bindings"
 note = "bindings/microvms-js/__test__/agents.mjs::both agents and permission modes reach the wire with the remote deadline"
 transform = { file = "bindings/microvms-js/src/agents.rs", replace = ".unwrap_or(defaults.permission_mode)", with = ".unwrap_or(\"unrestricted\".parse().unwrap())" }
+
+[[fault]]
+id = "default-typescript-base-workdir-ownership"
+guard = "an omitted base working directory follows the shared default"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "--test-name-pattern", "an omitted base working directory follows the shared default", "bindings/microvms-js/__test__/build_project.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+note = "bindings/microvms-js/__test__/build_project.mjs::an omitted base working directory follows the shared default"
+transform = [
+  { file = "crates/microvms-app/src/control/artifact.rs", replace = "            working_dir: String::new(),\n", with = "            working_dir: \"/shared-default\".to_string(),\n" },
+  { file = "bindings/microvms-js/src/sandbox.rs", replace = ".unwrap_or_else(|| CoreBaseImage::default().working_dir)", with = ".unwrap_or_default()" },
+]

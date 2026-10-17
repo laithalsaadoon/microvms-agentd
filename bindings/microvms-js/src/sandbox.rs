@@ -249,7 +249,9 @@ impl BaseImageInput {
         CoreBaseImage {
             name: self.name,
             docker_ref: self.docker_ref,
-            working_dir: self.working_dir.unwrap_or_default(),
+            working_dir: self
+                .working_dir
+                .unwrap_or_else(|| CoreBaseImage::default().working_dir),
         }
     }
 }
