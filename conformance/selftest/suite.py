@@ -45,6 +45,7 @@ from selftest.quickstart import check_gh_logged_out
 from selftest.skew import check_version_skew_helpers
 from selftest.state12 import check_state12, check_state12_driver
 from selftest.stub import STUB_SOURCE
+from selftest.wrapped_user import check_wrapped_user
 
 
 def self_test() -> int:
@@ -80,6 +81,7 @@ def self_test() -> int:
         check_example_agent_ports(results)
         check_delayed_readiness(results)
         check_changed_shared_port(results)
+        check_wrapped_user(results)
         check_platform_measurements(results)
         check_poweroff_lane(results)
         check_isolated_known_vm(results)

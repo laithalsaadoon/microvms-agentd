@@ -35,6 +35,36 @@ Keep shared tools and data in the image. Upload each task's source after launch,
 and install its credentials after bootstrap. Every VM restored from an image
 receives that image's files and captured memory.
 
+## Preserve a task image's user
+
+To keep the final Dockerfile `USER` as the default for workload execs, opt in
+when wrapping it:
+
+```bash
+microvm dockerfile --wrap Task.Dockerfile --preserve-user > Dockerfile
+```
+
+The Rust function is `wrap_dockerfile_preserving_user`. Python exposes the
+same name and Node exposes `wrapDockerfilePreservingUser`. They take the same
+options as the existing wrapper. The existing wrapper retains its root default.
+
+The builder resolves the final stage's user, including a user inherited from a
+base or previous stage, variables expanded by `USER`, and numeric `uid:gid`
+values. A build-only daemon invocation records its effective uid and primary
+gid. The wrapper then restores `USER 0:0` and seals the record. It clears the task's
+entrypoint and sets `CMD ["/agentd"]`. It requires a builder that supports
+`COPY --chmod`. Workloads still begin only after daemon readiness.
+
+Later edits to `/etc/passwd` do not change the captured uid or gid.
+A matching passwd row supplies `HOME`, `USER` and `LOGNAME` at each request.
+A numeric uid with no row still works. The daemon clears supplementary groups.
+
+An image's explicit `AGENTD_DEFAULT_USER` takes precedence, including an empty
+value, which refuses implicit-user execs. A request's `user` overrides the image
+default, and its `group` overrides the default primary gid. A missing or bad
+record, or one writable by another user, causes implicit-user execs to fail.
+The control API remains available for an explicit-user repair.
+
 ## Obtain the daemon without the CLI
 
 The bindings expose the same release verification used by the CLI:

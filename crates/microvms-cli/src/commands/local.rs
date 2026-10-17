@@ -1059,9 +1059,14 @@ fn wrapped_dockerfile(args: &DockerfileArgs, task: &std::path::Path) -> Result<R
         )
         .with_source(error)
     })?;
-    let wrapped = microvms_core::control::artifact::wrap_dockerfile(
+    let wrap = if args.preserve_user {
+        microvms_core::control::wrap_dockerfile_preserving_user
+    } else {
+        microvms_core::control::wrap_dockerfile
+    };
+    let wrapped = wrap(
         &text,
-        &microvms_core::control::artifact::WrapOptions {
+        &microvms_core::control::WrapOptions {
             port: args.port,
             workdir: args.workdir.clone(),
             inherit_workdir: args.inherit_workdir,
@@ -1646,6 +1651,7 @@ mod tests {
             port: 9000,
             workdir: None,
             wrap: None,
+            preserve_user: false,
             inherit_workdir: false,
             agent: Vec::new(),
             claude_version: None,
@@ -1698,6 +1704,7 @@ mod tests {
             port: 8125,
             workdir: Some("/workspace".into()),
             wrap: None,
+            preserve_user: false,
             inherit_workdir: false,
             agent: Vec::new(),
             claude_version: None,
@@ -1727,6 +1734,7 @@ mod tests {
             port: 9000,
             workdir: Some("/srv".into()),
             wrap: None,
+            preserve_user: false,
             inherit_workdir: false,
             agent: Vec::new(),
             claude_version: None,
@@ -1761,6 +1769,7 @@ mod tests {
             port: 9000,
             workdir: None,
             wrap: None,
+            preserve_user: false,
             inherit_workdir: false,
             agent: Vec::new(),
             claude_version: None,

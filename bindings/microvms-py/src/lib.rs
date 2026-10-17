@@ -172,7 +172,7 @@ mod microvms {
     #[pymodule_export]
     use super::sandbox::{
         PyBaseImage, PyDetached, PyEnsuredImage, PyImage, PyManagedBaseVersion, PySandbox,
-        PyTeardownReport, egress_posture_for, wrap_dockerfile,
+        PyTeardownReport, egress_posture_for, wrap_dockerfile, wrap_dockerfile_preserving_user,
     };
     #[pymodule_export]
     use super::serve::{

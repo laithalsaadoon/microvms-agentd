@@ -395,6 +395,15 @@ every other `AGENTD_*` variable. `/v1/health` doesn't report it, because a new
 `Health` field would break the protocol crate's API. The daemon logs the value
 at startup instead.
 
+**An opt-in wrapped Dockerfile can preserve its final `USER`.** The wrapper's
+build-only capture records the builder-resolved numeric uid and primary gid,
+then restores root for daemon startup. `AGENTD_PRESERVE_IMAGE_USER=1` selects
+that sealed image record only when `AGENTD_DEFAULT_USER` is absent. The capture
+may use a uid without a passwd row because it supplies the gid too.
+`AGENTD_DEFAULT_USER` still takes a name or digits and needs a passwd row. Explicit request users and groups keep their precedence. A broken
+capture refuses starts that omit `user`. It never falls back to root. See
+[Preserve a task image's user](EMBEDDING.md#preserve-a-task-images-user).
+
 **A named shell is resolved on the child's `PATH`, the image's `PATH`, `/bin`,
 then `/usr/bin`.** The first executable regular file wins and runs as
 `<shell> -c <command>`. An absolute path is checked as given. A shell the guest
@@ -771,9 +780,9 @@ client reads the error body with the 64 KiB cap and an idle timeout.
 ## Image configuration discovery
 
 `GET /v1/discovery` needs bootstrap and a bearer token. The `default_user` field
-is a string, or `null` when the image has no `AGENTD_DEFAULT_USER`. A string gives
-the image's value, without a passwd lookup. Exec resolves the user for each
-request. This new route leaves `/v1/health` and its Rust type unchanged.
+is a string, or `null` when the image has no default user. A string gives the
+explicit `AGENTD_DEFAULT_USER` or captured numeric uid:gid, without a passwd lookup.
+Exec resolves the user for each request. This route leaves `/v1/health` unchanged.
 
 A 404 means the daemon lacks this route. `Session::discovery` returns `None` in
 that case, or `null` in Node. Other failures remain errors. A reply with a null

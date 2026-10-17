@@ -99,7 +99,7 @@ use std::time::Duration;
 
 pub use artifact::{
     BaseImage, Ecosystem, ProjectFiles, WrapOptions, artifact_content_hash, build_artifact,
-    default_dockerfile, wrap_dockerfile,
+    default_dockerfile, wrap_dockerfile, wrap_dockerfile_preserving_user,
 };
 pub use connector::{
     ConnectorIntent, EgressPosture, PLATFORM_HONOURS_OMITTED_EGRESS, egress_posture_for,

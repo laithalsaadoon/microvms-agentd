@@ -308,17 +308,35 @@ pub fn wrap_dockerfile(
     task_dockerfile: String,
     options: Option<WrapDockerfileOptions>,
 ) -> napi::Result<String, String> {
-    // IMAGE-5: a pass-through; the stanza, the guards and their messages are core's.
+    microvms_core::control::wrap_dockerfile(&task_dockerfile, &wrap_options(options)).map_err(js)
+}
+
+/// Preserve the final Dockerfile USER's uid and primary gid as the workload default.
+/// The builder resolves stage inheritance, variables and names. Explicit image
+/// AGENTD_DEFAULT_USER and request users win. The daemon starts as root and
+/// workloads start only after readiness. Requires COPY --chmod.
+#[napi]
+pub fn wrap_dockerfile_preserving_user(
+    task_dockerfile: String,
+    options: Option<WrapDockerfileOptions>,
+) -> napi::Result<String, String> {
+    microvms_core::control::wrap_dockerfile_preserving_user(
+        &task_dockerfile,
+        &wrap_options(options),
+    )
+    .map_err(js)
+}
+
+fn wrap_options(options: Option<WrapDockerfileOptions>) -> microvms_core::control::WrapOptions {
     let defaults = microvms_core::control::WrapOptions::default();
-    let opts = match options {
+    match options {
         Some(options) => microvms_core::control::WrapOptions {
             port: options.port.unwrap_or(defaults.port),
             workdir: options.workdir,
-            inherit_workdir: options.inherit_workdir.unwrap_or(false),
+            inherit_workdir: options.inherit_workdir.unwrap_or(defaults.inherit_workdir),
         },
         None => defaults,
-    };
-    microvms_core::control::wrap_dockerfile(&task_dockerfile, &opts).map_err(js)
+    }
 }
 
 /// The egress posture `sandbox.run` with these options would report, without launching.

@@ -31,7 +31,7 @@ suite = "rust"
 
 [[family.fault]]
 id = "default-user-dropped-at-build"
-transform = { file = "crates/agentd/src/exec.rs", replace = "            default_user,\n            is_executable: &is_executable_file,\n", with = "            default_user: None,\n            is_executable: &is_executable_file,\n" }
+transform = { file = "crates/agentd/src/exec.rs", replace = "            default_user,\n            captured_user: state.config().captured_user,\n", with = "            default_user: None,\n            captured_user: state.config().captured_user,\n" }
 
 [[family.fault]]
 id = "default-user-passwd-unread"
@@ -127,7 +127,7 @@ guard = "config::tests::from_env_reads_the_default_user_from_the_environment"
 run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "config::tests::from_env_reads_the_default_user_from_the_environment"]
 expect = "test-failed"
 suite = "rust"
-transform = { file = "crates/agentd/src/config.rs", replace = "        cfg.default_user = default_user(std::env::var_os(DEFAULT_USER_VAR));\n", with = "" }
+transform = { file = "crates/agentd/src/config.rs", replace = "            std::env::var_os(DEFAULT_USER_VAR),\n", with = "            None,\n" }
 
 # A workload hook handler demoted to the image's default user (uid 65534 in the test).
 [[fault]]

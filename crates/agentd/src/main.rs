@@ -12,6 +12,9 @@ use agentd::{AppState, Config, disk, exec, exec_start, identity, routes, serve};
 use tokio::net::TcpListener;
 
 fn main() -> std::io::Result<()> {
+    if let Some(result) = agentd::image_user::build_mode() {
+        return result;
+    }
     // Thread credentials are inherited at creation. Apply before even tracing
     // can create a thread, and never listen after a partial or failed reduction.
     let restricted = agentd::exec_capabilities::apply_from_env()?;

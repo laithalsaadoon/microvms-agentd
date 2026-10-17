@@ -3805,6 +3805,14 @@ def wrap_dockerfile(task_dockerfile: str, *, port: int |None = None, workdir: st
     `inherit_workdir` with nothing to inherit.
     """
 
+def wrap_dockerfile_preserving_user(task_dockerfile: str, *, port: int |None = None, workdir: str |None = None, inherit_workdir: bool = False) -> str:
+    """
+    Preserve the final Dockerfile USER's uid and primary gid as the workload default.
+    The builder resolves stage inheritance, variables and names. Explicit image
+    AGENTD_DEFAULT_USER and request users win. The daemon starts as root and
+    workloads start only after readiness. Requires COPY --chmod.
+    """
+
 # `microvms_core::VERSION`, added by the module's `#[pymodule_init]`. The **core's**
 # version and not this crate's: what a caller needs to know is which client they are
 # talking through.

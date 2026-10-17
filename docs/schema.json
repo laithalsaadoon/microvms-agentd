@@ -4,7 +4,7 @@
       "description": "`GET /v1/discovery`: authenticated image configuration, not resolved identity.\n\nA missing route means an older daemon; a present response with `default_user:\nnull` means no image default. Resolution still happens for each exec request.",
       "properties": {
         "default_user": {
-          "description": "The image's `AGENTD_DEFAULT_USER`, or `None` for the daemon/root default.",
+          "description": "The image's explicit default or captured numeric uid:gid, or `None` for root.",
           "type": [
             "string",
             "null"

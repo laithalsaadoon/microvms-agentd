@@ -148,7 +148,7 @@ run = [
 expect = "test-failed"
 suite = "bindings"
 message = "pip install pytestCOPY agentd"
-transform = { file = "crates/microvms-app/src/control/artifact.rs", replace = "    wrapped.push_str(task);\n    if !task.ends_with('\\n') {\n        wrapped.push('\\n');\n    }\n", with = "    wrapped.push_str(task);\n" }
+transform = { file = "crates/microvms-app/src/control/artifact.rs", replace = "    let mut wrapped = String::with_capacity(task.len() + stanza.len() + 16);\n    wrapped.push_str(task);\n    if !task.ends_with('\\n') {\n        wrapped.push('\\n');\n    }\n", with = "    let mut wrapped = String::with_capacity(task.len() + stanza.len() + 16);\n    wrapped.push_str(task);\n" }
 
 [[fault]]
 id = "parity-ts-wrap-newline"
@@ -161,7 +161,7 @@ run = [
 expect = "test-failed"
 suite = "bindings"
 message = "pip install pytestCOPY agentd"
-transform = { file = "crates/microvms-app/src/control/artifact.rs", replace = "    wrapped.push_str(task);\n    if !task.ends_with('\\n') {\n        wrapped.push('\\n');\n    }\n", with = "    wrapped.push_str(task);\n" }
+transform = { file = "crates/microvms-app/src/control/artifact.rs", replace = "    let mut wrapped = String::with_capacity(task.len() + stanza.len() + 16);\n    wrapped.push_str(task);\n    if !task.ends_with('\\n') {\n        wrapped.push('\\n');\n    }\n", with = "    let mut wrapped = String::with_capacity(task.len() + stanza.len() + 16);\n    wrapped.push_str(task);\n" }
 
 [[family]]
 guard = "bindings/microvms-py/tests/test_parity_cases.py::test_every_area_and_the_sentinel_run"

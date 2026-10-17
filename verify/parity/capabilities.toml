@@ -504,6 +504,13 @@ py = "wrap_dockerfile"
 ts = "wrapDockerfile"
 
 [[capability]]
+id = "wrap-dockerfile-preserve-user"
+core = "microvms_core::control::artifact::wrap_dockerfile_preserving_user"
+cli = "dockerfile --preserve-user"
+py = "wrap_dockerfile_preserving_user"
+ts = "wrapDockerfilePreservingUser"
+
+[[capability]]
 id = "default-dockerfile"
 core = "microvms_core::control::artifact::default_dockerfile"
 cli = "dockerfile"
@@ -1043,7 +1050,7 @@ py = ["AgentVm.prompt(reap_group_on_exit)", "AgentVm.prompt_sync(reap_group_on_e
 [[default]]
 id = "image-inherit-workdir"
 core = "image.inheritWorkdir"
-py = ["Sandbox.build_artifact(inherit_workdir)", "Sandbox.build_image(inherit_workdir)", "Sandbox.preflight(inherit_workdir)", "wrap_dockerfile(inherit_workdir)", "Sandbox.build_image_async(inherit_workdir)"]
+py = ["Sandbox.build_artifact(inherit_workdir)", "Sandbox.build_image(inherit_workdir)", "Sandbox.preflight(inherit_workdir)", "wrap_dockerfile(inherit_workdir)", "wrap_dockerfile_preserving_user(inherit_workdir)", "Sandbox.build_image_async(inherit_workdir)"]
 
 [[default]]
 id = "image-repair-identity"

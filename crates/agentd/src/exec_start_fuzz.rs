@@ -239,6 +239,7 @@ fn start_resolution() {
                 passwd: &passwd,
                 group,
                 default_user,
+                captured_user: false,
                 is_executable: &exists,
             },
         );

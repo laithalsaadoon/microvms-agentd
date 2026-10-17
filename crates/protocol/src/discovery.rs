@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[non_exhaustive]
 pub struct Discovery {
-    /// The image's `AGENTD_DEFAULT_USER`, or `None` for the daemon/root default.
+    /// The image's explicit default or captured numeric uid:gid, or `None` for root.
     // A custom reader makes absence an error while retaining explicit null. The
     // schema function likewise makes the property required while keeping it nullable.
     #[serde(deserialize_with = "Option::<String>::deserialize")]

@@ -1242,6 +1242,7 @@ fn build_command(
             passwd: &passwd,
             group: &group,
             default_user,
+            captured_user: state.config().captured_user,
             is_executable: &is_executable_file,
         },
     )?;

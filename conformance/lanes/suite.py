@@ -77,6 +77,7 @@ from lanes.state12 import drive_state12
 from lanes.suspend import drive_auto_resume, drive_suspend_resume
 from lanes.teardown import drive_teardown, read_daemon_logs
 from lanes.tunnel import drive_tunnel_identity
+from lanes.wrapped_user import drive_wrapped_user
 
 
 def sh(cmd: list[str], cwd: Path | None = None) -> str:
@@ -458,6 +459,9 @@ def run_suite(args: argparse.Namespace) -> int:
                 binary,
                 aws,
                 results,
+            )
+            run_section(
+                results, "wrapped_user", drive_wrapped_user, cli, binary, aws, results
             )
             run_section(results, "poweroff", drive_poweroff, cli, binary, aws, results)
             run_section(

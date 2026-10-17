@@ -609,6 +609,63 @@ impl Default for WrapOptions {
 /// escape directive, continuations, comments, heredoc bodies — and no further: it finds a
 /// Dockerfile that cannot take the stanza, it does not validate one.
 pub fn wrap_dockerfile(task: &str, opts: &WrapOptions) -> Result<String, Error> {
+    let scan = validate_wrap(task, opts)?;
+    let workdir = opts.workdir.as_deref().filter(|dir| !dir.is_empty());
+    let stanza = agentd_stanza(opts.port, workdir, None);
+    let mut wrapped = String::with_capacity(task.len() + stanza.len() + 16);
+    wrapped.push_str(task);
+    if !task.ends_with('\n') {
+        wrapped.push('\n');
+    }
+    if scan
+        .last_user
+        .as_deref()
+        .is_some_and(|user| !is_root_user(user))
+    {
+        wrapped.push_str("USER root\n");
+    }
+    wrapped.push_str(&stanza);
+    Ok(wrapped)
+}
+
+/// Preserve the final Dockerfile USER as the default identity for workload execs.
+///
+/// This is opt-in: [`wrap_dockerfile`] retains its historical root-default behavior.
+/// The builder, not the client, resolves final-stage inheritance, USER variables,
+/// names and numeric ids. A build-only agentd invocation records its effective uid
+/// and primary gid, then the stanza restores root and seals that record. No workload
+/// starts before readiness, and the daemon remains the image's CMD.
+///
+/// An explicit `AGENTD_DEFAULT_USER` in the image overrides the captured identity,
+/// including an empty value (which refuses implicit-user execs). A request's `user`
+/// overrides either default; its `group` overrides the default primary gid. The
+/// captured ids are fixed at build time; passwd identity variables are still
+/// resolved per request. Supplementary groups follow the daemon's existing policy
+/// and are cleared. The builder must support `COPY --chmod`.
+pub fn wrap_dockerfile_preserving_user(task: &str, opts: &WrapOptions) -> Result<String, Error> {
+    validate_wrap(task, opts)?;
+    let workdir = opts.workdir.as_deref().filter(|dir| !dir.is_empty());
+    let stanza = agentd_stanza(opts.port, workdir, None);
+    let mut wrapped = String::with_capacity(task.len() + stanza.len() + 256);
+    wrapped.push_str(task);
+    if !task.ends_with('\n') {
+        wrapped.push('\n');
+    }
+    // Reuse the required context asset as a writable placeholder. This works even
+    // for a numeric USER with no writable directory or shell in the final image.
+    wrapped.push_str(concat!(
+        "COPY --chmod=0755 agentd /agentd\n",
+        "COPY --chmod=0666 agentd /agentd-image-user.json\n",
+        "RUN [\"/agentd\", \"--capture-image-user\"]\n",
+        "USER 0:0\n",
+        "RUN [\"/agentd\", \"--seal-image-user\"]\n",
+        "ENV AGENTD_PRESERVE_IMAGE_USER=1\n",
+    ));
+    wrapped.push_str(&stanza);
+    Ok(wrapped)
+}
+
+fn validate_wrap(task: &str, opts: &WrapOptions) -> Result<Instructions, Error> {
     if dockerfile_from_ref(task).is_none() {
         return Err(Error::invalid_arg(
             "the task Dockerfile has no FROM, so there is no image to append the agentd \
@@ -660,21 +717,7 @@ pub fn wrap_dockerfile(task: &str, opts: &WrapOptions) -> Result<String, Error> 
         ));
     }
 
-    let stanza = agentd_stanza(opts.port, workdir, None);
-    let mut wrapped = String::with_capacity(task.len() + stanza.len() + 16);
-    wrapped.push_str(task);
-    if !task.ends_with('\n') {
-        wrapped.push('\n');
-    }
-    if scan
-        .last_user
-        .as_deref()
-        .is_some_and(|user| !is_root_user(user))
-    {
-        wrapped.push_str("USER root\n");
-    }
-    wrapped.push_str(&stanza);
-    Ok(wrapped)
+    Ok(scan)
 }
 
 /// Whether a `USER` value names root: `root` or `0`, with no group or a root group.
@@ -2096,6 +2139,32 @@ mod tests {
         );
         let wrapped = wrap_dockerfile("FROM x\r\n", &WrapOptions::default()).expect("wraps");
         assert!(wrapped.starts_with("FROM x\r\nCOPY agentd"), "{wrapped}");
+    }
+
+    /// IMAGE-2: the builder executes capture with the final USER before restoring
+    /// root for sealing and daemon startup, regardless of how the task chose it.
+    #[test]
+    fn preserving_user_captures_before_root_and_keeps_the_daemon_as_cmd() {
+        for task in [
+            "FROM x\nUSER app\n",
+            "FROM x\nUSER 4242:4343\n",
+            "FROM x AS builder\nUSER ignored\nFROM y\n",
+            "FROM x AS base\nUSER app\nFROM base\n",
+            "FROM x\nARG who=app\nUSER ${who}\n",
+            "FROM x\nENV AGENTD_DEFAULT_USER=root\nUSER app\n",
+        ] {
+            let wrapped = wrap_dockerfile_preserving_user(task, &WrapOptions::default()).unwrap();
+            assert!(wrapped.starts_with(task));
+            let tail = &wrapped[task.len()..];
+            assert!(tail.find("--capture-image-user").unwrap() < tail.find("USER 0:0").unwrap());
+            assert!(tail.find("USER 0:0").unwrap() < tail.find("--seal-image-user").unwrap());
+            assert!(tail.contains("ENV AGENTD_PRESERVE_IMAGE_USER=1"));
+            assert!(tail.ends_with("ENTRYPOINT []\nCMD [\"/agentd\"]\n"));
+            assert!(!tail.contains("AGENTD_DEFAULT_USER="));
+        }
+        for invalid in ["USER app\n", "FROM x\nRUN echo \\"] {
+            assert!(wrap_dockerfile_preserving_user(invalid, &WrapOptions::default()).is_err());
+        }
     }
 
     /// **IMAGE-3.** Each refusal on its own, against an otherwise wrappable task, names its

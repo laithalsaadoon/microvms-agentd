@@ -174,6 +174,7 @@ pub struct Guest<'a> {
     pub group: &'a str,
     /// The image's default user (`Config::default_user`), for a request that names none.
     pub default_user: Option<&'a str>,
+    pub captured_user: bool,
     /// Whether a path is an executable regular file. The real check is
     /// [`is_executable_file`]; tests and the fuzz harness hand in a fake filesystem.
     pub is_executable: &'a dyn Fn(&Path) -> bool,
@@ -294,10 +295,22 @@ fn default_user_row<'a>(name: &str, rows: &'a [PasswdRow]) -> Result<&'a PasswdR
 fn resolve_request_user<'a>(
     request: &StartRequest,
     default_user: Option<&str>,
+    captured_user: bool,
     rows: &'a [PasswdRow],
 ) -> Result<Option<User<'a>>, Rejection> {
     match (&request.user, default_user) {
         (Some(spec), _) => resolve_user(spec, rows).map(Some),
+        (None, Some(name)) if captured_user => {
+            let identity = captured_identity(name).ok_or_else(|| Rejection::new(
+                ERROR_UNKNOWN_USER,
+                format!("the request names no user, and the default user {name:?} that {DEFAULT_USER_VAR} sets is not a numeric uid:gid pair"),
+            ))?;
+            Ok(Some(User {
+                uid: identity.0,
+                row: rows.iter().find(|row| row.uid == identity.0),
+                primary_gid: false,
+            }))
+        }
         (None, Some(name)) => match default_user_row(name, rows) {
             Ok(row) => Ok(Some(User {
                 uid: row.uid,
@@ -311,6 +324,11 @@ fn resolve_request_user<'a>(
         },
         (None, None) => Ok(None),
     }
+}
+
+fn captured_identity(value: &str) -> Option<(u32, u32)> {
+    let (uid, gid) = value.split_once(':')?;
+    Some((digits(uid)?, digits(gid)?))
 }
 
 /// A group by gid or name (AGENTD-7); an unmatched name is `unknown_group` (AGENTD-8).
@@ -393,7 +411,7 @@ pub fn plan(request: &StartRequest, guest: &Guest<'_>) -> Result<Plan, Rejection
     } else {
         Vec::new()
     };
-    let user = resolve_request_user(request, guest.default_user, &passwd)?;
+    let user = resolve_request_user(request, guest.default_user, guest.captured_user, &passwd)?;
 
     let groups = match &request.group {
         Some(NameOrId::Name(_)) => parse_group(guest.group),
@@ -404,6 +422,14 @@ pub fn plan(request: &StartRequest, guest: &Guest<'_>) -> Result<Plan, Rejection
         // A named user takes its row's primary group, the way `su` and `docker -u name` do,
         // and so does the default user, however the image spelled it (AGENTD-22). A uid the
         // request gives keeps the daemon's group, which is what protocol 1 did (AGENTD-16).
+        None if request.user.is_none()
+            && guest.default_user.is_some_and(|value| value.contains(':')) =>
+        {
+            guest
+                .default_user
+                .and_then(captured_identity)
+                .map(|(_, gid)| gid)
+        }
         None => user
             .as_ref()
             .filter(|user| user.primary_gid)
@@ -564,6 +590,7 @@ mod tests {
                 passwd: PASSWD,
                 group: GROUP,
                 default_user,
+                captured_user: false,
                 is_executable: &exec,
             },
         )
@@ -841,6 +868,57 @@ mod tests {
         assert_eq!((plan.uid, plan.gid), (Some(1000), Some(50)));
         let plan = resolve_with_default(&grouped, Some("1002")).expect("resolves");
         assert_eq!((plan.uid, plan.gid), (Some(1002), Some(50)));
+    }
+
+    /// AGENTD-22, AGENTD-23: captured ids do not require a passwd row, do not inherit
+    /// root's primary gid, and never override an explicit request user or group.
+    #[test]
+    fn captured_numeric_identity_preserves_the_primary_gid_and_explicit_precedence() {
+        let resolve_with_capture = |request: &StartRequest, default_user| {
+            plan(
+                request,
+                &Guest {
+                    launch_env: &Env::new(),
+                    image_env: None,
+                    passwd: PASSWD,
+                    group: GROUP,
+                    default_user,
+                    captured_user: true,
+                    is_executable: &|_| true,
+                },
+            )
+        };
+        // The explicit environment syntax stays strict: a uid without a passwd
+        // row is permitted only for the builder's separate sealed capture.
+        assert!(
+            resolve_with_default(&request(None, None, false.into()), Some("4242:4343")).is_err()
+        );
+        let implicit = request(None, None, false.into());
+        let plan = resolve_with_capture(&implicit, Some("4242:4343")).unwrap();
+        assert_eq!((plan.uid, plan.gid), (Some(4242), Some(4343)));
+        let known = resolve_with_capture(&implicit, Some("1000:4343")).unwrap();
+        assert_eq!((known.uid, known.gid), (Some(1000), Some(4343)));
+        assert_eq!(known.environment()["USER"], "agent");
+        let group = request(None, Some("staff".into()), false.into());
+        let plan = resolve_with_capture(&group, Some("4242:4343")).unwrap();
+        assert_eq!((plan.uid, plan.gid), (Some(4242), Some(50)));
+        let root = request(Some("root".into()), None, false.into());
+        let plan = resolve_with_capture(&root, Some("4242:4343")).unwrap();
+        assert_eq!((plan.uid, plan.gid), (Some(0), Some(0)));
+        for invalid in [
+            "4242:",
+            ":4343",
+            "4242:4343:0",
+            "agent:staff",
+            "4294967296:0",
+        ] {
+            assert_eq!(
+                resolve_with_capture(&implicit, Some(invalid))
+                    .unwrap_err()
+                    .error,
+                ERROR_UNKNOWN_USER
+            );
+        }
     }
 
     /// **AGENTD-23.** A user the request names wins over the default, `root` and `0`
