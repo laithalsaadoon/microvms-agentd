@@ -537,6 +537,28 @@ def control_plane_case(
     case: Case, _servers: Callable[..., SseServer]
 ) -> dict[str, Any]:
     plane = microvms.ControlPlane._parity_from_script(json.dumps(case.input["script"]))
+    if case.input["actions"] == ["sweep"]:
+        report = plane.sweep(
+            case.input["prefix"],
+            keep=case.input["keep"],
+            dry_run=case.input["dry_run"],
+        )
+        return {
+            "report": {
+                "dryRun": report.dry_run,
+                "imagesMatched": report.images_matched,
+                "imagesKept": report.images_kept,
+                "microvmsMatched": report.microvms_matched,
+                "microvmsTerminated": report.microvms_terminated,
+                "imagesDeleted": report.images_deleted,
+                "imagesInUse": report.images_in_use,
+                "failures": [
+                    {"resource": failure.resource, "message": failure.message}
+                    for failure in report.failures
+                ],
+            },
+            "calls": plane._parity_calls(),
+        }
     if case.input["actions"] == ["list"]:
         items = plane.list()
         plane.list_images()

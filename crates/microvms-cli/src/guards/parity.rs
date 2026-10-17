@@ -413,6 +413,26 @@ async fn parity_control_plane(case: &parity_corpus::Case) -> serde_json::Value {
         refusing: RefusingSeam::new(),
     };
     let state = TempDir::new("parity-control-plane");
+    if case.input_strings("actions") == ["sweep"] {
+        let mut arguments = vec![
+            "microvm",
+            "gc",
+            "--prefix",
+            case.input_str("prefix"),
+            "--region",
+            "us-east-1",
+        ];
+        let keep = case.input_strings("keep");
+        for name in &keep {
+            arguments.extend(["--keep", name]);
+        }
+        if !case.input_bool("dry_run") {
+            arguments.push("--yes");
+        }
+        let command = Cli::try_parse_from(arguments).unwrap().command;
+        let (result, _) = dispatch_with(&seam, &command, full_infra()).await;
+        return serde_json::json!({"report": result.unwrap().data, "calls": transport.calls()});
+    }
     if case.input_strings("actions") == ["list"] {
         let command = Cli::try_parse_from([
             "microvm",

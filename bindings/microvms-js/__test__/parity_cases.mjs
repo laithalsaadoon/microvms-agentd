@@ -536,6 +536,12 @@ async function tunnel(testCase) {
 
 async function controlPlane(testCase) {
   const plane = ControlPlane.parityFromScript(JSON.stringify(testCase.input.script));
+  if (testCase.input.actions.length === 1 && testCase.input.actions[0] === 'sweep') {
+    const report = await plane.sweep(testCase.input.prefix, {
+      keep: testCase.input.keep, dryRun: testCase.input.dry_run,
+    });
+    return { report, calls: plane.parityCalls() };
+  }
   if (testCase.input.actions.length === 1 && testCase.input.actions[0] === 'list') {
     const items = await plane.list();
     await plane.listImages();
