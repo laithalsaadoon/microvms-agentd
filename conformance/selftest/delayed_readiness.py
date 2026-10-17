@@ -7,10 +7,16 @@ import contextlib
 import copy
 import importlib.util
 import io
+import os
+import shlex
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from harness.constants import REPO
+from harness.constants import AGENT_PORT, REPO
 from harness.results import Results
 from lanes.delayed_readiness import delayed_recipe, measurement_outcome, timing_records
 
@@ -92,13 +98,95 @@ def check_delayed_readiness(results: Results) -> None:
     results.check(
         "delayed readiness image runs the supplied daemon behind the relay",
         "COPY agentd /agentd" in recipe
-        and "ENV AGENTD_PORT=9000" in recipe
+        and f"ENV AGENTD_PORT={AGENT_PORT}" in recipe
         and "ENTRYPOINT []" in recipe
         and 'CMD ["/agentd"]' in recipe
         and "mv /agentd /real-agentd" in recipe
-        and "export AGENTD_PORT=9001\\nexec /real-agentd" in recipe,
+        and "\\nexec /real-agentd\\n" in recipe,
     )
+    for front_port in dict.fromkeys((AGENT_PORT, 9001, 65535)):
+        with (
+            patch("lanes.delayed_readiness.AGENT_PORT", front_port),
+            patch("harness.image.AGENT_PORT", front_port),
+        ):
+            check_launcher_ports(results, delayed_recipe(), front_port)
     check_relay(results)
+
+
+def check_changed_shared_port(results: Results) -> None:
+    probe = Results(probe=True)
+    with (
+        patch("selftest.delayed_readiness.AGENT_PORT", 9001),
+        patch("lanes.delayed_readiness.AGENT_PORT", 9001),
+        patch("harness.image.AGENT_PORT", 9001),
+        contextlib.redirect_stdout(io.StringIO()),
+    ):
+        check_delayed_readiness(probe)
+    results.check(
+        "delayed readiness full self-test accepts shared port 9001",
+        not probe.failed,
+        repr(probe.failed),
+    )
+
+
+def check_launcher_ports(results: Results, recipe: str, front_port: int) -> None:
+    backend_port = int(
+        next(
+            line.removeprefix("ENV AGENTD_RELAY_BACKEND_PORT=")
+            for line in recipe.splitlines()
+            if line.startswith("ENV AGENTD_RELAY_BACKEND_PORT=")
+        )
+    )
+    line = next(
+        line for line in recipe.splitlines() if line.startswith("RUN mv /agentd ")
+    )
+    format_string = line.split("printf '", 1)[1].split("' > /agentd", 1)[0]
+    rendered = subprocess.run(
+        ["/bin/sh", "-c", 'printf "$1"', "launcher", format_string],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    with tempfile.TemporaryDirectory() as directory:
+        relay = Path(directory) / "relay.py"
+        relay.write_text(
+            'import os; print("relay=" + os.environ["AGENTD_PORT"]); '
+            'print("upstream=" + os.environ["AGENTD_RELAY_BACKEND_PORT"])'
+        )
+        daemon = Path(directory) / "daemon.sh"
+        daemon.write_text('#!/bin/sh\nprintf "daemon=%s\\n" "$AGENTD_PORT"\n')
+        daemon.chmod(0o700)
+        launcher = rendered.replace(
+            "python3 /delayed_ready.py",
+            f"{shlex.quote(sys.executable)} {shlex.quote(str(relay))}",
+        ).replace("/real-agentd", shlex.quote(str(daemon)))
+        process = subprocess.run(
+            ["/bin/sh", "-c", launcher],
+            env={
+                **os.environ,
+                "AGENTD_PORT": str(front_port),
+                "AGENTD_RELAY_BACKEND_PORT": str(backend_port),
+            },
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    results.check(
+        "delayed readiness relay inherits the front port before the daemon override "
+        f"at {front_port}",
+        process.returncode == 0
+        and 1 <= backend_port <= 65535
+        and backend_port != front_port
+        and f"ENV AGENTD_PORT={front_port}" in recipe.splitlines()
+        and sorted(process.stdout.splitlines())
+        == [
+            f"daemon={backend_port}",
+            f"relay={front_port}",
+            f"upstream={backend_port}",
+        ],
+        process.stderr,
+    )
 
 
 def check_relay(results: Results) -> None:
@@ -118,12 +206,15 @@ def check_relay(results: Results) -> None:
     )
     statuses = []
     with (
+        patch.dict(os.environ, {"AGENTD_RELAY_BACKEND_PORT": "19001"}),
         patch.object(
             module,
             "time",
             SimpleNamespace(monotonic=iter([1.0, 311.5]).__next__, sleep=sleeps.append),
         ),
-        patch.object(module.http.client, "HTTPConnection", return_value=connection),
+        patch.object(
+            module.http.client, "HTTPConnection", return_value=connection
+        ) as connect,
         contextlib.redirect_stdout(io.StringIO()) as output,
     ):
         relay = object.__new__(module.Relay)
@@ -140,6 +231,14 @@ def check_relay(results: Results) -> None:
         relay.command = "GET"
         relay.headers = {}
         relay.forward()
+    results.check(
+        "delayed readiness relay forwards to the configured backend",
+        connect.call_count == 2
+        and all(
+            call.args == ("127.0.0.1", 19001) and call.kwargs == {"timeout": 60}
+            for call in connect.call_args_list
+        ),
+    )
     results.check(
         "delayed readiness fixture sleeps only for ready and preserves the response",
         sleeps == [310]

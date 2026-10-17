@@ -25,7 +25,11 @@ from selftest.closed_output import (
 )
 from selftest.cost import check_cost_checks
 from selftest.default_user import check_default_user
-from selftest.delayed_readiness import check_delayed_readiness
+from selftest.defaults import check_agent_port, check_example_agent_ports
+from selftest.delayed_readiness import (
+    check_changed_shared_port,
+    check_delayed_readiness,
+)
 from selftest.ensure_image import check_ensure_image_section
 from selftest.harness import check_run_section
 from selftest.image_versions import check_image_versions_section
@@ -72,7 +76,10 @@ def self_test() -> int:
         check_doctor_region_lines(results)
         check_policy_lane(results)
         check_default_user(results)
+        check_agent_port(results, Path(tmp))
+        check_example_agent_ports(results)
         check_delayed_readiness(results)
+        check_changed_shared_port(results)
         check_platform_measurements(results)
         check_poweroff_lane(results)
         check_isolated_known_vm(results)

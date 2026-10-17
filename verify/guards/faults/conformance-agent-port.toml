@@ -1,0 +1,90 @@
+[[family]]
+guard = "conformance/run_rs.py --self-test: conformance/selftest/defaults.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "conformance-agent-port-frozen"
+message = "FAIL  conformance follows changed shared agent port 9001"
+transform = { file = "conformance/harness/constants.py", replace = 'AGENT_PORT = _agent_port_from_manifest(REPO / "docs" / "manifest.json")', with = "AGENT_PORT = 9000" }
+
+[[family.fault]]
+id = "conformance-agent-port-relay-frozen"
+message = "FAIL  conformance follows changed shared agent port 9001"
+transform = { file = "conformance/fixtures/delayed_ready.py", replace = 'int(os.environ["AGENTD_PORT"])', with = "9000" }
+
+[[family.fault]]
+id = "conformance-agent-port-relay-inheritance"
+message = "FAIL  delayed readiness relay inherits the front port before the daemon override"
+transform = { file = "conformance/lanes/delayed_readiness.py", replace = 'python3 /delayed_ready.py &\\n', with = 'AGENTD_PORT=9001 python3 /delayed_ready.py &\\n' }
+
+[[family.fault]]
+id = "conformance-agent-port-backend-collision"
+message = "FAIL  delayed readiness relay inherits the front port before the daemon override at 9001"
+transform = { file = "conformance/lanes/delayed_readiness.py", replace = "backend_port = 9002 if AGENT_PORT == 9001 else 9001", with = "backend_port = 9001" }
+
+[[family.fault]]
+id = "conformance-agent-port-backend-frozen"
+message = "FAIL  delayed readiness relay forwards to the configured backend"
+transform = { file = "conformance/fixtures/delayed_ready.py", replace = 'int(os.environ["AGENTD_RELAY_BACKEND_PORT"])', with = "9001" }
+
+[[family.fault]]
+id = "conformance-agent-port-stale-backend-assertion"
+message = "FAIL  delayed readiness full self-test accepts shared port 9001"
+transform = { file = "conformance/selftest/delayed_readiness.py", replace = 'and "\\nexec /real-agentd\\n" in recipe,', with = 'and "export AGENTD_PORT=9001\\nexec /real-agentd" in recipe,' }
+
+[[family.fault]]
+id = "conformance-agent-port-daemon-exec"
+message = "FAIL  delayed readiness image runs the supplied daemon behind the relay"
+transform = { file = "conformance/lanes/delayed_readiness.py", replace = 'exec /real-agentd\\n', with = '/real-agentd\\n' }
+
+[[family.fault]]
+id = "conformance-agent-port-missing-fallback"
+message = "FAIL  conformance rejects missing agentPort"
+transform = { file = "conformance/harness/constants.py", replace = ']["agentPort"]', with = '].get("agentPort", 9000)' }
+
+[[family.fault]]
+id = "conformance-agent-port-number-coercion"
+message = "FAIL  conformance rejects boolean"
+transform = { file = "conformance/harness/constants.py", replace = "type(port) is not int", with = "not isinstance(port, (int, float))" }
+
+[[family.fault]]
+id = "conformance-agent-port-range"
+message = "FAIL  conformance rejects zero"
+transform = { file = "conformance/harness/constants.py", replace = " or not 1 <= port <= 65535", with = "" }
+
+[[family.fault]]
+id = "conformance-agent-port-read-fallback"
+message = "FAIL  conformance rejects missing manifest"
+transform = { file = "conformance/harness/constants.py", replace = "        raise ValueError(message) from exc", with = "        return 9000" }
+
+[[family.fault]]
+id = "conformance-agent-port-example-coding-agents"
+message = "FAIL  example coding-agents-on-bedrock follows the shared daemon port"
+transform = { file = "examples/coding-agents-on-bedrock/Dockerfile", replace = "ENV AGENTD_PORT=9000", with = "ENV AGENTD_PORT=9001" }
+
+[[family.fault]]
+id = "conformance-agent-port-example-strands"
+message = "FAIL  example strands-box-codex-sdk follows the shared daemon port"
+transform = { file = "examples/strands-box-codex-sdk/Dockerfile", replace = "ENV AGENTD_PORT=9000", with = "ENV AGENTD_PORT=9001" }
+
+[[family.fault]]
+id = "conformance-agent-port-example-prefetch"
+message = "FAIL  example s3-prefetch-at-build follows the shared daemon port"
+transform = { file = "examples/s3-prefetch-at-build/Dockerfile", replace = "ENV AGENTD_PORT=9000", with = "ENV AGENTD_PORT=9001" }
+
+[[family.fault]]
+id = "conformance-agent-port-example-code-server"
+message = "FAIL  example code-server-remote-dev follows the shared daemon port"
+transform = { file = "examples/code-server-remote-dev/Dockerfile", replace = "ENV AGENTD_PORT=9000", with = "ENV AGENTD_PORT=9001" }
+
+[[family.fault]]
+id = "conformance-agent-port-example-expose"
+message = "FAIL  example code-server-remote-dev follows the shared daemon port"
+transform = { file = "examples/code-server-remote-dev/Dockerfile", replace = "EXPOSE 9000", with = "EXPOSE 9001" }
+
+[[family.fault]]
+id = "conformance-agent-port-example-missing"
+message = "FAIL  example coding-agents-on-bedrock follows the shared daemon port"
+transform = { file = "examples/coding-agents-on-bedrock/Dockerfile", replace = "ENV AGENTD_PORT=9000", with = "" }

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from harness.cli import Cli
-from harness.constants import BASELINE_MEMORY_MIB, REPO, SERVICE
+from harness.constants import AGENT_PORT, BASELINE_MEMORY_MIB, REPO, SERVICE
 from harness.envelope import KindError
 from harness.image import conformance_dockerfile, resolve_base_ref
 from harness.results import Results
@@ -35,16 +35,21 @@ def delayed_recipe() -> str:
     """Keep agentd as PID 1; the relay only inserts the measured hook delay."""
     source = (REPO / "conformance/fixtures/delayed_ready.py").read_bytes()
     encoded = base64.b64encode(source).decode("ascii")
+    # Keep the private listener distinct even if the shared front port changes.
+    backend_port = 9002 if AGENT_PORT == 9001 else 9001
     return (
         conformance_dockerfile(resolve_base_ref())
+        + f"ENV AGENTD_RELAY_BACKEND_PORT={backend_port}\n"
         + "RUN dnf install -y python3 && dnf clean all\n"
         + f"RUN printf '%s' '{encoded}' | base64 -d > /delayed_ready.py\n"
         # Keep the declared hook port and bootstrap command compatible with core
         # preflight. Only the daemon process moves behind the relay; exec keeps
         # the supplied daemon as PID 1 after the launcher starts the relay.
+        # The background child inherits the front port before the export below;
+        # changing the parent's environment cannot change that child snapshot.
         + "RUN mv /agentd /real-agentd && "
         + "printf '#!/bin/sh\\npython3 /delayed_ready.py &\\n"
-        + "export AGENTD_PORT=9001\\nexec /real-agentd\\n' "
+        + f"export AGENTD_PORT={backend_port}\\nexec /real-agentd\\n' "
         + "> /agentd && chmod 0755 /agentd\n"
     )
 
