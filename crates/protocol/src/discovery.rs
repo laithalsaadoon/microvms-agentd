@@ -29,3 +29,33 @@ impl Discovery {
 fn optional_user_schema(generator: &mut SchemaGenerator) -> Schema {
     generator.subschema_for::<Option<String>>()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn discovery_schema_requires_a_nullable_string_default() {
+        let schema = serde_json::to_value(schemars::schema_for!(Discovery)).unwrap();
+        assert_eq!(schema["required"], json!(["default_user"]));
+        assert_eq!(
+            schema["properties"]["default_user"]["type"],
+            json!(["string", "null"])
+        );
+        assert_ne!(schema["additionalProperties"], false);
+
+        // Future fields remain readable without weakening this field's value contract.
+        let discovery: Discovery = serde_json::from_value(json!({
+            "default_user": null,
+            "future_field": true
+        }))
+        .unwrap();
+        assert_eq!(discovery.default_user, None);
+        for invalid in [json!(true), json!(42), json!([]), json!({})] {
+            assert!(
+                serde_json::from_value::<Discovery>(json!({ "default_user": invalid })).is_err()
+            );
+        }
+    }
+}
