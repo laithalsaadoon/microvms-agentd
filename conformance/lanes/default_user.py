@@ -31,6 +31,11 @@ SYNC_WRITE = (
 
 def default_user_checks(report: dict[str, Any], results: Results) -> None:
     """Verdicts are separate from I/O so missing or wrong observations have negative twins."""
+    results.check(
+        "AGENTD-22 authenticated discovery reports the configured image user",
+        report.get("discoveryAvailable") is True
+        and report.get("discoveryUser") == CONFORMANCE_USER,
+    )
     sync_exit = report.get("syncExit")
     root_exit = report.get("missingRootExit")
     results.check(
@@ -115,6 +120,9 @@ def drive_default_user(cli: Cli, binary: Path, aws: Any, results: Results) -> No
             "syncExit": launched.data.get("execExitCode"),
             "syncStdout": launched.data.get("stdout"),
         }
+        discovery = cli.call("discovery", *attach).data
+        report["discoveryAvailable"] = discovery.get("available")
+        report["discoveryUser"] = discovery.get("defaultUser")
         files = cli.call(
             "exec",
             "cat /workspace/source.txt; printf '\\n'; cat /workspace/result/output.txt; printf '\\n'; stat -c '%u:%g' /workspace/source.txt /workspace/result/output.txt",

@@ -103,6 +103,7 @@ TWINS: dict[str, set[str]] = {
         "download_tar_async",
         "file_exists_async",
         "health_async",
+        "discovery_async",
         "kill_async",
         "port_forward_async",
         "procs_async",
@@ -817,3 +818,24 @@ def test_an_unused_port_refuses_connections() -> None:
     """The refused-connection tests above rely on port 9 refusing on loopback."""
     with socket.socket() as probe:
         assert probe.connect_ex(("127.0.0.1", 9)) != 0
+
+
+@pytest.mark.parametrize(
+    "status,value,available",
+    [
+        (404, {}, False),
+        (200, {"default_user": None}, True),
+        (200, {"default_user": "worker"}, True),
+    ],
+)
+def test_discovery_old_and_new_peers(daemon, status, value, available):
+    def route(method, path, body):
+        assert (method, path) == ("GET", "/v1/discovery")
+        return status, json.dumps(value).encode(), "application/json"
+
+    server = daemon(route)
+    session = server.session
+    for result in (session.discovery(), asyncio.run(session.discovery_async())):
+        assert (result is not None) is available
+        if result is not None:
+            assert result.default_user == value["default_user"]

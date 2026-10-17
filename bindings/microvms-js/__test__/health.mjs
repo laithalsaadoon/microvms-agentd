@@ -81,3 +81,21 @@ test('an older daemon reports empty lists', async () => {
   assert.equal(health.hooksDropped, 0);
   assert.equal(health.imageEnvKeys ?? null, null);
 });
+
+
+test('discovery distinguishes older peers, root, and configured users', async () => {
+  for (const [status, value] of [[404, {}], [200, {default_user: null}], [200, {default_user: 'worker'}]]) {
+    const server = http.createServer((request, response) => {
+      assert.equal(request.url, '/v1/discovery');
+      assert.equal(request.headers.authorization, 'Bearer token');
+      response.writeHead(status, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(value));
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const result = await Session.direct(`http://127.0.0.1:${server.address().port}`, 'token').discovery();
+      assert.equal(result != null, status === 200);
+      if (result) assert.equal(result.defaultUser ?? null, value.default_user);
+    } finally { server.close(); }
+  }
+});

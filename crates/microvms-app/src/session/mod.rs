@@ -395,6 +395,31 @@ impl Session {
             .await
     }
 
+    /// Discover image configuration without changing the published health response.
+    ///
+    /// `None` means the daemon predates discovery (HTTP 404). A present response
+    /// with an explicit null `default_user` means the historical daemon/root default. Authentication,
+    /// transport and malformed response errors remain errors, never guessed defaults.
+    pub async fn discovery(&self) -> Result<Option<protocol::discovery::Discovery>, Error> {
+        let response = self
+            .transport
+            .request(HttpRequest::new("GET", "/v1/discovery"))
+            .await?;
+        if response.status == 404 {
+            return Ok(None);
+        }
+        response.error_for_status("GET", "/v1/discovery")?;
+        serde_json::from_slice(&response.body)
+            .map(Some)
+            .map_err(|err| {
+                Error::wire(
+                    WireKind::ProtocolError,
+                    format!("GET /v1/discovery answered an invalid response: {err}"),
+                )
+                .with_source(err)
+            })
+    }
+
     /// Keeps the VM awake by polling health until `stop` resolves or the policy ends it.
     ///
     /// See [`keepalive`]: idleness is inbound traffic only, so this is the supported way to
@@ -1187,6 +1212,46 @@ mod tests {
                  rejects as if the token were bad",
                 request.method,
                 request.path
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn discovery_distinguishes_old_peers_from_root_and_named_defaults() {
+        let recorder = Recorder::with([
+            Reply::Body(404, Vec::new()),
+            Reply::ok(serde_json::json!({"default_user": null})),
+            Reply::ok(serde_json::json!({"default_user": "1000", "future": true})),
+            Reply::Body(401, Vec::new()),
+            Reply::Body(503, Vec::new()),
+            Reply::ok(serde_json::json!({"default_user": 1000})),
+            Reply::ok(serde_json::json!({})),
+        ]);
+        let (session, _, _) = session_with(Arc::clone(&recorder));
+        assert_eq!(session.discovery().await.unwrap(), None);
+        assert_eq!(
+            session.discovery().await.unwrap().unwrap().default_user,
+            None
+        );
+        assert_eq!(
+            session
+                .discovery()
+                .await
+                .unwrap()
+                .unwrap()
+                .default_user
+                .as_deref(),
+            Some("1000")
+        );
+        for _ in 0..4 {
+            assert!(session.discovery().await.is_err());
+        }
+        for request in recorder.requests() {
+            assert_eq!(request.method, "GET");
+            assert_eq!(request.path, "/v1/discovery");
+            assert_eq!(
+                request.header("authorization"),
+                Some("Bearer agent-token-abcdef")
             );
         }
     }

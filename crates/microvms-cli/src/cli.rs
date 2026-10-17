@@ -163,6 +163,9 @@ pub enum Command {
     /// drain a VM rather than to keep scheduling work onto it.
     Health(HealthArgs),
 
+    /// Discover the image default exec user; unavailable on older daemons.
+    Discovery(HealthArgs),
+
     /// Keep a running MicroVM awake while work runs inside it, by polling its health.
     ///
     /// The platform counts only inbound requests through the endpoint as activity, so an exec
@@ -3000,6 +3003,7 @@ mod tests {
                 "exec",
                 "wait",
                 "health",
+                "discovery",
                 "keepalive",
                 "ack",
                 "kill",

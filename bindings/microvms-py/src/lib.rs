@@ -181,8 +181,8 @@ mod microvms {
     };
     #[pymodule_export]
     use super::session::{
-        PyHandlerOutcome, PyHealth, PyHookObservation, PyIdentityStep, PyProcGroup, PySession,
-        session_constants,
+        PyDiscovery, PyHandlerOutcome, PyHealth, PyHookObservation, PyIdentityStep, PyProcGroup,
+        PySession, session_constants,
     };
     #[pymodule_export]
     use super::workspace::{PyDownloadedFile, PySyncReport};

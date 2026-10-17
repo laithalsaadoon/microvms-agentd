@@ -557,6 +557,16 @@ pub const EXEC_KILL: &[Status] = &[
     UNKNOWN_EXEC,
 ];
 
+pub const DISCOVERY: &[Status] = &[
+    Status::new(
+        StatusCode::OK,
+        "",
+        "the image's configured default exec user, without resolving a passwd row",
+    ),
+    UNAUTHORIZED,
+    NOT_BOOTSTRAPPED,
+];
+
 pub const PROCS: &[Status] = &[
     Status::new(
         StatusCode::OK,

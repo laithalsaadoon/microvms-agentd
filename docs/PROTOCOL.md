@@ -767,3 +767,17 @@ The client caps bodies it buffers at 512 MiB for success and 64 KiB for errors.
 It checks both the declared length and the bytes read from the body. These caps
 do not apply to successful streams. If a request to open a stream fails, the
 client reads the error body with the 64 KiB cap and an idle timeout.
+
+## Image configuration discovery
+
+`GET /v1/discovery` needs bootstrap and a bearer token. The `default_user` field
+is a string, or `null` when the image has no `AGENTD_DEFAULT_USER`. A string gives
+the image's value, without a passwd lookup. Exec resolves the user for each
+request. This new route leaves `/v1/health` and its Rust type unchanged.
+
+A 404 means the daemon lacks this route. `Session::discovery` returns `None` in
+that case, or `null` in Node. Other failures remain errors. A reply with a null
+user differs from a missing route. Readers ignore extra fields in future replies.
+
+Use `microvm discovery --name NAME`, `session.discovery()` in Python and Node,
+or `Session::discovery` in Rust. Python also provides `discovery_async`.

@@ -791,6 +791,35 @@ fn phase_name(phase: microvms_core::protocol::exec::Phase) -> &'static str {
     }
 }
 
+/// Discover the configured image user separately from the exhaustive health type.
+pub async fn discovery<O: std::io::Write, E: std::io::Write>(
+    ctx: &mut Ctx<'_, O, E>,
+    args: &HealthArgs,
+) -> Result<Rendered, CliError> {
+    let (session, microvm_id) = attach(ctx, &args.region, &args.attach).await?;
+    let discovery = session.discovery().await?;
+    let mut data = Map::new();
+    data.insert("microvmId".into(), json!(microvm_id));
+    data.insert("available".into(), json!(discovery.is_some()));
+    data.insert(
+        "defaultUser".into(),
+        json!(
+            discovery
+                .as_ref()
+                .and_then(|value| value.default_user.as_deref())
+        ),
+    );
+    let text = match discovery {
+        None => "discovery unavailable on this daemon".to_string(),
+        Some(value) => format!(
+            "default exec user: {}",
+            value.default_user.as_deref().unwrap_or("daemon/root")
+        ),
+    };
+    let (kind, _) = response_type("discovery");
+    Ok(Rendered::ok(kind, data, text.clone(), text))
+}
+
 // ── health ──────────────────────────────────────────────────────────────────
 
 /// `microvm keepalive`: hold a VM awake from outside while an exec works inside it.

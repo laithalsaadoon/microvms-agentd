@@ -76,6 +76,14 @@ const DEFAULT_RUN_SYNC_TIMEOUT: f64 = microvms_core::session::DEFAULT_EXEC_WAIT.
 /// `run_to_completion`'s default `client_grace_sec`, from the core so the two cannot drift.
 const DEFAULT_CLIENT_GRACE_SEC: f64 = DEFAULT_CLIENT_GRACE.as_secs_f64();
 
+/// Image configuration. A missing discovery response means an older daemon.
+#[pyclass(frozen, name = "Discovery", module = "microvms")]
+pub struct PyDiscovery {
+    /// Configured user, or None for the daemon/root default. Resolved per exec.
+    #[pyo3(get)]
+    default_user: Option<String>,
+}
+
 /// The daemon's liveness answer. `bootstrapped` is the useful field.
 #[pyclass(frozen, name = "Health", module = "microvms")]
 pub struct PyHealth {
@@ -565,6 +573,16 @@ impl PySession {
         }
     }
 
+    fn discovery_op(
+        &self,
+    ) -> impl Future<Output = Result<Option<PyDiscovery>, Error>> + Send + 'static {
+        session_op!(self.held(), |session| session.discovery().await.map(
+            |value| value.map(|value| PyDiscovery {
+                default_user: value.default_user
+            })
+        ))
+    }
+
     fn health_op(&self) -> impl Future<Output = Result<PyHealth, Error>> + Send + 'static {
         session_op!(self.held(), |session| session
             .health()
@@ -997,6 +1015,16 @@ impl PySession {
     #[getter]
     fn egress_posture(&self, py: Python<'_>) -> PyCoreResult<&'static str> {
         Ok(self.with(py, |session| Ok(session.egress_posture().as_str()))?)
+    }
+
+    /// Image configuration, or None if this daemon predates discovery.
+    fn discovery(&self, py: Python<'_>) -> PyCoreResult<Option<PyDiscovery>> {
+        Ok(runtime::block_on(py, self.discovery_op())?)
+    }
+
+    /// The awaitable twin of `discovery`.
+    async fn discovery_async(&self) -> PyCoreResult<Option<PyDiscovery>> {
+        Ok(runtime::spawn(self.discovery_op()).await?)
     }
 
     /// Unauthenticated liveness.

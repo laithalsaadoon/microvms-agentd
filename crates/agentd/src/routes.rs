@@ -177,6 +177,7 @@ fn handler_for(endpoint: &schema::Endpoint) -> axum::routing::MethodRouter<AppSt
         ("PUT", "/v1/fs/tar") => axum::routing::put(fs::write_tar),
         ("GET", "/v1/tcp") => get(crate::tunnel::open),
         ("GET", "/v1/health") => get(health_response),
+        ("GET", "/v1/discovery") => get(discovery),
         ("GET", "/v1/schema") => get(schema_route),
         (method, path) => panic!("{method} {path} is documented but has no handler"),
     }
@@ -392,6 +393,12 @@ async fn terminate_hook(State(state): State<AppState>) -> StatusCode {
     tracing::info!("terminate hook");
     crate::hook_handlers::run(&state, "terminate", slot).await;
     StatusCode::OK
+}
+
+async fn discovery(State(state): State<AppState>) -> Json<protocol::discovery::Discovery> {
+    Json(protocol::discovery::Discovery::new(
+        state.config().default_user.clone(),
+    ))
 }
 
 /// `GET /v1/health` — liveness, and the exec-activity signal an orchestrator polls.
@@ -774,6 +781,16 @@ pub fn surface_docs() -> Vec<schema::Endpoint> {
             )
         },
         schema::Endpoint {
+            response: json_body::<protocol::discovery::Discovery>(),
+            ..row(
+                "GET",
+                "/v1/discovery".into(),
+                Auth::Bearer,
+                "image configuration: the configured default exec user, or null for the daemon/root default; resolution still occurs for each request",
+                schema::DISCOVERY,
+            )
+        },
+        schema::Endpoint {
             response: json_body::<Health>(),
             ..row(
                 "GET",
@@ -997,6 +1014,63 @@ mod tests {
             "no hook has fired on a fresh daemon"
         );
         assert_eq!(report.hooks_dropped, 0);
+    }
+
+    /// Discovery keeps the configured name private until bootstrap and bearer auth,
+    /// and does not resolve it: an unavailable passwd row is still configuration.
+    #[tokio::test]
+    async fn discovery_reports_configuration_behind_the_control_guard() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt;
+        for user in [None, Some("root"), Some("1000"), Some("missing-user")] {
+            let state = AppState::new(Config {
+                default_user: user.map(str::to_string),
+                ..Config::default()
+            });
+            for (token, status) in [
+                (None, StatusCode::SERVICE_UNAVAILABLE),
+                (Some("token"), StatusCode::SERVICE_UNAVAILABLE),
+            ] {
+                let mut request = Request::builder().uri("/v1/discovery");
+                if let Some(token) = token {
+                    request = request.header("authorization", format!("Bearer {token}"));
+                }
+                assert_eq!(
+                    app(state.clone())
+                        .oneshot(request.body(Body::empty()).unwrap())
+                        .await
+                        .unwrap()
+                        .status(),
+                    status
+                );
+            }
+            post_hook(&state, envelope(serde_json::json!({"agent_token":"token"}))).await;
+            for (token, status) in [
+                ("wrong", StatusCode::UNAUTHORIZED),
+                ("token", StatusCode::OK),
+            ] {
+                let response = app(state.clone())
+                    .oneshot(
+                        Request::builder()
+                            .uri("/v1/discovery")
+                            .header("authorization", format!("Bearer {token}"))
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), status);
+                if status == StatusCode::OK {
+                    let bytes = axum::body::to_bytes(response.into_body(), 65536)
+                        .await
+                        .unwrap();
+                    let discovery: protocol::discovery::Discovery =
+                        serde_json::from_slice(&bytes).unwrap();
+                    assert_eq!(discovery.default_user.as_deref(), user);
+                }
+            }
+        }
     }
 
     /// AGENTD-22: clients can distinguish configured defaults without requiring

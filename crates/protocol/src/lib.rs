@@ -26,6 +26,7 @@
 //! contracts and byte-compared in CI, so a shape that reads differently than it
 //! writes is a test failure rather than a consumer's problem.
 
+pub mod discovery;
 pub mod exec;
 pub mod fs;
 pub mod health;

@@ -11,6 +11,8 @@ from lanes.default_user import default_user_checks
 
 def check_default_user(results: Results) -> None:
     good = {
+        "discoveryAvailable": True,
+        "discoveryUser": "conformance",
         "syncExit": 0,
         "syncStdout": "sync-write-ok",
         "files": "updated\ncreated\n4242:4242\n4242:4242\n",
@@ -41,6 +43,8 @@ def check_default_user(results: Results) -> None:
             f"default-user checks reject missing {key}", bool(negative.failed)
         )
     for key, value in (
+        ("discoveryAvailable", False),
+        ("discoveryUser", "root"),
         ("files", "updated\ncreated\n0:0\n0:0\n"),
         ("defaultIdentity", "0\n0\n/root\nroot\n"),
         ("explicitRoot", "4242\n4242\n"),
