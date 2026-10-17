@@ -88,7 +88,7 @@ shared snapshot, including snapshots read through a cloned session.
 
 Control-plane errors expose `attempt_count`, `backoff_seconds`, and `throttled`
 in Python. Node's `retryDetails(error)` returns the corresponding camel-case
-fields, or `null` for an error without telemetry. CLI JSON failures include
+fields, or `null` for an error without telemetry. The command-line tool's JSON failures include
 `attemptCount`, `backoffSeconds`, and `throttled` in `data`. These values describe
 one control-plane call, not a caller's own outer retry loop.
 
