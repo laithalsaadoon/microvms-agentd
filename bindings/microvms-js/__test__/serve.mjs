@@ -10,6 +10,7 @@
 // suite drives the core loops against AWS (`drive_serve`).
 
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { connect } from 'node:net';
 import { test } from 'node:test';
@@ -24,6 +25,23 @@ const HOST_SEED = Buffer.alloc(32, 7).toString('base64');
 const VM_PUBLIC_KEY = Buffer.alloc(32, 9).toString('base64');
 
 const direct = () => Session.direct(UNREACHABLE, 'serve-agent-token');
+
+test('omitted listener options resolve to the shared effective default', async () => {
+  const manifest = JSON.parse(readFileSync(new URL('../../../docs/manifest.json', import.meta.url)));
+  const expectedHost = manifest.data.clientDefaults.listener.bindIp;
+  for (const method of ['tunnel', 'portForward']) {
+    for (const options of [undefined, {}]) {
+      const handle = await direct()[method](8080, options);
+      try {
+        const { host, port } = hostAndPort(handle.localAddress);
+        assert.equal(host, expectedHost, method);
+        assert.notEqual(port, 0, 'the OS chooses the listening port');
+      } finally {
+        await handle.stop();
+      }
+    }
+  }
+});
 
 /** A guest HTTP server on loopback that answers every GET with its path. `/slow` resolves
  * `arrived` and holds its answer until `close()`, so a forwarded connection stays open. */

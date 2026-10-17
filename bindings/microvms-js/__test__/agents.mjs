@@ -88,6 +88,8 @@ test('permission modes and remote deadlines are refused before any request', asy
 });
 
 test('both agents and permission modes reach the wire with the remote deadline', async () => {
+  // **Falsification**: default an omitted permission mode to unrestricted in the
+  // binding; the command must retain the shared agent-default permissions.
   const { createServer } = await import('node:http');
   const requests = [];
   const server = createServer(async (req, res) => {
@@ -101,7 +103,7 @@ test('both agents and permission modes reach the wire with the remote deadline',
   try {
     const session = Session.direct(`http://127.0.0.1:${server.address().port}`, 'token');
     for (const agent of ['claude-code', 'codex']) {
-      for (const permissionMode of ['agent-default', 'unrestricted']) {
+      for (const permissionMode of [undefined, 'agent-default', 'unrestricted']) {
         const handle = await promptAgent(session, { agent }, "it's 'quoted'; $(false)", {
           permissionMode, timeoutSec: 17, execId: `${agent}-${permissionMode}`,
           reapGroupOnExit: true,

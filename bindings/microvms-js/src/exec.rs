@@ -329,6 +329,7 @@ impl AsyncGenerator for ExecStream {
 #[napi(object)]
 pub struct StreamOptionsInput {
     /// The byte to start at. Non-zero resumes a stream a previous process was reading.
+    /// @defaultValue 0
     pub offset: Option<f64>,
     /// Whether to reconnect after a cut. `false` ends the stream at the cut instead, which
     /// is what a caller doing its own reconnection wants.
@@ -395,7 +396,12 @@ impl ExecHandle {
         let defaults = StreamOptions::default();
         let options = options.unwrap_or_default();
         let resolved = StreamOptions {
-            offset: crate::numbers::offset_number(options.offset.unwrap_or(0.0)).map_err(js)?,
+            offset: options
+                .offset
+                .map(crate::numbers::offset_number)
+                .transpose()
+                .map_err(js)?
+                .unwrap_or(defaults.offset),
             reconnect: options.reconnect.unwrap_or(defaults.reconnect),
             max_reconnects: crate::numbers::optional_u32(options.max_reconnects, "maxReconnects")
                 .map_err(js)?

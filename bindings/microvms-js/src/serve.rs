@@ -76,6 +76,7 @@ pub struct ServeOptions {
     /// A `host:port` to listen on. Default: loopback, on a port the OS picks; the handle's
     /// `localAddress` says which. Bind beyond loopback only on a network you trust: whoever
     /// connects reaches the VM with this session's credentials.
+    /// @defaultValue "127.0.0.1:0"
     pub bind: Option<String>,
     /// Stop accepting after this many connections. Default: serve until stopped.
     pub max_connections: Option<f64>,

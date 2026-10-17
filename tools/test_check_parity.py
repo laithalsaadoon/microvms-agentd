@@ -117,7 +117,31 @@ py = "Sandbox.run(wait)"
 [[default]]
 id = "watch-interval"
 exempt = "a terminal affordance"
+value = "2"
 cli = "ls --interval-sec"
+
+[[default]]
+id = "offset"
+core = "offset"
+cli = "cost --running-sec"
+py = "Session.kill(offset)"
+
+[[default]]
+id = "labels"
+core = "label"
+py = "run_report(label)"
+
+[[default]]
+id = "absent"
+core = "image"
+py = "Sandbox.run(image)"
+ts = "Sandbox.run(image)"
+
+[[default]]
+id = "table-format"
+exempt = "a terminal-only rendering selection"
+value = "table"
+cli = "ls --format"
 """
 
 # The table with two tracked gaps, one on a row and one on a type's member: the records
@@ -161,7 +185,7 @@ GRIFFE = {
         pyclass(
             "Sandbox",
             function("__new__"),
-            function("run", wait="True", image=None),
+            function("run", wait="True", image="None"),
             attribute("microvm_id"),
         ),
         pyclass(
@@ -202,11 +226,17 @@ def tsclass(name, *members):
 
 TYPEDOC = {
     "schemaVersion": "2.0",
+    "name": "Documentation",
     "kind": 1,
     "children": [
         tsclass(
             "Sandbox",
-            member("run"),
+            {
+                **member("run"),
+                "signatures": [
+                    {"parameters": [{"name": "image", "flags": {"isOptional": True}}]}
+                ],
+            },
             member("microvmId"),
             member("region", ACCESSOR),
             member("create", static=True),
@@ -259,7 +289,13 @@ MANIFEST = {
             ),
         ],
         "globalFlags": [{"name": "json", "positional": False}],
-        "clientDefaults": {"execWaitSeconds": 300.0, "launch": {"wait": True}},
+        "clientDefaults": {
+            "execWaitSeconds": 300.0,
+            "launch": {"wait": True},
+            "offset": 0,
+            "label": "run",
+            "image": None,
+        },
     },
 }
 
@@ -564,6 +600,236 @@ class RuleTests(FixtureCase):
         self.assertProblem("attach: the id is used by more than one row")
 
 
+class DefaultValueComparisonTests(unittest.TestCase):
+    """Default spellings retain each adapter's scalar semantics."""
+
+    def test_cli_strings_keep_their_raw_text_and_case(self):
+        for text, value, expected in [
+            ("table", "table", False),
+            ("", "", False),
+            ('"run"', '"run"', False),
+            ("table", "json", True),
+            ("RUN", "run", True),
+            ('"run"', "run", True),
+        ]:
+            with self.subTest(text=text, value=value):
+                self.assertEqual(PARITY["differs"](text, value, "cli"), expected)
+
+    def test_cli_booleans_accept_case_without_losing_the_value(self):
+        for text, value, expected in [
+            ("true", True, False),
+            ("TRUE", True, False),
+            ("fAlSe", False, False),
+            ("false", True, True),
+            ("true", False, True),
+        ]:
+            with self.subTest(text=text, value=value):
+                self.assertEqual(PARITY["differs"](text, value, "cli"), expected)
+
+    def test_invalid_python_and_typescript_literals_are_not_equal_defaults(self):
+        for key, text in [("py", "'"), ("py", "missing"), ("ts", "'run'")]:
+            with self.subTest(key=key, text=text):
+                self.assertTrue(PARITY["differs"](text, None, key))
+
+    def test_numeric_literals_compare_values_across_integer_and_float_spellings(self):
+        for key in ("py", "ts"):
+            for text, value, expected in [
+                ("1", 1.0, False),
+                ("1.0", 1, False),
+                ("2.0", 1, True),
+                ("1", 2.0, True),
+            ]:
+                with self.subTest(key=key, text=text, value=value):
+                    self.assertEqual(PARITY["differs"](text, value, key), expected)
+
+    def test_booleans_and_numbers_remain_distinct_defaults(self):
+        for key, text, value in [
+            ("py", "True", 1),
+            ("py", "False", 0),
+            ("py", "1", True),
+            ("py", "0", False),
+            ("ts", "true", 1),
+            ("ts", "false", 0),
+            ("ts", "1", True),
+            ("ts", "0", False),
+        ]:
+            with self.subTest(key=key, text=text, value=value):
+                self.assertTrue(PARITY["differs"](text, value, key))
+
+
+class TypeScriptDefaultTests(unittest.TestCase):
+    """Scalar defaults and overloads in TypeDoc's serialized signature shape."""
+
+    def read(self, *parameters):
+        return PARITY["ts_surface"](
+            {
+                "kind": 1,
+                "name": "Documentation",
+                "children": [
+                    {
+                        "kind": FUNCTION,
+                        "name": "run",
+                        "signatures": [
+                            {"parameters": [parameter]} for parameter in parameters
+                        ],
+                    }
+                ],
+            }
+        ).defaults
+
+    def tagged(self, *parts):
+        return {
+            "name": "value",
+            "comment": {
+                "blockTags": [
+                    {
+                        "tag": "@defaultValue",
+                        "content": [{"kind": "text", "text": part} for part in parts],
+                    }
+                ]
+            },
+        }
+
+    def test_native_defaults_are_read_before_optional_omission(self):
+        self.assertEqual(
+            self.read(
+                {"name": "value", "defaultValue": "42", "flags": {"isOptional": True}}
+            ),
+            {"run(value)": "42"},
+        )
+
+    def test_tag_parts_concatenate_and_fenced_scalars_keep_whitespace(self):
+        for parts, expected in [
+            (('"', "run", '"'), '"run"'),
+            (("```json\n \n0\n \n```",), "0"),
+            (("undefined",), "undefined"),
+        ]:
+            with self.subTest(parts=parts):
+                self.assertEqual(
+                    self.read(self.tagged(*parts)), {"run(value)": expected}
+                )
+
+    def test_fenced_tags_match_markdown_backtick_lengths(self):
+        for value in (
+            "```json\n0\n```",
+            "```json\n0\n  ````  ",
+            "````json\n0\n````",
+        ):
+            with self.subTest(value=value):
+                self.assertEqual(self.read(self.tagged(value)), {"run(value)": "0"})
+
+    def test_complete_fenced_scalars_accept_supported_lines_and_spacing(self):
+        for newline in ("\n", "\r\n", "\r"):
+            for info in ("", "json", "json extra-info"):
+                for indent in range(4):
+                    with self.subTest(newline=newline, info=info, indent=indent):
+                        value = newline.join(
+                            ["```" + info, "0", " " * indent + "``` \t"]
+                        )
+                        self.assertEqual(
+                            self.read(self.tagged(value)), {"run(value)": "0"}
+                        )
+
+    def test_fenced_tags_reject_malformed_openers_and_line_boundaries(self):
+        for value in (
+            "```json`invalid\n0\n```",
+            "``` `\n0\n```",
+            "```json\n0\n    ```",
+            "```json\n0\n\t```",
+            "```json\u20280\u2028```",
+            "```json\u00850\u0085```",
+            "```json\x0b0\x0b```",
+        ):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                    PARITY["ParityError"], "malformed @defaultValue"
+                ):
+                    self.read(self.tagged(value))
+
+    def test_native_initializer_cannot_be_replaced_by_a_documentation_tag(self):
+        for tag in ("3", "0", "invalid"):
+            with self.subTest(tag=tag):
+                parameter = self.tagged(tag)
+                parameter["defaultValue"] = "3"
+                self.assertEqual(self.read(parameter), {"run(value)": "3"})
+
+    def test_callable_reference_cycles_keep_other_signature_branches(self):
+        reference = {"type": "reference", "target": 1}
+        surface = PARITY["ts_surface"](
+            {
+                "kind": 1,
+                "name": "Documentation",
+                "children": [
+                    {"kind": 32, "name": "run", "type": reference},
+                    {
+                        "kind": 2097152,
+                        "name": "Recursive",
+                        "id": 1,
+                        "type": {
+                            "type": "union",
+                            "types": [
+                                reference,
+                                {
+                                    "type": "reflection",
+                                    "declaration": {
+                                        "signatures": [
+                                            {
+                                                "parameters": [
+                                                    {
+                                                        "name": "count",
+                                                        "flags": {"isOptional": True},
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                },
+                            ],
+                        },
+                    },
+                ],
+            }
+        )
+        self.assertEqual(surface.defaults, {"run(count)": "undefined"})
+
+    def test_fenced_tags_require_a_complete_closing_fence(self):
+        for value in (
+            "```json\n0\nnot-a-closing-fence",
+            "```json\n0\n``` trailing garbage",
+            "```json\n0\n```\ntrailing garbage",
+            "```json\n0",
+            "````json\n0\n```",
+        ):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                    PARITY["ParityError"], "malformed @defaultValue"
+                ):
+                    self.read(self.tagged(value))
+
+    def test_invalid_tag_values_report_the_reason(self):
+        for value, reason in [
+            ("invalid", "malformed @defaultValue"),
+            ("[]", "must be a scalar"),
+            ("NaN", "nonfinite @defaultValue"),
+        ]:
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(PARITY["ParityError"], reason):
+                    self.read(self.tagged(value))
+        parameter = self.tagged("0")
+        parameter["comment"]["blockTags"] *= 2
+        with self.assertRaisesRegex(PARITY["ParityError"], "duplicate @defaultValue"):
+            self.read(parameter)
+
+    def test_overloads_agree_or_report_conflicting_defaults(self):
+        self.assertEqual(
+            self.read(self.tagged("0"), self.tagged("0")), {"run(value)": "0"}
+        )
+        with self.assertRaisesRegex(
+            PARITY["ParityError"], "conflicting overload defaults"
+        ):
+            self.read(self.tagged("0"), self.tagged("1"))
+
+
 class DefaultTests(FixtureCase):
     """The `[[default]]` rules (#300) over the same fixtures, which state defaults the rows hold."""
 
@@ -580,6 +846,16 @@ class DefaultTests(FixtureCase):
         owner = next(item for item in self.griffe["members"] if item["name"] == cls)
         function = next(item for item in owner["members"] if item["name"] == method)
         return next(item for item in function["parameters"] if item["name"] == name)
+
+    def default_problems(self, empty):
+        surfaces = {
+            "cli": PARITY["cli_surface"](self.manifest),
+            "py": PARITY["py_surface"](self.griffe),
+            "ts": PARITY["ts_surface"](self.typedoc),
+        }
+        return PARITY["default_problems"](
+            PARITY["parse_table"](self.table)["default"], surfaces, empty
+        )
 
     def test_the_baseline_states_defaults_and_holds_them(self):
         cli = PARITY["cli_surface"](self.manifest)
@@ -598,13 +874,76 @@ class DefaultTests(FixtureCase):
     def test_a_python_default_no_row_holds_fails(self):
         self.parameter("Session", "kill", "offset")["default"] = "False"
         self.assertProblem(
-            "py: Session.kill(offset) = False belongs to no [[default]] row"
+            "Session.kill(offset) defaults to False, but clientDefaults.offset is 0"
         )
 
-    def test_a_zero_none_or_string_default_needs_no_row(self):
-        # cost --running-sec 0, Sandbox.run(image=None), ls --format table and run_report's label
-        # are in the baseline with no row, and it passes.
-        self.assertEqual(self.problems(), [])
+    def test_zero_absent_and_string_defaults_are_held(self):
+        for value in ["0", "0.0", "None", "''", "'run'", "False"]:
+            self.assertTrue(PARITY["held"]("py", value))
+
+    def test_string_defaults_compare_values_and_do_not_coerce_numbers(self):
+        self.manifest["data"]["clientDefaults"]["label"] = "other"
+        self.assertProblem('run_report(label) defaults to "run"')
+        self.assertTrue(PARITY["differs"]('"0"', 0))
+        self.assertTrue(PARITY["differs"]("False", 0))
+        self.assertFalse(PARITY["differs"]("''", ""))
+
+    def test_zero_defaults_are_enrolled_and_compared(self):
+        self.parameter("Session", "kill", "offset")["default"] = "1"
+        self.assertProblem(
+            "Session.kill(offset) defaults to 1, but clientDefaults.offset is 0"
+        )
+        self.table = self.table.replace('py = "Session.kill(offset)"', "")
+        self.parameter("Session", "kill", "offset")["default"] = "0"
+        self.assertProblem("Session.kill(offset) = 0 belongs to no [[default]] row")
+
+    def test_absent_defaults_are_values_and_missing_defaults_are_refused(self):
+        self.manifest["data"]["clientDefaults"]["image"] = "image"
+        self.assertProblem("Sandbox.run(image) defaults to None")
+        self.assertProblem("Sandbox.run(image) defaults to undefined")
+        self.parameter("Sandbox", "run", "image")["default"] = None
+        self.assertProblem("py: Sandbox.run(image) states no default")
+
+    def test_exempt_omission_markers_are_pinned(self):
+        self.flag("ls", "format")["default"] = "json"
+        self.assertProblem("defaults to json, but its exemption pins table")
+
+    def test_exempt_defaults_cannot_drop_their_value_pin(self):
+        self.table = self.table.replace('value = "table"\n', "")
+        self.assertProblem("default table-format: an exempt default must pin its value")
+
+    def test_typescript_default_tags_are_compared_and_cannot_disappear(self):
+        parameter = self.typedoc["children"][0]["children"][1]["signatures"][0][
+            "parameters"
+        ][0]
+        parameter["comment"] = {
+            "blockTags": [{"tag": "@defaultValue", "content": [{"text": '"changed"'}]}]
+        }
+        self.assertProblem('ts: Sandbox.run(image) defaults to "changed"')
+        parameter["flags"] = {}
+        del parameter["comment"]
+        self.assertProblem("ts: Sandbox.run(image) states no default")
+
+    def test_typescript_tags_refuse_malformed_duplicate_and_container_values(self):
+        for values in [["bad"], ["{}"], ["NaN"], ["Infinity"], ["0", "0"]]:
+            with self.subTest(values=values):
+                parameter = self.typedoc["children"][0]["children"][1]["signatures"][0][
+                    "parameters"
+                ][0]
+                parameter["comment"] = {
+                    "blockTags": [
+                        {"tag": "@defaultValue", "content": [{"text": value}]}
+                        for value in values
+                    ]
+                }
+                with self.assertRaises(PARITY["ParityError"]):
+                    self.problems()
+
+    def test_global_and_positional_cli_defaults_are_enrolled(self):
+        self.manifest["data"]["globalFlags"][0]["default"] = "false"
+        self.manifest["data"]["commands"][0]["parameters"][-1]["default"] = "binary"
+        self.assertProblem("@global --json = false belongs to no [[default]] row")
+        self.assertProblem("run binary = binary belongs to no [[default]] row")
 
     def test_a_cli_default_that_differs_from_cores_fails(self):
         self.flag("run", "timeout")["default"] = "301"
@@ -641,6 +980,30 @@ class DefaultTests(FixtureCase):
         self.manifest["data"]["clientDefaults"]["execWaitSeconds"] = 300.0
         problems = self.problems()
         self.assertFalse([problem for problem in problems if "attach" in problem])
+
+    def test_ellipsis_is_only_a_python_named_constant_marker(self):
+        self.flag("ls", "format")["default"] = "..."
+        self.table = self.table.replace(
+            'exempt = "a terminal-only rendering selection"\nvalue = "table"',
+            'core = "label"',
+        )
+        self.assertProblem(
+            "default table-format: cli: ls --format defaults to ..., but "
+            'clientDefaults.label is "run"'
+        )
+        surfaces = {
+            "cli": PARITY["cli_surface"](self.manifest),
+            "py": PARITY["py_surface"](self.griffe),
+            "ts": PARITY["ts_surface"](self.typedoc),
+        }
+        surfaces["ts"].defaults["Sandbox.run(image)"] = "..."
+        self.assertIn(
+            "default absent: ts: Sandbox.run(image) defaults to ..., but "
+            "clientDefaults.image is null",
+            PARITY["default_problems"](
+                PARITY["parse_table"](self.table)["default"], surfaces, set()
+            ),
+        )
 
     def test_a_row_naming_a_default_the_surface_does_not_state_fails(self):
         self.flag("run", "timeout")["default"] = None
@@ -679,13 +1042,13 @@ class DefaultTests(FixtureCase):
         )
         self.assertProblem("default watch-interval: the exemption has an empty reason")
 
-    def test_a_typescript_cell_is_refused(self):
+    def test_a_typescript_cell_must_name_a_stated_default(self):
         self.table = self.table.replace(
             'py = "Sandbox.run(wait)"',
             'py = "Sandbox.run(wait)"\nts = "Sandbox.run(wait)"',
         )
         self.assertProblem(
-            "default launch-wait: ts: index.d.ts states defaults only in prose"
+            "default launch-wait: ts: Sandbox.run(wait) states no default"
         )
 
     def test_a_surface_stating_no_default_fails_the_floor(self):
@@ -713,6 +1076,82 @@ class DefaultTests(FixtureCase):
             'core = "launch.wait"', 'core = "launch.wait"\nnote = "x"'
         )
         self.assertProblem("default launch-wait: unknown key note")
+
+    def test_duplicate_default_ids_fail_with_distinct_selectors(self):
+        self.table = self.table.replace('id = "launch-wait"', 'id = "exec-wait"')
+        self.assertEqual(
+            self.problems(),
+            ["default exec-wait: the id is used by more than one row"],
+        )
+
+    def test_value_pins_require_an_exemption_and_source_spelling(self):
+        for before, after, row_id in [
+            (
+                'core = "launch.wait"',
+                'core = "launch.wait"\nvalue = "True"',
+                "launch-wait",
+            ),
+            ('value = "table"', "value = 0", "table-format"),
+        ]:
+            with self.subTest(row_id=row_id):
+                self.table = TABLE.replace(before, after)
+                self.assertIn(
+                    f"default {row_id}: value pins an exempt default's source spelling",
+                    self.problems(),
+                )
+
+    def test_invalid_cell_does_not_hide_a_later_surface_mismatch(self):
+        self.table = self.table.replace('cli = "run --timeout"', "cli = 123")
+        self.parameter("Session", "health", "timeout")["default"] = "301"
+        problems = self.problems()
+        self.assertIn(
+            "default exec-wait: cli: a cell is a default's name or a list of them",
+            problems,
+        )
+        self.assertIn(
+            "default exec-wait: py: Session.health(timeout) defaults to 301, but "
+            "clientDefaults.execWaitSeconds is 300.0",
+            problems,
+        )
+
+    def test_missing_default_does_not_hide_a_later_selector_mismatch(self):
+        self.parameter("Session", "health", "timeout")["default"] = None
+        self.parameter("Session", "attach", "retries")["default"] = "301"
+        self.assertEqual(
+            self.problems(),
+            [
+                "default exec-wait: py: Session.health(timeout) states no default",
+                "default exec-wait: py: Session.attach(retries) defaults to 301, but "
+                "clientDefaults.execWaitSeconds is 300.0",
+            ],
+        )
+
+    def test_unread_surface_still_claims_every_selector(self):
+        self.table = self.table.replace(
+            'py = "Sandbox.run(wait)"',
+            'py = ["Sandbox.run(wait)", "Session.attach(retries)"]',
+        )
+        self.assertEqual(
+            self.default_problems(empty={"py"}),
+            [
+                "default launch-wait: py: Session.attach(retries) is also in "
+                "default exec-wait"
+            ],
+        )
+
+    def test_unread_manifest_does_not_report_missing_client_defaults(self):
+        del self.manifest["data"]["clientDefaults"]
+        self.assertEqual(
+            self.default_problems(empty={"cli"}),
+            ["sentinel default exec-wait: no stated default was compared with core's"],
+        )
+
+    def test_unread_surface_does_not_hide_later_unclaimed_defaults(self):
+        self.table = self.table.replace('py = "Sandbox.run(wait)"', "")
+        self.assertEqual(
+            self.default_problems(empty={"cli"}),
+            ["py: Sandbox.run(wait) = True belongs to no [[default]] row"],
+        )
 
 
 class ExemptionRecordTests(unittest.TestCase):
@@ -819,16 +1258,70 @@ DECLARATIONS = """
 // SPDX-License-Identifier: Apache-2.0
 export declare class Session {
   get endpoint(): string
-  health(): Promise<boolean>
+  health(options?: RunOptions): Promise<boolean>
   static attach(endpoint: string): Promise<Session>
   bytes(): Buffer
 }
 export declare function runReport(): string
 export declare const __napiBindingTarget: string
-export interface RunOptions { timeout?: number }
+export interface BaseOptions {
+  /** @defaultValue 9 */
+  inherited?: number
+}
+export interface RunOptions extends BaseOptions {
+  /** @defaultValue 0 */
+  timeout?: number
+  /** @defaultValue "" */
+  label?: string
+  nested?: {
+    /** @defaultValue null */
+    value?: string | null
+  }
+  other?: OtherOptions
+}
+export type OtherOptions = {
+  /** @defaultValue false */
+  enabled?: boolean
+}
 export declare namespace snapshots {
   export function snapshotVm(): void
 }
+export declare function accept(options: AliasOptions, callback: CallbackOptions): void
+export type AliasOptions = BaseOptions | {
+  local?: {
+    /** @defaultValue true */
+    enabled?: boolean
+  }
+}
+export interface CallbackOptions {
+  invoke?: {
+    (flag?: boolean): OutputOnly
+    optional?: number
+  }
+  next?: CallbackOptions
+}
+export interface OutputOnly {
+  ignored?: number
+}
+export declare function list(options: Array<{
+  /** @defaultValue 7 */
+  size?: number
+}>): void
+export declare function readonlyList(options: readonly {
+  /** @defaultValue 8 */
+  size?: number
+}[]): void
+export interface GenericBase<T> {
+  inherited?: T
+}
+export interface GenericInput extends GenericBase<{ flag?: boolean }> {}
+export declare function generic(options: GenericInput): void
+export declare class NativeDefaults {
+  readonly count = 3
+}
+export declare function native(options: NativeDefaults): void
+export declare const DEFAULT_COUNT = 7
+export declare function wholeModule(value: typeof import("./index")): void
 """
 
 
@@ -845,8 +1338,7 @@ class ReaderTests(unittest.TestCase):
         self.assertEqual(
             surface.classes["Session"].members, {"health", "attach", "endpoint"}
         )
-        # Defaults as the stub spells them, `...` for a named constant; `None` is read but not
-        # held.
+        # Defaults retain the stub's spelling, including named constants and absence.
         self.assertEqual(
             surface.defaults,
             {
@@ -855,20 +1347,28 @@ class ReaderTests(unittest.TestCase):
                 "Session.health(label)": "None",
             },
         )
-        self.assertFalse(
-            PARITY["held"]("py", surface.defaults["Session.health(label)"])
-        )
+        self.assertTrue(PARITY["held"]("py", surface.defaults["Session.health(label)"]))
 
     def test_the_typescript_reader_over_typedoc(self):
         with tempfile.TemporaryDirectory() as scratch:
             declarations = Path(scratch) / "index.d.ts"
             declarations.write_text(DECLARATIONS, encoding="utf-8")
-            surface = PARITY["ts_surface"](
-                PARITY["run_typedoc"](declarations, Path(scratch))
-            )
+            project = PARITY["run_typedoc"](declarations, Path(scratch))
+            surface = PARITY["ts_surface"](project)
         self.assertEqual(
             surface.functions,
-            {"runReport", "__napiBindingTarget", "snapshots.snapshotVm"},
+            {
+                "runReport",
+                "__napiBindingTarget",
+                "snapshots.snapshotVm",
+                "accept",
+                "list",
+                "readonlyList",
+                "generic",
+                "native",
+                "wholeModule",
+                "DEFAULT_COUNT",
+            },
         )
         self.assertEqual(
             surface.classes["Session"].methods, {"health", "attach", "bytes"}
@@ -880,6 +1380,123 @@ class ReaderTests(unittest.TestCase):
         self.assertIn("RunOptions", surface.names)
         self.assertIn("RunOptions.timeout", surface.names)
         self.assertNotIn("RunOptions", surface.classes)
+        self.assertEqual(
+            surface.defaults,
+            {
+                "Session.health(options)": "undefined",
+                "RunOptions.timeout": "0",
+                "RunOptions.label": '""',
+                "RunOptions.nested": "undefined",
+                "RunOptions.nested.value": "null",
+                "RunOptions.other": "undefined",
+                "OtherOptions.enabled": "false",
+                "RunOptions.inherited": "9",
+                "BaseOptions.inherited": "9",
+                "AliasOptions.local": "undefined",
+                "AliasOptions.local.enabled": "true",
+                "CallbackOptions.invoke": "undefined",
+                "CallbackOptions.invoke.optional": "undefined",
+                "CallbackOptions.invoke(flag)": "undefined",
+                "CallbackOptions.next": "undefined",
+                "list(options).size": "7",
+                "readonlyList(options).size": "8",
+                "GenericBase.inherited": "undefined",
+                "GenericInput.flag": "undefined",
+                "GenericInput.inherited": "undefined",
+                "GenericInput.inherited.flag": "undefined",
+                "NativeDefaults.count": "3",
+                f"{project['name']}.AliasOptions.local": "undefined",
+                f"{project['name']}.AliasOptions.local.enabled": "true",
+                f"{project['name']}.DEFAULT_COUNT": "7",
+            },
+        )
+
+    def test_typescript_callable_values_read_inputs_but_not_return_records(self):
+        declarations_text = """\
+export interface OutputOnly {
+  ignored?: number;
+  callback: (hidden?: number) => void;
+}
+export declare function anchor(count?: number): OutputOnly;
+export declare function factory(): (hidden?: number) => void;
+export declare const run: (count?: number) => OutputOnly;
+export type Runner = (count?: number) => OutputOnly;
+export type RunnerAlias = Runner;
+export declare const aliased: RunnerAlias;
+export type UnionRunner = Runner | ((other?: boolean) => OutputOnly);
+export declare const union: UnionRunner;
+export declare const constants: readonly number[];
+export interface Callable { (enabled?: boolean): OutputOnly; }
+export declare const callableInterface: Callable;
+export declare class Box {
+  run: (count?: number) => OutputOnly;
+  aliased: Runner;
+}
+export declare namespace nested {
+  export const run: (options: { enabled?: boolean }) => OutputOnly;
+}
+"""
+        with tempfile.TemporaryDirectory() as scratch:
+            declarations = Path(scratch) / "index.d.ts"
+            declarations.write_text(declarations_text, encoding="utf-8")
+            surface = PARITY["ts_surface"](
+                PARITY["run_typedoc"](declarations, Path(scratch))
+            )
+        self.assertEqual(
+            surface.defaults,
+            {
+                "anchor(count)": "undefined",
+                "run(count)": "undefined",
+                "aliased(count)": "undefined",
+                "union(count)": "undefined",
+                "union(other)": "undefined",
+                "Callable(enabled)": "undefined",
+                "callableInterface(enabled)": "undefined",
+                "Box.run(count)": "undefined",
+                "Box.aliased(count)": "undefined",
+                "nested.run(options).enabled": "undefined",
+            },
+        )
+
+    def test_python_overloads_are_read_and_must_agree(self):
+        stub_text = """\
+from typing import Literal, overload
+@overload
+def run(mode: Literal["a"], timeout: float = 0.0) -> str: ...
+@overload
+def run(mode: Literal["b"], timeout: float = 0.0) -> bytes: ...
+"""
+        with tempfile.TemporaryDirectory() as scratch:
+            stub = Path(scratch) / "microvms.pyi"
+            stub.write_text(stub_text, encoding="utf-8")
+            surface = PARITY["py_surface"](PARITY["run_griffe"](stub))
+            self.assertEqual(surface.defaults, {"run(timeout)": "0.0"})
+            stub.write_text(stub_text.replace("= 0.0) -> bytes", "= 1.0) -> bytes"))
+            with self.assertRaisesRegex(
+                PARITY["ParityError"],
+                "run\\(timeout\\) has conflicting overload defaults",
+            ):
+                PARITY["py_surface"](PARITY["run_griffe"](stub))
+
+    def test_python_constructor_defaults_use_the_class_name_and_must_agree(self):
+        stub_text = """\
+class Example:
+    def __new__(cls, count: int = 0) -> Example: ...
+    def __init__(self, count: int = 0) -> None: ...
+"""
+        with tempfile.TemporaryDirectory() as scratch:
+            stub = Path(scratch) / "microvms.pyi"
+            stub.write_text(stub_text, encoding="utf-8")
+            surface = PARITY["py_surface"](PARITY["run_griffe"](stub))
+            self.assertEqual(surface.defaults, {"Example(count)": "0"})
+            stub.write_text(
+                stub_text.replace("count: int = 0) -> None", "count: int = 1) -> None")
+            )
+            with self.assertRaisesRegex(
+                PARITY["ParityError"],
+                "Example\\(count\\) has conflicting overload defaults",
+            ):
+                PARITY["py_surface"](PARITY["run_griffe"](stub))
 
     def test_a_declaration_typedoc_would_drop_is_refused(self):
         # TypeDoc leaves out a declaration tagged `@hidden`, `@ignore` or `@private`, so the

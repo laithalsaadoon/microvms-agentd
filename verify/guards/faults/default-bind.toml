@@ -1,0 +1,75 @@
+# SPDX-License-Identifier: Apache-2.0
+# Bind declarations and omitted runtime inputs follow the shared listener value.
+
+[[fault]]
+id = "default-bind-cli-tunnel-ownership"
+guard = "cli::tests::listener_flags_follow_the_shared_bind_ip_and_preserve_overrides"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "cli::tests::listener_flags_follow_the_shared_bind_ip_and_preserve_overrides"]
+expect = "test-failed"
+suite = "rust"
+transform = [{ file = "crates/microvms-app/src/session/mod.rs", replace = "pub const DEFAULT_BIND: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0));", with = "pub const DEFAULT_BIND: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 2), 0));" }, { file = "crates/microvms-cli/src/cli.rs", replace = "    /// a VM running untrusted code is not something to expose on a LAN by accident.\n    #[arg(long, default_value_t = microvms_core::session::DEFAULT_BIND.ip().to_string())]", with = "    /// a VM running untrusted code is not something to expose on a LAN by accident.\n    #[arg(long, default_value = \"127.0.0.1\")]" }]
+
+[[fault]]
+id = "default-bind-cli-forward-ownership"
+guard = "cli::tests::listener_flags_follow_the_shared_bind_ip_and_preserve_overrides"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "cli::tests::listener_flags_follow_the_shared_bind_ip_and_preserve_overrides"]
+expect = "test-failed"
+suite = "rust"
+transform = [{ file = "crates/microvms-app/src/session/mod.rs", replace = "pub const DEFAULT_BIND: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0));", with = "pub const DEFAULT_BIND: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 2), 0));" }, { file = "crates/microvms-cli/src/cli.rs", replace = "    /// accident, so widening it is a typed choice rather than the default.\n    #[arg(long, default_value_t = microvms_core::session::DEFAULT_BIND.ip().to_string())]", with = "    /// accident, so widening it is a typed choice rather than the default.\n    #[arg(long, default_value = \"127.0.0.1\")]" }]
+
+[[fault]]
+id = "default-bind-fallback-ownership"
+guard = "listener_defaults_and_compatibility_paths_follow_the_shared_owner"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "default_bind", "--", "--exact", "listener_defaults_and_compatibility_paths_follow_the_shared_owner"]
+expect = "test-failed"
+suite = "rust"
+transform = [{ file = "crates/microvms-app/src/session/mod.rs", replace = "pub const DEFAULT_BIND: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0));", with = "pub const DEFAULT_BIND: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 2), 0));" }, { file = "crates/microvms-edges/src/session/serve.rs", replace = "        None => Ok(DEFAULT_BIND),", with = "        None => Ok(\"127.0.0.1:0\".parse().unwrap())," }]
+
+[[fault]]
+id = "default-bind-address-projection"
+guard = "listener_defaults_and_compatibility_paths_follow_the_shared_owner"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "default_bind", "--", "--exact", "listener_defaults_and_compatibility_paths_follow_the_shared_owner"]
+expect = "test-failed"
+suite = "rust"
+transform = [{ file = "crates/microvms-app/src/defaults.rs", replace = "crate::session::DEFAULT_BIND.to_string()", with = "\"127.0.0.2:0\"" }]
+
+[[fault]]
+id = "default-bind-ip-projection"
+guard = "listener_defaults_and_compatibility_paths_follow_the_shared_owner"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "default_bind", "--", "--exact", "listener_defaults_and_compatibility_paths_follow_the_shared_owner"]
+expect = "test-failed"
+suite = "rust"
+transform = [{ file = "crates/microvms-app/src/defaults.rs", replace = "crate::session::DEFAULT_BIND.ip().to_string()", with = "\"127.0.0.2\"" }]
+
+[[fault]]
+id = "default-bind-loopback"
+guard = "listener_defaults_and_compatibility_paths_follow_the_shared_owner"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "default_bind", "--", "--exact", "listener_defaults_and_compatibility_paths_follow_the_shared_owner"]
+expect = "test-failed"
+suite = "rust"
+transform = [{ file = "crates/microvms-app/src/session/mod.rs", replace = "pub const DEFAULT_BIND: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0));", with = "pub const DEFAULT_BIND: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));" }]
+
+[[fault]]
+id = "default-bind-ephemeral"
+guard = "listener_defaults_and_compatibility_paths_follow_the_shared_owner"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "default_bind", "--", "--exact", "listener_defaults_and_compatibility_paths_follow_the_shared_owner"]
+expect = "test-failed"
+suite = "rust"
+transform = [{ file = "crates/microvms-app/src/session/mod.rs", replace = "pub const DEFAULT_BIND: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0));", with = "pub const DEFAULT_BIND: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 1));" }]
+
+[[fault]]
+id = "default-bind-typescript-default"
+guard = "tools/check-parity.py"
+run = ["./tools/check-parity.py"]
+expect = "exit-nonzero"
+message = 'ServeOptions.bind defaults to "127.0.0.2:0", but clientDefaults.listener.bindAddress is "127.0.0.1:0"'
+suite = "script"
+transform = [{ file = "bindings/microvms-js/index.d.ts", replace = "@defaultValue \"127.0.0.1:0\"", with = "@defaultValue \"127.0.0.2:0\"" }]
+
+[[fault]]
+id = "default-bind-node-omission"
+guard = "omitted listener options resolve to the shared effective default"
+run = [["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"], ["node", "--test", "--test-reporter=tap", "--test-name-pattern", "omitted listener options resolve to the shared effective default", "bindings/microvms-js/__test__/serve.mjs"]]
+expect = "test-failed"
+suite = "bindings"
+transform = [{ file = "bindings/microvms-js/src/serve.rs", replace = "bind_address(options.bind.as_deref()).map_err(js_async)?", with = "bind_address(options.bind.as_deref().or(Some(\"127.0.0.2:0\"))).map_err(js_async)?" }]

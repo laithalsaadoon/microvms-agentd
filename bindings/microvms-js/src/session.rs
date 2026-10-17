@@ -236,16 +236,20 @@ pub struct ExecOptions {
     /// runs it under that shell, resolved by the daemon in the guest, and a shell the guest
     /// does not have is refused (`unknown_shell`) before anything starts.
     pub shell: Option<Either<bool, String>>,
+    /// @defaultValue null
     pub cwd: Option<String>,
     pub env: Option<HashMap<String, String>>,
     /// A numeric uid, or a name the daemon resolves against the guest's `/etc/passwd`. An
     /// unknown name is refused (`unknown_user`) before anything starts. A user with a passwd
     /// row gets `HOME`, `USER` and `LOGNAME` from it, beneath the launch environment and
     /// `env`.
+    /// @defaultValue null
     pub user: Option<Either<f64, String>>,
     /// A numeric gid, or a name the daemon resolves against the guest's `/etc/group`.
+    /// @defaultValue null
     pub group: Option<Either<f64, String>>,
     /// The daemon's own kill deadline for the child, distinct from a client-side `wait`.
+    /// @defaultValue null
     pub timeout_sec: Option<f64>,
     /// Whether to open a stdin pipe. Writing without this is a 409.
     pub stdin: Option<bool>,
@@ -473,6 +477,7 @@ pub struct SpawnOptions {
     /// The byte to start reading at. Non-zero resumes output a previous process was reading —
     /// which, with a stable `exec.execId`, is how a spawned process survives *this* process
     /// restarting.
+    /// @defaultValue 0
     pub offset: Option<f64>,
     /// Whether to reconnect after a cut. Defaults to true, and turning it off is what makes a
     /// suspend/resume look like a stream that ended.
@@ -498,7 +503,12 @@ impl SpawnOptions {
     fn stream_options(&self) -> Result<StreamOptions, AsyncError> {
         let defaults = StreamOptions::default();
         Ok(StreamOptions {
-            offset: crate::numbers::offset_number(self.offset.unwrap_or(0.0)).map_err(js_async)?,
+            offset: self
+                .offset
+                .map(crate::numbers::offset_number)
+                .transpose()
+                .map_err(js_async)?
+                .unwrap_or(defaults.offset),
             reconnect: self.reconnect.unwrap_or(defaults.reconnect),
             max_reconnects: crate::numbers::optional_u32(self.max_reconnects, "maxReconnects")
                 .map_err(js_async)?

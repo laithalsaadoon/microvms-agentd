@@ -229,6 +229,7 @@ pub struct PromptOptions {
     pub exec_id: Option<String>,
     /// Agent process permissions: agent-default (default) or unrestricted.
     #[napi(ts_type = "'agent-default' | 'unrestricted'")]
+    /// @defaultValue "agent-default"
     pub permission_mode: Option<String>,
     /// Stop residual children when the main agent exits. Defaults to false.
     pub reap_group_on_exit: Option<bool>,
@@ -236,15 +237,19 @@ pub struct PromptOptions {
 
 impl PromptOptions {
     fn into_core(self) -> Result<CorePromptOptions, AsyncError> {
+        let defaults = CorePromptOptions::default();
         Ok(CorePromptOptions {
             exec_id: self.exec_id,
             permission_mode: self
                 .permission_mode
                 .as_deref()
-                .unwrap_or("agent-default")
-                .parse()
-                .map_err(js_async)?,
-            reap_group_on_exit: self.reap_group_on_exit.unwrap_or(false),
+                .map(str::parse)
+                .transpose()
+                .map_err(js_async)?
+                .unwrap_or(defaults.permission_mode),
+            reap_group_on_exit: self
+                .reap_group_on_exit
+                .unwrap_or(defaults.reap_group_on_exit),
             timeout: match self.timeout_sec {
                 Some(timeout) => Some(seconds_async(timeout)?),
                 None => None,

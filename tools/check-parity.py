@@ -69,24 +69,28 @@ and `[[default]]` rows map each surface default to one of them or exempt it with
     cli = ["exec --timeout", "run --timeout"]
     py = ["ExecHandle.wait(timeout)", "Session.run_sync(timeout)"]
 
-A CLI default is `<command> --<flag>`; a Python one is `function(param)`, `Class.method(param)`,
-or `Class(param)` for a constructor's. The check fails when:
+A CLI default is `<command> --<flag>`, `<command> <positional>`, or
+`@global --<flag>`. A Python default is `function(param)`, `Class.method(param)`,
+or `Class(param)` for a constructor. TypeScript uses `Class.method(param)` and
+`Options.field`; `@defaultValue` tags contain scalar JSON or `undefined`, and optional
+inputs without a tag state `undefined`.
+Only input record types reached from callable parameters are read, including nested
+records. Overloads must agree when they state a default for the same input.
 
-- a held default belongs to no row. On the CLI a default is held when it reads as a non-zero
-  number (the manifest prints every default as a string); in the stub when it's a non-zero
-  number, `True`, `False` or `...`, the stub's spelling of a default named for a constant. A
-  zero, `None` or a string isn't held: a zero or `None` is "nothing unless asked", and string
-  defaults (a label, a bind address) aren't this check's.
-- a row names a default the surface doesn't state, or one another row names.
-- a row's `core` key isn't in `clientDefaults`, or a stated default differs from core's value
-  (numbers by value, a boolean only with a boolean). A `...` is checked by its row alone: the
-  binding's source names the constant, which is why the stub can't print it, and the
-  adapter-logic ratchet refuses a `DEFAULT_*` retyped as a number there.
-- a row has both `core` and `exempt`, neither, an empty reason, or a `ts` cell: `index.d.ts`
-  states defaults only in prose, so there's none to read.
-- the manifest has no `clientDefaults`, a surface states no held default at all (the floor), or
-  a row marked `sentinel = true` names a default the surface doesn't state or doesn't compare.
-  The table must mark one.
+Every stated value needs a row: strings, zero, booleans, and absent values included.
+Values compare by kind; `False`, `0`, and `"0"` differ. A literal Python `None` or
+TypeScript `null`/`undefined` compares with a null core value. A Python `...` means
+a named Rust constant and is held by its row and the adapter-logic ratchet.
+
+An omitted override can select a non-null effective default in core. Such a row has
+`exempt = "<why this is an omission marker>"` and `value = "None"` or `"undefined"`
+to pin its declared spelling. It makes no claim that the marker proves the runtime
+fallback. Other adapter-only defaults also name their reason and pin their value.
+
+The check rejects missing/duplicate rows, missing core keys, mismatched values, empty
+exemption reasons, or a `value` pin without an exemption. Each surface must yield at
+least one default; a sentinel row must compare at least one value with core.
+TypeScript tags accept scalar JSON or `undefined`; malformed or repeated tags fail.
 
 A cell is a name, a list of names, or `{ exempt = "<reason>" }`. A CLI name is
 `<command>`, `<command> --<flag> ...`, or `@<group>` for a `[flag_groups]` entry, flags every
@@ -112,6 +116,7 @@ to them is this check's job, and the ratchet runs in a CI job with no Node for T
 from __future__ import annotations
 
 import argparse
+import ast
 import contextlib
 import json
 import os
@@ -147,7 +152,7 @@ SENTINELS = ("launch", "health", "kill", "run-report")
 CAPABILITY_KEYS = {"id", "sentinel", *SURFACES}
 TYPE_KEYS = {"name", "exempt_members"}
 TABLE_KEYS = {"capability", "type", "flag_groups", "exempt_names", "default"}
-DEFAULT_KEYS = {"id", "sentinel", "core", "exempt", "cli", "py", "ts"}
+DEFAULT_KEYS = {"id", "sentinel", "core", "exempt", "value", "cli", "py", "ts"}
 ISSUE = re.compile(r"#[1-9][0-9]*")
 
 # TypeDoc's ReflectionKind values for what the reader keeps.
@@ -191,12 +196,18 @@ def record_defaults(owner: str, function: dict[str, Any], surface: Surface) -> N
     """A function's stated defaults as `owner(param)`. `None` means the stub has no default."""
     for parameter in function.get("parameters") or []:
         if parameter.get("default") is not None:
-            surface.defaults[f"{owner}({parameter['name']})"] = parameter["default"]
+            name = f"{owner}({parameter['name']})"
+            previous = surface.defaults.get(name)
+            if previous is not None and previous != parameter["default"]:
+                raise ParityError(f"py: {name} has conflicting overload defaults")
+            surface.defaults[name] = parameter["default"]
+    for overload in function.get("overloads") or []:
+        record_defaults(owner, overload, surface)
 
 
 def py_surface(dump: dict[str, Any]) -> Surface:
-    """The stub as `griffe_dump.py` prints it. Dunders aren't surface: `__new__` is the
-    constructor a row names as the class, and the rest are protocol methods."""
+    """The stub as `griffe_dump.py` prints it. Constructor defaults use the class
+    name; other dunders are protocol methods outside this surface."""
     surface = Surface()
     for item in dump.get("members") or []:
         name = item["name"]
@@ -208,7 +219,10 @@ def py_surface(dump: dict[str, Any]) -> Surface:
         if item["kind"] == "class":
             info = ClassInfo()
             for member in item.get("members") or []:
-                if member["kind"] == "function" and member["name"] == "__new__":
+                if member["kind"] == "function" and member["name"] in (
+                    "__new__",
+                    "__init__",
+                ):
                     record_defaults(name, member, surface)
                 elif member["kind"] == "function" and not dunder(member["name"]):
                     record_defaults(f"{name}.{member['name']}", member, surface)
@@ -233,7 +247,139 @@ def ts_surface(project: dict[str, Any]) -> Surface:
     it (`snapshots.snapshotVm`), since napi-rs writes `#[napi(namespace = ...)]` that way."""
     surface = Surface()
     read_ts_children(project.get("children") or [], "", surface)
+    record_ts_defaults(project, surface)
     return surface
+
+
+def record_ts_defaults(project: dict[str, Any], surface: Surface) -> None:
+    """Read defaults on callable inputs and the record types they consume.
+
+    `@defaultValue` supplies an explicit scalar when the declaration has no initializer.
+    An optional input without either states the `undefined` omission
+    marker and must have its own table decision. Return-only records are not inputs.
+    """
+    nodes: dict[int, tuple[str, dict[str, Any]]] = {}
+    callables: list[tuple[str, dict[str, Any]]] = []
+    callable_types: list[tuple[str, dict[str, Any]]] = []
+
+    def index(
+        node: dict[str, Any], prefix: str, parent_kind: int | None = None
+    ) -> None:
+        name = prefix + node["name"]
+        if isinstance(node.get("id"), int):
+            nodes[node["id"]] = (name, node)
+        for signature in node.get("signatures") or []:
+            callables.append((name, signature))
+        # Callable variables and properties carry their signatures in a reflected type.
+        # Keep the declaration's public owner and leave signature return types unread.
+        if node.get("kind") == TS_VARIABLE or (
+            node.get("kind") == TS_PROPERTY and parent_kind == TS_CLASS
+        ):
+            callable_types.append((name, node.get("type") or {}))
+        for child in node.get("children") or []:
+            index(child, name + "." if node.get("kind") != 1 else "", node.get("kind"))
+
+    def default(node: dict[str, Any], name: str) -> None:
+        tags = [
+            tag
+            for tag in (node.get("comment") or {}).get("blockTags") or []
+            if tag.get("tag") == "@defaultValue"
+        ]
+        if len(tags) > 1:
+            raise ParityError(f"ts: {name} has duplicate @defaultValue tags")
+        value = node.get("defaultValue")
+        if tags and value is None:
+            value = "".join(
+                part["text"] for part in tags[0].get("content") or []
+            ).strip()
+            if value.startswith("```"):
+                lines = re.split(r"\r\n?|\n", value)
+                fence = re.match(r"`{3,}", value)[0]
+                # A complete backtick-wrapped scalar follows CommonMark 4.5's info and
+                # closing-run rules: https://spec.commonmark.org/0.31.2/#fenced-code-blocks
+                if (
+                    len(lines) < 3
+                    or "`" in lines[0][len(fence) :]
+                    or re.fullmatch(r" {0,3}" + fence + r"`*[ \t]*", lines[-1]) is None
+                ):
+                    raise ParityError(f"ts: {name} has a malformed @defaultValue")
+                value = "\n".join(lines[1:-1]).strip()
+            if value != "undefined":
+                try:
+                    parsed = json.loads(value)
+                except ValueError as error:
+                    raise ParityError(
+                        f"ts: {name} has a malformed @defaultValue"
+                    ) from error
+                if not (parsed is None or type(parsed) in (bool, int, float, str)):
+                    raise ParityError(f"ts: {name} @defaultValue must be a scalar")
+                if isinstance(parsed, float) and as_number(value) is None:
+                    raise ParityError(f"ts: {name} has a nonfinite @defaultValue")
+        elif value is None and (node.get("flags") or {}).get("isOptional"):
+            value = "undefined"
+        if value is not None:
+            previous = surface.defaults.get(name)
+            if previous is not None and previous != value:
+                raise ParityError(f"ts: {name} has conflicting overload defaults")
+            surface.defaults[name] = value
+
+    visited: set[int] = set()
+
+    def input_record(node: dict[str, Any], name: str) -> None:
+        for member in node.get("children") or []:
+            member_name = f"{name}.{member['name']}"
+            default(member, member_name)
+            input_type(member.get("type"), member_name)
+        for signature in node.get("signatures") or []:
+            input_parameters(signature, name)
+        input_type(node.get("type"), name)
+        input_type(node.get("extendedTypes"), name)
+
+    def input_type(value: Any, owner: str) -> None:
+        if isinstance(value, list):
+            for item in value:
+                input_type(item, owner)
+        elif isinstance(value, dict):
+            target = value.get("target")
+            if isinstance(target, int) and target in nodes and target not in visited:
+                visited.add(target)
+                name, node = nodes[target]
+                input_record(node, name)
+            declaration = value.get("declaration")
+            if isinstance(declaration, dict):
+                input_record(declaration, owner)
+            for key, nested in value.items():
+                # A type operator's target is another type; a reference's numeric target
+                # is harmless here. Declarations were handled above without return types.
+                if key != "declaration":
+                    input_type(nested, owner)
+
+    def input_parameters(signature: dict[str, Any], owner: str) -> None:
+        for parameter in signature.get("parameters") or []:
+            name = f"{owner}({parameter['name']})"
+            default(parameter, name)
+            input_type(parameter.get("type"), name)
+
+    def callable_type(value: dict[str, Any], owner: str, seen: set[int]) -> None:
+        declaration = value.get("declaration") or {}
+        for signature in declaration.get("signatures") or []:
+            input_parameters(signature, owner)
+        target = value.get("target")
+        if isinstance(target, int) and target in nodes and target not in seen:
+            seen.add(target)
+            _, node = nodes[target]
+            for signature in node.get("signatures") or []:
+                input_parameters(signature, owner)
+            callable_type(node.get("type") or {}, owner, seen)
+        for nested in value.get("types") or []:
+            callable_type(nested, owner, seen)
+
+    index(project, "")
+    for owner, signature in callables:
+        input_parameters(signature, owner)
+    for owner, value in callable_types:
+        # Each exported owner consumes its alias independently; cycles stop within it.
+        callable_type(value, owner, set())
 
 
 def read_ts_children(
@@ -290,11 +436,21 @@ def cli_surface(manifest: dict[str, Any]) -> Surface:
             if not parameter.get("positional")
         ]
         surface.flags[command["name"]] = {parameter["name"] for parameter in flags}
-        for parameter in flags:
+        for parameter in command.get("parameters") or []:
             if parameter.get("default") is not None:
-                surface.defaults[f"{command['name']} --{parameter['name']}"] = str(
+                option = (
+                    parameter["name"]
+                    if parameter.get("positional")
+                    else "--" + parameter["name"]
+                )
+                surface.defaults[f"{command['name']} {option}"] = str(
                     parameter["default"]
                 )
+    for parameter in data.get("globalFlags") or []:
+        if parameter.get("default") is not None:
+            surface.defaults[f"@global --{parameter['name']}"] = str(
+                parameter["default"]
+            )
     client = data.get("clientDefaults")
     surface.client_defaults = client if isinstance(client, dict) else None
     return surface
@@ -498,11 +654,8 @@ def as_number(text: str) -> float | None:
 
 
 def held(key: str, text: str) -> bool:
-    """Whether a stated default needs a `[[default]]` row; see the module docs."""
-    if key == "py" and text in ("True", "False", "..."):
-        return True
-    number = as_number(text)
-    return number is not None and number != 0
+    """Every explicitly stated value and optional-input omission needs a row."""
+    return True
 
 
 def core_value(client: dict[str, Any], path: str) -> tuple[bool, Any]:
@@ -515,14 +668,25 @@ def core_value(client: dict[str, Any], path: str) -> tuple[bool, Any]:
     return True, value
 
 
-def differs(text: str, value: Any) -> bool:
+def differs(text: str, value: Any, key: str = "py") -> bool:
     """Whether a surface's default text states something other than core's value."""
-    if isinstance(value, bool):
+    if key == "cli":
+        if isinstance(value, str):
+            return text != value
+        if type(value) in (int, float):
+            return as_number(text) != value
         return text.lower() != str(value).lower()
-    if isinstance(value, int | float):
-        number = as_number(text)
-        return number is None or number != value
-    return True
+    try:
+        actual = (
+            ast.literal_eval(text)
+            if key == "py"
+            else (None if text == "undefined" else json.loads(text))
+        )
+    except (ValueError, SyntaxError):
+        return True
+    if type(actual) in (int, float) and type(value) in (int, float):
+        return actual != value
+    return type(actual) is not type(value) or actual != value
 
 
 def default_problems(
@@ -545,16 +709,16 @@ def default_problems(
         problems += [
             f"{where}: unknown key {key}" for key in sorted(set(row) - DEFAULT_KEYS)
         ]
-        if "ts" in row:
-            problems.append(
-                f"{where}: ts: index.d.ts states defaults only in prose, so there's none to map"
-            )
         key_path = row.get("core")
         reason = row.get("exempt")
         if (key_path is None) == (reason is None):
             problems.append(f"{where}: a row has a core key or an exemption, not both")
         elif reason is not None and not (isinstance(reason, str) and reason.strip()):
             problems.append(f"{where}: the exemption has an empty reason")
+        if reason is not None and "value" not in row:
+            problems.append(f"{where}: an exempt default must pin its value")
+        if "value" in row and (reason is None or not isinstance(row["value"], str)):
+            problems.append(f"{where}: value pins an exempt default's source spelling")
         resolved, value = (False, None)
         if isinstance(key_path, str) and client is not None:
             resolved, value = core_value(client, key_path)
@@ -563,7 +727,7 @@ def default_problems(
         sentinel = row.get("sentinel") is True
         sentinels += sentinel
         compared = 0
-        for key in ("cli", "py"):
+        for key in ("cli", "py", "ts"):
             names = names_of(row[key]) if key in row else []
             if names is None:
                 problems.append(
@@ -582,10 +746,14 @@ def default_problems(
                 if text is None:
                     problems.append(f"{where}: {key}: {name} states no default")
                     continue
-                if not resolved or text == "...":
+                if reason is not None and "value" in row and text != row["value"]:
+                    problems.append(
+                        f"{where}: {key}: {name} defaults to {text}, but its exemption pins {row['value']}"
+                    )
+                if not resolved or (key == "py" and text == "..."):
                     continue
                 compared += 1
-                if differs(text, value):
+                if differs(text, value, key):
                     problems.append(
                         f"{where}: {key}: {name} defaults to {text}, but clientDefaults."
                         f"{key_path} is {json.dumps(value)}"
@@ -596,7 +764,7 @@ def default_problems(
             )
     if not sentinels:
         problems.append("the table marks no sentinel [[default]] row")
-    for key in ("cli", "py"):
+    for key in ("cli", "py", "ts"):
         if key in empty:
             continue
         stated = {

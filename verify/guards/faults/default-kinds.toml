@@ -1,0 +1,290 @@
+# Default kinds and omission metadata must fail closed (#570).
+[[family]]
+guard = "tools/check-parity.py"
+run = ["./tools/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "default-kind-string"
+message = "defaults to \"agent-default\", but clientDefaults.prompt.permissionMode is \"unrestricted\""
+transform = { file = "docs/manifest.json", replace = "\"permissionMode\": \"agent-default\"", with = "\"permissionMode\": \"unrestricted\"" }
+
+[[family.fault]]
+id = "default-kind-zero"
+message = "defaults to 0, but clientDefaults.stream.offset is 1"
+transform = { file = "docs/manifest.json", replace = "\"offset\": 0", with = "\"offset\": 1" }
+
+[[family.fault]]
+id = "default-kind-absent"
+message = "defaults to None, but clientDefaults.exec.cwd is \"/tmp\""
+transform = { file = "docs/manifest.json", replace = "\"cwd\": null", with = "\"cwd\": \"/tmp\"" }
+
+[[family.fault]]
+id = "default-kind-typescript"
+message = "ts: PromptOptions.permissionMode defaults to \"unrestricted\""
+transform = { file = "bindings/microvms-js/index.d.ts", replace = "* @defaultValue \"agent-default\"", with = "* @defaultValue \"unrestricted\"" }
+
+[[family.fault]]
+id = "default-typescript-floor"
+message = "ts: the surface states no default the rows hold, so nothing was read"
+transform = { file = "tools/check-parity.py", replace = "    record_ts_defaults(project, surface)\n", with = "    pass\n" }
+
+[[family.fault]]
+id = "default-exemption-pin"
+message = "default stdin-eof: an exempt default must pin its value"
+transform = { file = "verify/parity/capabilities.toml", replace = "id = \"stdin-eof\"\nexempt = \"whether this one write closes stdin: an argument of the call, with no default anywhere else\"\nvalue = \"False\"", with = "id = \"stdin-eof\"\nexempt = \"whether this one write closes stdin: an argument of the call, with no default anywhere else\"" }
+
+[[family]]
+guard = "tools/test_check_parity.py"
+run = ["python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-q"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "default-python-overload-conflict"
+message = "AssertionError: ParityError not raised"
+transform = { file = "tools/check-parity.py", replace = "            if previous is not None and previous != parameter[\"default\"]:\n", with = "            if False:\n" }
+
+[[family.fault]]
+id = "default-typescript-inline-input"
+message = "test_the_typescript_reader_over_typedoc"
+transform = { file = "tools/check-parity.py", replace = "            if isinstance(declaration, dict):\n", with = "            if False:\n" }
+
+[[family.fault]]
+id = "default-python-overload-only"
+message = "test_python_overloads_are_read_and_must_agree"
+transform = { file = "site/scripts/reference/griffe_dump.py", replace = "    for name, overloads in owner.overloads.items():\n", with = "    for name, overloads in []:\n" }
+
+[[family.fault]]
+id = "default-python-constructor"
+message = "test_python_constructor_defaults_use_the_class_name_and_must_agree"
+transform = { file = "tools/check-parity.py", replace = "                    \"__init__\",\n", with = "" }
+
+[[fault]]
+id = "default-typescript-permission-fallback"
+guard = "both agents and permission modes reach the wire with the remote deadline"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/agents.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+note = "bindings/microvms-js/__test__/agents.mjs::both agents and permission modes reach the wire with the remote deadline"
+transform = { file = "bindings/microvms-js/src/agents.rs", replace = ".unwrap_or(defaults.permission_mode)", with = ".unwrap_or(\"unrestricted\".parse().unwrap())" }
+
+[[fault]]
+id = "default-typescript-base-workdir-ownership"
+guard = "an omitted base working directory follows the shared default"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "--test-name-pattern", "an omitted base working directory follows the shared default", "bindings/microvms-js/__test__/build_project.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+note = "bindings/microvms-js/__test__/build_project.mjs::an omitted base working directory follows the shared default"
+transform = [
+  { file = "crates/microvms-app/src/control/artifact.rs", replace = "            working_dir: String::new(),\n", with = "            working_dir: \"/shared-default\".to_string(),\n" },
+  { file = "bindings/microvms-js/src/sandbox.rs", replace = ".unwrap_or_else(|| CoreBaseImage::default().working_dir)", with = ".unwrap_or_default()" },
+]
+
+[[family]]
+guard = "tools/test_check_parity.py: DefaultValueComparisonTests"
+run = ["uv", "run", "--locked", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "DefaultValueComparisonTests"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "default-cli-string-spelling"
+message = "FAIL: test_cli_strings_keep_their_raw_text_and_case"
+transform = { file = "tools/check-parity.py", replace = "    if key == \"cli\":\n        if isinstance(value, str):\n", with = "    if key == \"CLI\":\n        if isinstance(value, str):\n" }
+
+[[family.fault]]
+id = "default-cli-boolean-case"
+message = "FAIL: test_cli_booleans_accept_case_without_losing_the_value"
+transform = { file = "tools/check-parity.py", replace = "        return text.lower() != str(value).lower()\n", with = "        return text.upper() != str(value).lower()\n" }
+
+[[family.fault]]
+id = "default-invalid-literal-refused"
+message = "FAIL: test_invalid_python_and_typescript_literals_are_not_equal_defaults"
+transform = { file = "tools/check-parity.py", replace = "    except (ValueError, SyntaxError):\n        return True\n", with = "    except (ValueError, SyntaxError):\n        return False\n" }
+
+[[family.fault]]
+id = "default-numeric-literal-equivalence"
+message = "FAIL: test_numeric_literals_compare_values_across_integer_and_float_spellings"
+transform = { file = "tools/check-parity.py", replace = "    if type(actual) in (int, float) and type(value) in (int, float):\n", with = "    if type(None) in (int, float) and type(value) in (int, float):\n" }
+
+[[family.fault]]
+id = "default-boolean-numeric-distinction"
+message = "FAIL: test_booleans_and_numbers_remain_distinct_defaults"
+transform = { file = "tools/check-parity.py", replace = "    return type(actual) is not type(value) or actual != value\n", with = "    return actual != value\n" }
+
+[[family]]
+guard = "tools/test_check_parity.py: DefaultTests"
+run = ["uv", "run", "--locked", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "DefaultTests"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "default-duplicate-row-id"
+message = "FAIL: test_duplicate_default_ids_fail_with_distinct_selectors"
+transform = { file = "tools/check-parity.py", replace = "        if row_id in seen:\n            problems.append(f\"{where}: the id is used by more than one row\")\n        seen.add(row_id)\n", with = "        if row_id in seen:\n            problems.append(f\"{where}: the id is used by more than one row\")\n        seen.add(None)\n" }
+
+[[family.fault]]
+id = "default-value-pin-detection"
+message = "FAIL: test_value_pins_require_an_exemption_and_source_spelling"
+transform = { file = "tools/check-parity.py", replace = "        if \"value\" in row and (reason is None or not isinstance(row[\"value\"], str)):\n", with = "        if \"VALUE\" in row and (reason is None or not isinstance(row[\"value\"], str)):\n" }
+
+[[family.fault]]
+id = "default-value-pin-kind"
+message = "FAIL: test_value_pins_require_an_exemption_and_source_spelling"
+transform = { file = "tools/check-parity.py", replace = "        if \"value\" in row and (reason is None or not isinstance(row[\"value\"], str)):\n", with = "        if \"value\" in row and (reason is None and not isinstance(row[\"value\"], str)):\n" }
+
+[[family.fault]]
+id = "default-invalid-cell-continues"
+message = "FAIL: test_invalid_cell_does_not_hide_a_later_surface_mismatch"
+transform = { file = "tools/check-parity.py", replace = "                    f\"{where}: {key}: a cell is a default's name or a list of them\"\n                )\n                continue\n", with = "                    f\"{where}: {key}: a cell is a default's name or a list of them\"\n                )\n                break\n" }
+
+[[family.fault]]
+id = "default-missing-selector-continues"
+message = "FAIL: test_missing_default_does_not_hide_a_later_selector_mismatch"
+transform = { file = "tools/check-parity.py", replace = "                    problems.append(f\"{where}: {key}: {name} states no default\")\n                    continue\n", with = "                    problems.append(f\"{where}: {key}: {name} states no default\")\n                    break\n" }
+
+[[family.fault]]
+id = "default-unread-selector-claims"
+message = "FAIL: test_unread_surface_still_claims_every_selector"
+transform = { file = "tools/check-parity.py", replace = "                claimed[(key, name)] = row_id\n                if key in empty:\n                    continue\n", with = "                claimed[(key, name)] = row_id\n                if key in empty:\n                    break\n" }
+
+[[family.fault]]
+id = "default-unread-manifest"
+message = "FAIL: test_unread_manifest_does_not_report_missing_client_defaults"
+transform = { file = "tools/check-parity.py", replace = "    if client is None and \"cli\" not in empty:\n", with = "    if client is None and \"CLI\" not in empty:\n" }
+
+[[family.fault]]
+id = "default-unread-surface-continues"
+message = "FAIL: test_unread_surface_does_not_hide_later_unclaimed_defaults"
+transform = { file = "tools/check-parity.py", replace = "    for key in (\"cli\", \"py\", \"ts\"):\n        if key in empty:\n            continue\n", with = "    for key in (\"cli\", \"py\", \"ts\"):\n        if key in empty:\n            break\n" }
+
+[[family]]
+guard = "tools/test_check_parity.py: TypeScript defaults and input traversal"
+run = ["uv", "run", "--locked", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "default-typescript-native-value"
+message = "test_native_defaults_are_read_before_optional_omission"
+transform = { file = "tools/check-parity.py", replace = "        value = node.get(\"defaultValue\")\n", with = "        value = None\n" }
+
+[[family.fault]]
+id = "default-typescript-tag-pieces"
+message = "test_tag_parts_concatenate_and_fenced_scalars_keep_whitespace"
+transform = { file = "tools/check-parity.py", replace = "            value = \"\".join(\n", with = "            value = \"XXXX\".join(\n" }
+
+[[family.fault]]
+id = "default-typescript-fenced-scalar"
+message = "test_tag_parts_concatenate_and_fenced_scalars_keep_whitespace"
+transform = { file = "tools/check-parity.py", replace = "                value = \"\\n\".join(lines[1:-1]).strip()\n", with = "                value = \"XX\\nXX\".join(lines[1:-1]).strip()\n" }
+
+[[family.fault]]
+id = "default-typescript-explicit-undefined"
+message = "test_tag_parts_concatenate_and_fenced_scalars_keep_whitespace"
+transform = { file = "tools/check-parity.py", replace = "            if value != \"undefined\":\n", with = "            if value != \"UNDEFINED\":\n" }
+
+[[family.fault]]
+id = "default-typescript-invalid-tag-reason"
+message = "test_invalid_tag_values_report_the_reason"
+transform = { file = "tools/check-parity.py", replace = "            raise ParityError(f\"ts: {name} has duplicate @defaultValue tags\")\n", with = "            raise ParityError(None)\n" }
+
+[[family.fault]]
+id = "default-typescript-overload-value"
+message = "test_overloads_agree_or_report_conflicting_defaults"
+transform = { file = "tools/check-parity.py", replace = "        if value is not None:\n            previous = surface.defaults.get(name)\n", with = "        if value is not None:\n            previous = None\n" }
+
+[[family.fault]]
+id = "default-typescript-readonly-input"
+message = "test_the_typescript_reader_over_typedoc"
+transform = { file = "tools/check-parity.py", replace = "                if key != \"declaration\":\n", with = "                if key not in (\"target\", \"declaration\"):\n" }
+
+[[family.fault]]
+id = "default-typescript-return-only"
+message = "test_the_typescript_reader_over_typedoc"
+transform = { file = "tools/check-parity.py", replace = "                if key != \"declaration\":\n", with = "                if True:\n" }
+
+[[family.fault]]
+id = "default-typescript-inherited-owner"
+message = "test_the_typescript_reader_over_typedoc"
+transform = { file = "tools/check-parity.py", replace = "        input_type(node.get(\"extendedTypes\"), name)\n", with = "        input_type(node.get(\"extendedTypes\"), None)\n" }
+
+[[family.fault]]
+id = "default-typescript-recursive-input"
+message = "test_the_typescript_reader_over_typedoc"
+transform = { file = "tools/check-parity.py", replace = "                visited.add(target)\n", with = "                visited.add(None)\n" }
+
+[[family.fault]]
+id = "default-typescript-module-reference"
+message = "test_the_typescript_reader_over_typedoc"
+transform = { file = "tools/check-parity.py", replace = "    index(project, \"\")\n", with = "    for child in project.get(\"children\") or []:\n        index(child, \"\")\n" }
+
+[[family.fault]]
+id = "default-typescript-callable-record"
+message = "test_the_typescript_reader_over_typedoc"
+transform = { file = "tools/check-parity.py", replace = "        for signature in node.get(\"signatures\") or []:\n            input_parameters(signature, name)\n", with = "        for signature in []:\n            input_parameters(signature, name)\n" }
+
+[[family.fault]]
+id = "default-ellipsis-python-only"
+message = "test_ellipsis_is_only_a_python_named_constant_marker"
+transform = { file = "tools/check-parity.py", replace = '                if not resolved or (key == "py" and text == "..."):', with = '                if not resolved or text == "...":' }
+
+[[family.fault]]
+id = "default-typescript-native-tag-precedence"
+message = "test_native_initializer_cannot_be_replaced_by_a_documentation_tag"
+transform = { file = "tools/check-parity.py", replace = '        if tags and value is None:', with = '        if tags:' }
+
+[[family.fault]]
+id = "default-typescript-closing-fence"
+message = "test_fenced_tags_require_a_complete_closing_fence"
+transform = { file = "tools/check-parity.py", replace = '''                if (
+                    len(lines) < 3
+                    or "`" in lines[0][len(fence) :]
+                    or re.fullmatch(r" {0,3}" + fence + r"`*[ \t]*", lines[-1]) is None
+                ):''', with = '                if False:' }
+
+[[family.fault]]
+id = "default-typescript-callable-values"
+message = "test_typescript_callable_values_read_inputs_but_not_return_records"
+transform = { file = "tools/check-parity.py", replace = '            callable_types.append((name, node.get("type") or {}))', with = '            pass' }
+
+
+[[family.fault]]
+id = "default-typescript-callable-output-record"
+message = "test_typescript_callable_values_read_inputs_but_not_return_records"
+transform = { file = "tools/check-parity.py", replace = 'node.get("kind") == TS_PROPERTY and parent_kind == TS_CLASS', with = 'node.get("kind") == TS_PROPERTY' }
+
+
+[[family.fault]]
+id = "default-typescript-callable-reference"
+message = "test_typescript_callable_values_read_inputs_but_not_return_records"
+transform = { file = "tools/check-parity.py", replace = '        if isinstance(target, int) and target in nodes and target not in seen:', with = '        if False:' }
+
+[[family.fault]]
+id = "default-typescript-callable-cycle"
+message = "test_callable_reference_cycles_keep_other_signature_branches"
+transform = { file = "tools/check-parity.py", replace = '            seen.add(target)', with = '            seen.add(None)' }
+
+
+[[family.fault]]
+id = "default-typescript-fence-info"
+message = "test_fenced_tags_reject_malformed_openers_and_line_boundaries"
+transform = { file = "tools/check-parity.py", replace = '''                    or "`" in lines[0][len(fence) :]
+''', with = '' }
+
+[[family.fault]]
+id = "default-typescript-fence-lines"
+message = "test_fenced_tags_reject_malformed_openers_and_line_boundaries"
+transform = { file = "tools/check-parity.py", replace = '                lines = re.split(r"\r\n?|\n", value)', with = '                lines = value.splitlines()' }
+
+[[family.fault]]
+id = "default-typescript-fence-indent"
+message = "test_fenced_tags_reject_malformed_openers_and_line_boundaries"
+transform = { file = "tools/check-parity.py", replace = 're.fullmatch(r" {0,3}" + fence + r"`*[ \t]*", lines[-1])', with = 're.fullmatch(r"\s*" + fence + r"`*[ \t]*", lines[-1])' }
