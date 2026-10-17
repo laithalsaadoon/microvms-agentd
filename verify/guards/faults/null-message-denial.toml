@@ -1,0 +1,41 @@
+# Region-aware tests use a new optional transport accessor; these faults keep it buildable.
+
+[[fault]]
+id = "null-denial-signed-transport-region"
+guard = "control::transport::tests::signed_transport_exposes_its_configured_region_to_the_port"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "control::transport::tests::signed_transport_exposes_its_configured_region_to_the_port", "--", "--exact"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/control/transport.rs", replace = "fn region(&self) -> Option<&Region> {\n        Some(&self.region)\n    }", with = "fn region(&self) -> Option<&Region> {\n        None\n    }" }
+
+[[fault]]
+id = "null-denial-ambiguous"
+guard = "control::transport::tests::a_null_message_access_denied_names_both_possible_causes"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "control::transport::tests::a_null_message_access_denied_names_both_possible_causes", "--", "--exact"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "The cause may be an unsupported region or an IAM denial.", with = "Check the region before the policy." }
+
+[[fault]]
+id = "null-denial-supported-region"
+guard = "control::transport::tests::supported_region_null_denials_point_to_iam_in_both_send_paths"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "control::transport::tests::supported_region_null_denials_point_to_iam_in_both_send_paths", "--", "--exact"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "Some(region) if region.is_supported()", with = "Some(region) if !region.is_supported()" }
+
+[[fault]]
+id = "null-denial-parity-py"
+guard = "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[control-plane/null-message-denial]"
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml", "--features", "parity-fixtures"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[control-plane/null-message-denial]"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "Some(region) if region.is_supported()", with = "Some(region) if !region.is_supported()" }
+
+[[fault]]
+id = "null-denial-unlisted-region"
+guard = "control::transport::tests::unlisted_region_null_denials_keep_both_causes_visible"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "control::transport::tests::unlisted_region_null_denials_keep_both_causes_visible", "--", "--exact"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "Some(region) if region.is_supported()", with = "Some(region) if !region.is_supported()" }

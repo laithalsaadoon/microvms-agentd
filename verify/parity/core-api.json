@@ -657,6 +657,7 @@
     "microvms_core::control::transport::SignedTransport": "struct",
     "microvms_core::control::transport::SignedTransport::new": "method",
     "microvms_core::control::transport::Transport": "trait",
+    "microvms_core::control::transport::Transport::region": "method",
     "microvms_core::control::transport::Transport::resolve_credentials": "method",
     "microvms_core::control::transport::Transport::send": "method",
     "microvms_core::control::transport::classify_failure": "function",

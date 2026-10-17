@@ -1,6 +1,6 @@
 ---
 title: Debug a failed build
-description: Where a failed image build's reason lives, how to read the build log, what a wedged image looks like, and which failures the client now refuses before the billable call.
+description: Find the cause of a failed image build and check its logs before you try again.
 editUrl: false
 sidebar:
   order: 7
@@ -13,10 +13,9 @@ microvm image-builds <image> <version>    # each build's state and the reason a 
 microvm history <microvm-id-or-name>      # what was asked, and what the platform said back
 ```
 
-Start with the error envelope, then inspect the build record and its logs.
-Check prerequisites and image inputs before paying for another build. The
-steps below distinguish a rejected request, a failed image build, and a VM
-that failed after launch.
+Read the error first, then check the build record and its logs. Check your
+setup and build inputs before you try again. Use the steps below to tell a
+bad request from a failed build or a VM that failed after launch.
 
 ## 1. Read the exit code and the envelope first
 
@@ -28,7 +27,7 @@ The codes a build produces:
 - `ERR_INVALID_ARG` (exit 2): the request was refused locally, before any AWS call. The Dockerfile checks below land here.
 - `ERR_BUILD_WEDGED` (exit 6): the image build was never scheduled, the `clientToken` replay signature.
 - `ERR_LAUNCH_DIED` (exit 7): the MicroVM reached a terminal state before `RUNNING`; read `stateReason`.
-- `ERR_CREDENTIALS` (exit 4): an identity is wrong or absent, and waiting will not fix it. An `AccessDeniedException` with a null message is the unsupported-region signature, and the suggestion says to check `--region` first.
+- `ERR_CREDENTIALS` (exit 4): check the AWS role or user that made the call. Waiting does not fix an IAM denial. A blank `AccessDeniedException` can also mean the region has no MicroVM service. In a region with this service, read the full denial in CloudTrail and check the policy. Creating an image with tags also requires `lambda:TagResource`.
 
 ## 2. Before building again
 

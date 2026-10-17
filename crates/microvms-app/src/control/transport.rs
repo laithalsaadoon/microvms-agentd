@@ -246,6 +246,12 @@ impl Reply {
 /// whose behaviour is half real. `&self` rather than `&mut self` so the recorder can be
 /// shared behind an `Arc` while a lifecycle runs.
 pub trait Transport: Send + Sync {
+    /// The service region, when known, for diagnostics about ambiguous denials.
+    /// Custom transports may leave this unknown without changing their behavior.
+    fn region(&self) -> Option<&Region> {
+        None
+    }
+
     /// Performs `call`, returning whatever the far side answered.
     ///
     /// A transport-level failure (no status at all) is an `Err`; a 4xx or 5xx is an
@@ -298,7 +304,11 @@ pub async fn send_with_retry(transport: &dyn Transport, call: Call) -> Result<Re
             if reply.is_success() {
                 return Ok(reply);
             }
-            Err(classify_failure(operation, &reply))
+            Err(classify_failure_in_region(
+                operation,
+                &reply,
+                transport.region(),
+            ))
         }
     };
 
@@ -336,7 +346,11 @@ pub async fn send_accepting(
             if reply.is_success() || accept.contains(&reply.status) {
                 return Ok(reply);
             }
-            Err(classify_failure(operation, &reply))
+            Err(classify_failure_in_region(
+                operation,
+                &reply,
+                transport.region(),
+            ))
         }
     };
 
@@ -368,10 +382,14 @@ pub async fn send_accepting(
 ///
 /// # 403 and the null message
 ///
-/// A 403 whose `message` is null is the unsupported-region signature (TRAP-6). The
-/// message says so, because the alternative — forwarding a null as "AccessDenied: " — is
-/// precisely what sends someone to audit an IAM policy that is fine.
+/// A 403 whose `message` is null is ambiguous (TRAP-6): both unsupported regions and
+/// denied implied actions can produce it. The diagnostic names both and points to
+/// CloudTrail for the service's full denial.
 pub fn classify_failure(operation: &str, reply: &Reply) -> Error {
+    classify_failure_in_region(operation, reply, None)
+}
+
+fn classify_failure_in_region(operation: &str, reply: &Reply, region: Option<&Region>) -> Error {
     let parsed: crate::control::ops::ServiceErrorWire =
         serde_json::from_slice(&reply.body).unwrap_or_default();
     let detail = parsed.message.as_deref().unwrap_or("").trim().to_string();
@@ -405,17 +423,11 @@ pub fn classify_failure(operation: &str, reply: &Reply) -> Error {
         ),
         403 if detail.is_empty() => (
             ErrorKind::Credentials,
-            "AccessDeniedException with an empty or null message field. Measured 2026-08-07: this \
-             is the signature of a region that does not carry MicroVMs, and it is \
-             indistinguishable from a genuine IAM denial except that a real denial names the \
-             principal and the action (docs/PLATFORM.md, 'Calling an unpriced region returns \
-             AccessDeniedException with a null message'). Check the region before the policy."
-                .to_string(),
+            null_message_denial(operation, region),
         ),
         403 => (
             ErrorKind::Credentials,
-            "AccessDeniedException, with a message — so this is a genuine denial rather than the \
-             null-message region trap."
+            "AccessDeniedException, with a message — the service reported a genuine denial."
                 .to_string(),
         ),
         404 => (
@@ -455,6 +467,32 @@ pub fn classify_failure(operation: &str, reply: &Reply) -> Error {
             "{operation} failed with HTTP {}: {said}. {explanation}",
             reply.status
         ),
+    )
+}
+
+/// The service can omit its denial detail for both regional availability and IAM errors.
+fn null_message_denial(operation: &str, region: Option<&Region>) -> String {
+    let availability = match region {
+        Some(region) if region.is_supported() => format!(
+            "{} carries MicroVMs; an IAM policy is the likely cause.",
+            region.as_str()
+        ),
+        Some(region) => format!(
+            "{} is not in the known MicroVMs region list; verify service availability as well as the IAM policy.",
+            region.as_str()
+        ),
+        None => "The cause may be an unsupported region or an IAM denial.".to_string(),
+    };
+    let region_arg = region
+        .map(|region| format!(" --region {}", region.as_str()))
+        .unwrap_or_default();
+    format!(
+        "AccessDeniedException with an empty or null message field. {availability} \
+         A create call with tags can require the implied lambda:TagResource action. \
+         Check the full denial in CloudTrail: aws cloudtrail lookup-events{region_arg} \
+         --lookup-attributes AttributeKey=EventName,AttributeValue={operation} \
+         --query 'Events[].CloudTrailEvent' --output text. Inspect errorCode and errorMessage \
+         for the denied action (docs/PLATFORM.md)."
     )
 }
 
@@ -1074,12 +1112,9 @@ mod tests {
         assert_eq!(SIGNING_NAME, "lambda");
     }
 
-    /// TRAP-6's diagnostic, on the exact response shape the trap produces: 403 with a
-    /// null message. The message has to name the region cause *and* say the field was
-    /// null, because "AccessDeniedException" alone is what sends a reader to the IAM
-    /// console.
+    /// TRAP-6: a missing message cannot distinguish service availability from IAM.
     #[test]
-    fn a_null_message_access_denied_names_the_region_trap() {
+    fn a_null_message_access_denied_names_both_possible_causes() {
         let reply = Reply {
             status: 403,
             body: br#"{"message": null}"#.to_vec(),
@@ -1090,11 +1125,69 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains("null"), "{message}");
         assert!(message.contains("region"), "{message}");
-        assert!(message.contains("does not carry MicroVMs"), "{message}");
         assert!(
-            message.contains("Check the region before the policy"),
-            "the remedy has to be the region, not the policy: {message}"
+            message.contains("unsupported region or an IAM denial"),
+            "{message}"
         );
+        assert!(message.contains("lambda:TagResource"), "{message}");
+        assert!(message.contains("cloudtrail lookup-events"), "{message}");
+    }
+
+    /// TRAP-6: known service regions prioritize IAM and preserve the event name for lookup.
+    #[tokio::test]
+    async fn supported_region_null_denials_point_to_iam_in_both_send_paths() {
+        use crate::control::fake::{Answer, FakeControlPlane};
+        let transport = FakeControlPlane::in_region(Region::UsEast1);
+        transport.answer(
+            "CreateMicrovmImage",
+            Answer {
+                status: 403,
+                body: r#"{"message":null}"#.to_string(),
+                error_type: Some("AccessDeniedException".to_string()),
+            },
+        );
+        for accept in [false, true] {
+            let call = Call::get("CreateMicrovmImage", "/images");
+            let error = if accept {
+                send_accepting(&transport, call, &[404]).await.unwrap_err()
+            } else {
+                send_with_retry(&transport, call).await.unwrap_err()
+            };
+            assert_eq!(error.kind(), ErrorKind::Credentials);
+            assert!(!error.retryable());
+            let message = error.to_string();
+            for detail in [
+                "us-east-1 carries MicroVMs",
+                "policy is the likely cause",
+                "lambda:TagResource",
+                "cloudtrail lookup-events --region us-east-1",
+                "AttributeValue=CreateMicrovmImage",
+                "errorMessage",
+            ] {
+                assert!(message.contains(detail), "{message}");
+            }
+            assert!(!message.contains("Check the region before the policy"));
+        }
+        assert_eq!(transport.call_count("CreateMicrovmImage"), 2);
+    }
+
+    /// TRAP-6: an explicit unlisted region does not rule out an IAM denial.
+    #[test]
+    fn unlisted_region_null_denials_keep_both_causes_visible() {
+        let reply = Reply {
+            status: 403,
+            body: b"{}".to_vec(),
+            error_type: None,
+        };
+        let error = classify_failure_in_region(
+            "ListMicrovms",
+            &reply,
+            Some(&Region::unlisted("eu-central-1")),
+        );
+        let message = error.to_string();
+        assert!(message.contains("verify service availability as well as the IAM policy"));
+        assert!(message.contains("--region eu-central-1"));
+        assert!(!message.contains("policy is the likely cause"));
     }
 
     /// A 403 *with* a message is a genuine denial and says so, so the two are not

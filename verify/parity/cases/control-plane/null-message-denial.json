@@ -1,0 +1,35 @@
+{
+  "capability": "resume-by-id",
+  "input": {
+    "microvm_id": "mvm-parity",
+    "actions": ["resume"],
+    "script": [
+      {
+        "operation": "ResumeMicrovm",
+        "status": 403,
+        "body": "{\"message\":null}",
+        "error_type": "AccessDeniedException"
+      }
+    ],
+    "message_mentions": [
+      "us-east-1 carries MicroVMs",
+      "an IAM policy is the likely cause",
+      "lambda:TagResource",
+      "cloudtrail lookup-events --region us-east-1"
+    ]
+  },
+  "expect": {
+    "error": {
+      "code": "ERR_CREDENTIALS",
+      "wire_kind": null,
+      "retryable": false
+    },
+    "calls": ["ResumeMicrovm"],
+    "message_mentions": {
+      "us-east-1 carries MicroVMs": true,
+      "an IAM policy is the likely cause": true,
+      "lambda:TagResource": true,
+      "cloudtrail lookup-events --region us-east-1": true
+    }
+  }
+}
