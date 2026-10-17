@@ -21,6 +21,8 @@ SPEC = importlib.util.spec_from_file_location(
 )
 recovery = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(recovery)
+# Load once so each fixture avoids recompiling the wrapper's validation namespaces.
+CREDENTIALS = runpy.run_path(str(Path(__file__).with_name("recovery-credentials.py")))
 REGION = "us-east-1"
 NAME = "synthetic-private-image"
 ARN = f"arn:aws:lambda:{REGION}:000000000000:microvm-image:{NAME}"
@@ -184,6 +186,37 @@ def test_observed_timestamp_is_typed_and_never_copied_raw(value, kind):
     assert ("createdAt" in snapshot) == (kind == "valid")
     if kind == "valid":
         assert snapshot["createdAt"] == CREATED.timestamp()
+
+
+@pytest.mark.parametrize(
+    "error,code",
+    [
+        (RuntimeError("synthetic-private-diagnostic"), "observation_failed"),
+        (recovery.Refused("synthetic-private-diagnostic"), "observation_failed"),
+        (recovery.Refused("pagination_token"), "pagination_token"),
+        (subprocess.TimeoutExpired(["synthetic-private-command"], 1), "deadline"),
+    ],
+)
+def test_observation_error_retains_only_fixed_categories(error, code):
+    value = report()
+    recovery.observation_error(value, "versions", error)
+    assert value["sections"]["versions"] == "incomplete"
+    assert value["errors"] == [{"section": "versions", "code": code}]
+    assert "synthetic-private" not in json.dumps(value)
+    assert recovery.validate_observation(value) is value
+
+
+@pytest.mark.parametrize("existing", [999, 1000])
+def test_observation_error_stays_within_report_error_bound(existing):
+    value = report()
+    value["errors"] = [{"section": "images", "code": "api_failed"}] * existing
+    recovery.observation_error(value, "versions", RuntimeError("private-error"))
+    assert value["sections"]["versions"] == "incomplete"
+    assert len(value["errors"]) == 1000
+    assert value["errors"][-1]["section"] == (
+        "versions" if existing == 999 else "images"
+    )
+    assert recovery.validate_observation(value) is value
 
 
 def test_missing_and_unknown_state_and_availability_are_not_inferred():
@@ -576,11 +609,10 @@ def test_oversize_independent_verifier_retains_bounded_census_and_incomplete_rec
     )
     assert len(json.dumps(value).encode()) < recovery.OBSERVATION_MAX_BYTES
     assert recovery.validate_observation(value) is value
-    wrapper = runpy.run_path(str(Path(__file__).with_name("recovery-credentials.py")))
     path = tmp_path / "incomplete-observation.json"
     path.write_text(json.dumps(value))
-    assert wrapper["read_receipt"](path, observe_only=True) == value
-    assert wrapper["failure_receipt"](path, observe_only=True) == value
+    assert CREDENTIALS["read_receipt"](path, observe_only=True) == value
+    assert CREDENTIALS["failure_receipt"](path, observe_only=True) == value
 
 
 def test_observation_receipt_cannot_be_accepted_as_cleanup(census):
@@ -617,8 +649,54 @@ def test_observation_schema_rejects_wrong_kind_success_claims_and_unknown_fields
     original = report()
     recovery.observe(census.manifest, census.owned, census.api, original)
     original[field] = value
-    with pytest.raises(recovery.Refused):
+    with pytest.raises(recovery.Refused, match="^receipt_schema$"):
         recovery.validate_observation(original)
+
+
+@pytest.mark.parametrize("invalid", ["not-a-hash", "a" * 63, "g" * 64, None, True])
+def test_observation_schema_rejects_malformed_identity_hash(census, invalid):
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    value["images"][0]["imageSha256"] = invalid
+    with pytest.raises(recovery.Refused, match="^receipt_schema$"):
+        recovery.validate_observation(value)
+
+
+@pytest.mark.parametrize("target", ["images", "versions"])
+@pytest.mark.parametrize("field", ["listed", "observed"])
+@pytest.mark.parametrize(
+    "state,availability,timestamp,logging",
+    [
+        ("missing", "missing", "missing", {"kind": "missing"}),
+        ("null", "null", "null", {"kind": "null"}),
+        ("malformed", "malformed", "malformed", {"kind": "malformed"}),
+        ("known", "ACTIVE", "valid", {"kind": "disabled"}),
+        (
+            "known",
+            "INACTIVE",
+            "valid",
+            {"kind": "cloudWatch", "logGroupSha256": "d" * 64},
+        ),
+        ("known", "ACTIVE", "valid", {"kind": "unknownMember"}),
+    ],
+)
+def test_observation_schema_accepts_exact_snapshot_classifications(
+    census, target, field, state, availability, timestamp, logging
+):
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    if state == "known":
+        state = "CREATED" if target == "images" else "SUCCESSFUL"
+    snapshot = {
+        "state": state,
+        "availability": availability,
+        "createdAtKind": timestamp,
+        "logging": logging,
+    }
+    if timestamp == "valid":
+        snapshot["createdAt"] = 0
+    value[target][0][field] = snapshot
+    assert recovery.validate_observation(value) is value
 
 
 @pytest.mark.parametrize(
@@ -888,6 +966,47 @@ def test_core_observe_mode_runs_verifier_and_read_only_api_without_cleanup(
     )
     forbidden.assert_not_called()
     assert census.events[0:2] == ["verifier", "list_microvm_images"]
+
+
+@pytest.mark.parametrize("failure", ["refused", "unexpected", "interrupted"])
+def test_core_observation_preflight_failure_retains_valid_incomplete_receipt(
+    monkeypatch, tmp_path, failure
+):
+    error = {
+        "refused": recovery.Refused("invalid_manifest_digest"),
+        "unexpected": RuntimeError("synthetic-private-diagnostic"),
+        "interrupted": KeyboardInterrupt("synthetic-private-diagnostic"),
+    }[failure]
+    monkeypatch.setattr(recovery, "load_manifest", Mock(side_effect=error))
+    network = Mock(side_effect=AssertionError("preflight failure reached provider"))
+    monkeypatch.setattr(recovery.subprocess, "run", network)
+    monkeypatch.delenv("RECOVERY_DEADLINE_MONOTONIC", raising=False)
+    path = tmp_path / "observation.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "recover-live.py",
+            "observe",
+            "--source-run",
+            "9",
+            "--manifest-sha256",
+            "b" * 64,
+            "--report",
+            str(path),
+        ],
+    )
+    stdout = io.StringIO()
+    with contextlib.redirect_stdout(stdout):
+        assert recovery.main() == 1
+    value = json.loads(path.read_text())
+    assert json.loads(stdout.getvalue()) == value
+    assert value["status"] == "incomplete"
+    assert value["kind"] == "live-recovery-observation"
+    assert value["recoveryAccepted"] is value["mutationsPerformed"] is False
+    assert recovery.validate_observation(value) is value
+    assert "synthetic-private-diagnostic" not in stdout.getvalue()
+    network.assert_not_called()
 
 
 def test_full_list_inventory_and_source_image_identity_are_kept_distinct(census):

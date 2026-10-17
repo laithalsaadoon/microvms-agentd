@@ -207,6 +207,74 @@ def test_wrapper_schemas_reject_cross_kind_artifacts_and_keep_incomplete_observa
     }
 
 
+def test_default_receipt_reader_preserves_legacy_recovery_schema(tmp_path):
+    path = tmp_path / "receipt.json"
+    value = {
+        "kind": "live-recovery",
+        "conformance_verified": False,
+        "status": "failed",
+        "reason": "api_failed",
+    }
+    path.write_text(json.dumps(value))
+    assert wrapper.read_receipt(path) == value
+
+
+def test_observation_reader_uses_observation_size_bound(tmp_path):
+    path = tmp_path / "observation.json"
+    value = observation()
+    value["logGroups"] = [{"sha256": f"{index:064x}"} for index in range(900)]
+    raw = json.dumps(value)
+    assert (
+        wrapper.MAX_RESPONSE
+        < len(raw)
+        < wrapper.OBSERVATION_CORE["OBSERVATION_MAX_BYTES"]
+    )
+    path.write_text(raw)
+    assert wrapper.read_receipt(path, observe_only=True) == value
+
+
+def test_observation_failure_never_preserves_completed_receipt(tmp_path):
+    path = tmp_path / "observation.json"
+    path.write_text(json.dumps(observation()))
+    assert wrapper.failure_receipt(path, observe_only=True) == {
+        "kind": "live-recovery-observation",
+        "schemaVersion": 1,
+        "conformance_verified": False,
+        "recoveryAccepted": False,
+        "mutationsPerformed": False,
+        "status": "incomplete",
+    }
+
+
+def test_observation_cli_success_uses_distinct_fixed_summary(tmp_path, monkeypatch):
+    args = arguments(tmp_path)
+
+    def completed(actual, environ):
+        assert actual.observe_only is True
+        actual.report.write_text(json.dumps(observation()))
+
+    monkeypatch.setattr(wrapper, "recover", completed)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "recovery-credentials.py",
+            "--observe-only",
+            "--source-run",
+            args.source_run,
+            "--manifest-sha256",
+            args.manifest_sha256,
+            "--report",
+            str(args.report),
+        ],
+    )
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+        assert wrapper.main() == 0
+    assert output.getvalue() == "observation: completed\n"
+    assert json.loads(args.report.read_text()) == observation()
+
+
 def test_observation_cli_failure_is_distinct_and_never_prints_provider_text(
     tmp_path, monkeypatch
 ):
