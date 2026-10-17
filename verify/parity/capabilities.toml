@@ -1393,6 +1393,12 @@ value = "None"
 py = ["AgentVm.terminate(delete_attempts)", "AgentVm.terminate(delete_backoff)", "AgentVm.terminate_async(delete_attempts)", "AgentVm.terminate_async(delete_backoff)"]
 
 [[default]]
+id = "omitted-py-controlplane-create"
+exempt = "ControlPlane construction accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["ControlPlane(retry)", "ControlPlane.create_async(retry)"]
+
+[[default]]
 id = "omitted-py-controlplane-delete-image"
 exempt = "ControlPlane.delete_image accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
 value = "None"
@@ -1403,6 +1409,12 @@ id = "omitted-py-controlplane-list"
 exempt = "ControlPlane.list accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
 value = "None"
 py = ["ControlPlane.list(image_identifier)", "ControlPlane.list(image_version)", "ControlPlane.list_async(image_identifier)", "ControlPlane.list_async(image_version)"]
+
+[[default]]
+id = "omitted-py-controlplane-sweep"
+exempt = "ControlPlane.sweep accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["ControlPlane.sweep(dry_run)", "ControlPlane.sweep(keep)", "ControlPlane.sweep_async(dry_run)", "ControlPlane.sweep_async(keep)"]
 
 [[default]]
 id = "omitted-py-controlplane-wait-for-state"
@@ -1457,6 +1469,12 @@ id = "omitted-py-sandbox-build-image"
 exempt = "Sandbox.build_image accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
 value = "None"
 py = ["Sandbox.build_image(size)", "Sandbox.build_image(base_image)", "Sandbox.build_image(base_image_version)", "Sandbox.build_image(dockerfile)", "Sandbox.build_image(project_dir)", "Sandbox.build_image(run_hook_timeout)", "Sandbox.build_image(build_hook_timeout)", "Sandbox.build_image(tags)", "Sandbox.build_image(log_group)", "Sandbox.build_image(log_stream)", "Sandbox.build_image(token_scope)", "Sandbox.build_image_async(size)", "Sandbox.build_image_async(base_image)", "Sandbox.build_image_async(base_image_version)", "Sandbox.build_image_async(dockerfile)", "Sandbox.build_image_async(project_dir)", "Sandbox.build_image_async(run_hook_timeout)", "Sandbox.build_image_async(build_hook_timeout)", "Sandbox.build_image_async(tags)", "Sandbox.build_image_async(log_group)", "Sandbox.build_image_async(log_stream)", "Sandbox.build_image_async(token_scope)"]
+
+[[default]]
+id = "omitted-py-sandbox-create"
+exempt = "Sandbox construction accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["Sandbox(retry)", "Sandbox.create_async(retry)"]
 
 [[default]]
 id = "omitted-py-sandbox-ensure-image"
@@ -1633,6 +1651,12 @@ value = "None"
 py = ["wrap_dockerfile(port)"]
 
 [[default]]
+id = "omitted-py-wrap-dockerfile-preserving-user"
+exempt = "wrap_dockerfile_preserving_user accepts omitted inputs at the Python boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "None"
+py = ["wrap_dockerfile_preserving_user(port)", "wrap_dockerfile_preserving_user(workdir)"]
+
+[[default]]
 id = "omitted-ts-agentensureoptions"
 exempt = "AgentEnsureOptions accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
 value = "undefined"
@@ -1741,6 +1765,12 @@ value = "undefined"
 ts = ["CompletionRequest.clientGraceSec", "CompletionRequest.env", "CompletionRequest.execId", "CompletionRequest.inheritImageEnv", "CompletionRequest.poweroffOnExit", "CompletionRequest.reapGroupOnExit", "CompletionRequest.shell"]
 
 [[default]]
+id = "omitted-ts-controlplane-create"
+exempt = "ControlPlane.create accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["ControlPlane.create(retry)"]
+
+[[default]]
 id = "omitted-ts-controlplane-deleteimage"
 exempt = "ControlPlane.deleteImage accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
 value = "undefined"
@@ -1751,6 +1781,12 @@ id = "omitted-ts-controlplane-list"
 exempt = "ControlPlane.list accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
 value = "undefined"
 ts = ["ControlPlane.list(options)"]
+
+[[default]]
+id = "omitted-ts-controlplane-sweep"
+exempt = "ControlPlane.sweep accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["ControlPlane.sweep(options)"]
 
 [[default]]
 id = "omitted-ts-controlplane-waitforstate"
@@ -1891,6 +1927,12 @@ value = "undefined"
 ts = ["Sandbox.buildImage(size)", "Sandbox.buildImage(runHookTimeout)", "Sandbox.buildImage(buildHookTimeout)"]
 
 [[default]]
+id = "omitted-ts-sandbox-create"
+exempt = "Sandbox.create accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["Sandbox.create(retry)"]
+
+[[default]]
 id = "omitted-ts-sandbox-ensureimage"
 exempt = "Sandbox.ensureImage accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
 value = "undefined"
@@ -2029,6 +2071,12 @@ value = "undefined"
 ts = ["StreamOptionsInput.errorOnGap", "StreamOptionsInput.idleTimeout", "StreamOptionsInput.maxReconnects", "StreamOptionsInput.reconnect"]
 
 [[default]]
+id = "omitted-ts-sweepoptions"
+exempt = "SweepOptions accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["SweepOptions.dryRun", "SweepOptions.keep"]
+
+[[default]]
 id = "omitted-ts-syncdiroptions"
 exempt = "SyncDirOptions accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
 value = "undefined"
@@ -2123,6 +2171,12 @@ id = "omitted-ts-wrapdockerfile"
 exempt = "wrapDockerfile accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
 value = "undefined"
 ts = ["wrapDockerfile(options)"]
+
+[[default]]
+id = "omitted-ts-wrapdockerfilepreservinguser"
+exempt = "wrapDockerfilePreservingUser accepts omitted inputs at the Node boundary. This row pins only the omission marker; the shared operation owns any resolved default, generated value, or absence. It does not assert that their effective values are equal."
+value = "undefined"
+ts = ["wrapDockerfilePreservingUser(options)"]
 
 [[default]]
 id = "cli-quickstart-exec"
