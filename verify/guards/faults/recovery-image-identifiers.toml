@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: Apache-2.0
+# Exact image observations cannot turn names, errors, or incomplete version lists into proof.
+
+[[family]]
+guard = "test_recover_live_observation_identifiers.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_observation_identifiers.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "readonly-image-name-fallback"
+message = "test_"
+transform = { file = "tools/recover-live.py", replace = "requested = approved[name] or observation_image_arn(name, region, ownership)", with = "requested = approved[name] or name" }
+
+[[family.fault]]
+id = "readonly-image-shared-namespace-count"
+message = "test_"
+transform = { file = "tools/recover-live.py", replace = "require(len(sources) == 1, \"observation_identity\")", with = "require(bool(sources), \"observation_identity\")" }
+
+[[family.fault]]
+id = "readonly-image-canonical-partition"
+message = "test_"
+transform = { file = "tools/recover-live.py", replace = "r\"(arn:aws:lambda:\"", with = "r\"(arn:aws(?:-cn)?:lambda:\"" }
+
+[[family.fault]]
+id = "readonly-image-source-name-shape"
+message = "test_"
+transform = { file = "tools/recover-live.py", replace = "and re.fullmatch(r\"[A-Za-z0-9_-]{1,64}\", source_name),", with = "and True," }
+
+[[family.fault]]
+id = "readonly-image-target-name-shape"
+message = "test_"
+transform = { file = "tools/recover-live.py", replace = "isinstance(name, str) and re.fullmatch(r\"[A-Za-z0-9_-]{1,64}\", name),", with = "True," }
+
+[[family.fault]]
+id = "readonly-image-target-name-substitution"
+message = "test_"
+transform = { file = "tools/recover-live.py", replace = "return namespace[1] + name", with = "return namespace[1] + source_name" }
+
+[[family.fault]]
+id = "readonly-image-exact-region"
+message = "test_"
+transform = { file = "tools/recover-live.py", replace = "r\"(arn:aws:lambda:\"\n        + re.escape(region)", with = "r\"(arn:aws:lambda:\"\n        + r\"[a-z0-9-]+\"" }
+
+[[family.fault]]
+id = "readonly-image-derived-response-binding"
+message = "test_"
+transform = { file = "tools/recover-live.py", replace = "if name in derived:\n                row[\"identityMatches\"] = (\n                    current.get(\"imageArn\") == requested and current.get(\"name\") == name\n                )", with = "if name in derived:\n                row[\"identityMatches\"] = True" }
+
+[[family.fault]]
+id = "readonly-image-unlisted-version-coverage"
+message = "test_"
+transform = { file = "tools/recover-live.py", replace = "if listed is None:\n                # An image that appeared after List has no enumerated versions.", with = "if False:\n                # An image that appeared after List has no enumerated versions." }
