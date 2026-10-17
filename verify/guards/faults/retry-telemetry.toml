@@ -168,3 +168,17 @@ run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control
 expect = "test-failed"
 suite = "rust"
 transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "if !error.retryable() || !allowed {", with = "if !error.retryable() && !allowed {" }
+
+[[family]]
+guard = "control::transport::tests::a_retry_at_the_elapsed_budget_boundary_does_not_sleep"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::transport::tests::a_retry_at_the_elapsed_budget_boundary_does_not_sleep"]
+expect = "test-failed"
+suite = "rust"
+
+[[family.fault]]
+id = "retry-throttle-signals-require-both"
+transform = { file = "crates/microvms-app/src/control/transport.rs", replace = 'reply.status == 429 || reply.error_type.as_deref() == Some("ThrottlingException")', with = 'reply.status == 429 && reply.error_type.as_deref() == Some("ThrottlingException")' }
+
+[[family.fault]]
+id = "retry-throttle-header-inverted"
+transform = { file = "crates/microvms-app/src/control/transport.rs", replace = 'reply.status == 429 || reply.error_type.as_deref() == Some("ThrottlingException")', with = 'reply.status == 429 || reply.error_type.as_deref() != Some("ThrottlingException")' }

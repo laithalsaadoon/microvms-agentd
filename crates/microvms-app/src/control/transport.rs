@@ -1021,7 +1021,13 @@ mod tests {
         // Advancing during the request also proves request time uses this budget.
         clock.advance(Duration::MAX);
         gate.notify_one();
-        let error = pending.await.unwrap_err();
+        // The delivered response must finish this call immediately. A second request
+        // would wait on the closed gate, so fail that retry here rather than hanging.
+        let error = tokio::select! {
+            biased;
+            result = &mut pending => result.unwrap_err(),
+            _ = std::future::ready(()) => panic!("elapsed budget must stop before another request"),
+        };
         assert!(error.throttled());
         assert_eq!(error.attempt_count(), 1);
         assert_eq!(transport.call_count("RunMicrovm"), 1);
@@ -1613,6 +1619,7 @@ mod tests {
         };
         let error = classify_failure("ListMicrovms", &reply);
         assert!(error.retryable(), "{error}");
+        assert!(error.throttled(), "the header identifies the throttle");
         assert_eq!(error.kind(), ErrorKind::Retryable);
         let message = error.to_string();
         assert!(message.contains("ThrottlingException"), "{message}");
@@ -1686,6 +1693,7 @@ mod tests {
             };
             let error = classify_failure("GetMicrovm", &reply);
             assert_eq!(error.retryable(), retryable, "HTTP {status}");
+            assert_eq!(error.throttled(), status == 429, "HTTP {status}");
         }
     }
 
