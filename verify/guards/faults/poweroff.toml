@@ -6,6 +6,7 @@ id = "poweroff-before-group-exit"
 guard = "exec::tests::poweroff_waits_for_the_original_group_after_publishing_the_result"
 run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec::tests::poweroff_waits_for_the_original_group_after_publishing_the_result"]
 expect = "test-failed"
+message = "a live group postpones shutdown"
 suite = "rust"
 transform = { file = "crates/agentd/src/poweroff.rs", replace = "            if empty {", with = "            if empty || true {" }
 
@@ -96,3 +97,12 @@ run = ["cargo", "test", "-p", "agentd", "--test", "poweroff_startup", "--", "--e
 expect = "test-failed"
 suite = "rust"
 transform = { file = "crates/agentd/src/main.rs", replace = "async fn run(config: Config) -> std::io::Result<()> {", with = "async fn run(config: Config) -> std::io::Result<()> {\n    return Ok(());" }
+
+# FAIL_TO_PASS: fails on fede38ed6268 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-vanished-proc-row-retries-without-requesting-poweroff"
+guard = "poweroff::tests::vanished_proc_row_retries_without_requesting_poweroff"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "poweroff::tests::vanished_proc_row_retries_without_requesting_poweroff"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-vanished-proc-row-retries-without-requesting-poweroff.patch"

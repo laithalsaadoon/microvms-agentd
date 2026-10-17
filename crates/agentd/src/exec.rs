@@ -2035,12 +2035,12 @@ mod tests {
         ) {
             return;
         }
+        use std::io::Write;
         use std::sync::atomic::{AtomicUsize, Ordering};
         for enabled in [false, true] {
             let calls = Arc::new(AtomicUsize::new(0));
             let observed = calls.clone();
-            let probes = Arc::new(AtomicUsize::new(0));
-            let nonempty = probes.clone();
+            let (probed, mut probes) = tokio::sync::mpsc::unbounded_channel();
             let poweroff = crate::poweroff::Poweroff::testing(
                 Arc::new(|| Ok(())),
                 Arc::new(move || {
@@ -2048,11 +2048,14 @@ mod tests {
                     Ok(())
                 }),
                 Arc::new(move |pgid| {
-                    let empty = crate::poweroff::group_empty(Path::new("/proc"), pgid)?;
-                    if !empty {
-                        nonempty.fetch_add(1, Ordering::SeqCst);
-                    }
-                    Ok(empty)
+                    let result = crate::poweroff::group_empty(Path::new("/proc"), pgid);
+                    let _ = probed.send(
+                        result
+                            .as_ref()
+                            .map(|empty| *empty)
+                            .map_err(|error| (error.kind(), error.raw_os_error())),
+                    );
+                    result
                 }),
             );
             let state = AppState::with_services(
@@ -2064,14 +2067,30 @@ mod tests {
             );
             let dir = tempfile::tempdir().unwrap();
             let marker = dir.path().join("release");
-            // The bounded child avoids leaving work behind even if an assertion
-            // fails. Redirected pipes let the direct child's result publish while
-            // the original process group is still alive.
-            let request = req("poweroff-group", &[
-                "/bin/sh", "-c",
-                "(i=0; while [ ! -e \"$1\" ] && [ \"$i\" -lt 500 ]; do sleep .02; i=$((i+1)); done) >/dev/null 2>&1 & echo ready",
-                "sh", marker.to_str().unwrap(),
-            ]).with_poweroff_on_exit(enabled);
+            nix::unistd::mkfifo(
+                &marker,
+                nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR,
+            )
+            .unwrap();
+            let mut release = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&marker)
+                .unwrap();
+            // One blocked shell keeps the group alive without repeatedly spawning
+            // sleep processes during the procfs scan. Dropping our FIFO writer on
+            // failure gives it EOF. Redirected pipes let the leader publish first.
+            let request = req(
+                "poweroff-group",
+                &[
+                    "/bin/sh",
+                    "-c",
+                    "(IFS= read -r release < \"$1\") >/dev/null 2>&1 & echo ready",
+                    "sh",
+                    marker.to_str().unwrap(),
+                ],
+            )
+            .with_poweroff_on_exit(enabled);
             let response = start(State(state.clone()), Ok(Json(request))).await;
             assert_eq!(response.status(), StatusCode::OK);
             let outcome = await_result(&state, "poweroff-group").await;
@@ -2082,8 +2101,15 @@ mod tests {
                 // to wait. Publication alone does not mean the monitor has run,
                 // especially under tracing; an early action must fail this barrier.
                 tokio::time::timeout(Duration::from_secs(5), async {
-                    while probes.load(Ordering::SeqCst) < 2 && calls.load(Ordering::SeqCst) == 0 {
-                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    let mut nonempty = 0;
+                    while nonempty < 2 && calls.load(Ordering::SeqCst) == 0 {
+                        tokio::select! {
+                            result = probes.recv() => {
+                                assert_eq!(result.expect("the monitor reports its probe"), Ok(false), "the held group probe must succeed and remain nonempty");
+                                nonempty += 1;
+                            }
+                            _ = tokio::time::sleep(Duration::from_millis(10)) => {}
+                        }
                     }
                 })
                 .await
@@ -2094,7 +2120,7 @@ mod tests {
                 0,
                 "a live group postpones shutdown"
             );
-            std::fs::write(marker, "release").unwrap();
+            writeln!(release, "release").unwrap();
             if enabled {
                 tokio::time::timeout(Duration::from_secs(5), async {
                     while calls.load(Ordering::SeqCst) == 0 {
