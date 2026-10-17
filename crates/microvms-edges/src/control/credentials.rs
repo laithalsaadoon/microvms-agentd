@@ -335,6 +335,53 @@ mod tests {
         assert!(std::error::Error::source(&safe).is_none());
     }
 
+    #[tokio::test]
+    async fn cache_debug_names_the_type_without_formatting_provider_or_identity() {
+        struct DebugProvider(Arc<AtomicUsize>);
+
+        impl std::fmt::Debug for DebugProvider {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                f.write_str("SYNTHETIC_PROVIDER_DEBUG")
+            }
+        }
+
+        impl ProvideCredentials for DebugProvider {
+            fn provide_credentials<'a>(&'a self) -> future::ProvideCredentials<'a>
+            where
+                Self: 'a,
+            {
+                future::ProvideCredentials::new(async {
+                    Ok(Credentials::new(
+                        "SYNTHETIC_CACHED_ACCESS",
+                        "SYNTHETIC_CACHED_SECRET",
+                        Some("SYNTHETIC_CACHED_TOKEN".into()),
+                        None,
+                        "test",
+                    ))
+                })
+            }
+        }
+
+        let formats = Arc::new(AtomicUsize::new(0));
+        let config = aws_config::SdkConfig::builder()
+            .credentials_provider(SharedCredentialsProvider::new(DebugProvider(
+                formats.clone(),
+            )))
+            .time_source(Clock::default())
+            .sleep_impl(TokioSleep::new())
+            .build();
+        let cached = cached(&config).unwrap();
+        let before = format!("{cached:?}");
+        let credentials = cached.provide_credentials().await.unwrap();
+        assert_eq!(credentials.secret_access_key(), "SYNTHETIC_CACHED_SECRET");
+        for rendered in [before, format!("{cached:?}")] {
+            assert!(rendered.contains("CachedCredentials"), "{rendered}");
+            assert!(!rendered.contains("SYNTHETIC_"), "{rendered}");
+        }
+        assert_eq!(formats.load(Ordering::SeqCst), 0);
+    }
+
     #[derive(Clone, Debug, Default)]
     struct Clock(Arc<AtomicU64>);
     impl TimeSource for Clock {
