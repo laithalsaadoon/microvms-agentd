@@ -221,6 +221,10 @@ mod tests {
                 "configuration is invalid",
             ),
             (
+                CredentialsError::provider_error("SYNTHETIC_CREDENTIAL_SENTINEL"),
+                "credential provider failed",
+            ),
+            (
                 CredentialsError::provider_error(CredentialsError::provider_timed_out(
                     Duration::from_secs(1),
                 )),
