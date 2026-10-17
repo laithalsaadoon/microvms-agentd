@@ -1,0 +1,34 @@
+# Exact collector contracts preserve source identity and independently mapped inputs.
+[[family]]
+guard = "tools/test_parity_collectors_exact.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "tools/test_parity_collectors_exact.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "parity-collectors-core-origin"
+message = "test_complete_declarations_and_argument_origins"
+transform = { file = "tools/parity_inventory.py", replace = '''"origin": f"{declaration.get('origin')}({parameter})",''', with = '''"origin": parameter,''' }
+
+[[family.fault]]
+id = "parity-collectors-ts-reference"
+message = "test_reference_identity_and_declaration_shapes"
+transform = { file = "tools/parity_inventory.py", replace = "                    result[key] = references[child]\n", with = "                    result[key] = str(child)\n" }
+
+[[fault]]
+id = "parity-collectors-typescript-export-omission"
+guard = "tools/test_typedoc_parser.py::TypeDocParser::test_export_omissions_refuse_a_partial_inventory_and_name_missing_exports"
+run = ["uv", "run", "--locked", "pytest", "-q", "tools/test_typedoc_parser.py"]
+expect = "exit-nonzero"
+message = "test_export_omissions_refuse_a_partial_inventory_and_name_missing_exports"
+suite = "script"
+transform = { file = "tools/check-parity.py", replace = "    missing = set(extra[\"exports\"]) - reported\n", with = "    missing = set()\n" }
+
+[[fault]]
+id = "parity-collectors-typescript-index-signatures"
+guard = "tools/test_parity_index_signatures.py::TypeScriptIndexSignatures::test_real_index_signature_changes_reject_reviewed_shapes"
+run = ["uv", "run", "--locked", "pytest", "-q", "tools/test_parity_index_signatures.py::TypeScriptIndexSignatures::test_real_index_signature_changes_reject_reviewed_shapes"]
+expect = "exit-nonzero"
+message = "test_real_index_signature_changes_reject_reviewed_shapes"
+suite = "script"
+transform = { file = "tools/parity_inventory.py", replace = '''{"indexSignatures": stable(item["indexSignatures"])}''', with = '''{}''' }

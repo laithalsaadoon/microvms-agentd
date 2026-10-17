@@ -1,0 +1,16 @@
+# Reviewed contracts must identify an implementation and preserve conflicting declarations.
+[[family]]
+guard = "tools/test_parity_inventory_verdict.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "tools/test_parity_inventory_verdict.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "parity-inventory-all-exempt-contract"
+message = "test_contract_cannot_be_exempt_on_every_surface"
+transform = { file = "tools/parity_inventory.py", replace = "        if implementer is None:\n", with = "        if False:\n" }
+
+[[family.fault]]
+id = "parity-inventory-conflicting-declaration"
+message = "test_conflicting_declaration_identifies_the_key_and_preserves_the_first"
+transform = { file = "tools/parity_inventory.py", replace = "    if key in out and out[key] != shape:\n", with = "    if False:\n" }

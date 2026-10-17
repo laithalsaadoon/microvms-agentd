@@ -213,16 +213,25 @@ group's file or listed twice. Moving drift to another file or crate is a move, n
 drift, when its key keeps its path or its text; a move and a rename at once read as new
 drift, so they land in separate PRs.
 
-`mise run parity:check` holds `verify/parity/capabilities.toml` to the four surfaces
-(core through `verify/parity/core-api.json`, the CLI through `docs/manifest.json`, and
-the two bindings through their stub and declarations). A public function, a
-method of a class the table names, or a command that no row names fails, and so
-does a row naming something a surface doesn't have. A new class and its methods
-aren't held yet; that's the option-level follow-up. Name
-the capability on each surface, or exempt the surface with the reason it won't
-have it. An exemption that names an issue is a parity gap, which `parity:check`
-refuses and the ratchet holds at zero (#280), so a new function or method lands
-on every surface or is exempted as a decision.
+`mise run parity:check` compares `verify/parity/capabilities.toml` with the Rust,
+CLI, Python, and TypeScript APIs. It reads core through `verify/parity/core-api.json`,
+the CLI through `docs/manifest.json`, and the bindings through their stub and
+declarations. A capability row must resolve on each API or give a reason for an
+exemption. Public functions and commands require a row, as do methods on the
+classes listed in the table. An exemption that cites an issue is a parity gap,
+which `parity:check` refuses and the ratchet holds at zero (#280).
+
+The table also selects `verify/parity/inventory.json`. This reviewed inventory
+records public types, callable signatures, values, and inputs. It includes new
+classes and their members, CLI flags and positional arguments, and request or
+options fields. Each collected item must have exactly one contract row. For each
+API, the row lists declarations or a named permanent exemption with a reason.
+The check rejects new or missing declarations and changed shapes. It also rejects
+duplicate ownership, stale mappings, and unused exemptions.
+
+Review decides which language forms express the same contract. The check verifies
+that mapping and each API's recorded shape, so their syntax can differ. Generated
+observations still need review before enrollment.
 `mise run core-api` regenerates the core snapshot, and `core-api:check` fails
 when it's stale.
 
@@ -331,8 +340,8 @@ that release's CLI drives this tree's, each through a launch, an exec, a file co
 back, health and a teardown.
 
 Use current boto3 models and AWS documentation to identify capabilities the
-package should expose, verify request serialization, and check CLI/SDK parity
-(`mise run parity:check` covers names, not options).
+package should expose. Verify request serialization and review CLI/SDK parity
+alongside the checked inventory.
 The [MicroVM API](https://docs.aws.amazon.com/lambda/latest/microvm-api/Welcome.html)
 manages images and VMs; [Lambda core](https://docs.aws.amazon.com/lambda/latest/lambda-core/Welcome.html)
 manages VPC connectors. Document the package's supported workflows and limits.

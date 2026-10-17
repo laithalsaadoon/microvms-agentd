@@ -160,8 +160,12 @@ capabilities, or `verify/parity/capabilities.toml` says why one doesn't.
   a row naming something a surface doesn't have. An exemption is a decision
   with its reason: `parity:check` refuses one that names an issue, because that
   is a parity gap, and the ratchet holds parity-gap at zero (#280). The
-  script's docstring has the rules; option-level parity (flags, keyword
-  arguments) isn't checked yet.
+  script's docstring has the rules. The reviewed `verify/parity/inventory.json`
+  also records public types, values, callables, and inputs. Each collected item
+  needs one contract row. The row lists its declarations in each API or explains
+  why that API omits it. Review decides which forms express the same contract
+  across APIs. The check compares each declaration with its reviewed record and
+  rejects missing or duplicate mappings.
 - Defaults live at or below core. The CLI and the bindings use the constant
   core re-exports from the layer that owns it, and don't add a duration, size
   or retry literal of their own without a decision in `verify/ratchet/decisions.toml`.

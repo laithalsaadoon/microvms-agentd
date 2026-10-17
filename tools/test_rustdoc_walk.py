@@ -11,13 +11,20 @@ cargo comes from `mise.toml`'s toolchain, so run this under `mise x` or a mise t
 """
 
 import json
+import runpy
 import shutil
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
-import rustdoc_walk
+rustdoc_walk = SimpleNamespace(
+    **runpy.run_path(
+        str(Path(__file__).with_name("rustdoc_walk.py")),
+        run_name="tools.rustdoc_walk",
+    )
+)
 
 # `inner` defines everything; `outer` is the composition root that re-exports it, the way
 # microvms-core re-exports microvms-app. Each item is here for one branch of the walk.
