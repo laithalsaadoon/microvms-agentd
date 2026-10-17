@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use super::transport::{Call, paths, send_with_retry};
+use super::transport::{Call, paths};
 use super::{ControlPlane, ops};
 use crate::error::{Error, ErrorKind};
 use crate::sandbox::{DEFAULT_LIFECYCLE_TIMEOUT, LIFECYCLE_POLL_INTERVAL};
@@ -78,9 +78,7 @@ impl ControlPlane {
         let separator = if path.contains('?') { '&' } else { '?' };
         let call = Call::get(operation, format!("{path}{separator}{PAGE_SIZE}"));
         *last = Some(self.clock().elapsed());
-        send_with_retry(self.transport(), call)
-            .await?
-            .json(operation)
+        self.send(call).await?.json(operation)
     }
 
     async fn sweep_images(
@@ -326,6 +324,48 @@ mod tests {
             "ListMicrovms",
             Answer::failure(403, "polling exceeded the deadline"),
         );
+    }
+
+    #[tokio::test]
+    async fn sweep_honors_the_control_plane_retry_attempt_budget() {
+        let (fake, clock, plane) = fixture();
+        fake.answer("ListMicrovmImages", Answer::failure(429, "throttled"));
+        fake.answer("ListMicrovmImages", Answer::ok(EMPTY));
+        let plane = plane.with_retry(
+            super::super::transport::RetryPolicy::new(1, Duration::from_secs(30)).unwrap(),
+        );
+        let error = plane
+            .sweep("job-", &SweepOptions::default())
+            .await
+            .unwrap_err();
+        assert_eq!(fake.call_count("ListMicrovmImages"), 1);
+        assert!(error.throttled());
+        assert_eq!(error.attempt_count(), 1);
+        assert_eq!(clock.now(), Duration::ZERO);
+    }
+
+    #[tokio::test]
+    async fn sweep_decode_failures_retain_completed_request_retry_details() {
+        let (fake, clock, plane) = fixture();
+        fake.answer("ListMicrovmImages", Answer::throttled_as_400());
+        fake.answer("ListMicrovmImages", Answer::ok(r#"{"items":["#));
+        let plane = plane.with_retry(
+            super::super::transport::RetryPolicy::new(2, Duration::from_secs(30)).unwrap(),
+        );
+
+        let error = plane
+            .sweep("job-", &SweepOptions::default())
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.kind(), ErrorKind::Platform);
+        assert!(!error.throttled());
+        assert_eq!(error.attempt_count(), 2);
+        assert_eq!(error.backoff(), clock.now());
+        assert!(error.backoff() >= Duration::from_millis(200));
+        assert!(error.backoff() < Duration::from_millis(400));
+        assert_eq!(fake.call_count("ListMicrovmImages"), 2);
+        assert_eq!(fake.call_count("ListMicrovms"), 0);
     }
 
     #[tokio::test]

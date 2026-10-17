@@ -615,7 +615,23 @@ impl ControlPlane {
     /// Discover prefix-matched images and their VMs; set dryRun false to clean them up.
     /// Keep entries preserve an exact image name or ARN and every VM using it.
     #[napi]
-    pub async fn sweep(
+    pub fn sweep<'env>(
+        &self,
+        env: &'env napi::Env,
+        prefix: String,
+        options: Option<SweepOptions>,
+    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, SweepReport>> {
+        let owned = Self {
+            inner: Arc::clone(&self.inner),
+            #[cfg(feature = "parity-fixtures")]
+            parity: self.parity.clone(),
+        };
+        crate::errors::spawn_with_retry_details(env, async move {
+            owned.sweep_impl(prefix, options).await
+        })
+    }
+
+    async fn sweep_impl(
         &self,
         prefix: String,
         options: Option<SweepOptions>,

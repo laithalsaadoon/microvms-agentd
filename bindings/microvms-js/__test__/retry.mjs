@@ -40,3 +40,19 @@ test('Sandbox control-plane failures retain retry telemetry', async () => {
     return true;
   });
 });
+
+test('ControlPlane sweep failures retain retry telemetry', async () => {
+  const plane = ControlPlane.parityFromScript(JSON.stringify([
+    { operation: 'ListMicrovmImages', status: 429, body: '{}' },
+    { operation: 'ListMicrovmImages', status: 200, body: '{"items":[]}' },
+    { operation: 'ListMicrovms', status: 200, body: '{"items":[]}' },
+  ]), { maxAttempts: 1, maxElapsedSeconds: 30 });
+  await assert.rejects(plane.sweep('job-'), error => {
+    assert.equal(error.cause.message, 'ERR_RETRYABLE');
+    assert.deepEqual(retryDetails(error), {
+      attemptCount: 1, backoffSeconds: 0, throttled: true,
+    });
+    return true;
+  });
+  assert.deepEqual(plane.parityCalls(), ['ListMicrovmImages']);
+});

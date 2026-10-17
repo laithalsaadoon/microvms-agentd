@@ -8,3 +8,7 @@ void report
 void timestamps
 // @ts-expect-error a keep entry is an image name or ARN
 plane.sweep('job-', { keep: [123] })
+
+type Same<A, B> = (<T>() => T extends A ? 1 : 2) extends
+  (<T>() => T extends B ? 1 : 2) ? true : false
+export const sweepReturn: Same<ReturnType<ControlPlane['sweep']>, Promise<SweepReport>> = true

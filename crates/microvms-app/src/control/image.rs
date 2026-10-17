@@ -1266,9 +1266,7 @@ impl ControlPlane {
                 self.sweep_page("ListMicrovmImageVersions", call.path, last)
                     .await?
             } else {
-                self.send(call)
-                    .await?
-                    .json("ListMicrovmImageVersions")?
+                self.send(call).await?.json("ListMicrovmImageVersions")?
             };
             versions.extend(page.items.into_iter().map(|item| item.image_version));
             match page.next_token {
