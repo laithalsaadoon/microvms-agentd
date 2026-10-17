@@ -1388,6 +1388,7 @@ OBSERVATION_REASONS = {
     "missing_text",
     "invalid_response",
     "observation_limit",
+    "observation_identity",
     "observation_failed",
     "read_only_operation",
     "verifier_execution",
@@ -1476,8 +1477,12 @@ def observation_snapshot(record: dict, region: str, states=VERSION_STATES) -> di
     return result
 
 
-def observation_error(report: dict, section: str, exc: Exception, **context) -> None:
+def observation_error(
+    report: dict, section: str, exc: BaseException, **context
+) -> None:
     report["sections"][section] = "incomplete"
+    if isinstance(exc, (InterruptedError, KeyboardInterrupt)):
+        raise exc
     code = (
         str(exc)
         if isinstance(exc, Refused) and str(exc) in OBSERVATION_REASONS
@@ -1538,9 +1543,17 @@ def observe(manifest: dict, ownership: dict, api: ReadOnlyApi, report: dict) -> 
                 if k not in {"GH_TOKEN", "GITHUB_TOKEN", "RECOVERY_ROLE_ARN"}
             },
         )
-        report["independentVerifier"] = captured_verifier(done, region)
+        verified = captured_verifier(done, region)
+        # Bound this separately before insertion so a large census cannot erase
+        # the later bounded metadata when the credential wrapper validates it.
+        require(
+            len(verified["resources"]) <= OBSERVATION_MAX_ROWS
+            and len(json.dumps(verified).encode()) <= OBSERVATION_MAX_BYTES // 4,
+            "observation_limit",
+        )
+        report["independentVerifier"] = verified
         report["sections"]["independentVerifier"] = "completed"
-    except Exception as exc:  # noqa: BLE001 - retain only fixed error categories
+    except (Exception, KeyboardInterrupt) as exc:  # noqa: BLE001 - retain only fixed error categories
         observation_error(report, "independentVerifier", exc)
 
     images, names = {}, set()
@@ -1580,7 +1593,7 @@ def observe(manifest: dict, ownership: dict, api: ReadOnlyApi, report: dict) -> 
                         {"sha256": identity("log-group", region, identifier)},
                     )
             report["sections"][section] = "completed"
-        except Exception as exc:  # noqa: BLE001 - a partial page set never becomes complete
+        except (Exception, KeyboardInterrupt) as exc:  # noqa: BLE001 - a partial page set never becomes complete
             observation_error(report, section, exc, operation=operation)
 
     approved = {
@@ -1592,7 +1605,18 @@ def observe(manifest: dict, ownership: dict, api: ReadOnlyApi, report: dict) -> 
         )
     }
     for name in sorted(approved.keys() - names):
-        images[approved[name] or name] = (name, None)
+        requested = approved[name] or name
+        if requested in images:
+            # Preserve the listed identity and its versions when source and
+            # current names disagree about the same ARN.
+            observation_error(
+                report,
+                "images",
+                Refused("observation_identity"),
+                imageSha256=identity("image", region, name),
+            )
+            continue
+        images[requested] = (name, None)
     report["sections"]["versions"] = (
         "completed" if report["sections"]["images"] == "completed" else "incomplete"
     )
@@ -1630,7 +1654,7 @@ def observe(manifest: dict, ownership: dict, api: ReadOnlyApi, report: dict) -> 
                 row["sourceIdentityMatches"] = (
                     current.get("imageArn") == requested and current.get("name") == name
                 )
-        except Exception as exc:  # noqa: BLE001 - exact absence remains a read result
+        except (Exception, KeyboardInterrupt) as exc:  # noqa: BLE001 - exact absence remains a read result
             if isinstance(exc, Refused) and str(exc) == "not_found":
                 row["getOutcome"] = "not_found"
             else:
@@ -1720,7 +1744,7 @@ def observe(manifest: dict, ownership: dict, api: ReadOnlyApi, report: dict) -> 
                         saved["createdAtMatches"] = (
                             saved["listed"]["createdAt"] == observed["createdAt"]
                         )
-                except Exception as exc:  # noqa: BLE001 - preserve prior versions and the listed projection
+                except (Exception, KeyboardInterrupt) as exc:  # noqa: BLE001 - preserve prior versions and the listed projection
                     if isinstance(exc, Refused) and str(exc) == "not_found":
                         saved["getOutcome"] = "not_found"
                         coverage["notFoundCount"] += 1
@@ -1735,7 +1759,7 @@ def observe(manifest: dict, ownership: dict, api: ReadOnlyApi, report: dict) -> 
                         operation="get_microvm_image_version",
                     )
             coverage["paginationComplete"] = True
-        except Exception as exc:  # noqa: BLE001 - later page failures preserve prior safe rows
+        except (Exception, KeyboardInterrupt) as exc:  # noqa: BLE001 - later page failures preserve prior safe rows
             observation_error(
                 report,
                 "versions",
@@ -1759,20 +1783,14 @@ def validate_observation(value: Any) -> dict:
     def hashed(item):
         return isinstance(item, str) and re.fullmatch(r"[a-f0-9]{64}", item) is not None
 
-    def snapshot(item):
+    def snapshot(item, states):
         valid(isinstance(item, dict))
         valid(
             {"state", "availability", "createdAtKind", "logging"}
             <= set(item)
             <= {"state", "availability", "createdAtKind", "createdAt", "logging"}
         )
-        valid(
-            item["state"]
-            in IMAGE_STATES
-            | VERSION_STATES
-            | VM_STATES
-            | {"missing", "null", "malformed"}
-        )
+        valid(item["state"] in states | {"missing", "null", "malformed"})
         valid(
             item["availability"]
             in {"ACTIVE", "INACTIVE", "missing", "null", "malformed"}
@@ -1868,6 +1886,12 @@ def validate_observation(value: Any) -> dict:
             **common,
         }
     )
+    if "independentVerifier" in value:
+        valid(len(value["independentVerifier"]["resources"]) <= OBSERVATION_MAX_ROWS)
+        valid(
+            len(json.dumps(value["independentVerifier"]).encode())
+            <= OBSERVATION_MAX_BYTES // 4
+        )
     if "reason" in value:
         valid(
             value["status"] == "incomplete"
@@ -1958,6 +1982,12 @@ def validate_observation(value: Any) -> dict:
                         "sourceIdentityMatches",
                     }
                     valid(type(row.get("approved")) is bool)
+                    valid(("listed" in row) == ("imageArnSha256" in row))
+                    valid(
+                        ("sourceIdentityMatches" in row)
+                        == ("requestedArnSha256" in row)
+                    )
+                    valid("requestedArnSha256" not in row or row["approved"])
                 else:
                     base |= {
                         "imageArnSha256",
@@ -1973,7 +2003,10 @@ def validate_observation(value: Any) -> dict:
                 valid((row["getOutcome"] == "observed") == ("observed" in row))
                 for field in ("listed", "observed"):
                     if field in row:
-                        snapshot(row[field])
+                        snapshot(
+                            row[field],
+                            IMAGE_STATES if section == "images" else VERSION_STATES,
+                        )
                 for key, item in row.items():
                     if key.endswith("Matches"):
                         valid(item is None or type(item) is bool)
@@ -2005,12 +2038,13 @@ def validate_observation(value: Any) -> dict:
             <= set(value)
         )
         coverage = {row["imageSha256"]: row for row in value["versionCoverage"]}
-        valid(
-            set(coverage)
-            == {row["imageSha256"] for row in value["images"] if "listed" in row}
-        )
+        listed_images = {
+            row["imageSha256"]: row for row in value["images"] if "listed" in row
+        }
+        valid(set(coverage) == set(listed_images))
         valid(all(row["getOutcome"] != "api_error" for row in value["images"]))
         for image, row in coverage.items():
+            valid(row["imageArnSha256"] == listed_images[image]["imageArnSha256"])
             versions = [
                 item for item in value["versions"] if item["imageSha256"] == image
             ]
