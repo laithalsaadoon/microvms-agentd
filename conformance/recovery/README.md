@@ -101,7 +101,8 @@ creation timestamp and known state must agree. A present malformed Get value,
 missing configuration in both responses under the ordinary policy, or conflicting
 explicit configurations under either policy, still refuse log deletion. This is
 positive configuration evidence, never an inference that missing logging means disabled or names a default destination.
-Optional version evidence in the receipt continues to describe Get fields only.
+Optional version evidence retains Get-only identity and build metadata and
+`logGroupSha256`; `loggingStatus` summarizes the validated paired Get/List evidence.
 
 `RunMicrovm` accepts an explicit per-VM log destination, but the VM list and get
 responses do not expose it. Before deleting any selected log group, recovery
