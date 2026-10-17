@@ -57,6 +57,7 @@ from lanes.lifecycle import (
 )
 from lanes.local import drive_doctor_region, drive_local_commands, drive_preflight
 from lanes.names import drive_named_vm
+from lanes.native_box import drive_native_box
 from lanes.platform_measurements import drive_platform_measurements
 from lanes.posture import drive_platform_posture, drive_posture_parity
 from lanes.poweroff import drive_poweroff
@@ -511,6 +512,10 @@ def run_suite(args: argparse.Namespace) -> int:
                 aws.client("logs"),
                 aws.client("s3"),
                 results,
+            )
+            # Exercise exactly the Box artifacts built by the native ARM64 job.
+            run_section(
+                results, "native_box", drive_native_box, cli, binary, aws, results
             )
             # Auto-resume on its own VM (launched `--auto-resume` from the suite's image):
             # the policy is set only at launch, so the suite's VM cannot carry it. NEW in

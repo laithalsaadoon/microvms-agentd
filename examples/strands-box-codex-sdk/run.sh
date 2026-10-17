@@ -24,8 +24,9 @@ set -euo pipefail
 
 REGION="${AWS_REGION:-us-east-1}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
-BOXBIN="$HERE/.box-bin"
-OUT="$HERE/out"
+BOXBIN="${BOX_BIN_DIR:-$HERE/.box-bin}"
+OUT="${BOX_OUT_DIR:-$HERE/out}"
+MICROVM="${MICROVM:-microvm}"
 NAME="strands-box-codex-$$"
 
 for bin in strands-box strands-box-sock-alias strands-box-contain-trampoline; do
@@ -35,14 +36,14 @@ done
 [ "$REGION" = us-east-1 ] || { echo "box/box.toml and box/policy.dw name us-east-1" >&2; exit 2; }
 
 jqr() { python3 -c "import json,sys; print(json.load(sys.stdin)['data']$1)"; }
-vm() { microvm "$@" --name "$NAME" --region "$REGION"; }
+vm() { "$MICROVM" "$@" --name "$NAME" --region "$REGION"; }
 vmroot() { vm exec "$1" --user 0 --timeout "${2:-120}"; }
 
 # Whatever happens below, the trap terminates the VM once it has an id, and removes the local
 # copy of the Bedrock API key and the staging directory.
 ID="" KEYFILE="" STAGE=""
 trap 'rm -f "$KEYFILE"; [ -z "$STAGE" ] || rm -rf "$STAGE"
-  [ -z "$ID" ] || microvm terminate "$ID" --region "$REGION" >/dev/null || true' EXIT
+  [ -z "$ID" ] || "$MICROVM" terminate "$ID" --region "$REGION" >/dev/null || true' EXIT
 
 # ── 1. the image ────────────────────────────────────────────────────────────
 # --project guest bakes guest/uv.lock (the Codex SDK and its Codex binary) into the image.
@@ -50,12 +51,18 @@ trap 'rm -f "$KEYFILE"; [ -z "$STAGE" ] || rm -rf "$STAGE"
 # platform masks parts of /proc and the guest holds no CAP_SYS_ADMIN, and Box cannot build its
 # view (vm/launch_in_fresh_proc.py says why). --reuse keys the image name to the build inputs.
 echo "resolving image (builds server-side on first run, several minutes)..." >&2
-BUILT=$(microvm build --json --reuse --repair-identity \
-  --name strands-box-codex \
-  --dockerfile "$HERE/Dockerfile" \
-  --project "$HERE/guest" \
-  --region "$REGION")
-IMAGE_ARN=$(echo "$BUILT" | jqr "['imageIdentifier']")
+mkdir -p "$OUT"
+rm -f "$OUT/metadata-outside.ok" "$OUT/metadata-inside.ok" "$OUT/results.json" "$OUT/records.jsonl"
+if [ -n "${BOX_IMAGE:-}" ]; then
+  IMAGE_ARN="$BOX_IMAGE"
+else
+  BUILT=$("$MICROVM" build --json --reuse --repair-identity \
+    --name strands-box-codex \
+    --dockerfile "$HERE/Dockerfile" \
+    --project "$HERE/guest" \
+    --region "$REGION")
+  IMAGE_ARN=$(echo "$BUILT" | jqr "['imageIdentifier']")
+fi
 
 # ── 2. launch ───────────────────────────────────────────────────────────────
 # --egress lets the guest reach bedrock-runtime. Inside the box, Codex reaches only what
@@ -64,7 +71,7 @@ IMAGE_ARN=$(echo "$BUILT" | jqr "['imageIdentifier']")
 # envelope still names the VM, so the id is read from whichever envelope came back.
 echo "launching..." >&2
 LAUNCH_STATUS=0
-LAUNCH=$(microvm run --json --keep --egress --image "$IMAGE_ARN" --vm-name "$NAME" \
+LAUNCH=$("$MICROVM" run --json --keep --egress --image "$IMAGE_ARN" --vm-name "$NAME" \
   --max-duration-sec 3600 --region "$REGION") || LAUNCH_STATUS=$?
 ID=$(echo "$LAUNCH" | python3 -c \
   "import json,sys; print((json.load(sys.stdin).get('data') or {}).get('microvmId') or '')" \
@@ -106,7 +113,7 @@ vmroot "mv /home/agent/box-bin-upload /opt/box && chown -R 0:0 /opt/box && chmod
 # hours. The driver hands it to `strands-box run`, whose egress gateway adds it to each request to
 # bedrock-runtime; Codex gets a placeholder. The key never appears on a command line or in a log.
 KEYFILE=$(mktemp)
-uvx --from aws-bedrock-token-generator@latest --quiet python -c \
+uvx --from aws-bedrock-token-generator@1.1.0 --quiet python -c \
   "from aws_bedrock_token_generator import provide_token; print(provide_token(region='$REGION'))" > "$KEYFILE"
 vm cp "$KEYFILE" vm:/home/agent/.bedrock-token --mode 0600 --json >/dev/null
 rm -f "$KEYFILE"
@@ -120,6 +127,7 @@ vmroot "chown 1000:1000 /home/agent/.bedrock-token" >/dev/null
 LAUNCHER="python3.12 /opt/box/launch_in_fresh_proc.py"
 echo "--- metadata service probe ---"
 vmroot "$LAUNCHER /usr/bin/python3.12 /home/agent/probe_mmds.py" | grep '^\['
+printf 'passed\n' > "$OUT/metadata-outside.ok"
 set +e
 INSIDE=$(vmroot "$LAUNCHER /opt/box/strands-box run --config /home/agent/box/probe-box.toml \
   2>/home/agent/probe-box.err")
@@ -131,6 +139,8 @@ if [ "$PROBE_STATUS" -ne 0 ]; then
   vmroot "tail -n 20 /home/agent/probe-box.err" >&2 || true
   exit "$PROBE_STATUS"
 fi
+
+printf 'passed\n' > "$OUT/metadata-inside.ok"
 
 # ── 6. the scenarios ────────────────────────────────────────────────────────
 echo "--- codex sdk scenarios ---"

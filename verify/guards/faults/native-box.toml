@@ -1,0 +1,25 @@
+[[family]]
+guard = "conformance/run_rs.py --self-test: conformance/selftest/native_box.py"
+run = ["./conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "native-box-host"
+message = "FAIL  native Box rejects missing hostArchitecture"
+transform = { file = "conformance/lanes/native_box.py", replace = 'and receipt.get("hostArchitecture") == "aarch64"', with = 'and True' }
+
+[[family.fault]]
+id = "native-box-digest"
+message = "FAIL  native Box rejects changed strands-box"
+transform = { file = "conformance/lanes/native_box.py", replace = '== hashlib.sha256((directory / name).read_bytes()).hexdigest()', with = '== receipt.get("sha256", {}).get(name)' }
+
+[[family.fault]]
+id = "native-box-metadata"
+message = "FAIL  native Box rejects missing metadata-outside"
+transform = { file = "conformance/lanes/native_box.py", replace = 'report.get(f"metadata-{where}")', with = '"passed\n"' }
+
+[[family.fault]]
+id = "native-box-scenario"
+message = "FAIL  native Box rejects release-before-tests checks="
+transform = { file = "conformance/lanes/native_box.py", replace = 'all(check.get("ok") is True for check in checks)', with = 'True' }
