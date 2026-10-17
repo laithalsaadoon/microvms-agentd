@@ -109,7 +109,9 @@ fn every_store_operation_refuses_keys_outside_one_file_name_component() {
     assert!(!directory.path().join("escape.json").exists());
 }
 
-#[cfg(unix)]
+// The macOS test filesystem rejects invalid UTF-8 names with EILSEQ. Linux permits
+// the two byte-distinct filenames this regression needs to exercise lossy aliasing.
+#[cfg(target_os = "linux")]
 #[test]
 fn non_unicode_ledger_names_are_read_only_without_aliasing_unicode_neighbors() {
     use std::ffi::OsString;
