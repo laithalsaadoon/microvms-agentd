@@ -2,6 +2,7 @@
 """Observation rows retain strict types, bounds, and cross-section coverage."""
 
 import copy
+import json
 import runpy
 from pathlib import Path
 
@@ -315,6 +316,32 @@ def test_observation_limits_accumulated_metadata_but_counts_errors_separately():
     assert validate(value) is value
     value["microvms"] = [rows()["microvms"]]
     rejected(value)
+
+
+@pytest.mark.parametrize("difference", [-1, 0, 1])
+def test_observation_enforces_serialized_byte_boundary(difference):
+    value = report()
+    value.update({key: [] for key in rows()})
+    for index in range(1000):
+        row = rows()["versions"]
+        row["versionSha256"] = f"{index:064x}"
+        for field in ("listed", "observed"):
+            row[field]["createdAt"] = 10**308
+        value["versions"].append(row)
+    target = CORE["OBSERVATION_MAX_BYTES"] + difference
+    excess = len(json.dumps(value).encode()) - target
+    # Finite numeric timestamps vary the size without adding an unrecognized field.
+    for row in value["versions"]:
+        for field in ("listed", "observed"):
+            reduction = min(excess, 308)
+            row[field]["createdAt"] = 10 ** (308 - reduction)
+            excess -= reduction
+    assert excess == 0
+    assert len(json.dumps(value).encode()) == target
+    if difference <= 0:
+        assert validate(value) is value
+    else:
+        rejected(value)
 
 
 @pytest.mark.parametrize(
