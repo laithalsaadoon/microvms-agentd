@@ -436,6 +436,16 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
             Door::ControlPlane,
         ),
         (
+            "gc",
+            Command::Gc(crate::cli::GcArgs {
+                prefix: "guard-".into(),
+                keep: vec!["guard-current".into()],
+                yes: false,
+                region: region_flags(),
+            }),
+            Door::ControlPlane,
+        ),
+        (
             "image-set-status",
             Command::ImageSetStatus(crate::cli::ImageSetStatusArgs {
                 image: "arn:image".into(),

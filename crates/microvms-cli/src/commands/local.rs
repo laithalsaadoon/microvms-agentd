@@ -63,7 +63,8 @@ pub async fn ls<O: std::io::Write, E: std::io::Write>(
     if args.remote {
         let region = args.region.resolve(ctx.env)?;
         let plane = ctx.seam.control_plane(region.clone()).await?;
-        let microvms = plane.list_microvms().await?;
+        let summaries = plane.list_microvm_summaries(&Default::default()).await?;
+        let microvms: Vec<_> = summaries.iter().cloned().map(Into::into).collect();
         let images = plane.list_images().await?;
         let verdicts = reconcile(region.as_str(), &runs, &microvms, &images);
 
@@ -142,10 +143,11 @@ pub async fn ls<O: std::io::Write, E: std::io::Write>(
         }
         remote = json!({
             "region": region.as_str(),
-            "microvms": microvms.iter().map(|vm| json!({
+            "microvms": summaries.iter().map(|vm| json!({
                 "microvmId": vm.microvm_id,
                 "state": vm.state,
                 "imageArn": vm.image_arn,
+                "startedAt": vm.started_at,
             })).collect::<Vec<_>>(),
             "images": images.iter().map(|image| json!({
                 "imageArn": image.image_arn,

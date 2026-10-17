@@ -230,6 +230,11 @@ export declare class ControlPlane {
    * past `timeout` rejects with a timeout.
    */
   waitForState(microvmId: string, wanted: Array<string>, options?: WaitForStateOptions | undefined | null): Promise<Microvm>
+  /**
+   * Discover prefix-matched images and their VMs; set dryRun false to clean them up.
+   * Keep entries preserve an exact image name or ARN and every VM using it.
+   */
+  sweep(prefix: string, options?: SweepOptions | undefined | null): Promise<SweepReport>
   /** `ListMicrovmImages`, every page: every image in the account and region. */
   listImages(): Promise<Array<ImageSummary>>
   /**
@@ -2299,6 +2304,7 @@ export interface MicrovmSummary {
   state: string
   imageArn: string
   imageVersion: string
+  startedAt?: number
 }
 
 /**
@@ -2829,6 +2835,30 @@ export interface StreamOptionsInput {
   errorOnGap?: boolean
   /** How long the body may be silent before the connection is treated as dead. */
   idleTimeout?: number
+}
+
+export interface SweepFailure {
+  resource: string
+  message: string
+}
+
+/** Prefix cleanup options. Omitted options preserve the dry-run default. */
+export interface SweepOptions {
+  /** Exact image names or ARNs to preserve, together with their VMs. */
+  keep?: Array<string>
+  dryRun?: boolean
+}
+
+/** Inventory and confirmed outcomes of prefix cleanup. */
+export interface SweepReport {
+  dryRun: boolean
+  imagesMatched: Array<string>
+  imagesKept: Array<string>
+  microvmsMatched: Array<string>
+  microvmsTerminated: Array<string>
+  imagesDeleted: Array<string>
+  imagesInUse: Array<string>
+  failures: Array<SweepFailure>
 }
 
 /** How `syncDir` should behave. */

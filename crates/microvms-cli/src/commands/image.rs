@@ -128,3 +128,41 @@ pub async fn builds<O: std::io::Write, E: std::io::Write>(
     let (kind, _) = response_type("image-builds");
     Ok(Rendered::ok(kind, data, text.join("\n"), dense.join("\n")))
 }
+
+/// Prefix cleanup, dry-run unless the caller explicitly opts in.
+pub async fn gc<O: std::io::Write, E: std::io::Write>(
+    ctx: &mut Ctx<'_, O, E>,
+    args: &crate::cli::GcArgs,
+) -> Result<Rendered, CliError> {
+    let plane = ctx
+        .seam
+        .control_plane(args.region.resolve(ctx.env)?)
+        .await?;
+    let report = plane
+        .sweep(
+            &args.prefix,
+            &microvms_core::control::SweepOptions {
+                keep: args.keep.clone(),
+                dry_run: !args.yes,
+            },
+        )
+        .await?;
+    let text = format!(
+        "{}: {} image(s) matched, {} kept, {} VM(s) selected, {} terminated, {} image(s) deleted, {} in use, {} failure(s)",
+        if report.dry_run { "dry run" } else { "cleanup" },
+        report.images_matched.len(),
+        report.images_kept.len(),
+        report.microvms_matched.len(),
+        report.microvms_terminated.len(),
+        report.images_deleted.len(),
+        report.images_in_use.len(),
+        report.failures.len()
+    );
+    let data = serde_json::to_value(&report)
+        .expect("sweep report serializes")
+        .as_object()
+        .expect("sweep report is an object")
+        .clone();
+    let (kind, _) = response_type("gc");
+    Ok(Rendered::ok(kind, data, text.clone(), text))
+}

@@ -514,6 +514,7 @@ async fn handle<O: std::io::Write, E: std::io::Write>(
         Command::History(args) => commands::local::history(ctx, args),
         Command::Names(args) => commands::local::names(ctx, args),
         Command::Logs(args) => commands::local::logs(ctx, args),
+        Command::Gc(args) => commands::image::gc(ctx, args).await,
         Command::ImageVersions(args) => commands::image::versions(ctx, args).await,
         Command::ImageSetStatus(args) => commands::image::set_status(ctx, args).await,
         Command::ImageBuilds(args) => commands::image::builds(ctx, args).await,

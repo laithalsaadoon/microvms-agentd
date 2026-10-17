@@ -137,7 +137,7 @@ mod microvms {
     #[pymodule_export]
     use super::control::{
         PyControlPlane, PyIdlePolicy, PyImageBuild, PyImageSummary, PyImageVersion, PyMicrovm,
-        PyMicrovmSummary,
+        PyMicrovmSummary, PySweepFailure, PySweepReport,
     };
     #[pymodule_export]
     use super::core_version;

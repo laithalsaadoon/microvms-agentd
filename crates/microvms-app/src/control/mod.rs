@@ -91,6 +91,7 @@ pub mod microvm;
 pub mod ops;
 pub mod project;
 pub mod services;
+pub mod sweep;
 pub mod token;
 pub mod transport;
 
@@ -109,6 +110,7 @@ pub use ensure::{EnsureImageRequest, EnsuredImage};
 pub use image::{Image, WaitOpts};
 pub use microvm::{Microvm, MicrovmFilter, ProxyToken, RunHookPayload};
 pub use services::BuildServices;
+pub use sweep::{SweepFailure, SweepOptions, SweepReport};
 
 use crate::error::{Error, ErrorKind};
 use crate::hooks::{BuildHookTimeout, RunHookTimeout};

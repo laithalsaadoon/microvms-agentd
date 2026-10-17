@@ -363,6 +363,9 @@ pub enum Command {
     #[command(name = "image-versions")]
     ImageVersions(ImageVersionsArgs),
 
+    /// Discover prefix-matched images and their VMs; --yes performs cleanup.
+    Gc(GcArgs),
+
     /// Retire an image version (`INACTIVE`) or restore it (`ACTIVE`), and read the change back.
     ///
     /// The canary and rollback lever: an `INACTIVE` version is refused by `RunMicrovm`, while
@@ -2221,6 +2224,21 @@ pub struct LogsArgs {
     pub region: RegionFlags,
 }
 
+#[derive(Debug, Args)]
+pub struct GcArgs {
+    #[command(flatten)]
+    pub region: RegionFlags,
+    /// Match image names starting with this nonempty prefix.
+    #[arg(long)]
+    pub prefix: String,
+    /// Preserve this exact image name or ARN, together with all its VMs. Repeatable.
+    #[arg(long)]
+    pub keep: Vec<String>,
+    /// Terminate VMs and delete images. Without this flag, only report candidates.
+    #[arg(long)]
+    pub yes: bool,
+}
+
 #[derive(Args, Debug)]
 pub struct ImageVersionsArgs {
     /// The image: its ARN, or its name, which is looked up in the account.
@@ -3030,6 +3048,7 @@ mod tests {
                 "names",
                 "logs",
                 "image-versions",
+                "gc",
                 "image-set-status",
                 "image-builds",
                 "cost",

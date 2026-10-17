@@ -490,6 +490,29 @@ async fn control_plane_case(case: &Case) -> Value {
         microvms_app::testing::ParityControlPlane::from_json(&case.input("script").to_string())
             .unwrap();
     let plane = script.plane();
+    if case.input_strings("actions") == ["sweep"] {
+        let options = microvms_core::control::SweepOptions {
+            keep: case.input_strings("keep"),
+            dry_run: case.input_bool("dry_run"),
+        };
+        let report = plane
+            .sweep(case.input_str("prefix"), &options)
+            .await
+            .unwrap();
+        return json!({"report": report, "calls": script.calls()});
+    }
+    if case.input_strings("actions") == ["list"] {
+        let items = plane
+            .list_microvm_summaries(&Default::default())
+            .await
+            .unwrap();
+        // CLI remote listing also inventories images, so every surface replays both reads.
+        plane.list_images().await.unwrap();
+        return json!({"items": items.iter().map(|item| json!({
+            "id": item.microvm_id, "state": item.state, "image_arn": item.image_arn,
+            "started_at": item.started_at,
+        })).collect::<Vec<_>>(), "calls": script.calls()});
+    }
     let id = case.input_str("microvm_id");
     for action in case.input_strings("actions") {
         if action == "suspend" {

@@ -4068,6 +4068,76 @@
       },
       {
         "alternateResponse": null,
+        "name": "gc",
+        "parameters": [
+          {
+            "choices": [
+              "us-east-1",
+              "us-east-2",
+              "us-west-2",
+              "eu-west-1",
+              "ap-northeast-1"
+            ],
+            "default": null,
+            "help": "AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1",
+            "name": "region",
+            "positional": false,
+            "required": false,
+            "type": "enum"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Use a region this client has not seen carry MicroVMs. Costs you the diagnostic",
+            "name": "unlisted-region",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Match image names starting with this nonempty prefix",
+            "name": "prefix",
+            "positional": false,
+            "required": true,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Preserve this exact image name or ARN, together with all its VMs. Repeatable",
+            "name": "keep",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Terminate VMs and delete images. Without this flag, only report candidates",
+            "name": "yes",
+            "positional": false,
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "responseKeys": [
+          "dryRun",
+          "imagesMatched",
+          "imagesKept",
+          "microvmsMatched",
+          "microvmsTerminated",
+          "imagesDeleted",
+          "imagesInUse",
+          "failures"
+        ],
+        "responseType": "microvm.gc",
+        "summary": "Discover prefix-matched images and their VMs; --yes performs cleanup",
+        "supportsJson": true
+      },
+      {
+        "alternateResponse": null,
         "name": "image-set-status",
         "parameters": [
           {

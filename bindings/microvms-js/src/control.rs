@@ -89,6 +89,57 @@ pub struct MicrovmSummary {
     pub state: String,
     pub image_arn: String,
     pub image_version: String,
+    pub started_at: Option<f64>,
+}
+
+/// Prefix cleanup options. Omitted options preserve the dry-run default.
+#[derive(Default)]
+#[napi(object)]
+pub struct SweepOptions {
+    /// Exact image names or ARNs to preserve, together with their VMs.
+    pub keep: Option<Vec<String>>,
+    pub dry_run: Option<bool>,
+}
+
+#[napi(object)]
+pub struct SweepFailure {
+    pub resource: String,
+    pub message: String,
+}
+
+/// Inventory and confirmed outcomes of prefix cleanup.
+#[napi(object)]
+pub struct SweepReport {
+    pub dry_run: bool,
+    pub images_matched: Vec<String>,
+    pub images_kept: Vec<String>,
+    pub microvms_matched: Vec<String>,
+    pub microvms_terminated: Vec<String>,
+    pub images_deleted: Vec<String>,
+    pub images_in_use: Vec<String>,
+    pub failures: Vec<SweepFailure>,
+}
+
+impl From<microvms_core::control::SweepReport> for SweepReport {
+    fn from(report: microvms_core::control::SweepReport) -> Self {
+        Self {
+            dry_run: report.dry_run,
+            images_matched: report.images_matched,
+            images_kept: report.images_kept,
+            microvms_matched: report.microvms_matched,
+            microvms_terminated: report.microvms_terminated,
+            images_deleted: report.images_deleted,
+            images_in_use: report.images_in_use,
+            failures: report
+                .failures
+                .into_iter()
+                .map(|failure| SweepFailure {
+                    resource: failure.resource,
+                    message: failure.message,
+                })
+                .collect(),
+        }
+    }
 }
 
 /// The service's optional `ListMicrovms` filters.
@@ -347,7 +398,7 @@ impl ControlPlane {
         };
         let items = self
             .inner
-            .list_microvms_matching(&filter)
+            .list_microvm_summaries(&filter)
             .await
             .map_err(js_async)?;
         Ok(items
@@ -357,6 +408,7 @@ impl ControlPlane {
                 state: item.state,
                 image_arn: item.image_arn,
                 image_version: item.image_version,
+                started_at: item.started_at,
             })
             .collect())
     }
@@ -413,6 +465,29 @@ impl ControlPlane {
             .await
             .map_err(js_async)?;
         Ok(vm.into())
+    }
+
+    /// Discover prefix-matched images and their VMs; set dryRun false to clean them up.
+    /// Keep entries preserve an exact image name or ARN and every VM using it.
+    #[napi]
+    pub async fn sweep(
+        &self,
+        prefix: String,
+        options: Option<SweepOptions>,
+    ) -> Result<SweepReport, AsyncError> {
+        let options = options.unwrap_or_default();
+        let mut request = microvms_core::control::SweepOptions::default();
+        if let Some(keep) = options.keep {
+            request.keep = keep;
+        }
+        if let Some(dry_run) = options.dry_run {
+            request.dry_run = dry_run;
+        }
+        self.inner
+            .sweep(&prefix, &request)
+            .await
+            .map(Into::into)
+            .map_err(js_async)
     }
 
     /// `ListMicrovmImages`, every page: every image in the account and region.

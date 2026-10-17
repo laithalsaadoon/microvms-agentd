@@ -40,6 +40,7 @@ from selftest.native_box import check_native_box
 from selftest.platform_measurements import check_platform_measurements
 from selftest.posture import check_execution_role_policy, check_posture_lines
 from selftest.poweroff import check_poweroff_lane
+from selftest.prefix_sweep import check_prefix_sweep
 from selftest.privacy import check_log_privacy
 from selftest.quickstart import check_gh_logged_out
 from selftest.skew import check_version_skew_helpers
@@ -84,6 +85,7 @@ def self_test() -> int:
         check_wrapped_user(results)
         check_platform_measurements(results)
         check_poweroff_lane(results)
+        check_prefix_sweep(results)
         check_isolated_known_vm(results)
         check_ensure_image_section(results)
         check_caller_artifact_section(results)

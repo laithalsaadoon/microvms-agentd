@@ -1,0 +1,105 @@
+{
+  "capability": "sweep-prefix",
+  "input": {
+    "actions": [
+      "sweep"
+    ],
+    "prefix": "job-",
+    "keep": [],
+    "dry_run": false,
+    "script": [
+      {
+        "operation": "ListMicrovmImages",
+        "status": 200,
+        "body": "{\"items\":[{\"imageArn\":\"arn:aws:lambda:us-east-1:123456789012:microvm-image:job-a\",\"name\":\"job-a\",\"state\":\"CREATED\"},{\"imageArn\":\"arn:aws:lambda:us-east-1:123456789012:microvm-image:job-b\",\"name\":\"job-b\",\"state\":\"CREATED\"}]}"
+      },
+      {
+        "operation": "ListMicrovms",
+        "status": 200,
+        "body": "{\"items\":[{\"microvmId\":\"mvm-a\",\"imageArn\":\"arn:aws:lambda:us-east-1:123456789012:microvm-image:job-a\",\"imageVersion\":\"1\",\"state\":\"RUNNING\"},{\"microvmId\":\"mvm-b\",\"imageArn\":\"arn:aws:lambda:us-east-1:123456789012:microvm-image:job-b\",\"imageVersion\":\"1\",\"state\":\"RUNNING\"}]}"
+      },
+      {
+        "operation": "TerminateMicrovm",
+        "status": 200,
+        "body": "{}"
+      },
+      {
+        "operation": "TerminateMicrovm",
+        "status": 200,
+        "body": "{}"
+      },
+      {
+        "operation": "ListMicrovms",
+        "status": 200,
+        "body": "{\"items\":[{\"microvmId\":\"mvm-a\",\"imageArn\":\"arn:aws:lambda:us-east-1:123456789012:microvm-image:job-a\",\"imageVersion\":\"1\",\"state\":\"TERMINATED\"},{\"microvmId\":\"mvm-b\",\"imageArn\":\"arn:aws:lambda:us-east-1:123456789012:microvm-image:job-b\",\"imageVersion\":\"1\",\"state\":\"TERMINATING\"}]}"
+      },
+      {
+        "operation": "ListMicrovms",
+        "status": 200,
+        "body": "{\"items\":[{\"microvmId\":\"mvm-b\",\"imageArn\":\"arn:aws:lambda:us-east-1:123456789012:microvm-image:job-b\",\"imageVersion\":\"1\",\"state\":\"TERMINATED\"}]}"
+      },
+      {
+        "operation": "ListMicrovmImageVersions",
+        "status": 200,
+        "body": "{\"items\":[]}"
+      },
+      {
+        "operation": "DeleteMicrovmImage",
+        "status": 200,
+        "body": "{\"imageIdentifier\":\"arn:aws:lambda:us-east-1:123456789012:microvm-image:job-a\",\"state\":\"DELETING\"}"
+      },
+      {
+        "operation": "ListMicrovmImageVersions",
+        "status": 200,
+        "body": "{\"items\":[]}"
+      },
+      {
+        "operation": "DeleteMicrovmImage",
+        "status": 200,
+        "body": "{\"imageIdentifier\":\"arn:aws:lambda:us-east-1:123456789012:microvm-image:job-b\",\"state\":\"DELETING\"}"
+      },
+      {
+        "operation": "ListMicrovmImages",
+        "status": 200,
+        "body": "{\"items\":[]}"
+      }
+    ]
+  },
+  "expect": {
+    "report": {
+      "dryRun": false,
+      "imagesMatched": [
+        "arn:aws:lambda:us-east-1:123456789012:microvm-image:job-a",
+        "arn:aws:lambda:us-east-1:123456789012:microvm-image:job-b"
+      ],
+      "imagesKept": [],
+      "microvmsMatched": [
+        "mvm-a",
+        "mvm-b"
+      ],
+      "microvmsTerminated": [
+        "mvm-a",
+        "mvm-b"
+      ],
+      "imagesDeleted": [
+        "arn:aws:lambda:us-east-1:123456789012:microvm-image:job-a",
+        "arn:aws:lambda:us-east-1:123456789012:microvm-image:job-b"
+      ],
+      "imagesInUse": [],
+      "failures": []
+    },
+    "calls": [
+      "ListMicrovmImages",
+      "ListMicrovms",
+      "TerminateMicrovm",
+      "TerminateMicrovm",
+      "ListMicrovms",
+      "ListMicrovms",
+      "ListMicrovmImageVersions",
+      "DeleteMicrovmImage",
+      "ListMicrovmImageVersions",
+      "DeleteMicrovmImage",
+      "ListMicrovmImages"
+    ]
+  }
+}

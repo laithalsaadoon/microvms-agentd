@@ -1032,6 +1032,38 @@ pub struct MicrovmItemWire {
     pub image_version: String,
 }
 
+/// A list item with optional timestamp metadata. The original `MicrovmItemWire` remains
+/// unchanged so downstream Rust code can keep constructing its published fields.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MicrovmSummaryWire {
+    pub microvm_id: String,
+    pub state: String,
+    pub image_arn: String,
+    pub image_version: String,
+    /// When the VM started, in Unix seconds; absent on older service responses.
+    #[serde(default)]
+    pub started_at: Option<f64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ListMicrovmSummariesResponseWire {
+    pub items: Vec<MicrovmSummaryWire>,
+    pub next_token: Option<String>,
+}
+
+impl From<MicrovmSummaryWire> for MicrovmItemWire {
+    fn from(item: MicrovmSummaryWire) -> Self {
+        Self {
+            microvm_id: item.microvm_id,
+            state: item.state,
+            image_arn: item.image_arn,
+            image_version: item.image_version,
+        }
+    }
+}
+
 /// `DeleteMicrovmImageOutput`.
 ///
 /// # Kept and read, rather than deleted as dead

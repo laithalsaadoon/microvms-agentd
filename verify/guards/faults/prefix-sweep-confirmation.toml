@@ -1,0 +1,10 @@
+# ── prefix-sweep-confirmation: FAIL_TO_PASS entries tools/fail-to-pass.py emitted ──
+
+# FAIL_TO_PASS: fails on cd7c759fad9d with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-confirmed-terminations-survive-later-listing-omissions"
+guard = "control::sweep::tests::confirmed_terminations_survive_later_listing_omissions"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::sweep::tests::confirmed_terminations_survive_later_listing_omissions"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-confirmed-terminations-survive-later-listing-omissions.patch"

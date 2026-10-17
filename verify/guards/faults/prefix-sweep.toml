@@ -1,0 +1,110 @@
+# Prefix cleanup and listing metadata regression proofs.
+
+[[fault]]
+id = "sweep-keep-list"
+guard = "control::sweep::tests::dry_run_protects_keep_names_and_arns_and_filters_substrings"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::sweep::tests::dry_run_protects_keep_names_and_arns_and_filters_substrings"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/sweep.rs", replace = "if options.keep.contains(&image.name) || options.keep.contains(&image.image_arn) {", with = "if false {" }
+
+[[fault]]
+id = "sweep-prefix-boundary"
+guard = "control::sweep::tests::dry_run_protects_keep_names_and_arns_and_filters_substrings"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::sweep::tests::dry_run_protects_keep_names_and_arns_and_filters_substrings"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/sweep.rs", replace = "image.name.starts_with(prefix) && image.state != \"DELETED\"", with = "image.name.contains(prefix) && image.state != \"DELETED\"" }
+
+[[fault]]
+id = "sweep-timestamps"
+guard = "control::sweep::tests::sweep_reads_every_page_and_preserves_started_at"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::sweep::tests::sweep_reads_every_page_and_preserves_started_at"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/ops.rs", replace = "#[serde(default)]\n    pub started_at: Option<f64>,", with = "#[serde(skip_deserializing)]\n    pub started_at: Option<f64>," }
+
+[[fault]]
+id = "sweep-waits-for-termination"
+guard = "control::sweep::tests::cleanup_confirms_termination_before_deletion_and_image_absence"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::sweep::tests::cleanup_confirms_termination_before_deletion_and_image_absence"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/sweep.rs", replace = "if !pending\n", with = "if pending\n" }
+
+[[fault]]
+id = "sweep-held-image"
+guard = "control::sweep::tests::cleanup_reports_held_images_without_deleting_them"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::sweep::tests::cleanup_reports_held_images_without_deleting_them"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/sweep.rs", replace = "if held {", with = "if false {" }
+
+[[fault]]
+id = "sweep-nonempty-prefix"
+guard = "control::sweep::tests::sweep_refuses_empty_scope_and_repeated_pagination_before_mutation"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::sweep::tests::sweep_refuses_empty_scope_and_repeated_pagination_before_mutation"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/sweep.rs", replace = "        super::require_valid_image_name(prefix)?;", with = "        // Prefix validation removed." }
+
+[[family]]
+guard = "conformance/run_rs.py --self-test: prefix sweep report checks"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "sweep-report-dry-run"
+message = "FAIL  prefix sweep dry-run rejects missing imagesDeleted"
+transform = { file = "conformance/lanes/prefix_sweep.py", replace = "dry.get(\"imagesDeleted\") == []", with = "dry.get(\"imagesDeleted\", []) == []" }
+
+[[family.fault]]
+id = "sweep-report-cleaned"
+message = "FAIL  prefix sweep cleanup rejects missing failures"
+transform = { file = "conformance/lanes/prefix_sweep.py", replace = "cleaned.get(\"failures\") == []", with = "cleaned.get(\"failures\", []) == []" }
+
+[[fault]]
+id = "sweep-missing-is-not-terminated"
+guard = "control::sweep::tests::a_missing_vm_never_becomes_permission_to_delete_its_image"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::sweep::tests::a_missing_vm_never_becomes_permission_to_delete_its_image"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/sweep.rs", replace = "let unconfirmed = vms.iter().any(", with = "let unconfirmed = false && vms.iter().any(" }
+
+[[fault]]
+id = "sweep-partial-report"
+guard = "control::sweep::tests::polling_errors_preserve_the_inventory_and_prior_outcomes"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::sweep::tests::polling_errors_preserve_the_inventory_and_prior_outcomes"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/sweep.rs", replace = "report.images_in_use.sort();\n                    return Ok(report);", with = "report.images_in_use.sort();\n                    return Err(error);" }
+
+
+[[fault]]
+id = "parity-list-timestamps"
+guard = "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[control-plane/list-timestamps]"
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml", "--features", "parity-fixtures"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[control-plane/list-timestamps]"]]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "crates/microvms-app/src/control/ops.rs", replace = "#[serde(default)]\n    pub started_at: Option<f64>,", with = "#[serde(skip_deserializing)]\n    pub started_at: Option<f64>," }
+
+
+[[fault]]
+id = "sweep-outside-control-cleanup"
+guard = "conformance/run_rs.py --self-test: fresh outside control cleanup"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  prefix sweep owns and cleans its fresh outside control after body failure"
+transform = { file = "conformance/lanes/prefix_sweep.py", replace = 'cli.call("terminate", identifier, "--wait", "--region", cli.region)', with = 'cli.call("ls", identifier, "--wait", "--region", cli.region)' }
+
+
+[[fault]]
+id = "sweep-failed-launch-cleanup"
+guard = "conformance/run_rs.py --self-test: failed outside launch cleanup"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  prefix sweep owns and cleans its fresh outside control after launch failure"
+transform = { file = "conformance/lanes/prefix_sweep.py", replace = "known.update(discovered)", with = "known.update(before)" }

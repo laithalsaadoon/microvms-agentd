@@ -50,6 +50,51 @@ microvm terminate <microvm-id> --delete-image --image-identifier <image-arn> --i
 
 An image refuses deletion while its VM is still terminating, so one pass is sometimes not enough. Deleting the image early also saves nothing, because its snapshot has a one-week minimum retention; a leaked image is a small bill and a leaked running VM is the one to hurry for.
 
+## Clean up a job's images by prefix
+
+Preview the images and VMs belonging to an image-name prefix, preserving the image
+currently in use:
+
+Destructive cleanup selects VMs by image. It can stop every VM using a selected
+image outside the keep-list, including VMs from other runners. The sweep cannot
+identify one failed runner among users of a shared image. Put shared images on the
+keep-list, or give each job a separate image-name prefix.
+
+```bash
+microvm gc --prefix my-job- --keep my-job-current --json
+microvm gc --prefix my-job- --keep my-job-current --yes --json
+```
+
+The first command only lists candidates. With `--yes`, cleanup stops the selected
+VMs and confirms their shutdown before requesting image deletion. It confirms each
+image deletion before reporting success. Repeat `--keep` for more exact image
+names or ARNs. Cleanup preserves those images and their VMs.
+
+The prefix must be nonempty and match the start of an image name. The report lists
+scoped resources and confirmed outcomes. Inspect `failures` and `imagesInUse`
+before declaring cleanup complete. A concurrent launch can keep an image in use.
+The sweep reports that image for a later attempt. Clean up build log groups and
+local ledger records separately.
+
+The SDKs expose the same operation:
+
+```python
+preview = plane.sweep("my-job-", keep=["my-job-current"])
+report = plane.sweep("my-job-", keep=["my-job-current"], dry_run=False)
+```
+
+```javascript
+const preview = await plane.sweep('my-job-', { keep: ['my-job-current'] });
+const report = await plane.sweep('my-job-', {
+  keep: ['my-job-current'], dryRun: false,
+});
+```
+
+List summaries include the VM's start time in Unix seconds (`started_at` in
+Python, `startedAt` in JavaScript and command JSON). When the service omits the
+timestamp, the summary has no start time. Preserve resources with unknown ages
+when cleaning up by age.
+
 ## 4. Ask the account, never the teardown
 
 ```bash
