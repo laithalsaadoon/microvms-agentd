@@ -42,6 +42,8 @@ def delayed_recipe() -> str:
         # Keep the declared hook port and bootstrap command compatible with core
         # preflight. Only the daemon process moves behind the relay; exec keeps
         # the supplied daemon as PID 1 after the launcher starts the relay.
+        # The background child inherits the front port before the export below;
+        # changing the parent's environment cannot change that child snapshot.
         + "RUN mv /agentd /real-agentd && "
         + "printf '#!/bin/sh\\npython3 /delayed_ready.py &\\n"
         + "export AGENTD_PORT=9001\\nexec /real-agentd\\n' "

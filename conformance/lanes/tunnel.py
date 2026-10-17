@@ -251,7 +251,7 @@ def drive_tunnel_identity(
         )
 
         # The guest server is the daemon itself: al2023-minimal ships no python3, and the
-        # daemon's unauthenticated `GET /v1/schema` on 127.0.0.1:9000 is already an HTTP
+        # daemon's unauthenticated `GET /v1/schema` on its loopback port is already an HTTP
         # server whose body could only come from plaintext inside the guest. Tunnelling to
         # the daemon's own port also exercises the exact loopback dial the relay performs
         # for any other guest service.

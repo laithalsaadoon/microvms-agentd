@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -29,6 +30,8 @@ class Relay(BaseHTTPRequestHandler):
                 + json.dumps({"event": "end", "elapsed": time.monotonic() - started}),
                 flush=True,
             )
+        # The launcher moves the real daemon to this private backend port;
+        # the listener keeps the shared front port inherited from the image.
         connection = http.client.HTTPConnection("127.0.0.1", 9001, timeout=60)
         try:
             connection.request(self.command, self.path, body, dict(self.headers))
@@ -54,4 +57,6 @@ class Relay(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    ThreadingHTTPServer(("0.0.0.0", 9000), Relay).serve_forever()
+    ThreadingHTTPServer(
+        ("0.0.0.0", int(os.environ["AGENTD_PORT"])), Relay
+    ).serve_forever()

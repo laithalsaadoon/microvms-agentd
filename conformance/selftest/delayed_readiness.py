@@ -7,10 +7,16 @@ import contextlib
 import copy
 import importlib.util
 import io
+import os
+import shlex
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from harness.constants import REPO
+from harness.constants import AGENT_PORT, REPO
 from harness.results import Results
 from lanes.delayed_readiness import delayed_recipe, measurement_outcome, timing_records
 
@@ -92,13 +98,51 @@ def check_delayed_readiness(results: Results) -> None:
     results.check(
         "delayed readiness image runs the supplied daemon behind the relay",
         "COPY agentd /agentd" in recipe
-        and "ENV AGENTD_PORT=9000" in recipe
+        and f"ENV AGENTD_PORT={AGENT_PORT}" in recipe
         and "ENTRYPOINT []" in recipe
         and 'CMD ["/agentd"]' in recipe
         and "mv /agentd /real-agentd" in recipe
         and "export AGENTD_PORT=9001\\nexec /real-agentd" in recipe,
     )
+    check_launcher_ports(results, recipe)
     check_relay(results)
+
+
+def check_launcher_ports(results: Results, recipe: str) -> None:
+    line = next(
+        line for line in recipe.splitlines() if line.startswith("RUN mv /agentd ")
+    )
+    format_string = line.split("printf '", 1)[1].split("' > /agentd", 1)[0]
+    rendered = subprocess.run(
+        ["/bin/sh", "-c", 'printf "$1"', "launcher", format_string],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    with tempfile.TemporaryDirectory() as directory:
+        relay = Path(directory) / "relay.py"
+        relay.write_text('import os; print("relay=" + os.environ["AGENTD_PORT"])')
+        daemon = Path(directory) / "daemon.sh"
+        daemon.write_text('#!/bin/sh\nprintf "daemon=%s\\n" "$AGENTD_PORT"\n')
+        daemon.chmod(0o700)
+        launcher = rendered.replace(
+            "python3 /delayed_ready.py",
+            f"{shlex.quote(sys.executable)} {shlex.quote(str(relay))}",
+        ).replace("/real-agentd", shlex.quote(str(daemon)))
+        process = subprocess.run(
+            ["/bin/sh", "-c", launcher],
+            env={**os.environ, "AGENTD_PORT": "19000"},
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    results.check(
+        "delayed readiness relay inherits the front port before the daemon override",
+        process.returncode == 0
+        and sorted(process.stdout.splitlines()) == ["daemon=9001", "relay=19000"],
+        process.stderr,
+    )
 
 
 def check_relay(results: Results) -> None:
