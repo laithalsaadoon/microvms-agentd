@@ -635,9 +635,9 @@ fn delete_budget(
     Ok((attempts, backoff))
 }
 
+#[cfg(feature = "parity-fixtures")]
 #[pymethods]
 impl PyControlPlane {
-    #[cfg(feature = "parity-fixtures")]
     #[staticmethod]
     fn _parity_from_script(script: &str) -> PyCoreResult<Self> {
         let parity = microvms_core::testing::ParityControlPlane::from_json(script)?;
@@ -647,11 +647,13 @@ impl PyControlPlane {
         })
     }
 
-    #[cfg(feature = "parity-fixtures")]
     fn _parity_calls(&self) -> Vec<String> {
         self.parity.as_ref().expect("a parity fixture").calls()
     }
+}
 
+#[pymethods]
+impl PyControlPlane {
     /// Resolves credentials for `region` from the default chain.
     #[new]
     fn new(py: Python<'_>, region: PyRegion) -> PyCoreResult<PyControlPlane> {
