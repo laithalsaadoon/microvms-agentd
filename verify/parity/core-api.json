@@ -1025,6 +1025,7 @@
     "microvms_core::prelude::TunnelIdentityExt": "trait",
     "microvms_core::prelude::TunnelIdentityExt::initiator": "method",
     "microvms_core::protocol": "module",
+    "microvms_core::protocol::DEFAULT_AGENT_PORT": "constant",
     "microvms_core::protocol::PROTOCOL_VERSION": "constant",
     "microvms_core::protocol::VERSION_HEADER": "constant",
     "microvms_core::protocol::exec": "module",

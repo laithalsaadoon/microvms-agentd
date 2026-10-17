@@ -2398,7 +2398,7 @@ pub struct DockerfileArgs {
     pub from: Option<String>,
 
     /// The port agentd listens on inside the guest.
-    #[arg(long, default_value_t = 9000)]
+    #[arg(long, default_value_t = microvms_core::control::DEFAULT_AGENT_PORT)]
     pub port: u16,
 
     /// A working directory to create and set. Strongly recommended.
@@ -3847,6 +3847,22 @@ mod tests {
                 "{command} --timeout"
             );
         }
+    }
+
+    #[test]
+    fn the_dockerfile_port_defaults_to_the_shared_daemon_port() {
+        let cli = Cli::try_parse_from(["microvm", "dockerfile"]).expect("parses");
+        let Command::Dockerfile(args) = cli.command else {
+            panic!("expected dockerfile command");
+        };
+        assert_eq!(args.port, microvms_core::protocol::DEFAULT_AGENT_PORT);
+
+        let cli = Cli::try_parse_from(["microvm", "dockerfile", "--port", "8123"])
+            .expect("explicit port parses");
+        let Command::Dockerfile(args) = cli.command else {
+            panic!("expected dockerfile command");
+        };
+        assert_eq!(args.port, 8123);
     }
 
     /// **`wait --timeout` defaults to core's `DEFAULT_RUNNING_TIMEOUT` (#269),** the bound a

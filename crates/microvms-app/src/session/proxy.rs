@@ -81,8 +81,8 @@ pub const PROXY_AUTH_HEADER: &str = "X-aws-proxy-auth";
 /// looks like.
 pub const PROXY_PORT_HEADER: &str = "X-aws-proxy-port";
 
-/// The port the daemon listens on in the images this repo builds (`AGENTD_PORT`).
-pub const DEFAULT_AGENT_PORT: u16 = 9000;
+// Keep the published import path while sharing the daemon's default.
+pub use crate::control::DEFAULT_AGENT_PORT;
 
 /// The base subprotocol every MicroVM WebSocket handshake offers first.
 ///

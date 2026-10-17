@@ -115,8 +115,8 @@ use crate::hooks::{BuildHookTimeout, RunHookTimeout};
 use crate::region::Region;
 use crate::sizing::SizeClass;
 
-/// The default agent port, matching the daemon's own default.
-pub const DEFAULT_AGENT_PORT: u16 = 9000;
+/// Compatibility alias for the shared daemon listener default.
+pub const DEFAULT_AGENT_PORT: u16 = protocol::DEFAULT_AGENT_PORT;
 
 use crate::adapters::Adapters;
 /// The clock every wait here measures its deadline on. It's the crate's one [`Clock`], so the

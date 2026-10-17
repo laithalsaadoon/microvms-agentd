@@ -1,0 +1,40 @@
+# The daemon, image builders, session proxy, and CLI share one port default.
+
+[[family]]
+guard = "default_daemon_port_keeps_its_value_and_compatibility_paths"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "default_agent_port", "--", "--exact", "default_daemon_port_keeps_its_value_and_compatibility_paths"]
+expect = "test-failed"
+suite = "rust"
+
+[[family.fault]]
+id = "default-agent-port-contract-changes"
+message = "the published default is stable"
+transform = { file = "crates/protocol/src/lib.rs", replace = "pub const DEFAULT_AGENT_PORT: u16 = 9000;", with = "pub const DEFAULT_AGENT_PORT: u16 = 9001;" }
+
+[[family.fault]]
+id = "default-agent-port-control-diverges"
+message = "assertion `left == right` failed"
+transform = { file = "crates/microvms-app/src/control/mod.rs", replace = "pub const DEFAULT_AGENT_PORT: u16 = protocol::DEFAULT_AGENT_PORT;", with = "pub const DEFAULT_AGENT_PORT: u16 = protocol::DEFAULT_AGENT_PORT + 1;" }
+
+[[family.fault]]
+id = "default-agent-port-session-diverges"
+message = "assertion `left == right` failed"
+transform = { file = "crates/microvms-app/src/session/proxy.rs", replace = "pub use crate::control::DEFAULT_AGENT_PORT;", with = "pub const DEFAULT_AGENT_PORT: u16 = protocol::DEFAULT_AGENT_PORT + 1;" }
+
+[[fault]]
+id = "default-agent-port-daemon-diverges"
+guard = "config::tests::defaults_are_sized_for_a_small_vm"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "config::tests::defaults_are_sized_for_a_small_vm"]
+expect = "test-failed"
+suite = "rust"
+message = "assertion `left == right` failed"
+transform = { file = "crates/agentd/src/config.rs", replace = "            port: protocol::DEFAULT_AGENT_PORT,", with = "            port: protocol::DEFAULT_AGENT_PORT + 1," }
+
+[[fault]]
+id = "default-agent-port-cli-diverges"
+guard = "cli::tests::the_dockerfile_port_defaults_to_the_shared_daemon_port"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "cli::tests::the_dockerfile_port_defaults_to_the_shared_daemon_port"]
+expect = "test-failed"
+suite = "rust"
+message = "assertion `left == right` failed"
+transform = { file = "crates/microvms-cli/src/cli.rs", replace = "#[arg(long, default_value_t = microvms_core::control::DEFAULT_AGENT_PORT)]", with = "#[arg(long, default_value_t = microvms_core::control::DEFAULT_AGENT_PORT + 1)]" }

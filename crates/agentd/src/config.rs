@@ -118,7 +118,7 @@ pub const MAX_HOOK_HANDLER_SECS: u64 = 55;
 impl Default for Config {
     fn default() -> Self {
         Self {
-            port: 9000,
+            port: protocol::DEFAULT_AGENT_PORT,
             max_body_bytes: 512 * 1024 * 1024,
             max_drain_bytes: 64 * 1024,
             max_output_bytes: 8 * 1024 * 1024,
@@ -254,7 +254,7 @@ mod tests {
     #[test]
     fn defaults_are_sized_for_a_small_vm() {
         let cfg = Config::default();
-        assert_eq!(cfg.port, 9000);
+        assert_eq!(cfg.port, protocol::DEFAULT_AGENT_PORT);
         // The output cap has to be well under the smallest baseline memory, or a
         // single noisy command can kill a daemon nothing can restart.
         assert!(cfg.max_output_bytes < 64 * 1024 * 1024);
