@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use microvms_app::run_store::{RunStore, StoredLedger};
 
 /// The shared state directory: run JSON at its root and history JSON Lines below it.
+/// Non-Unicode filename stems remain read-only diagnostics; a string key cannot identify
+/// them exactly, and a replacement character could name a different, writable file.
 #[derive(Clone, Debug)]
 pub struct FileRunStore {
     root: PathBuf,
@@ -56,13 +58,22 @@ impl RunStore for FileRunStore {
             .filter_map(Result::ok)
             .map(|entry| entry.path())
             .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
-            .map(|path| StoredLedger {
-                key: path
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_default(),
-                location: path.to_string_lossy().into_owned(),
-                text: std::fs::read_to_string(&path).ok(),
+            .map(|path| {
+                let Some(key) = path.file_stem().and_then(|stem| stem.to_str()) else {
+                    // An empty key is rejected by every file operation. With no text, the
+                    // app also cannot reopen this entry and flush it through a lossy alias.
+                    // Debug escapes the raw filename, keeping it distinct from a real U+FFFD.
+                    return StoredLedger {
+                        key: String::new(),
+                        location: format!("{path:?}"),
+                        text: None,
+                    };
+                };
+                StoredLedger {
+                    key: key.to_owned(),
+                    location: path.to_string_lossy().into_owned(),
+                    text: std::fs::read_to_string(&path).ok(),
+                }
             })
             .collect()
     }
