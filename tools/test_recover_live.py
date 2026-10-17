@@ -436,23 +436,30 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(recovery.Refused, "image_in_use"):
             recovery.recover(self.manifest, self.owned, self.api, {})
         self.assert_no_deletes()
-        self.plane.vms = []
-        self.plane.version_logging[arn(UNKNOWN)] = {
-            "cloudWatch": {"logGroup": CONFIGURED}
-        }
-        with self.assertRaisesRegex(recovery.Refused, "configured_group_in_use"):
-            recovery.recover(self.manifest, self.owned, self.api, {})
-        self.assert_no_deletes()
-        self.plane.version_logging[arn(UNKNOWN)] = {
-            "cloudWatch": {"logGroup": recovery.SERVICE_PREFIX + SHARED}
-        }
-        with self.assertRaisesRegex(recovery.Refused, "configured_group_in_use"):
-            recovery.recover(self.manifest, self.owned, self.api, {})
-        self.assert_no_deletes()
-        self.plane.version_logging[arn(UNKNOWN)] = None
-        with self.assertRaisesRegex(recovery.Refused, "version_logging_missing"):
-            recovery.recover(self.manifest, self.owned, self.api, {})
-        self.assert_no_deletes()
+        for logging, reason in (
+            ({"cloudWatch": {"logGroup": CONFIGURED}}, "configured_group_in_use"),
+            (
+                {"cloudWatch": {"logGroup": recovery.SERVICE_PREFIX + SHARED}},
+                "configured_group_in_use",
+            ),
+            (None, "version_logging_missing"),
+        ):
+            with self.subTest(reason=reason, logging=logging):
+                self.setUp()
+                self.plane.version_logging[arn(UNKNOWN)] = logging
+                report = {}
+                with self.assertRaisesRegex(recovery.Refused, reason):
+                    recovery.recover(self.manifest, self.owned, self.api, report)
+                self.assertEqual(
+                    [row for row in self.plane.calls if row[0].startswith("delete")],
+                    [("delete_image", arn(SHARED)), ("delete_image", arn(CAPABILITY))],
+                )
+                for row in report["resources"]:
+                    self.assertEqual(row["deletionRequested"], row["kind"] == "image")
+                    self.assertEqual(
+                        row["status"], "absent" if row["kind"] == "image" else "present"
+                    )
+                self.assertNotIn("independentVerifier", report)
 
     def test_every_page_and_bad_page_fail_before_mutation(self):
         self.plane.extra_image_page = [
@@ -471,7 +478,8 @@ class RecoveryTests(unittest.TestCase):
         self.assertTrue(
             any(row == ("list", {"nextToken": "second"}) for row in self.plane.calls)
         )
-        self.assert_no_deletes()
+        self.assertFalse(any(row[0] == "delete_group" for row in self.plane.calls))
+        self.plane.calls.clear()
         with patch.object(
             self.plane,
             "list_microvm_images",
@@ -499,6 +507,62 @@ class RecoveryTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(recovery.Refused, "api_failed"):
                 self.api.image_absent(arn(SHARED))
+
+    def test_each_log_rechecks_dependencies_after_the_previous_log_delete(self):
+        for change, reason in (
+            ("vm", "log_vm_dependencies_unobservable"),
+            ("version", "version_logging_missing"),
+            ("image", "image_not_absent"),
+        ):
+            with self.subTest(change=change):
+                self.setUp()
+                image = copy.deepcopy(self.plane.images[arn(SHARED)])
+                original = self.logs.delete_log_group
+
+                def delete(*, logGroupName):
+                    result = original(logGroupName)
+                    if change == "vm":
+                        self.plane.vms = [
+                            {
+                                "microvmId": "late",
+                                "imageArn": arn(UNKNOWN),
+                                "state": "RUNNING",
+                            }
+                        ]
+                    elif change == "version":
+                        self.plane.version_logging[arn(UNKNOWN)] = None
+                    else:
+                        self.plane.images[arn(SHARED)] = image
+                    return result
+
+                report = {}
+                with patch.object(self.logs, "delete_log_group", side_effect=delete):
+                    with self.assertRaisesRegex(recovery.Refused, reason):
+                        recovery.recover(self.manifest, self.owned, self.api, report)
+                self.assertEqual(
+                    [row for row in self.plane.calls if row[0].startswith("delete")],
+                    [
+                        ("delete_image", arn(SHARED)),
+                        ("delete_image", arn(CAPABILITY)),
+                        ("delete_group", recovery.SERVICE_PREFIX + SHARED),
+                    ],
+                )
+                self.assertIn(CONFIGURED, self.logs.groups)
+                statuses = {row["sha256"]: row for row in report["resources"]}
+                first = statuses[
+                    recovery.identity(
+                        "log-group", REGION, recovery.SERVICE_PREFIX + SHARED
+                    )
+                ]
+                second = statuses[recovery.identity("log-group", REGION, CONFIGURED)]
+                self.assertEqual(
+                    (first["status"], first["deletionRequested"]),
+                    ("deletion_requested", True),
+                )
+                self.assertEqual(
+                    (second["status"], second["deletionRequested"]), ("present", False)
+                )
+                self.assertNotIn("independentVerifier", report)
 
     def test_incarnation_rechecked_before_delete(self):
         real = self.plane.get_microvm_image

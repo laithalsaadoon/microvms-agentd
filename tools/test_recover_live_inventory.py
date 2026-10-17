@@ -384,12 +384,15 @@ def test_selection_contains_only_reviewed_objects_and_sets_evidence_context(setu
 @pytest.mark.parametrize(
     "state", ["PENDING", "RUNNING", "SUSPENDING", "SUSPENDED", "TERMINATING"]
 )
-def test_every_live_vm_state_blocks_image_selection(setup, state):
+@pytest.mark.parametrize("image_phase", [False, True])
+def test_every_live_vm_state_blocks_image_selection(setup, state, image_phase):
     setup.plane.list_microvms.return_value = {
         "items": [{"microvmId": "vm", "imageArn": ARN, "state": state}]
     }
     with pytest.raises(recovery.Refused, match="^image_in_use$"):
-        recovery.selected(setup.manifest, setup.ownership, setup.api)
+        recovery.selected(
+            setup.manifest, setup.ownership, setup.api, image_phase=image_phase
+        )
 
 
 @pytest.mark.parametrize(
@@ -400,16 +403,24 @@ def test_every_live_vm_state_blocks_image_selection(setup, state):
         ("imageArn", "other", "image_changed"),
     ],
 )
-def test_changed_readback_refuses_image_selection(setup, field, value, reason):
+@pytest.mark.parametrize("image_phase", [False, True])
+def test_changed_readback_refuses_image_selection(
+    setup, field, value, reason, image_phase
+):
     setup.plane.get_microvm_image.return_value = {**setup.image, field: value}
     with pytest.raises(recovery.Refused, match=f"^{reason}$"):
-        recovery.selected(setup.manifest, setup.ownership, setup.api)
+        recovery.selected(
+            setup.manifest, setup.ownership, setup.api, image_phase=image_phase
+        )
 
 
-def test_source_arn_cannot_be_replaced_even_when_name_matches(setup):
+@pytest.mark.parametrize("image_phase", [False, True])
+def test_source_arn_cannot_be_replaced_even_when_name_matches(setup, image_phase):
     setup.ownership["image-key"] = ("shared-image", "reviewed", "other")
     with pytest.raises(recovery.Refused, match="^source_arn_changed$"):
-        recovery.selected(setup.manifest, setup.ownership, setup.api)
+        recovery.selected(
+            setup.manifest, setup.ownership, setup.api, image_phase=image_phase
+        )
 
 
 def test_absent_resources_remain_absent_without_invented_plan(setup):
@@ -421,22 +432,32 @@ def test_absent_resources_remain_absent_without_invented_plan(setup):
     setup.plane.get_microvm_image.assert_not_called()
 
 
-def test_settled_selection_retries_only_exact_not_found(setup, monkeypatch):
+@pytest.mark.parametrize("image_phase", [False, True])
+def test_settled_selection_retries_only_exact_not_found(
+    setup, monkeypatch, image_phase
+):
     expected = ({}, ({}, {}, {}))
     choose = Mock(side_effect=[recovery.Refused("not_found"), expected])
     monkeypatch.setattr(recovery, "selected", choose)
     assert (
-        recovery.settled_selection(setup.manifest, setup.ownership, setup.api)
+        recovery.settled_selection(
+            setup.manifest, setup.ownership, setup.api, image_phase=image_phase
+        )
         == expected
     )
     assert setup.clock.sleeps == [2]
     assert (
         choose.call_args_list
-        == [((setup.manifest, setup.ownership, setup.api), {})] * 2
+        == [
+            ((setup.manifest, setup.ownership, setup.api), {"image_phase": image_phase})
+        ]
+        * 2
     )
     choose.side_effect = recovery.Refused("api_failed")
     with pytest.raises(recovery.Refused, match="^api_failed$"):
-        recovery.settled_selection(setup.manifest, setup.ownership, setup.api)
+        recovery.settled_selection(
+            setup.manifest, setup.ownership, setup.api, image_phase=image_phase
+        )
     assert setup.clock.sleeps == [2]
 
 
@@ -497,7 +518,16 @@ def test_present_log_refuses_unrelated_vm_before_any_deletion(setup, proof):
         recovery.recover(setup.manifest, setup.ownership, setup.api, report)
     setup.plane.delete_microvm_image.assert_not_called()
     setup.logs.delete_log_group.assert_not_called()
-    assert report == {}
+    assert report == {
+        "resources": [
+            {
+                "kind": "log-group",
+                "sha256": "group-key",
+                "status": "present",
+                "deletionRequested": False,
+            }
+        ]
+    }
 
 
 def test_vm_appearing_after_image_deletion_vetoes_exact_log_deletion(setup):
@@ -612,7 +642,7 @@ def test_existing_image_deletion_is_observed_without_reissuing_mutation(
     monkeypatch.setattr(
         recovery,
         "settled_selection",
-        lambda *_: (choices.pop(0) if choices else {}, ({}, {}, {})),
+        lambda *_, **__: (choices.pop(0) if choices else {}, ({}, {}, {})),
     )
     mutation, wait = Mock(), Mock()
     monkeypatch.setattr(setup.api, "call", mutation)
@@ -656,8 +686,9 @@ def test_recovery_orders_deletions_reports_each_stage_and_restarts_visibility(
     def statuses():
         return copy.deepcopy(report["resources"])
 
-    def choose(*args):
+    def choose(*args, image_phase=False):
         assert args == (setup.manifest, setup.ownership, setup.api)
+        assert image_phase == (len(choices) >= 5)
         if report:
             observed.append(statuses())
         return (choices.pop(0) if choices else {}), state
@@ -877,7 +908,7 @@ def test_deletion_requested_records_an_accepted_call_even_if_later_work_fails(
 ):
     initial = plan_for(setup, kind)
     monkeypatch.setattr(
-        recovery, "settled_selection", lambda *_: (initial, ({}, {}, {}))
+        recovery, "settled_selection", lambda *_, **__: (initial, ({}, {}, {}))
     )
     monkeypatch.setattr(setup.api, "configured_dependencies", Mock())
     delete = Mock(
@@ -975,7 +1006,95 @@ def test_explicit_additional_image_does_not_authorize_its_log_group(setup, monke
     assert setup.logs.describe_log_groups.return_value == {"logGroups": [group]}
     assert dependencies.call_args_list
     assert all(call.args[0] is None for call in dependencies.call_args_list)
-    assert len(setup.api.version_evidence) == 1
-    assert setup.api.version_evidence[0]["logGroupSha256"] == recovery.identity(
-        "log-group", REGION, related_group
+    assert setup.api.version_evidence == []
+    setup.plane.get_microvm_image_version.assert_not_called()
+
+
+def test_image_phase_preserves_full_inventories_without_observing_versions(setup):
+    foreign = {**setup.image, "imageArn": "foreign", "name": "foreign"}
+    vm = {"microvmId": "foreign-vm", "imageArn": "foreign", "state": "RUNNING"}
+    group = {**setup.group, "logGroupName": GROUP + "-foreign"}
+    setup.plane.list_microvm_images.return_value = {"items": [setup.image, foreign]}
+    setup.plane.list_microvms.return_value = {"items": [vm]}
+    setup.logs.describe_log_groups.return_value = {"logGroups": [setup.group, group]}
+    setup.api.configured_dependencies = Mock(side_effect=AssertionError("log phase"))
+    plan, state = recovery.selected(
+        setup.manifest, setup.ownership, setup.api, image_phase=True
+    )
+    assert set(plan) == {"image-key", "group-key"}
+    assert state == (
+        {ARN: setup.image, "foreign": foreign},
+        {"foreign-vm": vm},
+        {GROUP: setup.group, GROUP + "-foreign": group},
+    )
+    setup.api.configured_dependencies.assert_not_called()
+    setup.plane.get_microvm_image.assert_called_once_with(imageIdentifier=ARN)
+
+
+@pytest.mark.parametrize("logging", [None, {}, {"cloudWatch": None}])
+def test_unknown_logging_stops_logs_after_confirmed_image_absence(setup, logging):
+    foreign = {**setup.image, "imageArn": "foreign", "name": "foreign"}
+    images = {ARN: setup.image, "foreign": foreign}
+    setup.plane.list_microvm_images.side_effect = lambda: {
+        "items": list(images.values())
+    }
+
+    class Missing(Exception):
+        response = {"Error": {"Code": "ResourceNotFoundException"}}
+
+    def read(*, imageIdentifier):
+        if imageIdentifier not in images:
+            raise Missing
+        return images[imageIdentifier]
+
+    def delete(*, imageIdentifier):
+        assert imageIdentifier == ARN
+        images.pop(imageIdentifier)
+        return {}
+
+    setup.plane.get_microvm_image.side_effect = read
+    setup.plane.delete_microvm_image = Mock(side_effect=delete)
+    setup.plane.list_microvm_image_versions.return_value = {
+        "items": [{"imageVersion": "1"}]
+    }
+    setup.plane.get_microvm_image_version = Mock(
+        return_value={
+            "imageArn": "foreign",
+            "imageVersion": "1",
+            "state": "SUCCESSFUL",
+            "createdAt": CREATED,
+            "logging": logging,
+        }
+    )
+    setup.logs.delete_log_group = Mock()
+    report = {}
+    reason = (
+        "version_logging_missing" if logging is None else "version_logging_ambiguous"
+    )
+    with pytest.raises(recovery.Refused, match=f"^{reason}$"):
+        recovery.recover(setup.manifest, setup.ownership, setup.api, report)
+    assert images == {"foreign": foreign}
+    setup.plane.delete_microvm_image.assert_called_once_with(imageIdentifier=ARN)
+    setup.logs.delete_log_group.assert_not_called()
+    assert setup.plane.get_microvm_image.call_args_list[-1].kwargs == {
+        "imageIdentifier": ARN
+    }
+    assert report == {
+        "resources": [
+            {
+                "kind": "image",
+                "sha256": "image-key",
+                "status": "absent",
+                "deletionRequested": True,
+            },
+            {
+                "kind": "log-group",
+                "sha256": "group-key",
+                "status": "present",
+                "deletionRequested": False,
+            },
+        ]
+    }
+    assert setup.api.version_evidence[0]["imageSha256"] == recovery.identity(
+        "image", REGION, "foreign"
     )

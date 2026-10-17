@@ -734,7 +734,7 @@ class Api:
                 ),
                 "imageVersion",
             )
-            for version in versions:
+            for version, listed in versions.items():
                 record = self.call(
                     self.plane,
                     "get_microvm_image_version",
@@ -752,20 +752,48 @@ class Api:
                 self.observe_version(images[arn]["name"], version, record)
                 if group is None:
                     continue
-                logging = record.get("logging")
-                require(isinstance(logging, dict), "version_logging_missing")
-                if logging.get("disabled") == {}:
-                    require(set(logging) == {"disabled"}, "version_logging_ambiguous")
+                destination = self.version_log_destination(record, listed)
+                if destination is None:
                     continue
-                cloud = logging.get("cloudWatch")
-                require(
-                    set(logging) == {"cloudWatch"} and isinstance(cloud, dict),
-                    "version_logging_ambiguous",
-                )
-                destination = text(cloud.get("logGroup"))
                 require(
                     destination != group or arn in deleting, "configured_group_in_use"
                 )
+
+    @staticmethod
+    def logging_destination(logging: Any) -> str | None:
+        require(isinstance(logging, dict), "version_logging_missing")
+        if logging.get("disabled") == {}:
+            require(set(logging) == {"disabled"}, "version_logging_ambiguous")
+            return None
+        cloud = logging.get("cloudWatch")
+        require(
+            set(logging) == {"cloudWatch"} and isinstance(cloud, dict),
+            "version_logging_ambiguous",
+        )
+        return text(cloud.get("logGroup"))
+
+    def version_log_destination(self, record: dict, listed: dict) -> str | None:
+        # Both APIs describe logging for this exact version. Configuration updates
+        # build a new version; the version update API changes only availability.
+        # Missing Get data may use positive List evidence, never an inferred default.
+        present = "logging" in record
+        destination = self.logging_destination(record["logging"]) if present else None
+        if "logging" not in listed:
+            require(present, "version_logging_missing")
+            return destination
+        require(
+            listed.get("imageArn") == record["imageArn"]
+            and listed.get("imageVersion") == record["imageVersion"]
+            and listed.get("state") == record["state"]
+            and stamp(listed.get("createdAt")) == stamp(record.get("createdAt")),
+            "version_logging_ambiguous",
+        )
+        listed_destination = self.logging_destination(listed["logging"])
+        require(
+            not present or record["logging"] == listed["logging"],
+            "version_logging_ambiguous",
+        )
+        return listed_destination
 
     def observe_version(self, name: str, version: str, record: dict) -> None:
         # Version metadata can inform a later reviewed incident amendment. It
@@ -843,7 +871,9 @@ def fingerprint(kind: str, row: dict, manifest: dict) -> tuple:
     return value
 
 
-def selected(manifest: dict, ownership: dict, api: Api) -> tuple[dict, tuple]:
+def selected(
+    manifest: dict, ownership: dict, api: Api, *, image_phase: bool = False
+) -> tuple[dict, tuple]:
     api.region = manifest["region"]
     api.source_infrastructure = manifest.get("source_infrastructure", {})
     images, vms, groups = api.inventory()
@@ -870,6 +900,11 @@ def selected(manifest: dict, ownership: dict, api: Api) -> tuple[dict, tuple]:
                 "image_in_use",
             )
         plan[key] = (resource, row, current)
+    # Unknown log destinations veto log deletion, not independently authorized
+    # image deletion. Keep the full inventories and incarnation checks above in
+    # both phases; every log mutation below still requires the default phase.
+    if image_phase:
+        return plan, (images, vms, groups)
     deleting = {
         row["imageArn"]
         for resource, row, _ in plan.values()
@@ -891,12 +926,14 @@ def selected(manifest: dict, ownership: dict, api: Api) -> tuple[dict, tuple]:
     return plan, (images, vms, groups)
 
 
-def settled_selection(manifest: dict, ownership: dict, api: Api) -> tuple[dict, tuple]:
+def settled_selection(
+    manifest: dict, ownership: dict, api: Api, *, image_phase: bool = False
+) -> tuple[dict, tuple]:
     # A just-deleted object can remain in a list after its exact Get says gone.
     # Wait for the list to converge; never turn a different API error into absence.
     while True:
         try:
-            return selected(manifest, ownership, api)
+            return selected(manifest, ownership, api, image_phase=image_phase)
         except Refused as exc:
             if str(exc) != "not_found":
                 raise
@@ -905,7 +942,7 @@ def settled_selection(manifest: dict, ownership: dict, api: Api) -> tuple[dict, 
 
 
 def recover(manifest: dict, ownership: dict, api: Api, report: dict) -> None:
-    initial, _ = settled_selection(manifest, ownership, api)
+    initial, _ = settled_selection(manifest, ownership, api, image_phase=True)
     report["resources"] = [
         {
             "kind": r["kind"],
@@ -916,11 +953,12 @@ def recover(manifest: dict, ownership: dict, api: Api, report: dict) -> None:
         for r in manifest["resources"]
     ]
     statuses = {r["sha256"]: r for r in report["resources"]}
-    # No mutation occurs before all initial ownership/incarnation/dependency checks pass.
+    # Image authority is independent of a log destination's observability. Log
+    # dependency checks run afresh after these images are confirmed absent by Get.
     for key, (resource, row, old) in initial.items():
         if resource["kind"] != "image":
             continue
-        current, _ = settled_selection(manifest, ownership, api)
+        current, _ = settled_selection(manifest, ownership, api, image_phase=True)
         require(key in current and current[key][2] == old, "incarnation_changed")
         if row["state"] not in {"DELETING", "DELETED"}:
             api.call(api.plane, "delete_microvm_image", imageIdentifier=row["imageArn"])

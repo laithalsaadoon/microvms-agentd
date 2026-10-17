@@ -1,0 +1,59 @@
+[[family]]
+guard = "test_recover_live_logging.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_logging.py::test_missing_get_uses_only_explicit_matching_list_configuration"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "recovery-version-list-positive"
+message = "test_missing_get_uses_only_explicit_matching_list_configuration"
+transform = { file = "tools/recover-live.py", replace = "destination = self.version_log_destination(record, listed)", with = "destination = self.logging_destination(record.get(\"logging\"))" }
+
+[[family]]
+guard = "test_recover_live_logging.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_logging.py::test_missing_null_and_malformed_evidence_never_select_a_safe_default"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "recovery-version-list-absent-only"
+message = "test_missing_null_and_malformed_evidence_never_select_a_safe_default"
+transform = { file = "tools/recover-live.py", replace = "present = \"logging\" in record", with = "present = isinstance(record.get(\"logging\"), dict)" }
+
+[[family]]
+guard = "test_recover_live_logging.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_logging.py::test_list_configuration_is_bound_to_the_exact_get_incarnation"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "recovery-version-list-identity"
+message = "test_list_configuration_is_bound_to_the_exact_get_incarnation"
+transform = { file = "tools/recover-live.py", replace = "listed.get(\"imageArn\") == record[\"imageArn\"]", with = "True" }
+
+[[family]]
+guard = "test_recover_live_logging.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_logging.py::test_list_configuration_is_bound_to_the_exact_get_incarnation"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "recovery-version-list-incarnation"
+message = "test_list_configuration_is_bound_to_the_exact_get_incarnation"
+transform = { file = "tools/recover-live.py", replace = "stamp(listed.get(\"createdAt\")) == stamp(record.get(\"createdAt\"))", with = "True" }
+
+[[family]]
+guard = "test_recover_live_logging.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_logging.py::test_list_configuration_is_bound_to_the_exact_get_incarnation"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "recovery-version-list-state"
+message = "test_list_configuration_is_bound_to_the_exact_get_incarnation"
+transform = { file = "tools/recover-live.py", replace = "listed.get(\"state\") == record[\"state\"]", with = "True" }
+
+[[family]]
+guard = "test_recover_live_logging.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_logging.py::test_conflicting_explicit_reads_refuse_even_when_one_would_allow_deletion"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "recovery-version-list-agreement"
+message = "test_conflicting_explicit_reads_refuse_even_when_one_would_allow_deletion"
+transform = { file = "tools/recover-live.py", replace = "not present or record[\"logging\"] == listed[\"logging\"]", with = "True" }

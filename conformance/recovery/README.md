@@ -58,22 +58,39 @@ names during recovery. This operational precondition is necessary because the
 provider's deletion APIs have no atomic creation-time condition. It does not
 supply ownership evidence. Recovery requires each surviving selected resource's
 creation time to fall within the original job interval, rechecks its identity
-before deletion, refuses active VM and image-version log dependencies, deletes
-images before log groups, records whether it requested each deletion, and checks
-absence through a visibility interval and an independent verifier. Other
-resources are reported by hash and left alone.
+before deletion, refuses active references to each selected image, deletes
+images before checking log-group dependencies, records whether it requested each
+deletion, and checks absence through a visibility interval and an independent
+verifier. Other resources are reported by hash and left alone.
+
+Image deletion does not depend on unrelated image versions' log configuration.
+Before each log deletion, recovery still checks the complete regional VM and
+image-version inventories and refuses missing or ambiguous log destinations.
+If that phase fails, the failed receipt retains accepted image deletion requests
+and their exact Get absence results; those results do not substitute for the
+final inventory window or independent verifier.
+
+When an exact version Get omits its logging field, recovery can use an explicit
+logging configuration from that version's List row. The image ARN, version,
+creation timestamp and known state must agree. A present malformed Get value,
+missing configuration in both responses, or conflicting explicit configurations
+still refuses log deletion. This is positive configuration evidence, never an
+inference that missing logging means disabled or names a default destination.
+Optional version evidence in the receipt continues to describe Get fields only.
 
 `RunMicrovm` accepts an explicit per-VM log destination, but the VM list and get
-responses do not expose it. While any selected log group is present, recovery
+responses do not expose it. Before deleting any selected log group, recovery
 therefore requires every VM in the complete regional inventory to be
 `TERMINATED`, including VMs using unrelated images. It repeats this check before
 each log deletion. The check cannot exclude a VM launched after the last read,
 so the no-other-writer precondition also covers launches that use selected log
-names. When every selected log is absent, image recovery retains its ordinary
-image-reference dependency check.
+names. Image deletion always retains its ordinary image-reference dependency
+check.
 
 Run `uv run --locked pytest tools/test_recover_live*.py tools/test_recovery_credentials.py`
 for the offline selector, provenance, failure, credential and privacy cases. The seeded faults are in
-`verify/guards/faults/recovery.toml`. These tests do not establish AWS behavior;
+`verify/guards/faults/recovery.toml`, `verify/guards/faults/recovery-phases.toml`,
+`verify/guards/faults/recovery-version-logging.toml`, and
+`verify/guards/faults/recovery-integration.toml`. These tests do not establish AWS behavior;
 the hosted recovery path remains unverified against AWS until a run succeeds.
 The source incident's cancelled run is not acceptance evidence.
