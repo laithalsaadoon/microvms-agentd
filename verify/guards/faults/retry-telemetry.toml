@@ -128,3 +128,35 @@ expect = "exit-nonzero"
 suite = "bindings"
 message = "bindings/microvms-py/microvms.pyi is stale"
 transform = { file = "tools/generate-py-stubs.py", replace = "                \"    throttled: bool\",\n                \"    attempt_count: int\",\n                \"    backoff_seconds: float\",\n", with = "" }
+
+[[fault]]
+id = "retry-elapsed-boundary-sleeps"
+guard = "control::transport::tests::a_retry_at_the_elapsed_budget_boundary_does_not_sleep"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::transport::tests::a_retry_at_the_elapsed_budget_boundary_does_not_sleep"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "elapsed.saturating_add(delay) < policy.max_elapsed", with = "elapsed.saturating_add(delay) <= policy.max_elapsed" }
+
+[[fault]]
+id = "retry-ordinary-counter-decreases"
+guard = "control::transport::tests::throttle_budget_counts_attempts_bounds_elapsed_and_keeps_other_failures_default"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::transport::tests::throttle_budget_counts_attempts_bounds_elapsed_and_keeps_other_failures_default"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "ordinary_retries += 1;", with = "ordinary_retries -= 1;" }
+
+[[fault]]
+id = "retry-ordinary-counter-stays-zero"
+guard = "control::transport::tests::throttle_budget_counts_attempts_bounds_elapsed_and_keeps_other_failures_default"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::transport::tests::throttle_budget_counts_attempts_bounds_elapsed_and_keeps_other_failures_default"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "ordinary_retries += 1;", with = "ordinary_retries *= 1;" }
+
+[[fault]]
+id = "retry-refusal-requires-both-conditions"
+guard = "control::transport::tests::throttle_budget_counts_attempts_bounds_elapsed_and_keeps_other_failures_default"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::transport::tests::throttle_budget_counts_attempts_bounds_elapsed_and_keeps_other_failures_default"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "if !error.retryable() || !allowed {", with = "if !error.retryable() && !allowed {" }

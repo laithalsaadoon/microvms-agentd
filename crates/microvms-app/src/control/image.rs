@@ -2292,10 +2292,18 @@ mod tests {
         fake.answer(
             "GetMicrovmImage",
             Answer::ok(fake::get_image_response("img", "CREATING")),
-        )
-        .answer(
+        );
+        for _ in 0..6 {
+            fake.answer(
+                "ListMicrovmImageVersions",
+                Answer::failure(429, "Rate exceeded"),
+            );
+        }
+        // Keep the listing unreadable after exhaustion without letting a broken
+        // retry counter repeat a transient response forever.
+        fake.answer(
             "ListMicrovmImageVersions",
-            Answer::failure(429, "Rate exceeded"),
+            Answer::failure(403, "listing denied"),
         );
 
         let error = plane
@@ -2508,10 +2516,18 @@ mod tests {
         fake.answer(
             "GetMicrovmImage",
             Answer::ok(fake::get_image_response("img", "CREATE_FAILED")),
-        )
-        .answer(
+        );
+        for _ in 0..6 {
+            fake.answer(
+                "ListMicrovmImageVersions",
+                Answer::failure(429, "Rate exceeded"),
+            );
+        }
+        // Keep the listing unreadable after exhaustion without letting a broken
+        // retry counter repeat a transient response forever.
+        fake.answer(
             "ListMicrovmImageVersions",
-            Answer::failure(429, "Rate exceeded"),
+            Answer::failure(403, "listing denied"),
         );
 
         let error = plane

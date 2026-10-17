@@ -966,9 +966,12 @@ mod tests {
             ),
         ] {
             let transport = FakeControlPlane::new();
-            for _ in 0..10 {
+            for _ in 0..expected {
                 transport.answer("RunMicrovm", Answer::failure(status, "failure"));
             }
+            // An extra retry reaches success, so a broken budget fails the verdict
+            // assertion instead of repeating a transient answer forever.
+            transport.answer("RunMicrovm", Answer::ok("{}"));
             let clock = TestClock::new();
             let error = send_configured(
                 &transport,
@@ -989,6 +992,41 @@ mod tests {
         }
         assert!(RetryPolicy::new(0, Duration::from_secs(1)).is_err());
         assert!(RetryPolicy::new(1, Duration::ZERO).is_err());
+    }
+
+    #[tokio::test]
+    async fn a_retry_at_the_elapsed_budget_boundary_does_not_sleep() {
+        use crate::clock::Clock;
+        use crate::control::fake::{Answer, FakeControlPlane, TestClock};
+        let transport = FakeControlPlane::new();
+        transport.answer("RunMicrovm", Answer::throttled_as_400());
+        let gate = transport.hold_responses();
+        let clock = TestClock::new();
+        clock.set_unix_now(Duration::ZERO);
+        let pending = send_configured(
+            &transport,
+            Call::get("RunMicrovm", "/run"),
+            &[],
+            Some(RetryPolicy::new(2, Duration::MAX).unwrap()),
+            &clock,
+        );
+        tokio::pin!(pending);
+        tokio::select! {
+            biased;
+            _ = &mut pending => panic!("response must wait for the gate"),
+            _ = std::future::ready(()) => {}
+        }
+        assert_eq!(transport.call_count("RunMicrovm"), 1);
+        // Saturating elapsed + jittered delay equals MAX for every possible delay.
+        // Advancing during the request also proves request time uses this budget.
+        clock.advance(Duration::MAX);
+        gate.notify_one();
+        let error = pending.await.unwrap_err();
+        assert!(error.throttled());
+        assert_eq!(error.attempt_count(), 1);
+        assert_eq!(transport.call_count("RunMicrovm"), 1);
+        assert_eq!(error.backoff(), Duration::ZERO);
+        assert_eq!(clock.elapsed(), Duration::MAX);
     }
 
     #[tokio::test]
@@ -1043,6 +1081,7 @@ mod tests {
             for _ in 0..6 {
                 transport.answer("ListMicrovms", Answer::throttled_as_400());
             }
+            transport.answer("ListMicrovms", Answer::ok("{}"));
             let call = Call::get("ListMicrovms", "/list");
             let error = if accepts_missing {
                 send_accepting(&transport, call, &[404]).await

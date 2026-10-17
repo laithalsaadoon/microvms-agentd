@@ -4811,12 +4811,17 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_terminate_whose_call_fails_still_records_the_intent_and_the_leak() {
         let (mut sandbox, recorder, _) = launched().await;
-        recorder.answer(
-            "TerminateMicrovm",
-            Answer::failure(500, "InternalServerException"),
-        );
+        for _ in 0..6 {
+            recorder.answer(
+                "TerminateMicrovm",
+                Answer::failure(500, "InternalServerException"),
+            );
+        }
+        // The failure remains terminal even if the retry budget regresses.
+        recorder.answer("TerminateMicrovm", Answer::failure(403, "denied"));
 
         let report = sandbox.terminate(TeardownOpts::default()).await;
+        assert_eq!(recorder.call_count("TerminateMicrovm"), 6);
         assert!(!report.terminate_accepted);
         assert_eq!(report.undeleted, ["mvm-abc123"], "{report:?}");
         assert!(sandbox.was_terminated());
