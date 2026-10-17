@@ -1,0 +1,10 @@
+# ── preflight-prefix: FAIL_TO_PASS entries tools/fail-to-pass.py emitted ──
+
+# FAIL_TO_PASS: fails on 5bf08393dcf8 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-service-failure-names-the-iam-action-namespace"
+guard = "preflight::tests::service_failure_names_the_iam_action_namespace"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "preflight::tests::service_failure_names_the_iam_action_namespace"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-service-failure-names-the-iam-action-namespace.patch"

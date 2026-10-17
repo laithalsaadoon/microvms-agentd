@@ -78,7 +78,7 @@ pub async fn service_check(plane: &ControlPlane) -> Check {
             "service",
             format!("ListManagedMicrovmImages in {region} failed: {error}"),
             "an AccessDeniedException with no message is also what a region without MicroVMs \
-             answers; otherwise allow lambda-microvms:ListManagedMicrovmImages",
+             answers; otherwise allow lambda:ListManagedMicrovmImages",
         ),
     }
 }
@@ -181,6 +181,23 @@ mod tests {
             );
             assert_eq!(report.checks.len(), 3);
         }
+    }
+
+    #[tokio::test]
+    async fn service_failure_names_the_iam_action_namespace() {
+        let recorder = Arc::new(FakeControlPlane::new());
+        recorder.answer(
+            "ListManagedMicrovmImages",
+            Answer::failure(403, "AccessDeniedException"),
+        );
+        let check = service_check(&plane(recorder, Region::UsEast1)).await;
+        assert!(!check.ok && check.ran && check.fatal);
+        assert!(
+            check
+                .remedy
+                .contains("allow lambda:ListManagedMicrovmImages")
+        );
+        assert!(!check.remedy.contains("lambda-microvms:"));
     }
 
     /// **BIND-16: no call after the credentials fail**, and the service line says it did not
