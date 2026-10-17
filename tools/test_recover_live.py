@@ -609,10 +609,11 @@ class RecoveryTests(unittest.TestCase):
         with patch.object(
             self.plane, "list_microvm_images", side_effect=Throttled()
         ) as call:
+            self.api.jitter = lambda low, high: high
             with self.assertRaisesRegex(recovery.Refused, "api_failed"):
                 self.api.inventory()
-            self.assertEqual(call.call_count, 3)
-            self.assertEqual(self.clock.now, 4)
+            self.assertEqual(call.call_count, 6)
+            self.assertEqual(self.clock.now, 46)
         self.assert_no_deletes()
 
     def test_every_collection_consumes_later_pages_and_rejects_missing_fields(self):

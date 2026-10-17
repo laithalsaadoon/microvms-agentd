@@ -20,6 +20,7 @@ import hashlib
 import json
 import math
 import os
+import random
 import re
 import signal
 import subprocess
@@ -72,6 +73,7 @@ RETRY_CODES = {
     "RequestTimeout",
 }
 ERROR_CODES = RETRY_CODES | {
+    "AccessDenied",
     "AccessDeniedException",
     "ConflictException",
     "ValidationException",
@@ -92,6 +94,16 @@ OPERATIONS = {
     "delete_log_group",
     "get_role",
 }
+READ_OPERATIONS = {
+    "list_microvm_images",
+    "list_microvms",
+    "describe_log_groups",
+    "list_microvm_image_versions",
+    "get_microvm_image_version",
+    "get_microvm_image",
+    "get_role",
+}
+OBSERVATION_RETRY_CAPS = (2, 4, 8, 16, 16)
 TOTAL_SECONDS = 600
 VISIBILITY_SECONDS = 10
 
@@ -608,9 +620,11 @@ class Api:
         clock=time.monotonic,
         sleep=time.sleep,
         deadline=None,
+        jitter=random.uniform,
     ):
         self.plane, self.logs = plane, logs
         self.clock, self.sleep = clock, sleep
+        self.jitter = jitter
         self.deadline = deadline if deadline is not None else clock() + TOTAL_SECONDS
         self.version_evidence: list[dict] = []
         self.failures: list[dict] = []
@@ -623,6 +637,8 @@ class Api:
 
     def call(self, client: Any, operation: str, **kwargs) -> dict:
         attempt = 0
+        observation = operation in READ_OPERATIONS
+        delays = OBSERVATION_RETRY_CAPS if observation else (2, 2)
         while True:
             self.check_time()
             try:
@@ -635,9 +651,15 @@ class Api:
                 code = error_code(exc)
                 if code == "ResourceNotFoundException":
                     raise Refused("not_found") from None
-                if code in RETRY_CODES and attempt < 2:
+                if code in RETRY_CODES and attempt < len(delays):
+                    delay = delays[attempt]
                     attempt += 1
-                    self.sleep(2)
+                    if observation:
+                        # Reads can outwait throttling without expanding deletion
+                        # retries. SDK retries stay disabled under this deadline.
+                        delay = self.jitter(delay / 2, delay)
+                        require(delay < self.deadline - self.clock(), "deadline")
+                    self.sleep(delay)
                     continue
                 self.failures.append(
                     {
