@@ -41,16 +41,19 @@
       "kind": "image",
       "proof": "explicit-incident-image",
       "sha256": "238c445ae1b10c92bfad6b9d738f77114f8503e435a0f95bd640dbf2b21ecc78"
+    },
+    {
+      "kind": "log-group",
+      "proof": "incident-default-log",
+      "sha256": "abb2e03ca16d24f92846f367a8e6400b194935d4fde2a154eed6b72cdc38a1cf"
     }
   ],
-  "excluded": [
-    "abb2e03ca16d24f92846f367a8e6400b194935d4fde2a154eed6b72cdc38a1cf"
-  ],
+  "excluded": [],
   "source_infrastructure": {
     "bucket_sha256": "0317ddbb3f0542317438a809cfa2879c4ac476b8bbaff7256b1101e6aa59b6b2",
     "build_role_arn_sha256": "e0b1b911f182e46dea5a09d929e145e0c05d8e900fc0a37626b4a24734e1874e"
   },
-  "parser_version": 3,
+  "parser_version": 4,
   "source_log_representation": "gh-api-job-log-python-text-utf8-lf-spans-v1",
   "source_job_steps_sha256": "d8f30a63c1a78ecad6aa34023c468a9c23809eedd1c87a535c662942e990adf0",
   "source_log_spans": [
@@ -215,5 +218,23 @@
       "count": 4,
       "sha256": "67eb4d17679716eca8d93cf9fe5c5f37f9a55c472fa82bafe35a3b7395ff71df"
     }
-  ]
+  ],
+  "incident_recovery": {
+    "policy": "incident-owned-logs-v1",
+    "sourceRun": 39040736580,
+    "sourceSha": "4d1a7bf883093dbf09ead1e993a43f4ec4a9c634",
+    "region": "us-east-1",
+    "imageSha256": [
+      "238c445ae1b10c92bfad6b9d738f77114f8503e435a0f95bd640dbf2b21ecc78",
+      "9f85875d19ebcb3cb45c8098280e65bb264ba5cea67b9c5f64a9bd73ace6fde9",
+      "dda248b6dc25e6b06bc9a7b233c99aca4adaed812da56fbe8fc9993d23ad95ea"
+    ],
+    "historicalRecovery": {
+      "runId": 39065604332,
+      "attempt": 1,
+      "producerSha": "4720c35a12a9027fa525fed42dd79b604fb7584c",
+      "manifestSha256": "ee22215f1e21ab63ded11a16a388d7762c710e3fe56ae35b7b7769d539d99e33",
+      "receiptSha256": "9e181dc0bd9cf26fb956b6e739e7a851d88f36daead95465b260ff1cb832ee1d"
+    }
+  }
 }

@@ -89,7 +89,7 @@ transform = { file = "tools/recover-live.py", replace = "    require(start <= cr
 [[family.fault]]
 id = "recovery-core-dependency"
 message = "FAIL: test_dependency_veto_covers_vm_and_version_references"
-transform = { file = "tools/recover-live.py", replace = "                    destination != group or arn in deleting, \"configured_group_in_use\"", with = "                    True, \"configured_group_in_use\"" }
+transform = { file = "tools/recover-live.py", replace = "destination not in targets or arn in deleting,", with = "True," }
 
 [[family.fault]]
 id = "recovery-core-retry-bound"

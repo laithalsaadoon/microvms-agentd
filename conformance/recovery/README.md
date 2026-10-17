@@ -19,7 +19,7 @@ does not grant authority or establish a configured session maximum.
 
 The dispatch names a reviewed manifest by source run ID and the SHA-256 of its
 exact file bytes. Manifests retain hashes, source-run metadata and proof labels;
-raw source logs and resource names stay in memory. Parser version 3 fetches the
+raw source logs and resource names stay in memory. Parser versions 3 and 4 fetch the
 pinned job directly with `gh api repos/<repository>/actions/jobs/<job>/logs`.
 It captures `gh api --help` first and adds `--allow-escape-sequences` when that
 exact option is present; newer CLI versions otherwise refuse escape characters
@@ -50,8 +50,32 @@ from an earlier inventory does not establish ownership.
 The manifest also permits an exact `explicit-incident-image` selection when the
 maintainer has directly authorized that image. Its cleanup-log occurrence only
 resolves the hashed name; it does not prove creation by the source run. This
-selection retains the same creation-time and dependency checks and does not
-authorize any associated log group.
+selection retains the same creation-time and dependency checks. An associated
+log group requires its own reviewed manifest row and ownership evidence.
+
+Parser version 4 also accepts the incident-owned log policy. Its reviewed
+historical anchors identify the earlier authenticated image-recovery receipt,
+producer, manifest, source run, region and exact image hashes. They record a
+review already performed; the helper does not fetch or reauthenticate that
+historical receipt at runtime. The original receipt remains separate, including
+its original overall outcome and accepted image deletion requests.
+
+The `incident-default-log` row binds the exact default log name to the
+source-resolved incident image. This scope relies on trusted incident attribution,
+the reviewed historical image evidence, and a fresh log creation time inside the
+source job interval. Before deletion, the helper repeats the log fingerprint,
+confirms every selected image absent with an exact Get, and checks a complete
+regional VM census for any state other than `TERMINATED`. It checks every
+selected log name for known image-version references, even when the log is
+already absent. Concurrent image builds, malformed metadata, conflicting logging
+configurations, incomplete pages and API failures still refuse cleanup.
+
+Only this policy permits an unrelated version whose Get and List both omit
+logging. The receipt labels that destination `unknown`; it does not mean disabled
+or default logging. Every later version is still checked for explicit references.
+The fresh receipt's `incidentLogEvidence` records log incarnation and predelete
+checks, or an already-absent outcome without inventing a deletion. It does not
+promise that an unknown future caller cannot select or recreate a deleted group.
 
 The owner must assert that no other writer can create or replace the selected
 names during recovery. This operational precondition is necessary because the
@@ -64,8 +88,9 @@ deletion, and checks absence through a visibility interval and an independent
 verifier. Other resources are reported by hash and left alone.
 
 Image deletion does not depend on unrelated image versions' log configuration.
-Before each log deletion, recovery still checks the complete regional VM and
-image-version inventories and refuses missing or ambiguous log destinations.
+Before each log deletion, recovery checks complete regional VM and image-version
+inventories. The ordinary policy refuses missing or ambiguous log destinations;
+the incident policy handles only missing destinations as described above.
 If that phase fails, the failed receipt retains accepted image deletion requests
 and their exact Get absence results; those results do not substitute for the
 final inventory window or independent verifier.
@@ -73,10 +98,11 @@ final inventory window or independent verifier.
 When an exact version Get omits its logging field, recovery can use an explicit
 logging configuration from that version's List row. The image ARN, version,
 creation timestamp and known state must agree. A present malformed Get value,
-missing configuration in both responses, or conflicting explicit configurations
-still refuses log deletion. This is positive configuration evidence, never an
-inference that missing logging means disabled or names a default destination.
-Optional version evidence in the receipt continues to describe Get fields only.
+missing configuration in both responses under the ordinary policy, or conflicting
+explicit configurations under either policy, still refuse log deletion. This is
+positive configuration evidence, never an inference that missing logging means disabled or names a default destination.
+Optional version evidence retains Get-only identity and build metadata and
+`logGroupSha256`; `loggingStatus` summarizes the validated paired Get/List evidence.
 
 `RunMicrovm` accepts an explicit per-VM log destination, but the VM list and get
 responses do not expose it. Before deleting any selected log group, recovery
