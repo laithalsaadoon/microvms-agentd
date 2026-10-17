@@ -127,14 +127,14 @@ transform = { file = ".github/workflows/live-conformance.yml", replace = "    ti
 [[family.fault]]
 id = "release-live-credentials-missing"
 message = "FAIL: test_live_credentials_outlast_the_whole_job"
-transform = { file = ".github/workflows/live-conformance.yml", replace = "uses: aws-actions/configure-aws-credentials@", with = "uses: actions/cache@" }
+transform = { file = ".github/workflows/live-conformance.yml", replace = "      - name: assume AWS role\n        uses: aws-actions/configure-aws-credentials@", with = "      - name: assume AWS role\n        uses: actions/cache@" }
 
 
 # Main needs its exact CLI version's release before AWS; it still builds its own binaries.
 [[family.fault]]
 id = "live-release-branch-download"
 message = "FAIL: test_live_matching_release_preserves_privilege_and_binary_sources"
-transform = { file = ".github/workflows/live-conformance.yml", replace = "  draft:\n    name: the CLI version's release assets", with = "  draft:\n    if: github.ref_type == 'tag'\n    name: the CLI version's release assets" }
+transform = { file = ".github/workflows/live-conformance.yml", replace = "  draft:\n    if: inputs.mode == 'full'\n    name: the CLI version's release assets", with = "  draft:\n    if: github.ref_type == 'tag'\n    name: the CLI version's release assets" }
 
 [[family.fault]]
 id = "live-release-manifest-floating-ref"
@@ -170,3 +170,90 @@ inputs = [".github/workflows/release.yml", "bindings/microvms-js/package.json", 
 empty = "cannot read release build inputs"
 unreadable = "cannot read release build inputs"
 sentinel = { file = ".github/workflows/release.yml", replace = "          npm exec --offline -- napi build", with = "          echo napi build", message = "release workflow has no napi tool step" }
+
+# Recovery remains a separate, provenance-gated branch of the live workflow.
+[[family]]
+guard = "test_check_release_builds.py"
+run = ["uv", "run", "--locked", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_release_builds.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "recovery-full-draft"
+message = "FAIL: test_recovery_and_full_jobs_are_mutually_exclusive"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "  draft:\n    if: inputs.mode == 'full'\n", with = "  draft:\n    if: always()\n" }
+
+[[family.fault]]
+id = "recovery-full-native"
+message = "FAIL: test_recovery_and_full_jobs_are_mutually_exclusive"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "  native-box:\n    if: inputs.mode == 'full'\n", with = "  native-box:\n    if: always()\n" }
+
+[[family.fault]]
+id = "recovery-full-live"
+message = "FAIL: test_recovery_and_full_jobs_are_mutually_exclusive"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "!cancelled() && inputs.mode == 'full' &&", with = "!cancelled() &&" }
+
+[[family.fault]]
+id = "recovery-preflight-owner"
+message = "FAIL: test_recovery_preflight_has_no_aws_authority"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "    if: inputs.mode == 'recover' && needs.owner.result == 'success'\n", with = "    if: always()\n" }
+
+[[family.fault]]
+id = "recovery-preflight-oidc"
+message = "FAIL: test_recovery_preflight_has_no_aws_authority"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "      actions: read\n    env:\n", with = "      actions: read\n      id-token: write\n    env:\n" }
+
+[[family.fault]]
+id = "recovery-preflight-checkout"
+message = "FAIL: test_recovery_preflight_has_no_aws_authority"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "          ref: ${{ github.sha }}\n          persist-credentials: false\n      - name: validate recovery provenance", with = "          ref: main\n          persist-credentials: false\n      - name: validate recovery provenance" }
+
+[[family.fault]]
+id = "recovery-apply-preflight"
+message = "FAIL: test_recovery_apply_requires_provenance_owner_and_environment"
+transform = { file = ".github/workflows/live-conformance.yml", replace = " && needs.recovery-preflight.result == 'success'", with = "" }
+
+[[family.fault]]
+id = "recovery-apply-owner"
+message = "FAIL: test_recovery_apply_requires_provenance_owner_and_environment"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "inputs.mode == 'recover' && needs.owner.result == 'success' && needs.recovery-preflight", with = "inputs.mode == 'recover' && needs.recovery-preflight" }
+
+[[family.fault]]
+id = "recovery-apply-environment"
+message = "FAIL: test_recovery_apply_requires_provenance_owner_and_environment"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "    environment: live-aws\n    timeout-minutes: 20\n", with = "    environment: release\n    timeout-minutes: 20\n" }
+
+[[family.fault]]
+id = "recovery-apply-permissions"
+message = "FAIL: test_recovery_apply_requires_provenance_owner_and_environment"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "      contents: read\n      actions: read\n      id-token: write", with = "      contents: write\n      actions: read\n      id-token: write" }
+
+[[family.fault]]
+id = "recovery-apply-checkout"
+message = "FAIL: test_recovery_apply_requires_provenance_owner_and_environment"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "          ref: ${{ github.sha }}\n          persist-credentials: false\n      - uses: astral-sh/setup-uv", with = "          ref: main\n          persist-credentials: false\n      - uses: astral-sh/setup-uv" }
+
+[[family.fault]]
+id = "recovery-apply-attestation"
+message = "FAIL: test_recovery_inputs_and_exclusive_attestation_are_shell_arguments"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "          if [ \"$EXCLUSIVE_NAMES\" = true ]; then", with = "          if true; then" }
+
+[[family.fault]]
+id = "recovery-report-marker"
+message = "FAIL: test_recovery_reports_never_publish_a_live_marker"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "          name: recovery-report\n", with = "          name: live-verified\n" }
+
+[[family.fault]]
+id = "recovery-report-always"
+message = "FAIL: test_recovery_reports_never_publish_a_live_marker"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "      - name: retain the sanitized recovery receipt\n        if: always()\n", with = "      - name: retain the sanitized recovery receipt\n        if: success()\n" }
+
+[[family.fault]]
+id = "recovery-extra-action"
+message = "FAIL: test_recovery_reports_never_publish_a_live_marker"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "      - name: recover only the reviewed resource identities\n", with = "      - uses: actions/cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6\n      - name: recover only the reviewed resource identities\n" }
+
+[[family.fault]]
+id = "recovery-captured-credentials"
+message = "FAIL: test_recovery_apply_requires_provenance_owner_and_environment"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "uv run --script tools/recovery-credentials.py", with = "uv run --script tools/recover-live.py" }

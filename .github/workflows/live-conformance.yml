@@ -19,6 +19,25 @@ name: live conformance
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: "Run the full suite or recover reviewed incident resources"
+        required: true
+        default: full
+        type: choice
+        options: [full, recover]
+      source_run_id:
+        description: "Recovery only: source live run ID"
+        required: false
+        type: string
+      manifest_sha256:
+        description: "Recovery only: reviewed incident manifest SHA256"
+        required: false
+        type: string
+      exclusive_names:
+        description: "Recovery only: no other writer can reuse the selected exact names"
+        required: true
+        default: false
+        type: boolean
       region:
         description: "AWS region (must be a Lambda MicroVMs region)"
         required: true
@@ -68,6 +87,7 @@ jobs:
   # This isolated job reads the exact commit's manifest as data and runs no repository code.
   # Draft visibility needs `contents: write`; the AWS job keeps only `contents: read`.
   draft:
+    if: inputs.mode == 'full'
     name: the CLI version's release assets
     needs: owner
     runs-on: ubuntu-latest
@@ -100,6 +120,7 @@ jobs:
           if-no-files-found: error
 
   native-box:
+    if: inputs.mode == 'full'
     needs: owner
     uses: ./.github/workflows/native-box.yml
 
@@ -108,7 +129,7 @@ jobs:
     needs: [owner, draft, native-box]
     # Every run needs its matching release for quickstart. A missing release fails before
     # AWS work; main still tests its own source-built daemon and CLI in the other sections.
-    if: ${{ !cancelled() && needs.owner.result == 'success' && needs.native-box.result == 'success' && needs.draft.result == 'success' }}
+    if: ${{ !cancelled() && inputs.mode == 'full' && needs.owner.result == 'success' && needs.native-box.result == 'success' && needs.draft.result == 'success' }}
     runs-on: ubuntu-latest
     environment: live-aws
     timeout-minutes: 90
@@ -288,4 +309,80 @@ jobs:
         with:
           name: live-verified
           path: live-verified.json
+          if-no-files-found: error
+
+  # Provenance is checked without AWS credentials before requesting environment approval.
+  recovery-preflight:
+    name: validate the reviewed recovery incident
+    if: inputs.mode == 'recover' && needs.owner.result == 'success'
+    needs: owner
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    env:
+      AWS_REGION: ${{ inputs.region }}
+      SOURCE_RUN: ${{ inputs.source_run_id }}
+      MANIFEST_SHA: ${{ inputs.manifest_sha256 }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: check out the reviewed recovery code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: validate recovery provenance without AWS credentials
+        run: python3 tools/recover-live.py preflight --source-run "$SOURCE_RUN" --manifest-sha256 "$MANIFEST_SHA" --report recovery-preflight.json
+      - name: retain the recovery preflight receipt
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: recovery-preflight
+          path: recovery-preflight.json
+          if-no-files-found: error
+
+  # The no-other-writer attestation bounds a name-reuse race; provenance and fingerprints
+  # still decide ownership independently before the script constructs AWS clients.
+  recovery:
+    name: recover reviewed incident resources
+    needs: [owner, recovery-preflight]
+    if: ${{ !cancelled() && inputs.mode == 'recover' && needs.owner.result == 'success' && needs.recovery-preflight.result == 'success' }}
+    runs-on: ubuntu-latest
+    environment: live-aws
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ inputs.region }}
+      SOURCE_RUN: ${{ inputs.source_run_id }}
+      MANIFEST_SHA: ${{ inputs.manifest_sha256 }}
+      EXCLUSIVE_NAMES: ${{ inputs.exclusive_names }}
+      RECOVERY_ROLE_ARN: ${{ secrets.LIVE_CONFORMANCE_ROLE_ARN }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: check out the reviewed recovery code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: false
+      - name: recover only the reviewed resource identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(--source-run "$SOURCE_RUN" --manifest-sha256 "$MANIFEST_SHA" --report recovery.json)
+          if [ "$EXCLUSIVE_NAMES" = true ]; then
+            args+=(--exclusive-names)
+          fi
+          uv run --script tools/recovery-credentials.py "${args[@]}"
+      - name: retain the sanitized recovery receipt
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: recovery-report
+          path: recovery.json
           if-no-files-found: error

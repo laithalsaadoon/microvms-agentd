@@ -97,3 +97,13 @@ suite = "script"
 inputs = [".github/workflows/release.yml"]
 empty = "{input} has no jobs, so there's nothing to hold to the gate"
 sentinel = { file = ".github/workflows/release.yml", replace = "        run: cargo publish --workspace --locked\n", with = "        run: echo published\n", message = "no job in .github/workflows/release.yml runs `cargo publish` (crates.io)" }
+
+# A recovery receipt cannot stand in for the tag's live-verified marker.
+[[fault]]
+id = "release-gate-recovery-no-marker"
+guard = "test_release_gate.py"
+run = ["uv", "run", "--locked", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_release_gate.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_successful_recovery_without_live_marker_is_refused"
+transform = { file = "tools/release-gate.py", replace = "        if isinstance(marker, str):\n            lines.append(f\"{label}: {marker}\")\n            continue\n", with = "        if isinstance(marker, str):\n            return True, lines\n" }

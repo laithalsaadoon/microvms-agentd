@@ -131,7 +131,7 @@ class LiveReleaseInputTests(unittest.TestCase):
         workflow = self.workflow()
         draft = workflow["jobs"]["draft"]
         live = workflow["jobs"]["live"]
-        self.assertNotIn("if", draft, "branches also need the matching release")
+        self.assertEqual(draft["if"], "inputs.mode == 'full'")
         self.assertEqual(draft["needs"], "owner")
         self.assertEqual(draft["permissions"], {"contents": "write"})
         self.assertTrue(
@@ -173,6 +173,210 @@ class LiveReleaseInputTests(unittest.TestCase):
             if step.get("with", {}).get("name") == "live-verified"
         )
         self.assertEqual(marker["if"], "github.ref_type == 'tag'")
+
+
+class LiveRecoveryWorkflowTests(unittest.TestCase):
+    def setUp(self):
+        self.workflow = yaml.safe_load(
+            (ROOT / ".github/workflows/live-conformance.yml").read_text()
+        )
+        self.jobs = self.workflow["jobs"]
+
+    def test_recovery_and_full_jobs_are_mutually_exclusive(self):
+        inputs = self.workflow.get("on", self.workflow.get(True))["workflow_dispatch"][
+            "inputs"
+        ]
+        self.assertEqual(inputs["mode"]["options"], ["full", "recover"])
+        self.assertEqual(inputs["mode"]["default"], "full")
+        self.assertTrue(inputs["mode"]["required"])
+        for name in ("source_run_id", "manifest_sha256"):
+            self.assertEqual(inputs[name]["type"], "string")
+        self.assertIs(inputs["exclusive_names"]["default"], False)
+        self.assertEqual(inputs["exclusive_names"]["type"], "boolean")
+        for name in ("draft", "native-box"):
+            self.assertEqual(self.jobs[name]["if"], "inputs.mode == 'full'")
+        self.assertIn("inputs.mode == 'full' &&", self.jobs["live"]["if"])
+        self.assertEqual(
+            self.workflow["concurrency"],
+            {"group": "live-conformance", "cancel-in-progress": False},
+        )
+        self.assertEqual(self.workflow["permissions"], {"contents": "read"})
+
+    def test_recovery_preflight_has_no_aws_authority(self):
+        job = self.jobs["recovery-preflight"]
+        self.assertEqual(job["needs"], "owner")
+        self.assertEqual(
+            job["if"], "inputs.mode == 'recover' && needs.owner.result == 'success'"
+        )
+        self.assertEqual(job["permissions"], {"contents": "read", "actions": "read"})
+        self.assertNotIn("environment", job)
+        self.assertNotIn("secrets.", json.dumps(job))
+        self.assertNotIn("configure-aws-credentials", json.dumps(job))
+        steps = job["steps"]
+        self.assertEqual(
+            steps[0]["with"], {"ref": "${{ github.sha }}", "persist-credentials": False}
+        )
+        commands = [step["run"] for step in steps if "run" in step]
+        self.assertEqual(
+            commands,
+            [
+                'python3 tools/recover-live.py preflight --source-run "$SOURCE_RUN" '
+                '--manifest-sha256 "$MANIFEST_SHA" --report recovery-preflight.json'
+            ],
+        )
+        self.assertEqual(
+            job["env"],
+            {
+                "AWS_REGION": "${{ inputs.region }}",
+                "SOURCE_RUN": "${{ inputs.source_run_id }}",
+                "MANIFEST_SHA": "${{ inputs.manifest_sha256 }}",
+                "GH_TOKEN": "${{ github.token }}",
+            },
+        )
+
+    def test_recovery_apply_requires_provenance_owner_and_environment(self):
+        job = self.jobs["recovery"]
+        self.assertEqual(job["needs"], ["owner", "recovery-preflight"])
+        self.assertEqual(
+            job["if"],
+            "${{ !cancelled() && inputs.mode == 'recover' && needs.owner.result == 'success' && needs.recovery-preflight.result == 'success' }}",
+        )
+        self.assertEqual(job["environment"], "live-aws")
+        self.assertEqual(
+            job["permissions"],
+            {"contents": "read", "actions": "read", "id-token": "write"},
+        )
+        self.assertEqual(job["timeout-minutes"], 20)
+        steps = job["steps"]
+        self.assertEqual(
+            steps[0]["with"], {"ref": "${{ github.sha }}", "persist-credentials": False}
+        )
+        self.assertNotIn("configure-aws-credentials", json.dumps(job))
+        self.assertIn("tools/recovery-credentials.py", json.dumps(job))
+        self.assertEqual(
+            job["env"],
+            {
+                "AWS_REGION": "${{ inputs.region }}",
+                "SOURCE_RUN": "${{ inputs.source_run_id }}",
+                "MANIFEST_SHA": "${{ inputs.manifest_sha256 }}",
+                "EXCLUSIVE_NAMES": "${{ inputs.exclusive_names }}",
+                "RECOVERY_ROLE_ARN": "${{ secrets.LIVE_CONFORMANCE_ROLE_ARN }}",
+                "GH_TOKEN": "${{ github.token }}",
+            },
+        )
+        uv = next(step for step in steps if "setup-uv@" in step.get("uses", ""))
+        full_uv = next(
+            step
+            for step in self.jobs["live"]["steps"]
+            if "setup-uv@" in step.get("uses", "")
+        )
+        self.assertEqual(uv["uses"], full_uv["uses"])
+        self.assertEqual(uv["with"], {"enable-cache": False})
+
+    def test_recovery_inputs_and_exclusive_attestation_are_shell_arguments(self):
+        commands = [
+            step["run"] for step in self.jobs["recovery"]["steps"] if "run" in step
+        ]
+        self.assertEqual(len(commands), 1)
+        script = commands[0]
+        self.assertNotIn("${{", script)
+        for exclusive in ("false", "true"):
+            with (
+                self.subTest(exclusive=exclusive),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                uv = root / "uv"
+                uv.write_text(
+                    "#!/usr/bin/env python3\nimport json, sys\n"
+                    "from pathlib import Path\nPath('argv.json').write_text(json.dumps(sys.argv[1:]))\n"
+                )
+                uv.chmod(0o755)
+                source = '123; $(touch injected); "quoted"'
+                digest = "abc`touch injected`"
+                result = subprocess.run(
+                    ["bash", "-c", script],
+                    cwd=root,
+                    env={
+                        **os.environ,
+                        "PATH": directory + os.pathsep + os.environ["PATH"],
+                        "SOURCE_RUN": source,
+                        "MANIFEST_SHA": digest,
+                        "EXCLUSIVE_NAMES": exclusive,
+                    },
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                expected = [
+                    "run",
+                    "--script",
+                    "tools/recovery-credentials.py",
+                    "--source-run",
+                    source,
+                    "--manifest-sha256",
+                    digest,
+                    "--report",
+                    "recovery.json",
+                ]
+                if exclusive == "true":
+                    expected.append("--exclusive-names")
+                self.assertEqual(json.loads((root / "argv.json").read_text()), expected)
+                self.assertFalse((root / "injected").exists())
+
+    def test_recovery_reports_never_publish_a_live_marker(self):
+        for name, artifact, path in (
+            ("recovery-preflight", "recovery-preflight", "recovery-preflight.json"),
+            ("recovery", "recovery-report", "recovery.json"),
+        ):
+            job = self.jobs[name]
+            with self.subTest(job=name):
+                self.assertNotIn("live-verified", json.dumps(job))
+                self.assertNotIn("terraform", json.dumps(job))
+                self.assertNotIn("native-box", json.dumps(job))
+                self.assertNotIn("run_rs.py", json.dumps(job))
+                uploads = [
+                    step
+                    for step in job["steps"]
+                    if "upload-artifact@" in step.get("uses", "")
+                ]
+                self.assertEqual(len(uploads), 1)
+                self.assertEqual(uploads[0]["if"], "always()")
+                self.assertEqual(
+                    uploads[0]["with"],
+                    {"name": artifact, "path": path, "if-no-files-found": "error"},
+                )
+        live_steps = self.jobs["live"]["steps"]
+        checkout = next(
+            step["uses"] for step in live_steps if "checkout@" in step.get("uses", "")
+        )
+        upload = next(
+            step["uses"]
+            for step in live_steps
+            if "upload-artifact@" in step.get("uses", "")
+        )
+        uv = next(
+            step["uses"] for step in live_steps if "setup-uv@" in step.get("uses", "")
+        )
+        for name, allowed in (
+            ("recovery-preflight", [checkout, upload]),
+            ("recovery", [checkout, uv, upload]),
+        ):
+            self.assertNotIn("uses", self.jobs[name])
+            self.assertEqual(
+                [step["uses"] for step in self.jobs[name]["steps"] if "uses" in step],
+                allowed,
+            )
+        release_tasks = tomllib.loads(
+            (ROOT / ".config/mise/tasks/release.toml").read_text()
+        )
+        self.assertTrue(
+            any(
+                "tools/test_recover_live.py" in command
+                and "tools/test_recovery_credentials.py" in command
+                for command in release_tasks["release:check"]["run"]
+            )
+        )
 
 
 class ReleaseBuildTests(unittest.TestCase):

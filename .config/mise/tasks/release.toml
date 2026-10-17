@@ -46,7 +46,7 @@ description = "Release builds use pinned inputs, and publishers wait on the live
 # lint, and CI's `security` job runs it. release.yml's `guard` job runs the same graph check
 # against the tagged commit. The unit tests run first, for `trace:check`'s reason.
 run = [
-  "uv run --locked pytest -n auto -q -p no:cacheprovider tools/test_release_gate.py tools/test_check_release_builds.py",
+  "uv run --locked pytest -n auto -q -p no:cacheprovider tools/test_release_gate.py tools/test_check_release_builds.py tools/test_recover_live.py tools/test_recover_live_*.py tools/test_recovery_credentials.py",
   "./tools/release-gate.py graph",
   "./tools/check-release-builds.py",
 ]

@@ -1,0 +1,55 @@
+{
+  "repository_id": 1328915813,
+  "workflow_id": 330539806,
+  "workflow_path": ".github/workflows/live-conformance.yml",
+  "source_run_id": 39040736580,
+  "source_attempt": 1,
+  "source_sha": "4d1a7bf883093dbf09ead1e993a43f4ec4a9c634",
+  "source_job_id": 117420623142,
+  "source_job_name": "real AWS",
+  "source_job_started_at": "2026-10-17T15:35:43Z",
+  "source_job_completed_at": "2026-10-17T17:08:08Z",
+  "source_conclusion": "cancelled",
+  "source_job_conclusion": "cancelled",
+  "version": 1,
+  "hash_scheme": "sha256-kind-nul-region-nul-name-v1",
+  "region": "us-east-1",
+  "source_log_sha256": "99eea1393f5fdf4f11c2204140dda850f2e17e9bc4f2d4500b5af1903cf42fbe",
+  "source_workflow_sha256": "182c650ca8d73a5b43521ec05b373dd16fe10f3d65d6e589bced67dd18cc7e94",
+  "resources": [
+    {
+      "kind": "image",
+      "proof": "shared-image",
+      "sha256": "9f85875d19ebcb3cb45c8098280e65bb264ba5cea67b9c5f64a9bd73ace6fde9"
+    },
+    {
+      "kind": "log-group",
+      "proof": "shared-log",
+      "sha256": "b3a3d758076817f75e1153bcda7b7a6587f3c53537c6d0c30ab0e59d5dcf9e7b"
+    },
+    {
+      "kind": "image",
+      "proof": "capability-default-image",
+      "sha256": "dda248b6dc25e6b06bc9a7b233c99aca4adaed812da56fbe8fc9993d23ad95ea"
+    },
+    {
+      "kind": "log-group",
+      "proof": "configured-log",
+      "sha256": "13ac18bd5192851e7ee08f404000655b673a38b884caaabbcf81033cbeddbc68"
+    },
+    {
+      "kind": "image",
+      "proof": "explicit-incident-image",
+      "sha256": "238c445ae1b10c92bfad6b9d738f77114f8503e435a0f95bd640dbf2b21ecc78"
+    }
+  ],
+  "excluded": [
+    "abb2e03ca16d24f92846f367a8e6400b194935d4fde2a154eed6b72cdc38a1cf"
+  ],
+  "source_infrastructure": {
+    "bucket_sha256": "0317ddbb3f0542317438a809cfa2879c4ac476b8bbaff7256b1101e6aa59b6b2",
+    "build_role_arn_sha256": "e0b1b911f182e46dea5a09d929e145e0c05d8e900fc0a37626b4a24734e1874e"
+  },
+  "parser_version": 2,
+  "source_log_representation": "gh-run-view-job-log-python-text-utf8-v1"
+}
