@@ -33,6 +33,7 @@ async fn the_cli_answers_the_shared_case_corpus_against_its_fakes() {
     );
     for case in run.cases() {
         let answer = match case.area.as_str() {
+            "control-plane" => parity_control_plane(&case).await,
             "forward" => parity_forward(&case).await,
             "image-name" => parity_image_name(&case).await,
             "error" => parity_daemon_status(&case).await,
@@ -400,4 +401,85 @@ async fn parity_forward(case: &parity_corpus::Case) -> serde_json::Value {
     answer["refused"] = data["connectionsRefused"].clone();
     answer["upstream_requests"] = serde_json::json!(upstream.request_count());
     answer
+}
+
+async fn parity_control_plane(case: &parity_corpus::Case) -> serde_json::Value {
+    use clap::Parser as _;
+    let transport =
+        microvms_core::testing::ParityControlPlane::from_json(&case.input("script").to_string())
+            .unwrap();
+    let seam = ParitySeam {
+        transport: transport.clone(),
+        refusing: RefusingSeam::new(),
+    };
+    let state = TempDir::new("parity-control-plane");
+    let command = |action: &str| {
+        Cli::try_parse_from([
+            "microvm",
+            action,
+            case.input_str("microvm_id"),
+            "--region",
+            "us-east-1",
+            "--state-dir",
+            state.0.to_str().unwrap(),
+        ])
+        .unwrap()
+        .command
+    };
+    for action in case.input_strings("actions") {
+        let (result, _) = dispatch_with(&seam, &command(&action), full_infra()).await;
+        match result {
+            Ok(_) => assert_eq!(action, "suspend"),
+            Err(error) => {
+                let mut answer = parity_refusal(&error);
+                if case.input.get("message_mentions").is_some() {
+                    answer["message_mentions"] = case.message_mentions(&error.message);
+                }
+                answer["calls"] = serde_json::json!(transport.calls());
+                return answer;
+            }
+        }
+    }
+    panic!("a control-plane case must end with a refusal")
+}
+
+/// The CLI receives the same ordered script as the bindings, with no alternate response map.
+struct ParitySeam {
+    transport: Arc<microvms_core::testing::ParityControlPlane>,
+    refusing: RefusingSeam,
+}
+
+impl crate::seam::CoreSeam for ParitySeam {
+    fn control_plane(
+        &self,
+        _region: microvms_core::Region,
+    ) -> crate::seam::futures_util_shim::BoxFuture<
+        '_,
+        Result<microvms_core::control::ControlPlane, microvms_core::Error>,
+    > {
+        let plane = self.transport.plane();
+        Box::pin(async move { Ok(plane) })
+    }
+
+    fn open_sandbox(
+        &self,
+        region: microvms_core::Region,
+        port: Option<u16>,
+    ) -> crate::seam::futures_util_shim::BoxFuture<
+        '_,
+        Result<microvms_core::sandbox::Sandbox, microvms_core::Error>,
+    > {
+        crate::seam::CoreSeam::open_sandbox(&self.refusing, region, port)
+    }
+
+    fn attach_session(
+        &self,
+        region: microvms_core::Region,
+        attach: crate::seam::Attach,
+    ) -> crate::seam::futures_util_shim::BoxFuture<
+        '_,
+        Result<microvms_core::session::Session, microvms_core::Error>,
+    > {
+        crate::seam::CoreSeam::attach_session(&self.refusing, region, attach)
+    }
 }

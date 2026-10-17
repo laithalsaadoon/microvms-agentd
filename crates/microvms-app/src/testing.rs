@@ -111,3 +111,94 @@ pub fn control_plane(
         Arc::new(TestAdapters::new()),
     )
 }
+
+/// A strict, ordered transport for parity fixtures. Responses stay literal service JSON;
+/// callers cannot silently consume a response for a different operation or repeat the last.
+#[derive(Debug)]
+pub struct ParityControlPlane {
+    exchanges: std::sync::Mutex<std::collections::VecDeque<serde_json::Value>>,
+    calls: std::sync::Mutex<Vec<String>>,
+}
+
+impl ParityControlPlane {
+    pub fn from_json(script: &str) -> Result<Arc<Self>, crate::Error> {
+        let exchanges: Vec<serde_json::Value> = serde_json::from_str(script).map_err(|error| {
+            crate::Error::new(
+                crate::ErrorKind::InvalidArg,
+                format!("invalid parity script: {error}"),
+            )
+        })?;
+        if exchanges.is_empty()
+            || exchanges.iter().any(|row| {
+                row["operation"].as_str().is_none()
+                    || row["status"].as_u64().is_none()
+                    || row["body"].as_str().is_none()
+            })
+        {
+            return Err(crate::Error::new(
+                crate::ErrorKind::InvalidArg,
+                "parity script needs exchanges with operation, status and literal body",
+            ));
+        }
+        Ok(Arc::new(Self {
+            exchanges: std::sync::Mutex::new(exchanges.into()),
+            calls: std::sync::Mutex::new(Vec::new()),
+        }))
+    }
+
+    pub fn plane(self: &Arc<Self>) -> ControlPlane {
+        control_plane(
+            self.clone(),
+            Region::UsEast1,
+            Arc::new(YieldingClock::new()),
+        )
+    }
+
+    pub fn calls(&self) -> Vec<String> {
+        self.calls.lock().expect("parity calls lock").clone()
+    }
+}
+
+impl Transport for ParityControlPlane {
+    fn send(
+        &self,
+        call: crate::control::transport::Call,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<crate::control::transport::Reply, crate::Error>>
+                + Send
+                + '_,
+        >,
+    > {
+        let answer = self
+            .exchanges
+            .lock()
+            .expect("parity exchanges lock")
+            .pop_front();
+        self.calls
+            .lock()
+            .expect("parity calls lock")
+            .push(call.operation.to_string());
+        Box::pin(async move {
+            let answer = answer.ok_or_else(|| {
+                crate::Error::new(crate::ErrorKind::Precondition, "parity script exhausted")
+            })?;
+            if answer["operation"].as_str() != Some(call.operation) {
+                return Err(crate::Error::new(
+                    crate::ErrorKind::Precondition,
+                    format!(
+                        "parity script expected {}, received {}",
+                        answer["operation"], call.operation
+                    ),
+                ));
+            }
+            Ok(crate::control::transport::Reply {
+                status: u16::try_from(answer["status"].as_u64().unwrap()).map_err(|_| {
+                    crate::Error::new(crate::ErrorKind::InvalidArg, "invalid parity status")
+                })?,
+                body: answer["body"].as_str().unwrap().as_bytes().to_vec(),
+                error_type: answer["error_type"].as_str().map(str::to_string),
+            })
+        })
+    }
+}

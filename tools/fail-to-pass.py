@@ -111,6 +111,14 @@ JS_BUILD = [
     "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd",
     "bindings/microvms-js",
 ]  # fmt: skip
+PARITY_PY_BUILD = [*PY_BUILD, "--features", "parity-fixtures"]
+PARITY_JS_BUILD = [
+    *JS_BUILD,
+    "--features",
+    "parity-fixtures",
+    "--dts",
+    "parity-fixtures.d.ts",
+]
 # A test each finder must find in its file on every run, so a finder that stopped reading
 # fails here instead of reading every fix as one with no test.
 SENTINELS = {
@@ -826,10 +834,24 @@ def candidates(branch: Branch, tests: list[Test]) -> tuple[list[Candidate], list
                 continue
             run, suite = [argv], "rust"
         elif test.kind == "pytest":
-            run = [PY_BUILD, ["python", "-m", "pytest", "-q", "-rA", test.guard]]
+            # Source-test discovery can select the whole parametrized corpus runner,
+            # whose control-plane case needs the opt-in fixture constructor.
+            build = (
+                PARITY_PY_BUILD
+                if test.path == "bindings/microvms-py/tests/test_parity_cases.py"
+                else PY_BUILD
+            )
+            run = [build, ["python", "-m", "pytest", "-q", "-rA", test.guard]]
             suite = "bindings"
         else:
-            run = [JS_BUILD, ["node", "--test", "--test-reporter=tap", test.path]]
+            # Node runs the whole source file, including the control-plane fixture,
+            # even when the changed test covers another part of the corpus.
+            build = (
+                PARITY_JS_BUILD
+                if test.path == "bindings/microvms-js/__test__/parity_cases.mjs"
+                else JS_BUILD
+            )
+            run = [build, ["node", "--test", "--test-reporter=tap", test.path]]
             suite = "bindings"
         entry_id, n = slug(test.name), 2
         while entry_id in taken:

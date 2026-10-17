@@ -1,0 +1,51 @@
+{
+  "capability": "resume-by-id",
+  "input": {
+    "microvm_id": "mvm-parity",
+    "script": [
+      {
+        "operation": "GetMicrovm",
+        "status": 200,
+        "body": "{\"microvmId\":\"mvm-parity\",\"state\":\"RUNNING\",\"endpoint\":\"https://example.invalid\",\"imageArn\":\"arn:aws:lambda:us-east-1:123456789012:microvm-image:fixture\",\"imageVersion\":\"1\",\"idlePolicy\":{\"maxIdleDurationSeconds\":1,\"suspendedDurationSeconds\":1,\"autoResumeEnabled\":false},\"maximumDurationInSeconds\":3600,\"startedAt\":1754524800}"
+      },
+      {
+        "operation": "SuspendMicrovm",
+        "status": 200,
+        "body": "{}"
+      },
+      {
+        "operation": "GetMicrovm",
+        "status": 200,
+        "body": "{\"microvmId\":\"mvm-parity\",\"state\":\"SUSPENDED\",\"endpoint\":\"https://example.invalid\",\"imageArn\":\"arn:aws:lambda:us-east-1:123456789012:microvm-image:fixture\",\"imageVersion\":\"1\",\"idlePolicy\":{\"maxIdleDurationSeconds\":1,\"suspendedDurationSeconds\":1,\"autoResumeEnabled\":false},\"maximumDurationInSeconds\":3600,\"startedAt\":1754524800}"
+      },
+      {
+        "operation": "ResumeMicrovm",
+        "status": 400,
+        "body": "{\"message\":\"The MicroVM has been terminated and its state cannot be changed.\"}"
+      },
+      {
+        "operation": "GetMicrovm",
+        "status": 200,
+        "body": "{\"microvmId\":\"mvm-parity\",\"state\":\"TERMINATED\",\"endpoint\":\"https://example.invalid\",\"imageArn\":\"arn:aws:lambda:us-east-1:123456789012:microvm-image:fixture\",\"imageVersion\":\"1\",\"idlePolicy\":{\"maxIdleDurationSeconds\":1,\"suspendedDurationSeconds\":1,\"autoResumeEnabled\":false},\"maximumDurationInSeconds\":3600,\"startedAt\":1754524800,\"stateReason\":\"Suspended window expired\"}"
+      }
+    ],
+    "actions": [
+      "suspend",
+      "resume"
+    ]
+  },
+  "expect": {
+    "error": {
+      "code": "ERR_WINDOW_CLOSED",
+      "wire_kind": null,
+      "retryable": false
+    },
+    "calls": [
+      "GetMicrovm",
+      "SuspendMicrovm",
+      "GetMicrovm",
+      "ResumeMicrovm",
+      "GetMicrovm"
+    ]
+  }
+}

@@ -34,7 +34,14 @@ pub const SENTINEL: &str = "wrap-dockerfile/sentinel";
 /// alone. The split is stated once, here, so a tier can't hand an area to the other without the
 /// other one planning it and failing on a case it has no handler for.
 pub const CLI_PROCESS_AREAS: [&str; 4] = ["cost", "egress", "size-class", "wrap-dockerfile"];
-pub const CLI_FAKE_AREAS: [&str; 5] = ["image-name", "error", "names", "forward", "tunnel"];
+pub const CLI_FAKE_AREAS: [&str; 6] = [
+    "image-name",
+    "error",
+    "names",
+    "forward",
+    "tunnel",
+    "control-plane",
+];
 
 const CASE_KEYS: [&str; 5] = ["capability", "input", "expect", "ignore", "skip"];
 

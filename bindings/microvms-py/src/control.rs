@@ -450,12 +450,16 @@ impl PyImageBuild {
 #[pyclass(frozen, name = "ControlPlane", module = "microvms")]
 pub struct PyControlPlane {
     inner: Arc<ControlPlane>,
+    #[cfg(feature = "parity-fixtures")]
+    parity: Option<Arc<microvms_core::testing::ParityControlPlane>>,
 }
 
 /// Opens a control plane for `region`: both spellings of the constructor.
 async fn open(region: microvms_core::Region) -> Result<PyControlPlane, microvms_core::Error> {
     ControlPlane::new(region).await.map(|plane| PyControlPlane {
         inner: Arc::new(plane),
+        #[cfg(feature = "parity-fixtures")]
+        parity: None,
     })
 }
 
@@ -629,6 +633,23 @@ fn delete_budget(
         None => DEFAULT_DELETE_BACKOFF,
     };
     Ok((attempts, backoff))
+}
+
+#[cfg(feature = "parity-fixtures")]
+#[pymethods]
+impl PyControlPlane {
+    #[staticmethod]
+    fn _parity_from_script(script: &str) -> PyCoreResult<Self> {
+        let parity = microvms_core::testing::ParityControlPlane::from_json(script)?;
+        Ok(Self {
+            inner: Arc::new(parity.plane()),
+            parity: Some(parity),
+        })
+    }
+
+    fn _parity_calls(&self) -> Vec<String> {
+        self.parity.as_ref().expect("a parity fixture").calls()
+    }
 }
 
 #[pymethods]

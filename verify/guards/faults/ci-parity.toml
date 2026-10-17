@@ -93,7 +93,7 @@ transform = { file = "mise.toml", replace = "cargo_mutants = \"27.1.0\"\n", with
 
 [[family.fault]]
 id = "ci-parity-uvx-unpinned"
-message = "runs `uvx maturin develop -m bindings/microvms-py/Cargo.toml`, which names no exact version of maturin"
+message = "which names no exact version of maturin"
 transform = { file = ".config/mise/tasks/test.toml", replace = "uvx maturin@1.14.1 develop -m", with = "uvx maturin develop -m" }
 
 # The call reader's spellings: options before the tool, `--from`, and `uv tool run`, each read

@@ -57,6 +57,8 @@ tokio = { version = "1.53", features = ["rt-multi-thread", "sync", "time"] }
 # but this crate's own dependencies. Retired 2026-08-09.
 
 [features]
+# Offline parity fixtures are opt-in and absent from published artifacts.
+parity-fixtures = ["microvms-core/test-support", "pyo3/multiple-pymethods"]
 # Off by default, and on only for `mise run stubs`. `pyo3/experimental-inspect` makes
 # the macros emit an extra `_PYO3_INTROSPECTION_*` symbol per class, method, and
 # function, which is the data `maturin generate-stubs` reads back out of the compiled

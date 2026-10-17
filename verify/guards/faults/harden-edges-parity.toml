@@ -34,7 +34,7 @@ patch = "verify/guards/faults/f2p-relative-default-home-python.patch"
 [[fault]]
 id = "f2p-relative-default-home-node"
 guard = "names/relative-default-home"
-run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"], ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"]]
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"], ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"]]
 expect = "test-failed"
 suite = "bindings"
 patch = "verify/guards/faults/f2p-relative-default-home-node.patch"

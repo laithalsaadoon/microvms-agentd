@@ -72,6 +72,16 @@ id = "f2p-bindings-build"
 message = "FAIL: test_the_build_commands_are_the_registrys ("
 transform = { file = "tools/fail-to-pass.py", replace = "    \"develop\",\n    \"-q\",\n", with = "    \"develop\",\n" }
 
+[[family.fault]]
+id = "f2p-python-fixture-build"
+message = "FAIL: test_fixture_sources_choose_their_required_binding_builds ("
+transform = { file = "tools/fail-to-pass.py", replace = "                PARITY_PY_BUILD\n                if test.path == \"bindings/microvms-py/tests/test_parity_cases.py\"", with = "                PY_BUILD\n                if test.path == \"bindings/microvms-py/tests/test_parity_cases.py\"" }
+
+[[family.fault]]
+id = "f2p-node-fixture-build"
+message = "FAIL: test_fixture_sources_choose_their_required_binding_builds ("
+transform = { file = "tools/fail-to-pass.py", replace = "                PARITY_JS_BUILD\n                if test.path == \"bindings/microvms-js/__test__/parity_cases.mjs\"", with = "                JS_BUILD\n                if test.path == \"bindings/microvms-js/__test__/parity_cases.mjs\"" }
+
 # The finders' floor: ast-grep returning nothing reads every fix as one with no test.
 [[family]]
 guard = "tools/fail-to-pass.py"

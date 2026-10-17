@@ -132,8 +132,8 @@ transform = { file = "CONTRIBUTING.md", replace = "`crates/agentd/src/fs.rs:632:
 
 [[family.fault]]
 id = "agents-md-glob-empty"
-message = "`bindings/microvms-js/__tests__/*.mjs` matches no file in this tree"
-transform = { file = "AGENTS.md", replace = "\"bindings/microvms-js/__test__/*.mjs\"", with = "\"bindings/microvms-js/__tests__/*.mjs\"" }
+message = "`docz/*.md` matches no file in this tree"
+transform = { file = "AGENTS.md", replace = "`docs/*.md`", with = "`docz/*.md`" }
 
 [[family.fault]]
 id = "agents-md-file-name"

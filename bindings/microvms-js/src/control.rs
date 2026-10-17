@@ -284,6 +284,27 @@ pub struct DeleteImageOptions {
 #[napi]
 pub struct ControlPlane {
     inner: Arc<CoreControlPlane>,
+    #[cfg(feature = "parity-fixtures")]
+    parity: Option<Arc<microvms_core::testing::ParityControlPlane>>,
+}
+
+#[cfg(feature = "parity-fixtures")]
+#[napi]
+impl ControlPlane {
+    #[napi(factory)]
+    pub fn parity_from_script(script: String) -> napi::Result<Self, String> {
+        let parity = microvms_core::testing::ParityControlPlane::from_json(&script)
+            .map_err(crate::errors::js)?;
+        Ok(Self {
+            inner: Arc::new(parity.plane()),
+            parity: Some(parity),
+        })
+    }
+
+    #[napi]
+    pub fn parity_calls(&self) -> Vec<String> {
+        self.parity.as_ref().expect("a parity fixture").calls()
+    }
 }
 
 #[napi]
@@ -297,6 +318,8 @@ impl ControlPlane {
             .map_err(js_async)?;
         Ok(ControlPlane {
             inner: Arc::new(plane),
+            #[cfg(feature = "parity-fixtures")]
+            parity: None,
         })
     }
 
