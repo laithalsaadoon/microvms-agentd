@@ -1024,7 +1024,7 @@
             "arity": null,
             "choices": null,
             "default": null,
-            "help": "Where the provisioned-daemon cache lives. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs \u2014 the same directory `run`'s ledger uses, so the two commands share one cache",
+            "help": "Where the provisioned-daemon cache lives. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs — the same directory `run`'s ledger uses, so the two commands share one cache",
             "index": null,
             "name": "state-dir",
             "positional": false,
@@ -1200,7 +1200,7 @@
             "arity": null,
             "choices": null,
             "default": null,
-            "help": "Log stream name prefix inside --log-group. The client appends `/<16 hex>` per build attempt and the envelope reports the resolved exact name as `logStream`. See `run --log-stream`. Requires --log-group \u2014 `build` reads no config file, so the flag is the only place a group can come from",
+            "help": "Log stream name prefix inside --log-group. The client appends `/<16 hex>` per build attempt and the envelope reports the resolved exact name as `logStream`. See `run --log-stream`. Requires --log-group — `build` reads no config file, so the flag is the only place a group can come from",
             "index": null,
             "name": "log-stream",
             "positional": false,
@@ -2240,7 +2240,7 @@
             "arity": null,
             "choices": null,
             "default": null,
-            "help": "Where the local state lives \u2014 the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
+            "help": "Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
             "index": null,
             "name": "state-dir",
             "positional": false,
@@ -2321,7 +2321,7 @@
             "gaps"
           ],
           "responseType": "microvm.exec.stream",
-          "stdout": "ndjson \u2014 one event object per line, then this envelope as the final line. The documented exception to the one-envelope rule: stream chunks are the command's output, not progress, so they cannot go on stderr.",
+          "stdout": "ndjson — one event object per line, then this envelope as the final line. The documented exception to the one-envelope rule: stream chunks are the command's output, not progress, so they cannot go on stderr.",
           "when": "--stream"
         },
         "name": "exec",
@@ -2774,7 +2774,7 @@
             "arity": null,
             "choices": null,
             "default": null,
-            "help": "Where the local state lives \u2014 the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
+            "help": "Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
             "index": null,
             "name": "state-dir",
             "positional": false,
@@ -2970,7 +2970,7 @@
             "arity": null,
             "choices": null,
             "default": null,
-            "help": "Where the local state lives \u2014 the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
+            "help": "Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
             "index": null,
             "name": "state-dir",
             "positional": false,
@@ -3144,7 +3144,7 @@
             "arity": null,
             "choices": null,
             "default": null,
-            "help": "Where the local state lives \u2014 the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
+            "help": "Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
             "index": null,
             "name": "state-dir",
             "positional": false,
@@ -3325,7 +3325,7 @@
             "arity": null,
             "choices": null,
             "default": null,
-            "help": "Where the local state lives \u2014 the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
+            "help": "Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
             "index": null,
             "name": "state-dir",
             "positional": false,
@@ -3583,7 +3583,7 @@
             "arity": null,
             "choices": null,
             "default": null,
-            "help": "Where the local state lives \u2014 the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
+            "help": "Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
             "index": null,
             "name": "state-dir",
             "positional": false,
@@ -3777,7 +3777,7 @@
             "arity": null,
             "choices": null,
             "default": null,
-            "help": "Where the local state lives \u2014 the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
+            "help": "Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
             "index": null,
             "name": "state-dir",
             "positional": false,
@@ -3970,7 +3970,7 @@
             "arity": null,
             "choices": null,
             "default": null,
-            "help": "Where the local state lives \u2014 the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
+            "help": "Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
             "index": null,
             "name": "state-dir",
             "positional": false,
@@ -4143,7 +4143,7 @@
             "arity": null,
             "choices": null,
             "default": null,
-            "help": "Where the local state lives \u2014 the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
+            "help": "Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
             "index": null,
             "name": "state-dir",
             "positional": false,
@@ -4366,7 +4366,7 @@
             "arity": null,
             "choices": null,
             "default": null,
-            "help": "Where the local state lives \u2014 the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
+            "help": "Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
             "index": null,
             "name": "state-dir",
             "positional": false,
@@ -4624,7 +4624,7 @@
             "arity": null,
             "choices": null,
             "default": null,
-            "help": "Where the local state lives \u2014 the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
+            "help": "Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
             "index": null,
             "name": "state-dir",
             "positional": false,
@@ -4816,7 +4816,7 @@
             "arity": null,
             "choices": null,
             "default": null,
-            "help": "Where the local state lives \u2014 the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
+            "help": "Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
             "index": null,
             "name": "state-dir",
             "positional": false,
@@ -5057,7 +5057,7 @@
             "arity": null,
             "choices": null,
             "default": null,
-            "help": "Where the local state lives \u2014 the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
+            "help": "Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
             "index": null,
             "name": "state-dir",
             "positional": false,
@@ -5321,7 +5321,7 @@
             "arity": null,
             "choices": null,
             "default": null,
-            "help": "Where the local state lives \u2014 the registry this record is written into. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
+            "help": "Where the local state lives — the registry this record is written into. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
             "index": null,
             "name": "state-dir",
             "positional": false,
@@ -5498,7 +5498,7 @@
             "arity": null,
             "choices": null,
             "default": null,
-            "help": "Where the local state lives \u2014 the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
+            "help": "Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
             "index": null,
             "name": "state-dir",
             "positional": false,
@@ -5793,7 +5793,7 @@
             "arity": null,
             "choices": null,
             "default": null,
-            "help": "Where the local state lives \u2014 the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
+            "help": "Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
             "index": null,
             "name": "state-dir",
             "positional": false,
@@ -6024,7 +6024,7 @@
             "arity": null,
             "choices": null,
             "default": null,
-            "help": "Where the local state lives \u2014 the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
+            "help": "Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
             "index": null,
             "name": "state-dir",
             "positional": false,
@@ -6152,7 +6152,7 @@
             "arity": null,
             "choices": null,
             "default": null,
-            "help": "Where the local state lives \u2014 the name registry. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs, the same resolution the attached commands use",
+            "help": "Where the local state lives — the name registry. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs, the same resolution the attached commands use",
             "index": null,
             "name": "state-dir",
             "positional": false,
@@ -6211,7 +6211,7 @@
           "closeReason"
         ],
         "responseType": "microvm.shell",
-        "summary": "Open an interactive root shell in a running MicroVM \u2014 a real PTY, with job control, signals, and resize",
+        "summary": "Open an interactive root shell in a running MicroVM — a real PTY, with job control, signals, and resize",
         "supportsJson": true
       },
       {
@@ -7435,7 +7435,7 @@
             "arity": null,
             "choices": null,
             "default": "0",
-            "help": "Seconds spent suspended. Storage only \u2014 no compute line at all",
+            "help": "Seconds spent suspended. Storage only — no compute line at all",
             "index": null,
             "name": "suspended-sec",
             "positional": false,
@@ -8098,25 +8098,25 @@
       "dollar figures are estimates derived from published rates, never an invoice",
       "an unpriced line item omits `usd` rather than reporting zero",
       "`data.kind` carries the daemon's own status name when the exit code is coarser than the failure (ERR_PROTOCOL covers five)",
-      "`exec --stream` is the one exception to the line above: it writes NDJSON \u2014 one event object per line \u2014 and this envelope as the final line, with the discriminant `microvm.exec.stream` rather than `microvm.exec`. Every other invocation writes exactly one object"
+      "`exec --stream` is the one exception to the line above: it writes NDJSON — one event object per line — and this envelope as the final line, with the discriminant `microvm.exec.stream` rather than `microvm.exec`. Every other invocation writes exactly one object"
     ],
     "envelope": {
       "discriminator": "status",
       "error": {
         "apiVersion": "string",
-        "code": "string \u2014 stable, branch on this",
-        "data": "object \u2014 partial results, e.g. leaked identifiers, and `kind` naming the daemon status when one produced the failure",
-        "error": "string \u2014 human readable, may be reworded between releases",
-        "exitCode": "integer \u2014 matches the process exit code",
-        "finding": "string \u2014 the docs/PLATFORM.md section, or empty",
+        "code": "string — stable, branch on this",
+        "data": "object — partial results, e.g. leaked identifiers, and `kind` naming the daemon status when one produced the failure",
+        "error": "string — human readable, may be reworded between releases",
+        "exitCode": "integer — matches the process exit code",
+        "finding": "string — the docs/PLATFORM.md section, or empty",
         "status": "error",
         "suggestions": "array of string"
       },
       "ok": {
         "apiVersion": "string",
-        "data": "object \u2014 keys per responseKeys",
+        "data": "object — keys per responseKeys",
         "status": "ok",
-        "type": "string \u2014 one of responseType above"
+        "type": "string — one of responseType above"
       }
     },
     "exitCodes": [
@@ -8130,7 +8130,7 @@
         "code": "ERR_UNEXPECTED",
         "exit": 1,
         "finding": "",
-        "meaning": "an exception no handler claimed \u2014 a bug in this CLI, not the platform"
+        "meaning": "an exception no handler claimed — a bug in this CLI, not the platform"
       },
       {
         "code": "ERR_INVALID_ARG",
@@ -8160,7 +8160,7 @@
         "code": "ERR_BUILD_WEDGED",
         "exit": 6,
         "finding": "`clientToken` is a permanent idempotency key",
-        "meaning": "the image build was never scheduled \u2014 the clientToken replay signature"
+        "meaning": "the image build was never scheduled — the clientToken replay signature"
       },
       {
         "code": "ERR_LAUNCH_DIED",
@@ -8196,7 +8196,7 @@
         "code": "ERR_PRECONDITION",
         "exit": 12,
         "finding": "",
-        "meaning": "a prerequisite is missing \u2014 run `microvm doctor`"
+        "meaning": "a prerequisite is missing — run `microvm doctor`"
       },
       {
         "code": "ERR_EXEC_FAILED",
@@ -8214,7 +8214,7 @@
         "code": "ERR_CONFIG",
         "exit": 15,
         "finding": "",
-        "meaning": "the project config file is missing, malformed, or out of domain; refused locally \u2014 fix the file, or pass --no-config"
+        "meaning": "the project config file is missing, malformed, or out of domain; refused locally — fix the file, or pass --no-config"
       },
       {
         "code": "ERR_SYNC",
