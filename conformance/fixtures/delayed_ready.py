@@ -30,9 +30,11 @@ class Relay(BaseHTTPRequestHandler):
                 + json.dumps({"event": "end", "elapsed": time.monotonic() - started}),
                 flush=True,
             )
-        # The launcher moves the real daemon to this private backend port;
+        # The launcher moves the real daemon to this distinct private backend;
         # the listener keeps the shared front port inherited from the image.
-        connection = http.client.HTTPConnection("127.0.0.1", 9001, timeout=60)
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", int(os.environ["AGENTD_RELAY_BACKEND_PORT"]), timeout=60
+        )
         try:
             connection.request(self.command, self.path, body, dict(self.headers))
             response = connection.getresponse()

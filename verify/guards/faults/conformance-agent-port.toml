@@ -20,6 +20,16 @@ message = "FAIL  delayed readiness relay inherits the front port before the daem
 transform = { file = "conformance/lanes/delayed_readiness.py", replace = 'python3 /delayed_ready.py &\\n', with = 'AGENTD_PORT=9001 python3 /delayed_ready.py &\\n' }
 
 [[family.fault]]
+id = "conformance-agent-port-backend-collision"
+message = "FAIL  delayed readiness relay inherits the front port before the daemon override at 9001"
+transform = { file = "conformance/lanes/delayed_readiness.py", replace = "backend_port = 9002 if AGENT_PORT == 9001 else 9001", with = "backend_port = 9001" }
+
+[[family.fault]]
+id = "conformance-agent-port-backend-frozen"
+message = "FAIL  delayed readiness relay forwards to the configured backend"
+transform = { file = "conformance/fixtures/delayed_ready.py", replace = 'int(os.environ["AGENTD_RELAY_BACKEND_PORT"])', with = "9001" }
+
+[[family.fault]]
 id = "conformance-agent-port-missing-fallback"
 message = "FAIL  conformance rejects missing agentPort"
 transform = { file = "conformance/harness/constants.py", replace = ']["agentPort"]', with = '].get("agentPort", 9000)' }
