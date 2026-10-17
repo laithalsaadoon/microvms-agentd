@@ -246,7 +246,7 @@ transform = { file = ".github/workflows/live-conformance.yml", replace = "      
 [[family.fault]]
 id = "recovery-report-always"
 message = "FAIL: test_recovery_reports_never_publish_a_live_marker"
-transform = { file = ".github/workflows/live-conformance.yml", replace = "      - name: retain the sanitized recovery receipt\n        if: always()\n", with = "      - name: retain the sanitized recovery receipt\n        if: success()\n" }
+transform = { file = ".github/workflows/live-conformance.yml", replace = "      - name: retain the sanitized recovery receipt\n        if: always() && !inputs.observe_only\n", with = "      - name: retain the sanitized recovery receipt\n        if: success() && !inputs.observe_only\n" }
 
 [[family.fault]]
 id = "recovery-extra-action"
@@ -256,4 +256,4 @@ transform = { file = ".github/workflows/live-conformance.yml", replace = "      
 [[family.fault]]
 id = "recovery-captured-credentials"
 message = "FAIL: test_recovery_apply_requires_provenance_owner_and_environment"
-transform = { file = ".github/workflows/live-conformance.yml", replace = "uv run --script tools/recovery-credentials.py", with = "uv run --script tools/recover-live.py" }
+transform = { file = ".github/workflows/live-conformance.yml", replace = 'uv run --script tools/recovery-credentials.py "${args[@]}"', with = 'uv run --script tools/recover-live.py "${args[@]}"' }

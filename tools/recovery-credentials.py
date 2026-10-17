@@ -31,6 +31,8 @@ AUTHORIZATION_HEADER = "Authorization"
 VALIDATE_RECEIPT = runpy.run_path(str(ROOT / "tools/recover-live.py"))[
     "validate_receipt"
 ]
+OBSERVATION_CORE = runpy.run_path(str(ROOT / "tools/recover-live.py"))
+VALIDATE_OBSERVATION = OBSERVATION_CORE["validate_observation"]
 
 
 class Refused(Exception):
@@ -146,22 +148,41 @@ def run_child(mode, args, environ):
         command, env=environ, capture_output=True, timeout=remaining, check=False
     )
     # Neither stdout nor stderr is forwarded, even on errors or cancellation.
-    report = read_receipt(args.report)
-    require(done.returncode == 0 and report["status"] == "passed")
+    report = read_receipt(args.report, mode == "observe")
+    require(
+        done.returncode == 0
+        and report["status"] == ("completed" if mode == "observe" else "passed")
+    )
 
 
-def read_receipt(path):
-    require(path.stat().st_size <= MAX_RESPONSE)
+def read_receipt(path, observe_only=False):
+    maximum = (
+        OBSERVATION_CORE["OBSERVATION_MAX_BYTES"] if observe_only else MAX_RESPONSE
+    )
+    require(path.stat().st_size <= maximum)
+    if observe_only:
+        return VALIDATE_OBSERVATION(json.loads(path.read_bytes()))
     return VALIDATE_RECEIPT(json.loads(path.read_bytes()))
 
 
-def failure_receipt(path):
+def failure_receipt(path, observe_only=False):
     try:
-        report = read_receipt(path)
+        report = read_receipt(path, observe_only)
+        if observe_only and report["status"] == "incomplete":
+            return report
         if report["status"] == "failed":
             return report
     except Exception:  # noqa: BLE001 - invalid or missing child receipt is never forwarded
         pass
+    if observe_only:
+        return {
+            "kind": "live-recovery-observation",
+            "schemaVersion": 1,
+            "conformance_verified": False,
+            "recoveryAccepted": False,
+            "mutationsPerformed": False,
+            "status": "incomplete",
+        }
     return {
         "kind": "live-recovery",
         "conformance_verified": False,
@@ -204,7 +225,9 @@ def recover(args, environ):
         ("SessionToken", "AWS_SESSION_TOKEN"),
     ):
         child[target] = safe_value(credentials[source], r"[A-Za-z0-9/+=]+", 16384)
-    run_child("apply", args, child)
+    run_child(
+        "observe" if getattr(args, "observe_only", False) else "apply", args, child
+    )
 
 
 def main():
@@ -215,6 +238,7 @@ def main():
     parser.add_argument("--manifest-sha256", required=True)
     parser.add_argument("--report", required=True, type=Path)
     parser.add_argument("--exclusive-names", action="store_true")
+    parser.add_argument("--observe-only", action="store_true")
     args = parser.parse_args()
 
     def interrupted(signum, frame):
@@ -225,13 +249,16 @@ def main():
         args.report.unlink(missing_ok=True)
         recover(args, dict(os.environ))
     except (Exception, KeyboardInterrupt):  # noqa: BLE001 - provider text is never public
-        report = failure_receipt(args.report)
+        report = failure_receipt(args.report, args.observe_only)
         args.report.write_text(json.dumps(report) + "\n")
-        print("recovery: failed")
+        if args.observe_only:
+            print("observation: incomplete")
+        else:
+            print("recovery: failed")
         return 1
     finally:
         signal.signal(signal.SIGTERM, previous)
-    print("recovery: passed")
+    print("observation: completed" if args.observe_only else "recovery: passed")
     return 0
 
 

@@ -666,7 +666,8 @@ class CredentialTests(unittest.TestCase):
                 self.assertEqual(wrapper.main(), 0)
             args, env = captured.call_args.args
             self.assertEqual(
-                vars(args), vars(self.args) | {"exclusive_names": exclusive}
+                vars(args),
+                vars(self.args) | {"exclusive_names": exclusive, "observe_only": False},
             )
             self.assertEqual(env, dict(wrapper.os.environ))
 
