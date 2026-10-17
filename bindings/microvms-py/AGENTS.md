@@ -24,8 +24,14 @@ per accessor, and no arithmetic or coercion the core doesn't have. The crate doc
   mise run bindings:py
   ```
 
-  The task builds with `parity-fixtures` in its own `.venv-bindings` environment; the
-  whole suite needs those test helpers. Ordinary wheel builds omit that feature.
+  The task creates and activates its own `.venv-bindings` environment, then runs this
+  pinned builder from `.config/mise/tasks/test.toml`:
+
+  ```bash
+  uvx maturin@1.14.1 develop -m bindings/microvms-py/Cargo.toml --features parity-fixtures
+  ```
+
+  The whole suite needs those test helpers. Ordinary wheel builds omit that feature.
   `mise run ci:bindings` also checks the declarations, typed consumers, and npm package.
 
 - Tests stay offline. To make the daemon fetch fail in a test, point `HTTPS_PROXY` at a closed

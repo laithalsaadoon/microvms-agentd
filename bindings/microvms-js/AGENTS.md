@@ -25,6 +25,14 @@ converts types and maps errors; behavior belongs in the Rust layers below.
   `npm test` in this directory runs the same task. It builds with `parity-fixtures`,
   which the whole suite needs, then restores the ordinary addon and declarations after
   the tests pass. `npm run build` remains an ordinary build without those test helpers.
+  The task's pinned builder in `.config/mise/tasks/test.toml` runs from the repository root:
+
+  ```bash
+  npx -y -p @napi-rs/cli@3.10.8 napi build --manifest-path Cargo.toml \
+    --package microvms-js --platform --output-dir . --cwd bindings/microvms-js \
+    --features parity-fixtures --dts parity-fixtures.d.ts
+  ```
+
   `mise run ci:bindings` also checks the declarations, typed consumers, and npm package.
 
 - Tests stay offline. To make the daemon fetch fail in a test, point `HTTPS_PROXY` at a closed
