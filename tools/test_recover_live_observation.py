@@ -1368,7 +1368,12 @@ def test_version_identity_disagreement_is_retained_without_acceptance(
 def test_core_observe_mode_runs_verifier_and_read_only_api_without_cleanup(
     census, monkeypatch, tmp_path
 ):
-    manifest = {**census.manifest, "source_run_id": 9, "source_sha": "a" * 40}
+    manifest = {
+        **census.manifest,
+        "source_run_id": 9,
+        "source_sha": "a" * 40,
+        "parser_version": recovery.PARSER_VERSION,
+    }
     monkeypatch.setattr(recovery, "load_manifest", Mock(return_value=manifest))
     monkeypatch.setattr(recovery, "provenance", Mock(return_value=census.owned))
     real_runner = recovery.subprocess.run

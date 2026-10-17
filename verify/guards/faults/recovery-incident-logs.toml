@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: Apache-2.0
+
+[[family]]
+guard = "test_recover_live_incident_logs.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_incident_logs.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "incident-log-image-scope"
+message = "test_"
+transform = { file = "tools/recover-live.py", replace = "and policy[\"imageSha256\"] == images,", with = "and True," }
+
+[[family.fault]]
+id = "incident-log-history-producer"
+message = "test_"
+transform = { file = "tools/recover-live.py", replace = "and re.fullmatch(r\"[a-f0-9]{40}\", history[\"producerSha\"])", with = "and True" }
+
+[[family.fault]]
+id = "incident-log-exact-pair"
+message = "test_"
+transform = { file = "tools/recover-live.py", replace = "identity(\"log-group\", region, group) == row[\"sha256\"]", with = "True" }
+
+[[family.fault]]
+id = "incident-log-exact-image-absence"
+message = "test_"
+transform = { file = "tools/recover-live.py", replace = "require(api.image_absent(address), \"image_not_absent\")", with = "require(True, \"image_not_absent\")" }
+
+[[family.fault]]
+id = "incident-log-missing-is-not-null"
+message = "test_"
+transform = { file = "tools/recover-live.py", replace = "if \"logging\" not in record and \"logging\" not in listed:", with = "if not record.get(\"logging\") and not listed.get(\"logging\"):" }
+
+[[family.fault]]
+id = "incident-log-unknown-incarnation"
+message = "test_"
+transform = { file = "tools/recover-live.py", replace = "and record[\"state\"] == listed.get(\"state\")", with = "and True" }
+
+[[family.fault]]
+id = "incident-log-absent-target-reference"
+message = "test_"
+transform = { file = "tools/recover-live.py", replace = "        targets = {\n            ownership[resource[\"sha256\"]][1]\n            for resource in manifest[\"resources\"]\n            if resource[\"kind\"] == \"log-group\"\n        }\n", with = "        targets = set()\n" }
+
+[[family.fault]]
+id = "incident-log-active-version"
+message = "test_"
+transform = { file = "tools/recover-live.py", replace = "record[\"state\"] not in {\"PENDING\", \"IN_PROGRESS\"}", with = "True" }
+
+[[family.fault]]
+id = "incident-log-active-image"
+message = "test_"
+transform = { file = "tools/recover-live.py", replace = "images[arn][\"state\"] not in {\"CREATING\", \"UPDATING\"}", with = "True" }
+
+[[family.fault]]
+id = "incident-log-unknown-status"
+message = "test_"
+transform = { file = "tools/recover-live.py", replace = "row[\"loggingStatus\"] = status", with = "row[\"loggingStatus\"] = \"disabled\"" }
+
+[[family.fault]]
+id = "incident-log-current-name-shape"
+message = "test_"
+transform = { file = "tools/recover-live.py", replace = "re.fullmatch(r\"[A-Za-z0-9_/.#-]{1,512}\", group)", with = "True" }
+
+[[family.fault]]
+id = "incident-log-confirmed-outcome"
+message = "test_"
+transform = { file = "tools/recover-live.py", replace = "item = evidence(resource, \"deletion_requested\")", with = "item = evidence(resource, \"deleted\")" }

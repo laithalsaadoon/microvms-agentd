@@ -36,7 +36,7 @@ MANIFESTS = ROOT / "conformance/recovery"
 WORKFLOW = ".github/workflows/live-conformance.yml"
 SERVICE_PREFIX = "/aws/lambda-microvms/"
 SCHEME = "sha256-kind-nul-region-nul-name-v1"
-PARSER_VERSION = 3
+PARSER_VERSION = 4
 LOG_REPRESENTATION = "gh-api-job-log-python-text-utf8-lf-spans-v1"
 IMAGE_STATES = {
     "CREATING",
@@ -158,7 +158,8 @@ def load_manifest(run: str, expected: str) -> dict:
     )
     require(manifest["source_run_id"] == int(run), "manifest_run")
     require(
-        manifest["parser_version"] == PARSER_VERSION
+        type(manifest["parser_version"]) is int
+        and manifest["parser_version"] in {3, PARSER_VERSION}
         and manifest["source_log_representation"] == LOG_REPRESENTATION,
         "manifest_parser",
     )
@@ -174,7 +175,12 @@ def load_manifest(run: str, expected: str) -> dict:
     }
     proofs = {r["proof"] for r in resources}
     require(
-        proofs in (required, required | {"explicit-incident-image"})
+        proofs
+        in (
+            required,
+            required | {"explicit-incident-image"},
+            required | {"explicit-incident-image", "incident-default-log"},
+        )
         and len(resources) == len(proofs),
         "resource_proofs",
     )
@@ -192,7 +198,76 @@ def load_manifest(run: str, expected: str) -> dict:
             == ("image" if resource["proof"].endswith("image") else "log-group"),
             "resource_kind",
         )
+    incident_policy(manifest)
     return manifest
+
+
+def incident_policy(manifest: dict) -> dict | None:
+    """Validate reviewed historical anchors, without claiming to reauthenticate them."""
+    policy = manifest.get("incident_recovery")
+    proofs = {row["proof"] for row in manifest["resources"]}
+    if policy is None:
+        require("incident-default-log" not in proofs, "incident_policy")
+        return None
+    require(isinstance(policy, dict), "incident_policy")
+    images = sorted(
+        row["sha256"] for row in manifest["resources"] if row["kind"] == "image"
+    )
+    require(
+        manifest["parser_version"] == PARSER_VERSION
+        and proofs
+        == {
+            "shared-image",
+            "shared-log",
+            "configured-log",
+            "capability-default-image",
+            "explicit-incident-image",
+            "incident-default-log",
+        }
+        and len(manifest["resources"]) == 6
+        and len(set(images)) == 3
+        and set(policy)
+        == {
+            "policy",
+            "sourceRun",
+            "sourceSha",
+            "region",
+            "imageSha256",
+            "historicalRecovery",
+        }
+        and policy["policy"] == "incident-owned-logs-v1"
+        and type(policy["sourceRun"]) is int
+        and policy["sourceRun"] == manifest["source_run_id"]
+        and policy["sourceSha"] == manifest["source_sha"]
+        and policy["region"] == manifest["region"]
+        and policy["imageSha256"] == images,
+        "incident_policy",
+    )
+    history = policy["historicalRecovery"]
+    require(
+        isinstance(history, dict)
+        and set(history)
+        == {
+            "runId",
+            "attempt",
+            "producerSha",
+            "manifestSha256",
+            "receiptSha256",
+        }
+        and all(
+            type(history[key]) is int and history[key] > 0
+            for key in ("runId", "attempt")
+        )
+        and isinstance(history["producerSha"], str)
+        and re.fullmatch(r"[a-f0-9]{40}", history["producerSha"])
+        and all(
+            isinstance(history[key], str)
+            and re.fullmatch(r"[a-f0-9]{64}", history[key])
+            for key in ("manifestSha256", "receiptSha256")
+        ),
+        "incident_policy",
+    )
+    return policy
 
 
 def source_leaked_images(log: str) -> set[str]:
@@ -307,6 +382,29 @@ def explicit_image_selection(
     require(len(names) == 1, "explicit_image_unresolved")
     require(row["sha256"] not in proven, "explicit_image_conflict")
     return {row["sha256"]: ("explicit-incident-image", names[0], None)}
+
+
+def incident_log_selection(
+    region: str, resources: list[dict], explicit_images: dict, proven: dict
+) -> dict:
+    selected = [row for row in resources if row["proof"] == "incident-default-log"]
+    if len(selected) == 0:
+        return {}
+    require(len(selected) == 1 and len(explicit_images) == 1, "incident_log_pair")
+    row = selected[0]
+    _, name, _ = next(iter(explicit_images.values()))
+    require(
+        row["kind"] == "log-group"
+        and isinstance(name, str)
+        and re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", name),
+        "incident_log_pair",
+    )
+    group = SERVICE_PREFIX + name
+    require(
+        identity("log-group", region, group) == row["sha256"], "incident_log_unresolved"
+    )
+    require(row["sha256"] not in proven, "incident_log_conflict")
+    return {row["sha256"]: ("incident-default-log", group, None)}
 
 
 def source_infrastructure(log: str, region: str) -> dict:
@@ -586,7 +684,7 @@ def provenance(manifest: dict, github: Github, environ: dict[str, str]) -> dict:
     positive = [
         row
         for row in manifest["resources"]
-        if row["proof"] != "explicit-incident-image"
+        if row["proof"] not in {"explicit-incident-image", "incident-default-log"}
     ]
     for row in positive:
         require(
@@ -594,9 +692,14 @@ def provenance(manifest: dict, github: Github, environ: dict[str, str]) -> dict:
             "unproven_resource",
         )
     require(set(ownership) == {r["sha256"] for r in positive}, "ownership_set")
+    incident_policy(manifest)
+    explicit = explicit_image_selection(
+        log, manifest["region"], manifest["resources"], ownership
+    )
+    ownership.update(explicit)
     ownership.update(
-        explicit_image_selection(
-            log, manifest["region"], manifest["resources"], ownership
+        incident_log_selection(
+            manifest["region"], manifest["resources"], explicit, ownership
         )
     )
     return ownership
@@ -631,6 +734,7 @@ class Api:
         self._observed_versions: set[tuple[str, str]] = set()
         self.region = ""
         self.source_infrastructure: dict = {}
+        self.unknown_logging_count = 0
 
     def check_time(self) -> None:
         require(self.clock() < self.deadline, "deadline")
@@ -722,9 +826,21 @@ class Api:
         return images, vms, groups
 
     def configured_dependencies(
-        self, group: str | None, images: dict, deleting: set[str]
-    ) -> None:
+        self,
+        group: str | set[str] | None,
+        images: dict,
+        deleting: set[str],
+        *,
+        allow_unknown: bool = False,
+    ) -> int:
+        targets = {group} if isinstance(group, str) else group
+        unknown = 0
         for arn in images:
+            if allow_unknown:
+                require(
+                    images[arn]["state"] not in {"CREATING", "UPDATING"},
+                    "log_build_in_progress",
+                )
             versions = self.unique(
                 self.pages(
                     self.plane,
@@ -747,17 +863,64 @@ class Api:
                     "version_identity",
                 )
                 require(record.get("state") in VERSION_STATES, "version_state")
+                if allow_unknown:
+                    require(
+                        listed.get("imageArn") == arn
+                        and listed.get("imageVersion") == version
+                        and record["state"] == listed.get("state")
+                        and stamp(listed.get("createdAt"))
+                        == stamp(record.get("createdAt")),
+                        "version_logging_ambiguous",
+                    )
                 if record["state"] == "DELETED":
                     continue
                 self.observe_version(images[arn]["name"], version, record)
                 if group is None:
                     continue
+                if allow_unknown:
+                    require(
+                        record["state"] not in {"PENDING", "IN_PROGRESS"},
+                        "log_build_in_progress",
+                    )
+                    if "logging" not in record and "logging" not in listed:
+                        # This exact incident policy permits unknown unrelated destinations;
+                        # it does not turn their omission into disabled or default logging.
+                        self.mark_logging(
+                            images[arn]["name"], version, "unknown", record
+                        )
+                        unknown += 1
+                        continue
                 destination = self.version_log_destination(record, listed)
+                if allow_unknown:
+                    self.mark_logging(
+                        images[arn]["name"],
+                        version,
+                        "disabled" if destination is None else "configured",
+                        record,
+                    )
                 if destination is None:
                     continue
                 require(
-                    destination != group or arn in deleting, "configured_group_in_use"
+                    destination not in targets or arn in deleting,
+                    "configured_group_in_use",
                 )
+        self.unknown_logging_count = unknown
+        return unknown
+
+    def mark_logging(self, name: str, version: str, status: str, record: dict) -> None:
+        # Refresh this fact on every scan even though immutable version metadata is deduplicated.
+        for row in self.version_evidence:
+            if row["imageSha256"] == identity("image", self.region, name) and row[
+                "versionSha256"
+            ] == digest(version.encode()):
+                row["loggingStatus"] = status
+                row.pop("logGroupSha256", None)
+                cloud = (record.get("logging") or {}).get("cloudWatch")
+                if isinstance(cloud, dict) and isinstance(cloud.get("logGroup"), str):
+                    row["logGroupSha256"] = identity(
+                        "log-group", self.region, cloud["logGroup"]
+                    )
+                return
 
     @staticmethod
     def logging_destination(logging: Any) -> str | None:
@@ -770,7 +933,11 @@ class Api:
             set(logging) == {"cloudWatch"} and isinstance(cloud, dict),
             "version_logging_ambiguous",
         )
-        return text(cloud.get("logGroup"))
+        group = text(cloud.get("logGroup"))
+        require(
+            re.fullmatch(r"[A-Za-z0-9_/.#-]{1,512}", group), "version_logging_ambiguous"
+        )
+        return group
 
     def version_log_destination(self, record: dict, listed: dict) -> str | None:
         # Both APIs describe logging for this exact version. Configuration updates
@@ -905,11 +1072,40 @@ def selected(
     # both phases; every log mutation below still requires the default phase.
     if image_phase:
         return plan, (images, vms, groups)
+    scoped = incident_policy(manifest) is not None
+    if scoped:
+        # The reviewed image history supplies ownership, never current absence.
+        # Read every exact image address again even when List omitted its row.
+        for resource in manifest["resources"]:
+            if resource["kind"] == "image":
+                _, name, source_arn = ownership[resource["sha256"]]
+                address = source_arn or observation_image_arn(
+                    name, manifest["region"], ownership
+                )
+                require(api.image_absent(address), "image_not_absent")
+        require(
+            all(vm["state"] == "TERMINATED" for vm in vms.values()),
+            "log_vm_dependencies_unobservable",
+        )
     deleting = {
         row["imageArn"]
         for resource, row, _ in plan.values()
         if resource["kind"] == "image"
     }
+    targets = {
+        row["logGroupName"]
+        for resource, row, _ in plan.values()
+        if resource["kind"] == "log-group"
+    }
+    if scoped:
+        targets = {
+            ownership[resource["sha256"]][1]
+            for resource in manifest["resources"]
+            if resource["kind"] == "log-group"
+        }
+        # One complete version census checks every selected target, including
+        # later pages after an unknown destination, under the same deadline.
+        api.configured_dependencies(targets, images, deleting, allow_unknown=True)
     for resource, row, _ in plan.values():
         if resource["kind"] == "log-group":
             # RunMicrovm accepts a per-VM log destination that List/Get omit.
@@ -918,8 +1114,11 @@ def selected(
                 all(vm["state"] == "TERMINATED" for vm in vms.values()),
                 "log_vm_dependencies_unobservable",
             )
-            api.configured_dependencies(row["logGroupName"], images, deleting)
-    if not any(resource["kind"] == "log-group" for resource, _, _ in plan.values()):
+            if not scoped:
+                api.configured_dependencies(row["logGroupName"], images, deleting)
+    if not scoped and not any(
+        resource["kind"] == "log-group" for resource, _, _ in plan.values()
+    ):
         # Read-only version evidence remains useful after an earlier run removed
         # every approved log group; it never extends the deletion allowlist.
         api.configured_dependencies(None, images, deleting)
@@ -942,6 +1141,7 @@ def settled_selection(
 
 
 def recover(manifest: dict, ownership: dict, api: Api, report: dict) -> None:
+    scoped = incident_policy(manifest) is not None
     initial, _ = settled_selection(manifest, ownership, api, image_phase=True)
     report["resources"] = [
         {
@@ -953,6 +1153,32 @@ def recover(manifest: dict, ownership: dict, api: Api, report: dict) -> None:
         for r in manifest["resources"]
     ]
     statuses = {r["sha256"]: r for r in report["resources"]}
+    log_evidence = []
+    if scoped:
+        report["incidentLogEvidence"] = log_evidence
+        image_keys = {
+            resource["proof"]: resource["sha256"]
+            for resource in manifest["resources"]
+            if resource["kind"] == "image"
+        }
+
+        def evidence(resource, outcome):
+            row = {
+                "sha256": resource["sha256"],
+                "ownershipProof": resource["proof"],
+                "outcome": outcome,
+            }
+            paired = {
+                "shared-log": "shared-image",
+                "incident-default-log": "explicit-incident-image",
+            }.get(resource["proof"])
+            if paired:
+                row["pairedImageSha256"] = image_keys[paired]
+            return row
+
+        for resource in manifest["resources"]:
+            if resource["kind"] == "log-group" and resource["sha256"] not in initial:
+                log_evidence.append(evidence(resource, "already_absent"))
     # Image authority is independent of a log destination's observability. Log
     # dependency checks run afresh after these images are confirmed absent by Get.
     for key, (resource, row, old) in initial.items():
@@ -975,10 +1201,23 @@ def recover(manifest: dict, ownership: dict, api: Api, report: dict) -> None:
             "image_not_absent",
         )
         require(key in current and current[key][2] == old, "incarnation_changed")
-        api.configured_dependencies(row["logGroupName"], state[0], set())
+        if not scoped:
+            api.configured_dependencies(row["logGroupName"], state[0], set())
         api.call(api.logs, "delete_log_group", logGroupName=row["logGroupName"])
         statuses[key]["deletionRequested"] = True
         statuses[key]["status"] = "deletion_requested"
+        if scoped:
+            item = evidence(resource, "deletion_requested")
+            item.update(
+                initialCreationTime=row["creationTime"],
+                preDeleteCreationTime=current[key][1]["creationTime"],
+                inventoryComplete=True,
+                imagesAbsent=sorted(image_keys.values()),
+                nonTerminatedVmCount=0,
+                knownReferenceCount=0,
+                unknownLoggingVersionCount=api.unknown_logging_count,
+            )
+            log_evidence.append(item)
     # Full inventories, including later pages, must remain clear through a visibility window.
     clear_since = None
     while True:
@@ -993,6 +1232,9 @@ def recover(manifest: dict, ownership: dict, api: Api, report: dict) -> None:
         api.sleep(2)
     for row in report["resources"]:
         row["status"] = "absent"
+    for row in log_evidence:
+        if row["outcome"] == "deletion_requested":
+            row["outcome"] = "deleted"
 
 
 def safe_verifier(stdout: str, region: str) -> dict:
@@ -1109,6 +1351,11 @@ def observe_duration(iam: Any, role_arn: str | None, api: Api) -> dict:
 
 
 REASONS = [
+    "incident_policy",
+    "incident_log_pair",
+    "incident_log_unresolved",
+    "incident_log_conflict",
+    "log_build_in_progress",
     "api_failed",
     "aws_region",
     "configured_group_in_use",
@@ -1257,6 +1504,7 @@ def validate_receipt(value: Any) -> dict:
             "roleDuration",
             "independentVerifier",
             "apiFailures",
+            "incidentLogEvidence",
         }
     )
     valid(
@@ -1311,16 +1559,68 @@ def validate_receipt(value: Any) -> dict:
                 "logGroupSha256",
                 "sourceBucketMatches",
                 "sourceBuildRoleMatches",
+                "loggingStatus",
             }
         )
         for key, item in row.items():
             valid(
-                number(item)
+                isinstance(item, str) and item in {"unknown", "disabled", "configured"}
+                if key == "loggingStatus"
+                else number(item)
                 if key == "createdAt"
                 else type(item) is bool
                 if key.endswith("Matches")
                 else hashed(item)
             )
+    for row in rows(value.get("incidentLogEvidence", [])):
+        valid(isinstance(row, dict))
+        required = {"sha256", "ownershipProof", "outcome"}
+        proof = row.get("ownershipProof")
+        valid(
+            isinstance(proof, str)
+            and proof in {"shared-log", "configured-log", "incident-default-log"}
+        )
+        if proof != "configured-log":
+            required.add("pairedImageSha256")
+            valid(hashed(row.get("pairedImageSha256")))
+        valid(hashed(row.get("sha256")))
+        valid(
+            isinstance(row.get("outcome"), str)
+            and row["outcome"] in {"already_absent", "deletion_requested", "deleted"}
+        )
+        if row["outcome"] in {"deletion_requested", "deleted"}:
+            required.update(
+                {
+                    "initialCreationTime",
+                    "preDeleteCreationTime",
+                    "inventoryComplete",
+                    "imagesAbsent",
+                    "nonTerminatedVmCount",
+                    "knownReferenceCount",
+                    "unknownLoggingVersionCount",
+                }
+            )
+            valid(
+                number(row.get("initialCreationTime"))
+                and number(row.get("preDeleteCreationTime"))
+            )
+            valid(row["initialCreationTime"] == row["preDeleteCreationTime"])
+            valid(row.get("inventoryComplete") is True)
+            absent = row.get("imagesAbsent")
+            valid(
+                isinstance(absent, list)
+                and len(absent) == 3
+                and all(hashed(key) for key in absent)
+                and absent == sorted(set(absent))
+            )
+            for key in (
+                "nonTerminatedVmCount",
+                "knownReferenceCount",
+                "unknownLoggingVersionCount",
+            ):
+                valid(type(row.get(key)) is int and row[key] >= 0)
+            valid(row["nonTerminatedVmCount"] == row["knownReferenceCount"] == 0)
+        valid(set(row) == required)
     if "roleDuration" in value:
         role = value["roleDuration"]
         valid(isinstance(role, dict))
@@ -2306,7 +2606,7 @@ def main() -> int:
             sourceSha=manifest["source_sha"],
             region=manifest["region"],
             manifestSha256=args.manifest_sha256,
-            parserVersion=PARSER_VERSION,
+            parserVersion=manifest["parser_version"],
             sourceLogRepresentation=LOG_REPRESENTATION,
         )
         if args.mode in {"apply", "observe"}:
