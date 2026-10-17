@@ -65,7 +65,7 @@ receipt = {
     "hostArchitecture": platform.machine(),
     "target": "aarch64-unknown-linux-gnu.2.34",
     "rustc": version("rustc", "--version"),
-    "cargoZigbuild": version("cargo", "zigbuild", "--version"),
+    "cargoZigbuild": version("cargo-zigbuild", "--version"),
     "zig": version("zig", "version"),
     "sha256": {
         name: hashlib.sha256((out / name).read_bytes()).hexdigest()

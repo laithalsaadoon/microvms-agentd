@@ -10,8 +10,11 @@ import importlib.util
 import io
 import json
 import re
+import subprocess
+import sys
 import tomllib
 from pathlib import Path
+from unittest.mock import patch
 
 from harness.results import Results
 from lanes.native_box import (
@@ -82,6 +85,7 @@ def check_native_box(results: Results, temporary: Path) -> None:
             f"native Box rejects wrong {field}", not native_build_ok(directory)
         )
     write(receipt)
+    check_build_receipt(results, directory, receipt)
     for name in BINARIES:
         (directory / name).write_bytes(b"changed")
         results.check(
@@ -125,6 +129,41 @@ def check_native_box(results: Results, temporary: Path) -> None:
     probe = Results(probe=True)
     native_box_checks(broken, probe)
     results.check("native Box rejects duplicate scenarios", bool(probe.failed))
+
+
+def check_build_receipt(results: Results, directory: Path, expected: dict) -> None:
+    script = (EXAMPLE / "build-box.sh").read_text()
+    receipt_code = script.split("<<'PY_RECEIPT'\n", 1)[1].split("\nPY_RECEIPT", 1)[0]
+    versions = {
+        ("git", "rev-parse", "HEAD"): expected["sourceRevision"],
+        ("rustc", "--version"): expected["rustc"],
+        ("cargo-zigbuild", "--version"): expected["cargoZigbuild"],
+        ("zig", "version"): expected["zig"],
+    }
+
+    def tool_version(args, **kwargs):
+        if args not in versions:
+            raise subprocess.CalledProcessError(2, args)
+        return versions[args] + "\n"
+
+    # Execute the receipt generator with the pinned tools' command contracts.
+    # cargo injects a `zigbuild` subcommand, whose flags omit --version.
+    try:
+        with (
+            patch.object(sys, "argv", ["receipt", str(directory)]),
+            patch.object(subprocess, "check_output", tool_version),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            exec(compile(receipt_code, str(EXAMPLE / "build-box.sh"), "exec"), {})
+        actual = json.loads((directory / "build.json").read_text())
+        valid = all(
+            actual[key] == expected[key]
+            for key in ("sourceRevision", "rustc", "cargoZigbuild", "zig", "sha256")
+        )
+    except (subprocess.CalledProcessError, KeyError):
+        valid = False
+    results.check("native Box records supported tool version commands", valid)
+    (directory / "build.json").write_text(json.dumps(expected))
 
 
 def check_region_staging(results: Results, temporary: Path) -> None:
