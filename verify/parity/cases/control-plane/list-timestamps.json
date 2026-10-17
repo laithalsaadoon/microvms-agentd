@@ -1,0 +1,40 @@
+{
+  "capability": "list-microvms",
+  "input": {
+    "actions": [
+      "list"
+    ],
+    "script": [
+      {
+        "operation": "ListMicrovms",
+        "status": 200,
+        "body": "{\"items\":[{\"microvmId\":\"mvm-current\",\"state\":\"RUNNING\",\"imageArn\":\"arn:aws:lambda:us-east-1:123456789012:microvm-image:fixture\",\"imageVersion\":\"1\",\"startedAt\":1754524800.125},{\"microvmId\":\"mvm-legacy\",\"state\":\"TERMINATED\",\"imageArn\":\"arn:aws:lambda:us-east-1:123456789012:microvm-image:fixture\",\"imageVersion\":\"1\"}]}"
+      },
+      {
+        "operation": "ListMicrovmImages",
+        "status": 200,
+        "body": "{\"items\":[]}"
+      }
+    ]
+  },
+  "expect": {
+    "items": [
+      {
+        "id": "mvm-current",
+        "state": "RUNNING",
+        "image_arn": "arn:aws:lambda:us-east-1:123456789012:microvm-image:fixture",
+        "started_at": 1754524800.125
+      },
+      {
+        "id": "mvm-legacy",
+        "state": "TERMINATED",
+        "image_arn": "arn:aws:lambda:us-east-1:123456789012:microvm-image:fixture",
+        "started_at": null
+      }
+    ],
+    "calls": [
+      "ListMicrovms",
+      "ListMicrovmImages"
+    ]
+  }
+}

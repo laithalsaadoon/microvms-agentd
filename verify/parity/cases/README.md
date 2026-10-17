@@ -149,6 +149,8 @@ without a reset.
   literal JSON bodies and operation names. The resume case reads RUNNING, suspends,
   observes SUSPENDED, and attempts a resume after the service ended the VM. Every
   runner compares the refusal and the complete operation sequence with `expect`.
+  The listing case checks present and absent start timestamps; each surface reads
+  VMs and images as `ls --remote` does and compares the VM summaries.
   Bindings run with the opt-in `parity-fixtures` build feature; their normal builds
   contain no scripted constructors. `bindings:js` rebuilds the normal addon after testing before npm packaging;
   wheel and release builds use the default features.

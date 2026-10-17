@@ -537,6 +537,21 @@ def control_plane_case(
     case: Case, _servers: Callable[..., SseServer]
 ) -> dict[str, Any]:
     plane = microvms.ControlPlane._parity_from_script(json.dumps(case.input["script"]))
+    if case.input["actions"] == ["list"]:
+        items = plane.list()
+        plane.list_images()
+        return {
+            "items": [
+                {
+                    "id": item.id,
+                    "state": item.state,
+                    "image_arn": item.image_arn,
+                    "started_at": item.started_at,
+                }
+                for item in items
+            ],
+            "calls": plane._parity_calls(),
+        }
     identifier = case.input["microvm_id"]
     for action in case.input["actions"]:
         try:

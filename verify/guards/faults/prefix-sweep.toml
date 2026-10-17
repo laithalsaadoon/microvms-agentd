@@ -79,3 +79,12 @@ run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control
 expect = "test-failed"
 suite = "rust"
 transform = { file = "crates/microvms-app/src/control/sweep.rs", replace = "report.images_in_use.sort();\n                    return Ok(report);", with = "report.images_in_use.sort();\n                    return Err(error);" }
+
+
+[[fault]]
+id = "parity-list-timestamps"
+guard = "core_answers_the_shared_case_corpus"
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/ops.rs", replace = "#[serde(default)]\n    pub started_at: Option<f64>,", with = "#[serde(skip_deserializing)]\n    pub started_at: Option<f64>," }
