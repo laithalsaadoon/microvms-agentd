@@ -354,6 +354,174 @@ class FixtureCase(unittest.TestCase):
         )
 
 
+class MainTests(FixtureCase):
+    """The command must enforce the inventory it reads, and report what failed."""
+
+    def setUp(self):
+        super().setUp()
+        self.observed = {
+            surface: {f"type:{surface}Options": {"kind": "struct"}}
+            for surface in ("core", "cli", "py", "ts")
+        }
+        self.inventory = {
+            "schema": 1,
+            "shapes": copy.deepcopy(self.observed),
+            "exemptions": {},
+            "contracts": [
+                {
+                    "id": "launch-options",
+                    "kind": "type",
+                    "capability": "launch",
+                    **{
+                        surface: list(items) for surface, items in self.observed.items()
+                    },
+                }
+            ],
+        }
+
+    def run_main(
+        self, *flags, inventory_error=False, surface_error=False, missing=False
+    ):
+        with tempfile.TemporaryDirectory() as scratch, contextlib.ExitStack() as stack:
+            root = Path(scratch)
+            table = root / "capabilities.toml"
+            table.write_text(
+                'inventory = "reviewed.json"\n' + self.table, encoding="utf-8"
+            )
+            if not missing:
+                (root / "reviewed.json").write_text(
+                    json.dumps(self.inventory), encoding="utf-8"
+                )
+            core = root / "core.json"
+            core.write_text(json.dumps(self.core), encoding="utf-8")
+            manifest = root / "commands.json"
+            manifest.write_text(json.dumps(self.manifest), encoding="utf-8")
+            pyi, dts = root / "api.pyi", root / "api.d.ts"
+            argv = [
+                "check-parity.py",
+                "--table",
+                str(table),
+                "--core-api",
+                str(core),
+                "--manifest",
+                str(manifest),
+                "--pyi",
+                str(pyi),
+                "--dts",
+                str(dts),
+                *flags,
+            ]
+            stack.enter_context(mock.patch.object(sys, "argv", argv))
+            stack.enter_context(
+                mock.patch.dict(
+                    PARITY_GLOBALS,
+                    {
+                        "run_griffe": mock.Mock(return_value=self.griffe),
+                        "run_typedoc": mock.Mock(return_value=self.typedoc),
+                        "pin_problems": mock.Mock(return_value=[]),
+                    },
+                )
+            )
+            readers = {}
+            for surface, name in (
+                ("core", "core"),
+                ("cli", "cli"),
+                ("py", "python"),
+                ("ts", "typescript"),
+            ):
+                readers[surface] = stack.enter_context(
+                    mock.patch.object(
+                        PARITY_GLOBALS["parity_inventory"],
+                        name,
+                        return_value=self.observed[surface],
+                    )
+                )
+            if inventory_error:
+                readers["py"].side_effect = PARITY_GLOBALS[
+                    "parity_inventory"
+                ].InventoryError("unknown Python declaration")
+            if surface_error:
+                PARITY_GLOBALS["run_typedoc"].side_effect = PARITY["ParityError"](
+                    "TypeScript unavailable"
+                )
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = PARITY["main"]()
+            if "--exemptions" not in flags:
+                PARITY_GLOBALS["run_griffe"].assert_called_once_with(pyi)
+                PARITY_GLOBALS["run_typedoc"].assert_called_once_with(dts, mock.ANY)
+                readers["core"].assert_called_once_with(self.core)
+                readers["cli"].assert_called_once_with(self.manifest)
+            return code, out.getvalue(), err.getvalue()
+
+    def test_reviewed_inventory_passes_in_human_and_json_modes(self):
+        code, out, err = self.run_main()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(
+            out,
+            "parity: every row resolves on its surfaces, every name rule (a) holds has a row, and every default a surface states is core's or exempt\n",
+        )
+        code, out, err = self.run_main("--json")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(
+            json.loads(out),
+            {
+                "ok": True,
+                "problems": [],
+                "exemptions": PARITY["exemptions"](PARITY["parse_table"](self.table)),
+            },
+        )
+
+    def test_changed_shape_and_unknown_capability_fail_the_command(self):
+        self.inventory["shapes"]["py"]["type:pyOptions"]["kind"] = "enum"
+        self.inventory["contracts"][0]["capability"] = "not-a-capability"
+        code, out, err = self.run_main("--json")
+        self.assertEqual((code, err), (1, ""))
+        self.assertEqual(json.loads(out)["ok"], False)
+        self.assertEqual(
+            json.loads(out)["problems"],
+            [
+                "inventory launch-options: unknown capability not-a-capability",
+                "inventory py: type:pyOptions changed shape",
+            ],
+        )
+
+    def test_missing_reviewed_inventory_is_a_failed_check(self):
+        code, out, err = self.run_main("--json", missing=True)
+        result = json.loads(out)
+        self.assertEqual((code, err, result["ok"]), (1, "", False))
+        self.assertEqual(len(result["problems"]), 1)
+        self.assertIn("reviewed.json doesn't exist", result["problems"][0])
+
+    def test_inventory_output_reports_all_collected_shapes_without_enrollment(self):
+        code, out, err = self.run_main("--inventory", missing=True)
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(json.loads(out), self.observed)
+
+    def test_inventory_output_refuses_incomplete_collectors_and_unread_surfaces(self):
+        for options, message in (
+            ({"inventory_error": True}, "inventory: unknown Python declaration"),
+            ({"surface_error": True}, "TypeScript unavailable"),
+        ):
+            with self.subTest(options=options):
+                code, out, err = self.run_main("--inventory", "--json", **options)
+                self.assertEqual((code, out, err), (1, "", message + "\n"))
+
+    def test_collector_failure_does_not_hide_a_missing_capability(self):
+        self.griffe["members"].append(function("orphan"))
+        code, out, err = self.run_main("--json", inventory_error=True)
+        result = json.loads(out)
+        self.assertEqual((code, err, result["ok"]), (1, "", False))
+        self.assertIn("py: orphan belongs to no row", result["problems"])
+        self.assertIn("inventory: unknown Python declaration", result["problems"])
+
+    def test_unread_surface_remains_a_failure_in_json_mode(self):
+        code, out, err = self.run_main("--json", surface_error=True)
+        result = json.loads(out)
+        self.assertEqual((code, err, result["ok"]), (1, "", False))
+        self.assertEqual(result["problems"][0], "TypeScript unavailable")
+
+
 class RuleTests(FixtureCase):
     """The rules over fixture surfaces, each case breaking one thing the baseline has."""
 

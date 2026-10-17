@@ -1,5 +1,35 @@
 # Exhaustive option/type inventory: each omission changes an asserted verdict.
 [[family]]
+guard = "tools/test_check_parity.py::MainTests"
+run = ["uv", "run", "--locked", "pytest", "-q", "tools/test_check_parity.py::MainTests"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "parity-inventory-command-unchecked"
+message = "test_changed_shape_and_unknown_capability_fail_the_command"
+transform = { file = "tools/check-parity.py", replace = "            problems += parity_inventory.problems(\n", with = "            problems += [] if True else parity_inventory.problems(\n" }
+
+[[family.fault]]
+id = "parity-inventory-command-uncollected"
+message = "test_reviewed_inventory_passes_in_human_and_json_modes"
+transform = { file = "tools/check-parity.py", replace = "            surface.inventory = collect(data)\n", with = "            surface.inventory = {}\n" }
+
+[[family.fault]]
+id = "parity-inventory-command-partial-output"
+message = "test_inventory_output_refuses_incomplete_collectors_and_unread_surfaces"
+transform = { file = "tools/check-parity.py", replace = "        if refused or inventory_refused:\n", with = "        if False:\n" }
+
+[[fault]]
+id = "parity-inventory-snapshot-declarations"
+guard = "tools/test_generate_core_api.py::Snapshot::test_snapshot_retains_declarations_and_omits_none"
+run = ["uv", "run", "--locked", "pytest", "-q", "tools/test_generate_core_api.py"]
+expect = "exit-nonzero"
+message = "test_snapshot_retains_declarations_and_omits_none"
+suite = "script"
+transform = { file = "tools/generate-core-api.py", replace = "        if entry.declaration is not None\n", with = "        if False\n" }
+
+[[family]]
 guard = "tools/test_parity_inventory.py"
 run = ["uv", "run", "--locked", "pytest", "-q", "tools/test_parity_inventory.py"]
 expect = "exit-nonzero"
