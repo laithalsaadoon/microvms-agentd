@@ -452,10 +452,11 @@ def test_incomplete_version_scan_preserves_other_sections_and_marks_failure(
     if failure == "missing_page":
         census.plane.list_microvm_image_versions.return_value = {}
     elif failure == "repeated_token":
-        census.plane.list_microvm_image_versions.return_value = {
+        page = {
             "items": [],
             "nextToken": "cycle",
         }
+        census.plane.list_microvm_image_versions.side_effect = [page, page]
     elif failure == "duplicate":
         census.plane.list_microvm_image_versions.return_value = {
             "items": [census.version, census.version]
