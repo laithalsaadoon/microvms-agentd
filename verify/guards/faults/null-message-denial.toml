@@ -1,6 +1,14 @@
 # Region-aware tests use a new optional transport accessor; these faults keep it buildable.
 
 [[fault]]
+id = "null-denial-signed-transport-region"
+guard = "control::transport::tests::signed_transport_exposes_its_configured_region_to_the_port"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "control::transport::tests::signed_transport_exposes_its_configured_region_to_the_port", "--", "--exact"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/control/transport.rs", replace = "fn region(&self) -> Option<&Region> {\n        Some(&self.region)\n    }", with = "fn region(&self) -> Option<&Region> {\n        None\n    }" }
+
+[[fault]]
 id = "null-denial-ambiguous"
 guard = "control::transport::tests::a_null_message_access_denied_names_both_possible_causes"
 run = ["cargo", "test", "-p", "microvms-app", "--lib", "control::transport::tests::a_null_message_access_denied_names_both_possible_causes", "--", "--exact"]

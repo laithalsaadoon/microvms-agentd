@@ -341,6 +341,29 @@ mod tests {
     use super::*;
     use microvms_app::control::transport::Method;
 
+    /// The denial classifier reads the transport port's region. Build the real transport
+    /// with a static provider so checking that wiring never resolves the default chain.
+    #[test]
+    fn signed_transport_exposes_its_configured_region_to_the_port() {
+        let credentials = aws_credential_types::provider::SharedCredentialsProvider::new(
+            aws_credential_types::Credentials::new("AKIDEXAMPLE", "secret", None, None, "test"),
+        );
+        for region in [
+            Region::UsEast1,
+            Region::EuWest1,
+            Region::unlisted("eu-central-1"),
+        ] {
+            let transport = SignedTransport {
+                endpoint: endpoint_for(&region),
+                region: region.clone(),
+                credentials: credentials.clone(),
+                http: reqwest::Client::new(),
+            };
+            let port: &dyn Transport = &transport;
+            assert_eq!(port.region(), Some(&region));
+        }
+    }
+
     /// The regression that blocked the whole live tier: with aws-config's
     /// `default-https-client` off, `load()` panics with "a http_client is
     /// required" before any credential question is even asked. Constructing
