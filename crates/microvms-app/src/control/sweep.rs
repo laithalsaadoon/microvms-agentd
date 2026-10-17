@@ -148,8 +148,13 @@ impl ControlPlane {
     /// Discover or clean up images whose names start with `prefix`, and their live VMs.
     ///
     /// A nonempty image-name prefix is required. Keep entries are exact names or ARNs;
-    /// their VMs are protected too. Cleanup waits for termination before deletion, then
-    /// confirms image disappearance. Concurrent launches may keep an image in use; they
+    /// their VMs are protected too. Destructive cleanup can stop every VM using a
+    /// selected, non-kept image, including VMs owned by other runners. It cannot isolate
+    /// a failed runner's VMs when runners share an image. Keep shared images or use a
+    /// separate image-name prefix for each job.
+    ///
+    /// Cleanup waits for termination before deletion, then confirms image disappearance.
+    /// Concurrent launches may keep an image in use; they
     /// are reported rather than repeatedly terminated. This is not an account-wide lock.
     pub async fn sweep(&self, prefix: &str, options: &SweepOptions) -> Result<SweepReport, Error> {
         super::require_valid_image_name(prefix)?;

@@ -55,6 +55,11 @@ An image refuses deletion while its VM is still terminating, so one pass is some
 Preview the images and VMs belonging to an image-name prefix, preserving the image
 currently in use:
 
+Destructive cleanup selects VMs by image. It can stop every VM using a selected
+image outside the keep-list, including VMs from other runners. The sweep cannot
+identify one failed runner among users of a shared image. Put shared images on the
+keep-list, or give each job a separate image-name prefix.
+
 ```bash
 microvm gc --prefix my-job- --keep my-job-current --json
 microvm gc --prefix my-job- --keep my-job-current --yes --json
