@@ -267,6 +267,46 @@ mod tests {
         assert!(warnings.contains("symlink"), "{warnings}");
     }
 
+    /// IMAGE-7: ignore rules remove paths from the context before warnings are reported.
+    /// Neither a selected link nor an ignored link can import its target into the artifact.
+    #[cfg(unix)]
+    #[test]
+    fn only_nonexcluded_symlinks_warn_and_no_symlink_is_followed() {
+        let scratch = Scratch::new("selected-links");
+        let outside = Scratch::new("outside-links");
+        outside.write("outside.txt", b"not part of the context");
+        scratch
+            .write("keep.txt", b"included")
+            .write(".dockerignore", b"ignored-link\nignored-directory\n");
+        for name in ["included-link", "ignored-link"] {
+            std::os::unix::fs::symlink(outside.0.join("outside.txt"), scratch.0.join(name))
+                .expect("file symlink");
+        }
+        for name in ["included-directory", "ignored-directory"] {
+            std::os::unix::fs::symlink(&outside.0, scratch.0.join(name))
+                .expect("directory symlink");
+        }
+        let context = from_dir(&scratch.0).expect("links are skipped without following");
+        assert_eq!(names(&context), ["keep.txt"]);
+        assert_eq!(context.warnings().len(), 2);
+        for name in ["included-link", "included-directory"] {
+            assert!(
+                context
+                    .warnings()
+                    .iter()
+                    .any(|warning| { warning.contains(name) && warning.contains("symlink") }),
+                "missing warning for {name}: {:?}",
+                context.warnings()
+            );
+        }
+        assert!(
+            context
+                .warnings()
+                .iter()
+                .all(|warning| !warning.contains("ignored"))
+        );
+    }
+
     /// **IMAGE-7, the collision.** A context file named `agentd` at the root would replace
     /// the daemon entry, so it is refused naming the file.
     #[test]

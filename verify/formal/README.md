@@ -30,3 +30,12 @@ or model weights are vendored here.
 environment does not resolve those findings or establish strict verification.
 The offline `spec:check` task guards the wrapper's version and verdict handling
 without installing the optional environment.
+
+`mise run spec:regression` installs the same locked verifier and checks STATE-5's
+call-history invariant against a repeated suspend from SUSPENDING. It requires a
+proved original model and a counterexample after widening the suspend guard.
+This test runs only reachability, without the semantic model; it does not assert
+strict coverage. The model records accepted suspend calls and does not represent
+failed outbound attempts.
+The registered regression faults run this task in `ci:guards`; full semantic
+verification remains optional because its findings are still unresolved.

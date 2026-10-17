@@ -177,7 +177,7 @@ def check_ensure_image_section(results: "Results") -> None:
     ensure_image_checks(complete, prefix, bucket, key_prefix, probe)
     results.check(
         "the ensure-image checks all pass on a complete report",
-        len(probe.passed) == 10 and not probe.failed,
+        len(probe.passed) == 11 and not probe.failed,
         f"passed={len(probe.passed)} failed={probe.failed!r}",
     )
     gaps = {
@@ -186,7 +186,8 @@ def check_ensure_image_section(results: "Results") -> None:
             "race": {**complete["race"], "reused": [False, False]},
         },
         "IMAGE-9": {**complete, "reuse": {**complete["reuse"], "uploaded": True}},
-        "IMAGE-8": {**complete, "accountCalls": [2, 1]},
+        "IMAGE-13": {**complete, "accountCalls": [2, 1]},
+        "IMAGE-8": {**complete, "puts": []},
         "IMAGE-2": {**complete, "guest": {**complete["guest"], "uid": "65534"}},
         "IMAGE-10": {**complete, "forced": {"error": "refused"}},
         "the ensure race never held": {
