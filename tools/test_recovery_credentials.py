@@ -59,6 +59,7 @@ class CredentialTests(unittest.TestCase):
             manifest_sha256="a" * 64,
             report=Path(self.temp.name) / "recovery.json",
             exclusive_names=False,
+            observe_only=False,
         )
         self.globals = vars(wrapper)
         self.clock = Mock()
@@ -666,7 +667,8 @@ class CredentialTests(unittest.TestCase):
                 self.assertEqual(wrapper.main(), 0)
             args, env = captured.call_args.args
             self.assertEqual(
-                vars(args), vars(self.args) | {"exclusive_names": exclusive}
+                vars(args),
+                vars(self.args) | {"exclusive_names": exclusive, "observe_only": False},
             )
             self.assertEqual(env, dict(wrapper.os.environ))
 

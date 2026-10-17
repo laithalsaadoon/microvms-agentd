@@ -1362,9 +1362,722 @@ def validate_receipt(value: Any) -> dict:
     return value
 
 
+OBSERVATION_OPERATIONS = {
+    "list_microvm_images",
+    "get_microvm_image",
+    "list_microvms",
+    "describe_log_groups",
+    "list_microvm_image_versions",
+    "get_microvm_image_version",
+}
+OBSERVATION_SECTIONS = {
+    "independentVerifier",
+    "images",
+    "microvms",
+    "logGroups",
+    "versions",
+}
+OBSERVATION_REASONS = {
+    "api_failed",
+    "not_found",
+    "deadline",
+    "missing_page_items",
+    "invalid_page_item",
+    "pagination_token",
+    "duplicate_identity",
+    "missing_text",
+    "invalid_response",
+    "observation_limit",
+    "observation_identity",
+    "observation_failed",
+    "read_only_operation",
+    "verifier_execution",
+    "verifier_summary",
+    "verifier_duplicate",
+    "verifier_count_mismatch",
+    "verifier_output_unrecognized",
+    "verifier_exit_mismatch",
+}
+OBSERVATION_MAX_ROWS = 1000
+OBSERVATION_MAX_BYTES = 1048576
+OBSERVATION_APPEND_BYTES = OBSERVATION_MAX_BYTES // 2
+OBSERVATION_VERIFIER_BYTES = OBSERVATION_MAX_BYTES // 4
+
+
+class ReadOnlyApi(Api):
+    """Enforce the observer's operation boundary before reaching any SDK client."""
+
+    def call(self, client: Any, operation: str, **kwargs) -> dict:
+        require(operation in OBSERVATION_OPERATIONS, "read_only_operation")
+        return super().call(client, operation, **kwargs)
+
+    def iter_rows(self, client: Any, operation: str, field: str, **kwargs):
+        seen, count = set(), 0
+        while True:
+            page = self.call(client, operation, **kwargs)
+            require(isinstance(page.get(field), list), "missing_page_items")
+            for row in page[field]:
+                require(isinstance(row, dict), "invalid_page_item")
+                count += 1
+                require(count <= OBSERVATION_MAX_ROWS, "observation_limit")
+                yield row
+            continuation = page.get("nextToken")
+            if continuation is None:
+                return
+            require(
+                isinstance(continuation, str)
+                and continuation
+                and continuation not in seen,
+                "pagination_token",
+            )
+            seen.add(continuation)
+            kwargs["nextToken"] = continuation
+
+
+def observation_field(record: dict, source: str, known: set[str]) -> str:
+    """Preserve optional-field uncertainty without exposing unrecognized values."""
+    value = record.get(source)
+    return (
+        "missing"
+        if source not in record
+        else "null"
+        if value is None
+        else value
+        if isinstance(value, str) and value in known
+        else "malformed"
+    )
+
+
+def observation_snapshot(record: dict, region: str, states=VERSION_STATES) -> dict:
+    """Project optional metadata into fixed classifications, never provider text."""
+    result = {
+        "state": observation_field(record, "state", states),
+        "availability": observation_field(record, "status", {"ACTIVE", "INACTIVE"}),
+    }
+    result["createdAtKind"] = "missing" if "createdAt" not in record else "null"
+    if record.get("createdAt") is not None:
+        try:
+            value = stamp(record["createdAt"])
+            if math.isfinite(value) and value >= 0:
+                result.update(createdAtKind="valid", createdAt=value)
+            else:
+                result["createdAtKind"] = "malformed"
+        except (Refused, TypeError, ValueError, OverflowError):
+            result["createdAtKind"] = "malformed"
+    value = record.get("logging")
+    logging = {"kind": "missing" if "logging" not in record else "null"}
+    if value is not None:
+        logging = {"kind": "malformed"}
+        if isinstance(value, dict):
+            if set(value) == {"disabled"} and value["disabled"] == {}:
+                logging = {"kind": "disabled"}
+            elif set(value) == {"cloudWatch"} and isinstance(value["cloudWatch"], dict):
+                group = value["cloudWatch"].get("logGroup")
+                if isinstance(group, str) and group:
+                    logging = {
+                        "kind": "cloudWatch",
+                        "logGroupSha256": identity("log-group", region, group),
+                    }
+            elif len(value) == 1 and not set(value) & {"disabled", "cloudWatch"}:
+                logging = {"kind": "unknownMember"}
+    result["logging"] = logging
+    return result
+
+
+def observation_error(
+    report: dict, section: str, exc: BaseException, **context
+) -> None:
+    report["sections"][section] = "incomplete"
+    if isinstance(exc, (InterruptedError, KeyboardInterrupt)):
+        raise exc
+    code = (
+        str(exc)
+        if isinstance(exc, Refused) and str(exc) in OBSERVATION_REASONS
+        else "observation_failed"
+    )
+    if isinstance(exc, subprocess.TimeoutExpired):
+        code = "deadline"
+    if len(report["errors"]) < OBSERVATION_MAX_ROWS:
+        report["errors"].append({"section": section, "code": code, **context})
+
+
+def observation_append(report: dict, section: str, row: dict) -> None:
+    require(
+        sum(
+            len(report[key])
+            for key in (
+                "images",
+                "microvms",
+                "logGroups",
+                "versions",
+                "versionCoverage",
+            )
+        )
+        < OBSERVATION_MAX_ROWS,
+        "observation_limit",
+    )
+    # Leave space for fixed error records if a later page or exact read fails.
+    require(
+        len(json.dumps(report)) + len(json.dumps(row)) < OBSERVATION_APPEND_BYTES,
+        "observation_limit",
+    )
+    report[section].append(row)
+
+
+def observe(manifest: dict, ownership: dict, api: ReadOnlyApi, report: dict) -> None:
+    """Collect evidence without interpreting it as authority or cleanup acceptance."""
+    region = manifest["region"]
+    report.update(
+        sections={key: "not_run" for key in OBSERVATION_SECTIONS},
+        errors=[],
+        images=[],
+        microvms=[],
+        logGroups=[],
+        versions=[],
+        versionCoverage=[],
+    )
+    try:
+        remaining = api.deadline - api.clock()
+        require(remaining > 0, "deadline")
+        done = subprocess.run(
+            [sys.executable, str(ROOT / "tools/verify-clean.py")],
+            capture_output=True,
+            text=True,
+            timeout=min(120, remaining),
+            env={
+                k: v
+                for k, v in os.environ.items()
+                if k not in {"GH_TOKEN", "GITHUB_TOKEN", "RECOVERY_ROLE_ARN"}
+            },
+        )
+        verified = captured_verifier(done, region)
+        # Bound this separately before insertion so a large census cannot erase
+        # the later bounded metadata when the credential wrapper validates it.
+        require(len(verified["resources"]) <= OBSERVATION_MAX_ROWS, "observation_limit")
+        # Keep this defense for future verifier schema growth. Its fixed fields and
+        # the row cap already bound the current schema below this byte budget.
+        # pragma: no mutate start (fixed verifier schema and row cap bound these bytes)
+        require(
+            len(json.dumps(verified).encode()) <= OBSERVATION_VERIFIER_BYTES,
+            "observation_limit",
+        )
+        # pragma: no mutate end
+        report["independentVerifier"] = verified
+        report["sections"]["independentVerifier"] = "completed"
+    except (Exception, KeyboardInterrupt) as exc:  # noqa: BLE001 - retain only fixed error categories
+        observation_error(report, "independentVerifier", exc)
+
+    images, names = {}, set()
+    for section, client, operation, field, key in (
+        ("images", api.plane, "list_microvm_images", "items", "imageArn"),
+        ("microvms", api.plane, "list_microvms", "items", "microvmId"),
+        ("logGroups", api.logs, "describe_log_groups", "logGroups", "logGroupName"),
+    ):
+        seen = set()
+        try:
+            kwargs = (
+                {"logGroupNamePrefix": SERVICE_PREFIX} if section == "logGroups" else {}
+            )
+            for raw in api.iter_rows(client, operation, field, **kwargs):
+                identifier = text(raw.get(key))
+                require(identifier not in seen, "duplicate_identity")
+                seen.add(identifier)
+                if section == "images":
+                    name = text(raw.get("name"))
+                    require(name not in names, "duplicate_identity")
+                    names.add(name)
+                    images[identifier] = (name, raw)
+                elif section == "microvms":
+                    state = observation_field(raw, "state", VM_STATES)
+                    observation_append(
+                        report,
+                        section,
+                        {
+                            "sha256": identity("microvm", region, identifier),
+                            "state": state,
+                        },
+                    )
+                else:
+                    observation_append(
+                        report,
+                        section,
+                        {"sha256": identity("log-group", region, identifier)},
+                    )
+            report["sections"][section] = "completed"
+        except (Exception, KeyboardInterrupt) as exc:  # noqa: BLE001 - a partial page set never becomes complete
+            observation_error(report, section, exc, operation=operation)
+
+    approved = {
+        name: source_arn
+        for key, (_, name, source_arn) in ownership.items()
+        if any(
+            row["sha256"] == key and row["kind"] == "image"
+            for row in manifest["resources"]
+        )
+    }
+    for name in sorted(approved.keys() - names):
+        requested = approved[name] or name
+        if requested in images:
+            # Preserve the listed identity and its versions when source and
+            # current names disagree about the same ARN.
+            observation_error(
+                report,
+                "images",
+                Refused("observation_identity"),
+                imageSha256=identity("image", region, name),
+            )
+            continue
+        images[requested] = (name, None)
+    report["sections"]["versions"] = (
+        "completed" if report["sections"]["images"] == "completed" else "incomplete"
+    )
+    for arn, (name, listed) in images.items():
+        image_key = identity("image", region, name)
+        row = {
+            "imageSha256": image_key,
+            "approved": name in approved,
+            "getOutcome": "api_error",
+            "identityMatches": None,
+        }
+        if listed is not None:
+            row.update(
+                imageArnSha256=digest(arn.encode()),
+                listed=observation_snapshot(listed, region, IMAGE_STATES),
+            )
+        requested = approved.get(name) or arn
+        if approved.get(name):
+            row.update(
+                requestedArnSha256=digest(requested.encode()),
+                sourceIdentityMatches=None,
+            )
+        try:
+            observation_append(report, "images", row)
+            current = api.call(
+                api.plane, "get_microvm_image", imageIdentifier=requested
+            )
+            row.update(
+                getOutcome="observed",
+                observed=observation_snapshot(current, region, IMAGE_STATES),
+                identityMatches=current.get("name") == name
+                and (listed is None or current.get("imageArn") == arn),
+            )
+            if approved.get(name):
+                row["sourceIdentityMatches"] = (
+                    current.get("imageArn") == requested and current.get("name") == name
+                )
+        except (Exception, KeyboardInterrupt) as exc:  # noqa: BLE001 - exact absence remains a read result
+            if isinstance(exc, Refused) and str(exc) == "not_found":
+                row["getOutcome"] = "not_found"
+            else:
+                observation_error(
+                    report,
+                    "images",
+                    exc,
+                    imageSha256=image_key,
+                    operation="get_microvm_image",
+                )
+        if listed is None:
+            continue
+        coverage = {
+            "imageSha256": image_key,
+            "imageArnSha256": digest(arn.encode()),
+            "listedCount": 0,
+            "getCount": 0,
+            "observedCount": 0,
+            "notFoundCount": 0,
+            "apiErrorCount": 0,
+            "paginationComplete": False,
+        }
+        try:
+            observation_append(report, "versionCoverage", coverage)
+            seen = set()
+            for version in api.iter_rows(
+                api.plane, "list_microvm_image_versions", "items", imageIdentifier=arn
+            ):
+                number = text(version.get("imageVersion"))
+                require(number not in seen, "duplicate_identity")
+                seen.add(number)
+                coverage["listedCount"] += 1
+                version_key = digest(number.encode())
+                saved = {
+                    "imageSha256": image_key,
+                    "imageArnSha256": digest(arn.encode()),
+                    "versionSha256": version_key,
+                    "listed": observation_snapshot(version, region),
+                    "getOutcome": "api_error",
+                    **{
+                        key + "Matches": None
+                        for key in (
+                            "identity",
+                            "state",
+                            "availability",
+                            "createdAt",
+                            "logging",
+                        )
+                    },
+                }
+                observation_append(report, "versions", saved)
+                try:
+                    coverage["getCount"] += 1
+                    current = api.call(
+                        api.plane,
+                        "get_microvm_image_version",
+                        imageIdentifier=arn,
+                        imageVersion=number,
+                    )
+                    observed = observation_snapshot(current, region)
+                    coverage["observedCount"] += 1
+                    saved.update(
+                        getOutcome="observed",
+                        observed=observed,
+                        identityMatches=current.get("imageArn")
+                        == version.get("imageArn")
+                        == arn
+                        and current.get("imageVersion") == number,
+                    )
+                    for key in ("state", "availability", "logging"):
+                        left, right = saved["listed"][key], observed[key]
+                        unknown = {"missing", "null", "malformed", "unknownMember"}
+                        known = (
+                            (
+                                left["kind"] not in unknown
+                                and right["kind"] not in unknown
+                            )
+                            if key == "logging"
+                            else left not in unknown and right not in unknown
+                        )
+                        saved[key + "Matches"] = left == right if known else None
+                    if (
+                        saved["listed"]["createdAtKind"]
+                        == observed["createdAtKind"]
+                        == "valid"
+                    ):
+                        saved["createdAtMatches"] = (
+                            saved["listed"]["createdAt"] == observed["createdAt"]
+                        )
+                except (Exception, KeyboardInterrupt) as exc:  # noqa: BLE001 - preserve prior versions and the listed projection
+                    if isinstance(exc, Refused) and str(exc) == "not_found":
+                        saved["getOutcome"] = "not_found"
+                        coverage["notFoundCount"] += 1
+                    else:
+                        coverage["apiErrorCount"] += 1
+                    observation_error(
+                        report,
+                        "versions",
+                        exc,
+                        imageSha256=image_key,
+                        versionSha256=version_key,
+                        operation="get_microvm_image_version",
+                    )
+            coverage["paginationComplete"] = True
+        except (Exception, KeyboardInterrupt) as exc:  # noqa: BLE001 - later page failures preserve prior safe rows
+            observation_error(
+                report,
+                "versions",
+                exc,
+                imageSha256=image_key,
+                operation="list_microvm_image_versions",
+            )
+    report["status"] = (
+        "completed"
+        if all(value == "completed" for value in report["sections"].values())
+        else "incomplete"
+    )
+
+
+def validate_observation(value: Any) -> dict:
+    """Keep the observation artifact bounded and separate from recovery receipts."""
+
+    def valid(ok):
+        require(ok, "receipt_schema")
+
+    def hashed(item):
+        return isinstance(item, str) and re.fullmatch(r"[a-f0-9]{64}", item) is not None
+
+    def snapshot(item, states):
+        valid(isinstance(item, dict))
+        valid(
+            {"state", "availability", "createdAtKind", "logging"}
+            <= set(item)
+            <= {"state", "availability", "createdAtKind", "createdAt", "logging"}
+        )
+        valid(item["state"] in states | {"missing", "null", "malformed"})
+        valid(
+            item["availability"]
+            in {"ACTIVE", "INACTIVE", "missing", "null", "malformed"}
+        )
+        valid(item["createdAtKind"] in {"valid", "missing", "null", "malformed"})
+        valid(("createdAt" in item) == (item["createdAtKind"] == "valid"))
+        if "createdAt" in item:
+            valid(
+                type(item["createdAt"]) in (int, float)
+                and math.isfinite(item["createdAt"])
+                and item["createdAt"] >= 0
+            )
+        logging = item["logging"]
+        valid(isinstance(logging, dict) and "kind" in logging)
+        valid(
+            logging["kind"]
+            in {
+                "missing",
+                "null",
+                "disabled",
+                "cloudWatch",
+                "malformed",
+                "unknownMember",
+            }
+        )
+        valid(
+            set(logging)
+            == (
+                {"kind", "logGroupSha256"}
+                if logging["kind"] == "cloudWatch"
+                else {"kind"}
+            )
+        )
+        if "logGroupSha256" in logging:
+            valid(hashed(logging["logGroupSha256"]))
+
+    valid(type(value) is dict)
+    binding = {
+        "sourceRun",
+        "sourceSha",
+        "region",
+        "manifestSha256",
+        "parserVersion",
+        "sourceLogRepresentation",
+    }
+    required = {
+        "kind",
+        "schemaVersion",
+        "conformance_verified",
+        "recoveryAccepted",
+        "mutationsPerformed",
+        "status",
+    }
+    valid(
+        required
+        <= set(value)
+        <= required
+        | binding
+        | {
+            "sections",
+            "errors",
+            "images",
+            "microvms",
+            "logGroups",
+            "versions",
+            "versionCoverage",
+            "independentVerifier",
+            "reason",
+        }
+    )
+    valid(
+        value["kind"] == "live-recovery-observation"
+        and type(value["schemaVersion"]) is int
+        and value["schemaVersion"] == 1
+    )
+    valid(
+        value["conformance_verified"] is False
+        and value["recoveryAccepted"] is False
+        and value["mutationsPerformed"] is False
+    )
+    valid(value["status"] in {"completed", "incomplete"})
+    # Reuse only the existing binding and verifier validation, never its verdict.
+    common = {
+        key: item
+        for key, item in value.items()
+        if key in binding | {"independentVerifier"}
+    }
+    validate_receipt(
+        {
+            "kind": "live-recovery",
+            "conformance_verified": False,
+            "status": "failed",
+            **common,
+        }
+    )
+    if "independentVerifier" in value:
+        valid(len(value["independentVerifier"]["resources"]) <= OBSERVATION_MAX_ROWS)
+        # Preserve the byte contract if the fixed verifier schema grows later.
+        # pragma: no mutate start (fixed verifier schema and row cap bound these bytes)
+        valid(
+            len(json.dumps(value["independentVerifier"]).encode())
+            <= OBSERVATION_VERIFIER_BYTES
+        )
+        # pragma: no mutate end
+    if "reason" in value:
+        valid(value["status"] == "incomplete" and value["reason"] in REASONS)
+    if "sections" in value:
+        sections = value["sections"]
+        valid(isinstance(sections, dict) and set(sections) == OBSERVATION_SECTIONS)
+        valid(
+            all(
+                item in {"completed", "incomplete", "not_run"}
+                for item in sections.values()
+            )
+        )
+        valid(
+            (sections["independentVerifier"] == "completed")
+            == ("independentVerifier" in value)
+        )
+        valid(
+            value["status"] != "completed"
+            or all(item == "completed" for item in sections.values())
+        )
+    else:
+        valid(value["status"] == "incomplete" and "independentVerifier" not in value)
+    total = 0
+    for section in (
+        "images",
+        "microvms",
+        "logGroups",
+        "versions",
+        "versionCoverage",
+        "errors",
+    ):
+        rows = value.get(section, [])
+        valid(isinstance(rows, list) and len(rows) <= OBSERVATION_MAX_ROWS)
+        if section != "errors":
+            total += len(rows)
+        for row in rows:
+            valid(isinstance(row, dict))
+            if section == "errors":
+                valid(
+                    {"section", "code"}
+                    <= set(row)
+                    <= {"section", "code", "operation", "imageSha256", "versionSha256"}
+                )
+                valid(
+                    row["section"] in OBSERVATION_SECTIONS
+                    and row["code"] in OBSERVATION_REASONS
+                )
+                if "operation" in row:
+                    valid(row["operation"] in OBSERVATION_OPERATIONS)
+            elif section == "logGroups":
+                valid(set(row) == {"sha256"})
+            elif section == "microvms":
+                valid(
+                    set(row) == {"sha256", "state"}
+                    and row["state"] in VM_STATES | {"missing", "null", "malformed"}
+                )
+            elif section == "versionCoverage":
+                counts = {
+                    "listedCount",
+                    "getCount",
+                    "observedCount",
+                    "notFoundCount",
+                    "apiErrorCount",
+                }
+                valid(
+                    set(row)
+                    == counts | {"imageSha256", "imageArnSha256", "paginationComplete"}
+                )
+                valid(all(type(row[key]) is int and row[key] >= 0 for key in counts))
+                valid(type(row["paginationComplete"]) is bool)
+                valid(
+                    row["getCount"]
+                    == row["observedCount"]
+                    + row["notFoundCount"]
+                    + row["apiErrorCount"]
+                )
+                valid(row["getCount"] <= row["listedCount"])
+            else:
+                base = {"imageSha256", "getOutcome", "identityMatches"}
+                extra = {"observed", "listed"}
+                if section == "images":
+                    base |= {"approved"}
+                    extra |= {
+                        "imageArnSha256",
+                        "requestedArnSha256",
+                        "sourceIdentityMatches",
+                    }
+                    valid(type(row.get("approved")) is bool)
+                    valid(("listed" in row) == ("imageArnSha256" in row))
+                    valid(
+                        ("sourceIdentityMatches" in row)
+                        == ("requestedArnSha256" in row)
+                    )
+                    valid("requestedArnSha256" not in row or row["approved"])
+                else:
+                    base |= {
+                        "imageArnSha256",
+                        "versionSha256",
+                        "listed",
+                        "stateMatches",
+                        "availabilityMatches",
+                        "createdAtMatches",
+                        "loggingMatches",
+                    }
+                valid(base <= set(row) <= base | extra)
+                valid(row["getOutcome"] in {"observed", "not_found", "api_error"})
+                valid((row["getOutcome"] == "observed") == ("observed" in row))
+                for field in ("listed", "observed"):
+                    if field in row:
+                        snapshot(
+                            row[field],
+                            IMAGE_STATES if section == "images" else VERSION_STATES,
+                        )
+                for key, item in row.items():
+                    if key.endswith("Matches"):
+                        valid(item is None or type(item) is bool)
+            for key, item in row.items():
+                if key.endswith("Sha256") or key == "sha256":
+                    valid(hashed(item))
+    valid(total <= OBSERVATION_MAX_ROWS)
+    for section, fields in (
+        ("images", ("imageSha256",)),
+        ("microvms", ("sha256",)),
+        ("logGroups", ("sha256",)),
+        ("versions", ("imageSha256", "versionSha256")),
+        ("versionCoverage", ("imageSha256",)),
+    ):
+        keys = [tuple(row[field] for field in fields) for row in value.get(section, [])]
+        valid(len(keys) == len(set(keys)))
+    if value["status"] == "completed":
+        valid(not value.get("errors") and binding.issubset(value))
+        valid(
+            {
+                "images",
+                "microvms",
+                "logGroups",
+                "versions",
+                "versionCoverage",
+                "sections",
+                "independentVerifier",
+            }.issubset(value)
+        )
+        coverage = {row["imageSha256"]: row for row in value["versionCoverage"]}
+        listed_images = {
+            row["imageSha256"]: row for row in value["images"] if "listed" in row
+        }
+        valid(set(coverage) == set(listed_images))
+        valid(all(row["getOutcome"] != "api_error" for row in value["images"]))
+        for image, row in coverage.items():
+            valid(row["imageArnSha256"] == listed_images[image]["imageArnSha256"])
+            versions = [
+                item for item in value["versions"] if item["imageSha256"] == image
+            ]
+            valid(
+                row["paginationComplete"]
+                and row["listedCount"] == row["getCount"] == len(versions)
+            )
+            valid(row["notFoundCount"] == row["apiErrorCount"] == 0)
+            valid(
+                all(
+                    item["getOutcome"] == "observed"
+                    and item["imageArnSha256"] == row["imageArnSha256"]
+                    for item in versions
+                )
+            )
+        valid(all(row["imageSha256"] in coverage for row in value["versions"]))
+    valid(len(json.dumps(value).encode()) <= OBSERVATION_MAX_BYTES)
+    return value
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("preflight", "apply"))
+    parser.add_argument("mode", choices=("preflight", "apply", "observe"))
     parser.add_argument("--source-run", required=True)
     parser.add_argument("--manifest-sha256", required=True)
     parser.add_argument("--report", type=Path, required=True)
@@ -1376,6 +2089,14 @@ def main() -> int:
         "conformance_verified": False,
         "status": "failed",
     }
+    if args.mode == "observe":
+        report.update(
+            kind="live-recovery-observation",
+            schemaVersion=1,
+            status="incomplete",
+            recoveryAccepted=False,
+            mutationsPerformed=False,
+        )
 
     def interrupted(signum, frame):
         # Cancellation must pass through optional observers and SDK exception handling.
@@ -1419,8 +2140,9 @@ def main() -> int:
             parserVersion=PARSER_VERSION,
             sourceLogRepresentation=LOG_REPRESENTATION,
         )
-        if args.mode == "apply":
-            require(args.exclusive_names, "exclusive_names_required")
+        if args.mode in {"apply", "observe"}:
+            if args.mode == "apply":
+                require(args.exclusive_names, "exclusive_names_required")
             require(os.environ.get("AWS_REGION") == manifest["region"], "aws_region")
             require(time.monotonic() < deadline, "deadline")
             import boto3
@@ -1430,11 +2152,15 @@ def main() -> int:
                 connect_timeout=5, read_timeout=5, retries={"total_max_attempts": 1}
             )
             session = boto3.Session(region_name=manifest["region"])
-            api = Api(
+            api_type = ReadOnlyApi if args.mode == "observe" else Api
+            api = api_type(
                 session.client("lambda-microvms", config=config),
                 session.client("logs", config=config),
                 deadline=deadline,
             )
+            if args.mode == "observe":
+                observe(manifest, ownership, api, report)
+                return int(report["status"] != "completed")
             report["versionEvidence"] = api.version_evidence
             report["apiFailures"] = api.failures
             report["roleDuration"] = observe_duration(

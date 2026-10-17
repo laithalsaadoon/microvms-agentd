@@ -252,7 +252,12 @@ class LiveRecoveryWorkflowTests(unittest.TestCase):
             steps[0]["with"], {"ref": "${{ github.sha }}", "persist-credentials": False}
         )
         self.assertNotIn("configure-aws-credentials", json.dumps(job))
-        self.assertIn("tools/recovery-credentials.py", json.dumps(job))
+        apply_step = next(
+            step
+            for step in steps
+            if step.get("name") == "recover only the reviewed resource identities"
+        )
+        self.assertIn("tools/recovery-credentials.py", apply_step["run"])
         self.assertEqual(
             job["env"],
             {
@@ -275,7 +280,9 @@ class LiveRecoveryWorkflowTests(unittest.TestCase):
 
     def test_recovery_inputs_and_exclusive_attestation_are_shell_arguments(self):
         commands = [
-            step["run"] for step in self.jobs["recovery"]["steps"] if "run" in step
+            step["run"]
+            for step in self.jobs["recovery"]["steps"]
+            if step.get("name") == "recover only the reviewed resource identities"
         ]
         self.assertEqual(len(commands), 1)
         script = commands[0]
@@ -325,9 +332,25 @@ class LiveRecoveryWorkflowTests(unittest.TestCase):
                 self.assertFalse((root / "injected").exists())
 
     def test_recovery_reports_never_publish_a_live_marker(self):
-        for name, artifact, path in (
-            ("recovery-preflight", "recovery-preflight", "recovery-preflight.json"),
-            ("recovery", "recovery-report", "recovery.json"),
+        for name, artifact, path, condition in (
+            (
+                "recovery-preflight",
+                "recovery-preflight",
+                "recovery-preflight.json",
+                "always()",
+            ),
+            (
+                "recovery",
+                "recovery-report",
+                "recovery.json",
+                "always() && !inputs.observe_only",
+            ),
+            (
+                "recovery",
+                "recovery-observation",
+                "recovery-observation.json",
+                "always() && inputs.observe_only",
+            ),
         ):
             job = self.jobs[name]
             with self.subTest(job=name):
@@ -339,9 +362,10 @@ class LiveRecoveryWorkflowTests(unittest.TestCase):
                     step
                     for step in job["steps"]
                     if "upload-artifact@" in step.get("uses", "")
+                    and step["with"]["name"] == artifact
                 ]
                 self.assertEqual(len(uploads), 1)
-                self.assertEqual(uploads[0]["if"], "always()")
+                self.assertEqual(uploads[0]["if"], condition)
                 self.assertEqual(
                     uploads[0]["with"],
                     {"name": artifact, "path": path, "if-no-files-found": "error"},
@@ -360,7 +384,7 @@ class LiveRecoveryWorkflowTests(unittest.TestCase):
         )
         for name, allowed in (
             ("recovery-preflight", [checkout, upload]),
-            ("recovery", [checkout, uv, upload]),
+            ("recovery", [checkout, uv, upload, upload]),
         ):
             self.assertNotIn("uses", self.jobs[name])
             self.assertEqual(

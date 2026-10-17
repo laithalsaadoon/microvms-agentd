@@ -87,6 +87,43 @@ so the no-other-writer precondition also covers launches that use selected log
 names. Image deletion always retains its ordinary image-reference dependency
 check.
 
+## Read-only observations
+
+Dispatch with `mode: recover` and `observe_only: true` to collect a separate
+`recovery-observation` artifact containing `recovery-observation.json`. The flag
+defaults to false and is rejected with full-suite mode. The same main-branch,
+owner, manifest, source-provenance, and protected-environment checks apply. The
+credential wrapper selects `recover-live.py observe` explicitly; it never falls
+back to cleanup after a failed observation.
+
+The observer first captures the independent verifier's classified census, then
+collects the complete regional image and VM lists and the service log-group
+namespace. These reads are not an atomic snapshot. Every regional image's full
+version list is recorded, including deleted versions, with an exact Get for each
+version. Per-image coverage records distinguish an empty list from a failed or
+partial list. Approved image Get calls also run when the image is absent from
+List, using the source ARN when available. If the name now resolves to another
+image, the source and current List identities remain separately identifiable by
+their hashes.
+
+A separate API boundary permits only the observer's List, Get, and log-group
+description operations. The observer does not invoke cleanup selectors or log
+dependency decisions. Missing, null, malformed, and unknown optional state or
+logging fields remain classified data; missing logging never means disabled.
+Version availability is read from the provider's `status` field. List and Get
+projections retain only recognized values, finite timestamps, comparison flags,
+and identity hashes. Raw names, ARNs, configurations, and provider messages are
+excluded from the artifact.
+
+The `live-recovery-observation` schema has its own bounded validator. Its
+`completed` status means that all collection sections completed; it can contain
+leaks and unknown configuration. An API, pagination, verifier, or output-limit
+failure produces `incomplete` and preserves earlier safe observations. The
+artifact always records `conformance_verified`, `recoveryAccepted`, and
+`mutationsPerformed` as false. It does not replace a partial recovery receipt,
+establish cleanup, or authorize deletion. This path is verified offline only
+until its hosted exercise succeeds.
+
 Run `uv run --locked pytest tools/test_recover_live*.py tools/test_recovery_credentials.py`
 for the offline selector, provenance, failure, credential and privacy cases. The seeded faults are in
 `verify/guards/faults/recovery.toml`, `verify/guards/faults/recovery-phases.toml`,
