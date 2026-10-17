@@ -54,6 +54,13 @@ id = "semver-edges-fn-hidden"
 message = "function microvms_edges::session::forward::direct_url, previously in file"
 transform = { file = "crates/microvms-edges/src/session/forward.rs", replace = "pub fn direct_url(endpoint: &str, guest_port: u16, target: &str)", with = "pub(crate) fn direct_url(endpoint: &str, guest_port: u16, target: &str)" }
 
+# An external re-export keeps the path usable but drops the constant's definition from this
+# crate's rustdoc JSON. Preserve the published declaration while sharing its value's owner.
+[[family.fault]]
+id = "semver-edges-constant-reexported"
+message = "DEFAULT_BIND"
+transform = { file = "crates/microvms-edges/src/session/serve.rs", replace = "pub const DEFAULT_BIND: SocketAddr = microvms_app::session::DEFAULT_BIND;", with = "pub use microvms_app::session::DEFAULT_BIND;" }
+
 # Core's own items: the composition root's free functions. `run_token` gains a parameter, and a
 # caller of the last release stops compiling (core's own token test and the live suite call it).
 [[family]]

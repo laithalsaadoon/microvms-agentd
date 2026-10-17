@@ -366,7 +366,9 @@ where
 // ── the SDKs' handles ────────────────────────────────────────────────────────
 
 /// The shared listener default, retained at its existing public path.
-pub use microvms_app::session::DEFAULT_BIND;
+// Keep a definition here: an external re-export omits the published constant from this
+// crate's rustdoc JSON. The value still comes from the shared application-layer owner.
+pub const DEFAULT_BIND: SocketAddr = microvms_app::session::DEFAULT_BIND;
 
 /// A local address to listen on: `bind` when given, [`DEFAULT_BIND`] otherwise.
 pub fn bind_address(bind: Option<&str>) -> Result<SocketAddr, Error> {
