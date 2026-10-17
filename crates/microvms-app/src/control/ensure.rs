@@ -1370,6 +1370,117 @@ mod tests {
         assert!(uploads(&services).is_empty(), "IMAGE-9");
     }
 
+    /// IMAGE-9: a vanished build gets one new decision, including waiting for a deletion
+    /// already in progress. IMAGE-8 still requires exactly one upload before the create.
+    #[tokio::test]
+    async fn a_vanished_build_is_redescribed_and_rebuilt_once() {
+        for deleting in [false, true] {
+            let name = expected_name();
+            let fake = Arc::new(FakeControlPlane::new());
+            fake.answer("GetMicrovmImage", state(&name, "CREATING"))
+                .answer("GetMicrovmImage", absent());
+            for _ in 0..2 {
+                fake.answer(
+                    "GetMicrovmImage",
+                    if deleting {
+                        state(&name, "DELETING")
+                    } else {
+                        absent()
+                    },
+                );
+            }
+            if deleting {
+                fake.answer("GetMicrovmImage", absent());
+            }
+            fake.answer("GetMicrovmImage", Answer::ok(ready(&name)))
+                .answer(
+                    "CreateMicrovmImage",
+                    Answer::created(fake::create_image_response(&name)),
+                );
+            let services = Arc::new(FakeServices {
+                before_create: Some(Arc::clone(&fake)),
+                ..FakeServices::default()
+            });
+            let ensured = sandbox(&fake, &services)
+                .ensure_image(request())
+                .await
+                .expect("the vanished build can be replaced");
+
+            let mut expected = vec!["GetMicrovmImage"; if deleting { 5 } else { 4 }];
+            expected.extend(["CreateMicrovmImage", "GetMicrovmImage"]);
+            assert_eq!(fake.operations(), expected, "deleting={deleting}");
+            assert_eq!(ensured.image.state, "CREATED");
+            assert!(!ensured.reused);
+            assert!(ensured.uploaded);
+            assert_eq!(
+                uploads(&services),
+                [(
+                    BUCKET.to_string(),
+                    format!("harbor/images/{name}/artifact.zip")
+                )]
+            );
+            assert_eq!(
+                fake.first_body("CreateMicrovmImage")["codeArtifact"]["uri"],
+                ensured.artifact_uri
+            );
+            assert_eq!(services.account_calls.load(Ordering::SeqCst), 1);
+        }
+    }
+
+    /// IMAGE-9: recovery is a budget for the whole ensure, not a fresh allowance for each
+    /// wait. A ready answer after the second disappearance must never be consumed.
+    #[tokio::test]
+    async fn a_second_vanished_build_returns_the_wait_error_without_recovery() {
+        let name = expected_name();
+        let fake = Arc::new(FakeControlPlane::new());
+        fake.answer("GetMicrovmImage", state(&name, "CREATING"))
+            .answer("GetMicrovmImage", absent())
+            .answer("GetMicrovmImage", absent())
+            .answer("GetMicrovmImage", absent())
+            .answer(
+                "GetMicrovmImage",
+                Answer::failure(404, "second disappearance"),
+            )
+            .answer("GetMicrovmImage", Answer::ok(ready(&name)))
+            .answer(
+                "CreateMicrovmImage",
+                Answer::created(fake::create_image_response(&name)),
+            );
+        let services = Arc::new(FakeServices {
+            before_create: Some(Arc::clone(&fake)),
+            ..FakeServices::default()
+        });
+        let error = sandbox(&fake, &services)
+            .ensure_image(request())
+            .await
+            .expect_err("a second disappearance ends the ensure");
+
+        assert_eq!(error.kind(), ErrorKind::Platform);
+        assert!(
+            error.to_string().contains("second disappearance"),
+            "{error}"
+        );
+        assert_eq!(
+            fake.operations(),
+            [
+                "GetMicrovmImage",
+                "GetMicrovmImage",
+                "GetMicrovmImage",
+                "GetMicrovmImage",
+                "CreateMicrovmImage",
+                "GetMicrovmImage",
+            ]
+        );
+        assert_eq!(
+            uploads(&services),
+            [(
+                BUCKET.to_string(),
+                format!("harbor/images/{name}/artifact.zip")
+            )]
+        );
+        assert_eq!(services.account_calls.load(Ordering::SeqCst), 1);
+    }
+
     /// **IMAGE-8, the build.** No image under the name: the artifact goes to the
     /// content-addressed key before create, the create names that URI and the derived name,
     /// and the image this call built is not reused.
@@ -1492,6 +1603,137 @@ mod tests {
         assert!(!ensured.reused, "IMAGE-10");
         assert_eq!(fake.call_count("DeleteMicrovmImage"), 1, "IMAGE-10");
         assert_eq!(fake.call_count("CreateMicrovmImage"), 1);
+    }
+
+    /// IMAGE-10: force does not invent a deletion when the name is already free.
+    #[tokio::test]
+    async fn a_forced_absent_image_builds_without_deleting() {
+        let name = expected_name();
+        let fake = Arc::new(FakeControlPlane::new());
+        fake.answer("GetMicrovmImage", absent())
+            .answer("GetMicrovmImage", Answer::ok(ready(&name)))
+            .answer(
+                "CreateMicrovmImage",
+                Answer::created(fake::create_image_response(&name)),
+            );
+        let services = Arc::new(FakeServices {
+            before_create: Some(Arc::clone(&fake)),
+            ..FakeServices::default()
+        });
+        let mut forced = request();
+        forced.force = true;
+        let ensured = sandbox(&fake, &services)
+            .ensure_image(forced)
+            .await
+            .unwrap();
+        assert_eq!(
+            fake.operations(),
+            ["GetMicrovmImage", "CreateMicrovmImage", "GetMicrovmImage"]
+        );
+        assert!(!ensured.reused);
+        assert!(ensured.uploaded);
+        assert_eq!(uploads(&services).len(), 1);
+    }
+
+    /// IMAGE-10: an existing deletion is awaited under force as well; the caller must not
+    /// send another delete or create before observing that the name is free.
+    #[tokio::test]
+    async fn a_forced_deleting_image_is_awaited_without_another_delete() {
+        let name = expected_name();
+        let fake = Arc::new(FakeControlPlane::new());
+        fake.answer("GetMicrovmImage", state(&name, "DELETING"))
+            .answer("GetMicrovmImage", state(&name, "DELETING"))
+            .answer("GetMicrovmImage", absent())
+            .answer("GetMicrovmImage", Answer::ok(ready(&name)))
+            .answer(
+                "CreateMicrovmImage",
+                Answer::created(fake::create_image_response(&name)),
+            );
+        let services = Arc::new(FakeServices {
+            before_create: Some(Arc::clone(&fake)),
+            ..FakeServices::default()
+        });
+        let mut forced = request();
+        forced.force = true;
+        let ensured = sandbox(&fake, &services)
+            .ensure_image(forced)
+            .await
+            .unwrap();
+        assert_eq!(
+            fake.operations(),
+            [
+                "GetMicrovmImage",
+                "GetMicrovmImage",
+                "GetMicrovmImage",
+                "CreateMicrovmImage",
+                "GetMicrovmImage",
+            ]
+        );
+        assert!(!ensured.reused);
+        assert!(ensured.uploaded);
+        assert_eq!(uploads(&services).len(), 1);
+    }
+
+    /// IMAGE-10: a forced caller lets the running build settle before deleting it. Force
+    /// is consumed by that replacement, so a competitor winning the free name is joined.
+    #[tokio::test]
+    async fn a_forced_build_settles_before_deletion_and_joins_a_competing_replacement() {
+        let name = expected_name();
+        let fake = Arc::new(FakeControlPlane::new());
+        for answer in [
+            state(&name, "CREATING"),
+            state(&name, "CREATING"),
+            Answer::ok(ready(&name)),
+            Answer::ok(ready(&name)),
+            state(&name, "DELETING"),
+            absent(),
+            absent(),
+            Answer::ok(ready(&name)),
+        ] {
+            fake.answer("GetMicrovmImage", answer);
+        }
+        fake.answer(
+            "ListMicrovmImageVersions",
+            Answer::ok(fake::list_versions_response("1")),
+        )
+        .answer(
+            "DeleteMicrovmImage",
+            Answer::ok(fake::delete_image_response()),
+        )
+        .answer(
+            "CreateMicrovmImage",
+            Answer::failure(409, "a competitor took the name"),
+        );
+        let services = Arc::new(FakeServices {
+            before_create: Some(Arc::clone(&fake)),
+            ..FakeServices::default()
+        });
+        let mut forced = request();
+        forced.force = true;
+        let ensured = sandbox(&fake, &services)
+            .ensure_image(forced)
+            .await
+            .unwrap();
+        assert_eq!(
+            fake.operations(),
+            [
+                "GetMicrovmImage",
+                "GetMicrovmImage",
+                "GetMicrovmImage",
+                "GetMicrovmImage",
+                "ListMicrovmImageVersions",
+                "DeleteMicrovmImage",
+                "GetMicrovmImage",
+                "GetMicrovmImage",
+                "CreateMicrovmImage",
+                "GetMicrovmImage",
+                "GetMicrovmImage",
+            ]
+        );
+        assert_eq!(ensured.image.state, "CREATED");
+        assert!(ensured.reused);
+        assert!(ensured.uploaded);
+        assert_eq!(uploads(&services).len(), 1);
     }
 
     /// **IMAGE-10, a deletion under way.** The name is awaited free, then built.

@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: Apache-2.0
+# The image clauses retain the exceptional paths as well as ordinary reuse.
+
+[[fault]]
+id = "formal-image-vanished-no-recovery"
+guard = "control::ensure::tests::a_vanished_build_is_redescribed_and_rebuilt_once"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::ensure::tests::a_vanished_build_is_redescribed_and_rebuilt_once"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/ensure.rs", replace = "            Plan::Wait => match control.wait_for_image(&arn, size, wait).await {\n                Ok(image) => return Ok(done(image, true, progress.uploaded)),\n                Err(error) => {\n                    if !progress.redescribed && control.vanished(&arn).await? {", with = "            Plan::Wait => match control.wait_for_image(&arn, size, wait).await {\n                Ok(image) => return Ok(done(image, true, progress.uploaded)),\n                Err(error) => {\n                    if false && !progress.redescribed && control.vanished(&arn).await? {" }
+
+[[fault]]
+id = "formal-image-vanished-budget-reset"
+guard = "control::ensure::tests::a_second_vanished_build_returns_the_wait_error_without_recovery"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::ensure::tests::a_second_vanished_build_returns_the_wait_error_without_recovery"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/ensure.rs", replace = "            Plan::Wait => match control.wait_for_image(&arn, size, wait).await {\n                Ok(image) => return Ok(done(image, true, progress.uploaded)),\n                Err(error) => {\n                    if !progress.redescribed && control.vanished(&arn).await? {\n                        progress.redescribed = true;", with = "            Plan::Wait => match control.wait_for_image(&arn, size, wait).await {\n                Ok(image) => return Ok(done(image, true, progress.uploaded)),\n                Err(error) => {\n                    if !progress.redescribed && control.vanished(&arn).await? {\n                        progress.redescribed = false;" }
+
+[[fault]]
+id = "formal-image-forced-absent-delete"
+guard = "control::ensure::tests::a_forced_absent_image_builds_without_deleting"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::ensure::tests::a_forced_absent_image_builds_without_deleting"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/ensure.rs", replace = "        (Found::Absent, _) => Plan::Build,", with = "        (Found::Absent, true) => Plan::Delete,\n        (Found::Absent, false) => Plan::Build," }
+
+[[fault]]
+id = "formal-image-forced-deleting-delete"
+guard = "control::ensure::tests::a_forced_deleting_image_is_awaited_without_another_delete"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::ensure::tests::a_forced_deleting_image_is_awaited_without_another_delete"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/control/ensure.rs", replace = "        (Found::Deleting, _) => Plan::AwaitAbsent,", with = "        (Found::Deleting, true) => Plan::Delete,\n        (Found::Deleting, false) => Plan::AwaitAbsent," }
+
+[[family]]
+guard = "control::ensure::tests::a_forced_build_settles_before_deletion_and_joins_a_competing_replacement"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::ensure::tests::a_forced_build_settles_before_deletion_and_joins_a_competing_replacement"]
+expect = "test-failed"
+suite = "rust"
+
+[[family.fault]]
+id = "formal-image-forced-build-reused"
+transform = { file = "crates/microvms-app/src/control/ensure.rs", replace = "            Plan::Wait if force => {", with = "            Plan::Wait if false => {" }
+
+[[family.fault]]
+id = "formal-image-force-unconsumed"
+transform = { file = "crates/microvms-app/src/control/ensure.rs", replace = "                progress.deleted = true;\n            }\n            Plan::Wait =>", with = "                progress.deleted = false;\n            }\n            Plan::Wait =>" }
+
+[[family]]
+guard = "control::context::tests::only_nonexcluded_symlinks_warn_and_no_symlink_is_followed"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "control::context::tests::only_nonexcluded_symlinks_warn_and_no_symlink_is_followed"]
+expect = "test-failed"
+suite = "rust"
+
+[[family.fault]]
+id = "formal-image-ignored-symlink-warns"
+transform = { file = "crates/microvms-edges/src/control/context.rs", replace = "                if !excluded {", with = "                if true {" }
+
+[[family.fault]]
+id = "formal-image-symlink-followed"
+transform = { file = "crates/microvms-edges/src/control/context.rs", replace = "let kind = std::fs::symlink_metadata(&path)", with = "let kind = std::fs::metadata(&path)" }

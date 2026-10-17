@@ -1074,7 +1074,7 @@ The microvms-core shall name an ensured image by its prefix and twelve hex chara
 
 ## IMAGE-7
 
-When a caller supplies a build context directory, the microvms-core shall add each regular file that the selected ignore file does not exclude to an artifact zip with fixed entry dates and modes, selecting Dockerfile.dockerignore when present and .dockerignore otherwise, skipping each symlink with a warning.
+When a caller supplies a build context directory, the microvms-core shall select Dockerfile.dockerignore when present and .dockerignore otherwise, using no ignore rules when neither exists; omit the root Dockerfile and both root ignore files from the context; reject a nonexcluded regular file named agentd at the root; add each remaining nonexcluded regular file to an artifact zip with fixed entry dates and normalized file modes; skip each remaining symlink without following it, warning for each nonexcluded symlink.
 
 - **model:** waived: reading a directory has no states; the ignore rules are fuzzed against moby's own regex translation instead
 - **gherkin:** `crates/microvms-core/tests/features/ensure_image.feature`
@@ -1096,7 +1096,7 @@ When the ensure-image decision proceeds to a build attempt, the microvms-core sh
 
 ## IMAGE-9
 
-When a describe finds the ensured image (ready or building) and the caller has not forced a rebuild, the microvms-core shall return the image once it is ready, marked reused, with no upload and no create.
+When an ensure-image call evaluates an image without an outstanding forced rebuild, or a wait for image readiness fails, the microvms-core shall return an already-ready image marked reused without a new upload or create whenever no forced rebuild remains outstanding; under the same condition, wait for a building image and return it marked reused without a new upload or create when ready; after a failed readiness wait for an existing build, an accepted create, or a refused-create winner, restart the describe-and-decide loop when the call has not used its recovery restart and a follow-up describe finds (no image or state DELETING); otherwise propagate the failure; share one recovery restart across the entire ensure-image call, including recovery from a refused create.
 
 - **model:** `crates/model/src/image.rs`
 - **gherkin:** `crates/microvms-core/tests/features/ensure_image.feature`
@@ -1107,7 +1107,7 @@ When a describe finds the ensured image (ready or building) and the caller has n
 
 ## IMAGE-10
 
-If the ensured image has failed or the caller forces a rebuild, then the microvms-core shall delete the image, wait for the name to be free before building, delete a ready image only under a forced rebuild.
+If an ensure-image call evaluates the image state and whether its forced-rebuild request remains outstanding, then the microvms-core shall delete a failed image before rebuilding; delete a ready image when a forced rebuild remains outstanding, preserving it otherwise; for a building image under forced rebuild, wait for the build to settle and delete any surviving image before rebuilding; after requesting deletion, wait for (absence or a replacement image) before attempting the build; apply that wait when deletion is already in progress; build directly when no image exists; consume the forced-rebuild request after the deletion path or the forced wait-and-replace path so recovery does not repeatedly force replacement.
 
 - **model:** `crates/model/src/image.rs`
 - **gherkin:** `crates/microvms-core/tests/features/ensure_image.feature`
