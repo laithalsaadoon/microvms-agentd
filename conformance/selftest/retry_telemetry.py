@@ -65,10 +65,13 @@ class Sandbox:
 
 NODE_BINDING = """
 const assert = require('node:assert/strict');
+// The driver samples before launch and after readiness, in that order per phase.
+let clockReads = 0;
+Date.now = () => ++clockReads % 2 === 1 ? 99000 : 101000;
 class Session {
   constructor(attempts, ready = false) { this.attempts = attempts; this.ready = ready; }
   async launchMetrics() { return {attemptCount: this.attempts, backoffSeconds: 0,
-    ...(this.ready ? {runningAt: Date.now()/1000, readyAt: Date.now()/1000} : {})}; }
+    ...(this.ready ? {runningAt: 100, readyAt: 101.0005} : {})}; }
 }
 class Sandbox {
   static created = 0;
@@ -132,8 +135,18 @@ def check_drivers(results: Results) -> None:
                 f"retry {binding} driver forwards policy and stable launch fields",
                 not failure
                 and known == {"fake-one"}
-                and all(ok for _, ok in verdicts(data)),
+                and all(ok for _, ok in verdicts(data, binding)),
             )
+            if binding == "node":
+                results.check(
+                    "retry node driver reports raw millisecond observations",
+                    bool(data.get("phases"))
+                    and all(
+                        type(phase.get("observedAtMilliseconds")) is int
+                        and phase["observedAtMilliseconds"] == 101000
+                        for phase in data["phases"]
+                    ),
+                )
 
 
 def report(*, throttled: bool = True) -> dict:
@@ -225,6 +238,7 @@ def clean(plane: Plane) -> bool:
 
 def check_retry_telemetry(results: Results) -> None:
     check_drivers(results)
+    check_observation_resolution(results)
     calls = []
     bounded_plane(
         SimpleNamespace(client=lambda *args, **kwargs: calls.append((args, kwargs)))
@@ -365,4 +379,38 @@ def check_retry_telemetry(results: Results) -> None:
         data == {}
         and known == {"partial"}
         and failure == "driver exceeded bounded runtime",
+    )
+
+
+def check_observation_resolution(results: Results) -> None:
+    data = report()
+    for phase in data["phases"]:
+        phase["ready"]["readyAt"] = 101.0005
+        phase["observedAt"] = 101.0
+        phase["observedAtMilliseconds"] = 101000
+    target = "retry maxAttempts=1 observes RUNNING before daemon readiness"
+    results.check(
+        "retry telemetry accepts readiness within the Node observation millisecond",
+        all(ok for _, ok in verdicts(data, "node")),
+    )
+    results.check(
+        "retry telemetry keeps Python observation timestamps strict",
+        dict(verdicts(data, "python"))[target] is False,
+    )
+    data["phases"][0]["ready"]["readyAt"] = 101.001
+    results.check(
+        "retry telemetry rejects readiness at the next Node millisecond",
+        dict(verdicts(data, "node"))[target] is False,
+    )
+    data["phases"][0]["ready"]["readyAt"] = 101.0005
+    for observed in (None, True, -1, 0, 101000.0, float("nan"), float("inf")):
+        data["phases"][0]["observedAtMilliseconds"] = observed
+        results.check(
+            f"retry telemetry rejects malformed Node observation {observed!r}",
+            dict(verdicts(data, "node"))[target] is False,
+        )
+    data["phases"][0].pop("observedAtMilliseconds")
+    results.check(
+        "retry telemetry rejects a missing Node observation",
+        dict(verdicts(data, "node"))[target] is False,
     )

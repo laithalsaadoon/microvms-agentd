@@ -60,7 +60,22 @@ def metric_valid(value: Any, cap: int) -> bool:
     )
 
 
-def verdicts(report: dict) -> list[tuple[str, bool]]:
+def observed_after_ready(phase: dict, ready_at: float, binding: str) -> bool:
+    if binding == "node":
+        observed_ms = phase.get("observedAtMilliseconds")
+        # Date.now() identifies [sample, sample + 1 ms), not an exact instant.
+        # The caller selects the known driver; a report cannot widen this bound.
+        return (
+            type(observed_ms) is int
+            and observed_ms > 0
+            and finite(observed_ms)
+            and ready_at < (observed_ms + 1) / 1000
+        )
+    observed = phase.get("observedAt")
+    return binding == "python" and finite(observed) and ready_at <= observed
+
+
+def verdicts(report: dict, binding: str = "python") -> list[tuple[str, bool]]:
     phases = report.get("phases") or []
     checks = [("reports both configured retry policies", len(phases) == len(POLICIES))]
     for index, policy in enumerate(POLICIES):
@@ -109,7 +124,7 @@ def verdicts(report: dict) -> list[tuple[str, bool]]:
         ]
         ready = phase.get("ready") or {}
         running_at, ready_at = ready.get("runningAt"), ready.get("readyAt")
-        started, observed = phase.get("startedAt"), phase.get("observedAt")
+        started = phase.get("startedAt")
         checks.append(
             (
                 f"{prefix} observes RUNNING before daemon readiness",
@@ -117,8 +132,8 @@ def verdicts(report: dict) -> list[tuple[str, bool]]:
                 and finite(running_at)
                 and finite(ready_at)
                 and finite(started)
-                and finite(observed)
-                and 0 < started <= running_at <= ready_at <= observed,
+                and 0 < started <= running_at <= ready_at
+                and observed_after_ready(phase, ready_at, binding),
             )
         )
         checks.append(
@@ -260,7 +275,7 @@ def drive_retry_telemetry(
                 )
             results.check(f"{binding} retry driver completes", not failure, failure)
             prefix = "BIND-3" if binding == "python" else "BIND-4"
-            for name, ok in verdicts(report):
+            for name, ok in verdicts(report, binding):
                 results.check(f"{prefix} {binding} {name}", ok)
             rows = [
                 row

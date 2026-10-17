@@ -27,7 +27,27 @@ transform = { file = "conformance/lanes/retry_telemetry.py", replace = 'and row[
 [[family.fault]]
 id = "retry-live-ready-order"
 message = "FAIL  retry telemetry rejects reversed phase timestamps"
-transform = { file = "conformance/lanes/retry_telemetry.py", replace = 'and 0 < started <= running_at <= ready_at <= observed', with = 'and running_at > 0' }
+transform = { file = "conformance/lanes/retry_telemetry.py", replace = 'and 0 < started <= running_at <= ready_at', with = 'and running_at > 0' }
+
+[[family.fault]]
+id = "retry-live-node-observation-resolution"
+message = "FAIL  retry telemetry accepts readiness within the Node observation millisecond"
+transform = { file = "conformance/lanes/retry_telemetry.py", replace = 'ready_at < (observed_ms + 1) / 1000', with = 'ready_at <= observed_ms / 1000' }
+
+[[family.fault]]
+id = "retry-live-node-observation-upper-bound"
+message = "FAIL  retry telemetry rejects readiness at the next Node millisecond"
+transform = { file = "conformance/lanes/retry_telemetry.py", replace = 'ready_at < (observed_ms + 1) / 1000', with = 'ready_at <= (observed_ms + 1) / 1000' }
+
+[[family.fault]]
+id = "retry-live-node-observation-integer"
+message = "FAIL  retry telemetry rejects malformed Node observation 101000.0"
+transform = { file = "conformance/lanes/retry_telemetry.py", replace = 'type(observed_ms) is int', with = 'finite(observed_ms)' }
+
+[[family.fault]]
+id = "retry-live-node-observation-sample"
+message = "FAIL  retry node driver reports raw millisecond observations"
+transform = { file = "conformance/drivers/retry.mjs", replace = 'observedAtMilliseconds: Date.now()', with = 'observedAt: Date.now() / 1000' }
 
 [[family.fault]]
 id = "retry-live-partial-timeout"

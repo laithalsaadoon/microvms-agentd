@@ -61,7 +61,9 @@ async function run(request) {
         break;
       }
     }
-    phases.push({ outcomes, ready, startedAt, observedAt: Date.now() / 1000 });
+    // Date.now() truncates to milliseconds. Keep that raw sample so the verdict
+    // can compare the Rust timestamp with the sample's half-open time interval.
+    phases.push({ outcomes, ready, startedAt, observedAtMilliseconds: Date.now() });
   }
   emit('report', { phases });
 }
