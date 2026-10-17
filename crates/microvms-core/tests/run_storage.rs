@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use microvms_core::prelude::LedgerExt as _;
 use microvms_core::{history, ledger};
 use serde::{Deserialize, Serialize};
 
@@ -74,7 +75,7 @@ fn legacy_ledger_is_reopened_updated_and_read_by_the_legacy_reader() {
     // Earlier records did not contain vmLogGroup; no rewrite or backfill is needed.
     let old = r#"{"runId":"1700000000-1","region":"us-east-1","imageIdentifier":"arn:image","imageName":"image","microvmId":"vm-1","leaked":["vm-1","arn:image"]}"#;
     std::fs::write(&path, old).unwrap();
-    let all = ledger::open_all_for_vm(root.path(), "vm-1");
+    let all = ledger::Ledger::open_all_for_vm(root.path(), "vm-1");
     assert_eq!(all.len(), 1);
     assert_eq!(
         std::fs::read_to_string(&path).unwrap(),
@@ -181,18 +182,27 @@ fn history_appends_across_old_and_new_writers_without_replacing_old_lines() {
         serde_json::to_string(&hook).unwrap()
     )
     .unwrap();
-    history::append_unseen_hooks(
-        root.path(),
-        "vm-1",
-        &[microvms_core::protocol::health::HookObservation {
+    let observed = [
+        microvms_core::protocol::health::HookObservation {
             hook: "run".into(),
             fired_at: 1700000001,
             handler: None,
-        }],
-    );
+        },
+        microvms_core::protocol::health::HookObservation {
+            hook: "suspend".into(),
+            fired_at: 1700000002,
+            handler: None,
+        },
+    ];
+    history::append_unseen_hooks(root.path(), "vm-1", &observed);
+    history::append_unseen_hooks(root.path(), "vm-1", &observed);
     let read = history::read_events(root.path(), "vm-1");
-    assert_eq!(read.len(), 3);
+    assert_eq!(read.len(), 4);
     assert_eq!(read[2]["firedAt"], 1700000001);
+    assert_eq!(read[3]["seq"], 3);
+    assert_eq!(read[3]["event"], "hookObserved");
+    assert_eq!(read[3]["hook"], "suspend");
+    assert_eq!(read[3]["firedAt"], 1700000002);
     let mut run = ledger::new("us-east-1", root.path());
     run.flush();
     run.mark_deleted(&[]);
@@ -335,4 +345,39 @@ fn legacy_file_names_remain_readable_and_reopened_writes_keep_the_original_key()
     assert!(!dir.path().join("different-id.json").exists());
     runs[0].clear();
     assert!(!path.exists());
+}
+
+#[test]
+fn removing_a_run_deletes_only_its_stored_key_and_reports_a_missing_record() {
+    let root = tempfile::tempdir().unwrap();
+    let key = "1700000000-1";
+    let removed = root.path().join(format!("{key}.json"));
+    let neighbor = root.path().join("keep.json");
+    std::fs::write(&removed, "removed record").unwrap();
+    std::fs::write(&neighbor, "retained record").unwrap();
+    history::for_vm(root.path(), "vm-1").append(history::Event::Suspended);
+    let events = history::read_events(root.path(), "vm-1");
+
+    ledger::remove(root.path(), key).unwrap();
+    assert!(
+        !removed.exists(),
+        "a successful remove deletes the stored file"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&neighbor).unwrap(),
+        "retained record"
+    );
+    assert_eq!(history::read_events(root.path(), "vm-1"), events);
+    assert_eq!(
+        ledger::remove(root.path(), key).unwrap_err().kind(),
+        std::io::ErrorKind::NotFound
+    );
+    assert_eq!(
+        ledger::remove(root.path(), "../keep").unwrap_err().kind(),
+        std::io::ErrorKind::InvalidInput
+    );
+    assert_eq!(
+        std::fs::read_to_string(&neighbor).unwrap(),
+        "retained record"
+    );
 }

@@ -40,3 +40,27 @@ run = ["cargo", "test", "-p", "microvms-edges", "--test", "run_store", "--", "--
 expect = "test-failed"
 suite = "rust"
 patch = "verify/guards/faults/f2p-non-unicode-ledger-names-are-read-only-without-aliasing.patch"
+
+[[fault]]
+id = "run-storage-prelude-open"
+guard = "legacy_ledger_is_reopened_updated_and_read_by_the_legacy_reader"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "run_storage", "--", "--exact", "legacy_ledger_is_reopened_updated_and_read_by_the_legacy_reader"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-core/src/prelude.rs", replace = "crate::ledger::open_all_for_vm(root, microvm_id)", with = "vec![]" }
+
+[[fault]]
+id = "run-storage-core-unseen-hooks"
+guard = "history_appends_across_old_and_new_writers_without_replacing_old_lines"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "run_storage", "--", "--exact", "history_appends_across_old_and_new_writers_without_replacing_old_lines"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-core/src/history.rs", replace = "microvms_app::history::append_unseen_hooks(&for_vm(root, vm_id), observed);", with = "();" }
+
+[[fault]]
+id = "run-storage-core-remove"
+guard = "removing_a_run_deletes_only_its_stored_key_and_reports_a_missing_record"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "run_storage", "--", "--exact", "removing_a_run_deletes_only_its_stored_key_and_reports_a_missing_record"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-core/src/ledger.rs", replace = "microvms_app::ledger::remove(&FileRunStore::new(root), run_id)", with = "Ok(())" }
