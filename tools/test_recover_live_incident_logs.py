@@ -448,6 +448,11 @@ def test_unknown_logging_count_includes_every_version_on_later_pages(incident):
     }
 
 
+def test_unknown_logging_count_starts_as_an_integer_zero(incident):
+    assert type(incident.api.unknown_logging_count) is int
+    assert incident.api.unknown_logging_count == 0
+
+
 def test_single_target_compares_complete_log_names_not_substrings(incident):
     incident.records = {"1": version(1, {"cloudWatch": {"logGroup": "target"}})}
     incident.api.region = REGION
@@ -720,6 +725,8 @@ def test_already_absent_logs_have_only_non_deletion_evidence(incident):
             )
         expected.append(evidence)
     assert report["incidentLogEvidence"] == expected
+    report.update(kind="live-recovery", conformance_verified=False, status="passed")
+    assert recovery.validate_receipt(report) is report
     no_log_deletes(incident)
 
 
@@ -903,6 +910,62 @@ def test_failed_visibility_check_does_not_claim_deletion_complete(incident, fail
         reason=reason,
     )
     assert recovery.validate_receipt(report) is report
+
+
+def test_receipt_accepts_all_optional_fields_and_configured_version_evidence(incident):
+    report = recover(incident)
+    report.update(
+        kind="live-recovery",
+        conformance_verified=False,
+        status="failed",
+        reason="api_failed",
+        sourceRun=9,
+        sourceSha="a" * 40,
+        region=REGION,
+        manifestSha256="b" * 64,
+        parserVersion=4,
+        sourceLogRepresentation=recovery.LOG_REPRESENTATION,
+        versionEvidence=[
+            {
+                "imageSha256": "a" * 64,
+                "versionSha256": "b" * 64,
+                "createdAt": 0,
+                "buildRoleArnSha256": "c" * 64,
+                "artifactBucketSha256": "d" * 64,
+                "artifactKeySha256": "e" * 64,
+                "logGroupSha256": "f" * 64,
+                "sourceBucketMatches": False,
+                "sourceBuildRoleMatches": False,
+                "loggingStatus": "configured",
+            }
+        ],
+        roleDuration={"status": "observed", "maxSessionDurationSeconds": 7200},
+        independentVerifier={
+            "resources": [],
+            "summary_present": True,
+            "leakCount": 0,
+            "exitCode": 0,
+        },
+        apiFailures=[
+            {"operation": "get_microvm_image", "code": "AccessDeniedException"}
+        ],
+    )
+    assert recovery.validate_receipt(report) is report
+
+
+@pytest.mark.parametrize(
+    "initial,current", [(True, 1), (1, True), (False, 0), (0, False)]
+)
+def test_receipt_rejects_boolean_timestamps_even_when_equal_to_integers(
+    incident, initial, current
+):
+    report = recover(incident)
+    report.update(kind="live-recovery", conformance_verified=False, status="passed")
+    row = report["incidentLogEvidence"][0]
+    row["initialCreationTime"] = initial
+    row["preDeleteCreationTime"] = current
+    with pytest.raises(recovery.Refused, match="^receipt_schema$"):
+        recovery.validate_receipt(report)
 
 
 def test_incident_evidence_is_an_optional_validated_receipt_extension(incident):
