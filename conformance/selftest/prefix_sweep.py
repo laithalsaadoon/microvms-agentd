@@ -3,8 +3,11 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
+
 from harness.results import Results
-from lanes.prefix_sweep import CLEANED, DRY_RUN, check_reports
+from lanes.prefix_sweep import CLEANED, DRY_RUN, check_reports, outside_control
 
 
 def check_prefix_sweep(results: Results) -> None:
@@ -54,3 +57,22 @@ def check_prefix_sweep(results: Results) -> None:
             f"prefix sweep cleanup rejects missing {field}",
             any(name == CLEANED for name, _ in bad.failed),
         )
+
+    cli = Mock(region="us-east-1")
+    aws = Mock()
+    aws.client.return_value.get_microvm.return_value = {"state": "TERMINATED"}
+    control = SimpleNamespace(data={"microvmId": "fresh-control"})
+    cleanup = Results()
+    with patch("lanes.prefix_sweep.launch_image", return_value=control):
+        try:
+            with outside_control(cli, SimpleNamespace(), aws, cleanup) as launched:
+                assert launched is control
+                raise ValueError("sweep failed")
+        except ValueError:
+            pass
+    results.check(
+        "prefix sweep owns and cleans its fresh outside control even after failure",
+        cli.call.call_args.args
+        == ("terminate", "fresh-control", "--wait", "--region", "us-east-1")
+        and not cleanup.failed,
+    )

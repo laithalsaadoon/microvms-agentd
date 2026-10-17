@@ -88,3 +88,13 @@ run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-pee
 expect = "test-failed"
 suite = "rust"
 transform = { file = "crates/microvms-app/src/control/ops.rs", replace = "#[serde(default)]\n    pub started_at: Option<f64>,", with = "#[serde(skip_deserializing)]\n    pub started_at: Option<f64>," }
+
+
+[[fault]]
+id = "sweep-outside-control-cleanup"
+guard = "conformance/run_rs.py --self-test: fresh outside control cleanup"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  prefix sweep owns and cleans its fresh outside control even after failure"
+transform = { file = "conformance/lanes/prefix_sweep.py", replace = 'cli.call("terminate", identifier, "--wait", "--region", cli.region)', with = 'cli.call("ls", identifier, "--wait", "--region", cli.region)' }

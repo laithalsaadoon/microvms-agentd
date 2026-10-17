@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Prefix cleanup against dedicated images, preserving a kept image and the suite VM."""
+"""Prefix cleanup against dedicated images, preserving kept and outside-prefix resources."""
 
 from __future__ import annotations
 
+import contextlib
 import secrets
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -51,13 +53,41 @@ def check_reports(
     )
 
 
+@contextlib.contextmanager
+def outside_control(
+    cli: Any, image: Envelope, aws: Any, results: Results
+) -> Iterator[Envelope]:
+    """Launch after the builds so the preservation control cannot age out during them."""
+    control = launch_image(cli, image, {})
+    identifier = str(control.data["microvmId"])
+    try:
+        yield control
+    finally:
+        try:
+            cli.call("terminate", identifier, "--wait", "--region", cli.region)
+            results.eq(
+                "prefix sweep outside control is independently terminated (#675)",
+                aws.client(SERVICE)
+                .get_microvm(microvmIdentifier=identifier)
+                .get("state"),
+                "TERMINATED",
+            )
+        except Exception as error:  # noqa: BLE001 - cleanup must preserve the original failure
+            results.check(
+                "prefix sweep outside control cleanup completed (#675)",
+                False,
+                repr(error),
+            )
+
+
 def drive_prefix_sweep(
     cli: Any, binary: Path, aws: Any, outside: Envelope, results: Results
 ) -> None:
     """Build two images owned by this lane, launch each, and sweep only the unkept one.
 
     Independent context cleanup finds resources even if the command fails before returning
-    its report. The suite VM supplies the outside-prefix control without another build.
+    its report. A fresh VM from the suite image supplies the outside-prefix control
+    after both builds, so slow builds cannot exhaust the control VM's lifetime.
     """
     label = f"sweep-{secrets.token_hex(4)}"
     prefix = f"microvm-cli-{label}-"
@@ -71,6 +101,7 @@ def drive_prefix_sweep(
             kept,
             keep_cleanup,
         ),
+        outside_control(cli, outside, aws, results) as control,
     ):
         victim = launch_image(cli, deleted, delete_cleanup)
         survivor = launch_image(cli, kept, keep_cleanup)
@@ -96,7 +127,7 @@ def drive_prefix_sweep(
         )
         cleaned = cli.call(*args, "--yes", timeout=15 * 60).data
         check_reports(dry, cleaned, deleted_image, kept_image, deleted_vm, results)
-        outside_vm = str(outside.data["microvmId"])
+        outside_vm = str(control.data["microvmId"])
         outside_image = str(outside.data["imageIdentifier"])
         results.check(
             PRESERVED,

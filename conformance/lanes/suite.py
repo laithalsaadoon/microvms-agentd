@@ -224,16 +224,6 @@ def run_suite(args: argparse.Namespace) -> int:
             )
             run_section(results, "daemon_lane", drive_daemon_lane, daemon, results)
 
-            run_section(
-                results,
-                "prefix_sweep",
-                drive_prefix_sweep,
-                cli,
-                binary,
-                aws,
-                launched,
-                results,
-            )
             run_section(results, "exec", drive_exec, cli, launched, results)
             run_section(results, "health", drive_health, cli, launched, results)
             # `adopt` (#269) reads the suite's VM through core's guards and launches nothing.
@@ -430,6 +420,17 @@ def run_suite(args: argparse.Namespace) -> int:
                 cli,
                 launched,
                 Path(tmp) / "sync-project",
+                results,
+            )
+            # Own-build lanes run after all sections that need the original VM alive.
+            run_section(
+                results,
+                "prefix_sweep",
+                drive_prefix_sweep,
+                cli,
+                binary,
+                aws,
+                launched,
                 results,
             )
             # The self-provisioned quickstart is the one section with its own build:
