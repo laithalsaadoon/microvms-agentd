@@ -89,7 +89,8 @@ check.
 
 Run `uv run --locked pytest tools/test_recover_live*.py tools/test_recovery_credentials.py`
 for the offline selector, provenance, failure, credential and privacy cases. The seeded faults are in
-`verify/guards/faults/recovery.toml`, `verify/guards/faults/recovery-phases.toml`, and
-`verify/guards/faults/recovery-version-logging.toml`. These tests do not establish AWS behavior;
+`verify/guards/faults/recovery.toml`, `verify/guards/faults/recovery-phases.toml`,
+`verify/guards/faults/recovery-version-logging.toml`, and
+`verify/guards/faults/recovery-integration.toml`. These tests do not establish AWS behavior;
 the hosted recovery path remains unverified against AWS until a run succeeds.
 The source incident's cancelled run is not acceptance evidence.
