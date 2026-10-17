@@ -354,7 +354,6 @@ class CredentialTests(unittest.TestCase):
         for bad in (
             {},
             [],
-            RECEIPT | {"status": "failed"},
             RECEIPT | {"kind": "other"},
             RECEIPT | {"conformance_verified": True},
             RECEIPT | {"conformance_verified": 0},
@@ -362,29 +361,31 @@ class CredentialTests(unittest.TestCase):
             self.args.report.write_text(json.dumps(bad))
             with (
                 patch.object(subprocess, "run", run),
-                self.assertRaises(
-                    (wrapper.Refused, wrapper.VALIDATE_RECEIPT.__globals__["Refused"])
-                ),
+                # Mutmut's trampoline owns different globals; assert the core's
+                # public refusal reason without reaching into its implementation.
+                self.assertRaisesRegex(Exception, "^receipt_schema$"),
             ):
                 wrapper.run_child(
                     "apply", self.args, {"RECOVERY_DEADLINE_MONOTONIC": "790"}
                 )
+        self.args.report.write_text(json.dumps(RECEIPT | {"status": "failed"}))
+        with patch.object(subprocess, "run", run), self.assertRaises(wrapper.Refused):
+            wrapper.run_child(
+                "apply", self.args, {"RECOVERY_DEADLINE_MONOTONIC": "790"}
+            )
         self.args.report.write_bytes(b"x" * 65537)
         with (
             patch.object(subprocess, "run", run),
-            self.assertRaises(
-                (wrapper.Refused, wrapper.VALIDATE_RECEIPT.__globals__["Refused"])
-            ),
+            self.assertRaises(wrapper.Refused),
         ):
             wrapper.run_child(
                 "apply", self.args, {"RECOVERY_DEADLINE_MONOTONIC": "790"}
             )
+        self.args.report.write_text(json.dumps(RECEIPT))
         run.return_value.returncode = 1
         with (
             patch.object(subprocess, "run", run),
-            self.assertRaises(
-                (wrapper.Refused, wrapper.VALIDATE_RECEIPT.__globals__["Refused"])
-            ),
+            self.assertRaises(wrapper.Refused),
         ):
             wrapper.run_child(
                 "preflight", self.args, {"RECOVERY_DEADLINE_MONOTONIC": "790"}
