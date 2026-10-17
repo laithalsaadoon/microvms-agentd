@@ -26,6 +26,12 @@ fn the_cli_process_answers_the_shared_case_corpus() {
     for case in run.cases() {
         let answer = match case.area.as_str() {
             "credential-error" => parity_corpus::credentials::run(
+                support::command(parity_corpus::credentials::fixture_path())
+                    .args(["credentials", "launch"])
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped())
+                    .spawn()
+                    .expect("build the credential fixture with mise run parity:fixtures"),
                 "cli",
                 support::binary(),
                 &[

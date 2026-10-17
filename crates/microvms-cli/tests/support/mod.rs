@@ -32,6 +32,11 @@ pub fn binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_microvm"))
 }
 
+/// Constructs a child command for a process-based integration harness.
+pub fn command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    Command::new(program)
+}
+
 /// What one invocation produced.
 pub struct Run {
     pub code: Option<i32>,
@@ -78,7 +83,7 @@ impl Run {
 /// finds nothing and the command stops at the credential lookup, offline on every host.
 pub fn run(args: &[&str], env: &[(&str, &str)]) -> Run {
     let home = TempDir::new("home");
-    let mut command = Command::new(binary());
+    let mut command = command(binary());
     command.args(args);
     command.env_clear();
     command.env("HOME", &home.0);
