@@ -95,6 +95,7 @@ fn json_string(text: &str) -> String {
 /// The fake, plus its ledger.
 #[derive(Debug, Default)]
 pub struct FakeControlPlane {
+    region: Option<crate::region::Region>,
     inner: Mutex<Inner>,
 }
 
@@ -112,6 +113,14 @@ struct Inner {
 }
 
 impl FakeControlPlane {
+    /// A recorder with the same diagnostic region context as a signed transport.
+    pub fn in_region(region: crate::region::Region) -> Self {
+        Self {
+            region: Some(region),
+            ..Self::default()
+        }
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -257,6 +266,10 @@ impl FakeControlPlane {
 }
 
 impl Transport for FakeControlPlane {
+    fn region(&self) -> Option<&crate::region::Region> {
+        self.region.as_ref()
+    }
+
     fn send(
         &self,
         call: Call,

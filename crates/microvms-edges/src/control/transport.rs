@@ -125,6 +125,10 @@ pub(crate) async fn resolve_credentials(
 }
 
 impl Transport for SignedTransport {
+    fn region(&self) -> Option<&Region> {
+        Some(&self.region)
+    }
+
     fn resolve_credentials(
         &self,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), Error>> + Send + '_>> {

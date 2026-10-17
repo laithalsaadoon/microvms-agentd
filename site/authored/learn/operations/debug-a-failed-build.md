@@ -28,7 +28,7 @@ The codes a build produces:
 - `ERR_INVALID_ARG` (exit 2): the request was refused locally, before any AWS call. The Dockerfile checks below land here.
 - `ERR_BUILD_WEDGED` (exit 6): the image build was never scheduled, the `clientToken` replay signature.
 - `ERR_LAUNCH_DIED` (exit 7): the MicroVM reached a terminal state before `RUNNING`; read `stateReason`.
-- `ERR_CREDENTIALS` (exit 4): an identity is wrong or absent, and waiting will not fix it. An `AccessDeniedException` with a null message is the unsupported-region signature, and the suggestion says to check `--region` first.
+- `ERR_CREDENTIALS` (exit 4): an identity is wrong or absent, and waiting will not fix it. An `AccessDeniedException` with a null message can mean an unsupported region or an IAM denial, including a missing `lambda:TagResource` permission on image creation. In a known supported region, check the policy and the matching CloudTrail event's full denial.
 
 ## 2. Before building again
 

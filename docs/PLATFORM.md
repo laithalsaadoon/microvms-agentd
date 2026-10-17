@@ -62,18 +62,37 @@ The budget includes the token, launch environment, identity material, and JSON
 escaping. See the
 [AWS RunMicrovm documentation](https://docs.aws.amazon.com/lambda/latest/microvm-api/API_RunMicrovm.html) for current shape constraints.
 
-## Calling an unpriced region returns `AccessDeniedException` with a null message
+## A null-message `AccessDeniedException` can mean region availability or IAM
 
-Measured 2026-08-07 with `ListMicrovms`. `us-east-1`, `us-east-2`,
-`us-west-2`, `eu-west-1`, and `ap-northeast-1` succeeded. `eu-central-1`,
-`ap-southeast-2`, and `sa-east-1` returned `AccessDeniedException` with a null
-message. This can resemble an IAM problem; a null message alone is not proof
-of its cause.
+Measured 2026-10-17 in `us-east-1`, API version `2025-09-09`, with
+`CreateMicrovmImage` using tags on an `al2023-1` aarch64 base image. A role
+permitted to create the image but lacking `lambda:TagResource` received HTTP
+403 with a null message. CloudTrail recorded `AccessDenied` and identified
+`lambda:TagResource` as the denied action on `*`. Granting that action with an
+`aws:RequestTag` condition allowed the next call. Evidence: the API response
+and CloudTrail event recorded in [issue #673](https://github.com/laithalsaadoon/microvms-agentd/issues/673).
 
-The shared Lambda endpoint resolver can list ordinary Lambda regions that do
-not support MicroVMs. SDK endpoint availability is not a MicroVM service
-availability check. The package validates its known regions and permits an
-explicit `--unlisted-region` override.
+A null message alone does not distinguish this IAM denial from a region
+without MicroVMs. `ListMicrovms` measurements on 2026-08-07 succeeded in
+`us-east-1`, `us-east-2`, `us-west-2`, `eu-west-1`, and `ap-northeast-1`;
+`eu-central-1`, `ap-southeast-2`, and `sa-east-1` returned the same null-message
+`AccessDeniedException`.
+
+In a known supported region, check the policy, including implied actions for
+tags. Retrieve recent events in that region with:
+
+```bash
+aws cloudtrail lookup-events --region us-east-1 \
+  --lookup-attributes AttributeKey=EventName,AttributeValue=CreateMicrovmImage \
+  --query 'Events[].CloudTrailEvent' --output text
+```
+
+Inspect the matching event's `errorCode` and `errorMessage` for the denied
+action. [CloudTrail event lookup](https://docs.aws.amazon.com/awscloudtrail/latest/userguide/view-cloudtrail-events-cli.html)
+returns the event record as JSON text. The shared Lambda endpoint resolver
+can list ordinary Lambda regions that do not support MicroVMs. SDK endpoint
+availability is not a MicroVM service availability check. The package validates
+its known regions and permits an explicit `--unlisted-region` override.
 
 ## Network connectors are ARNs
 

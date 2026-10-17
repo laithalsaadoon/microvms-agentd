@@ -11,12 +11,13 @@
 //! # Why refusing matters more than it looks
 //!
 //! Measured 2026-08-07: a region that does not carry MicroVMs answers
-//! `AccessDeniedException` with the message field **null**, which is
-//! indistinguishable from a genuine IAM denial except that a real denial names the
-//! principal and the action. Nothing between the caller and that answer objects —
+//! `AccessDeniedException` with the message field **null**. A denied implied IAM action,
+//! such as tagging an image on creation, can return the same response (measured
+//! 2026-10-17, us-east-1, API 2025-09-09; docs/PLATFORM.md). Nothing between the
+//! caller and that answer objects to an unsupported region —
 //! the service model's `endpointPrefix` is `lambda`, so an endpoint resolves for any
 //! region and a client constructs happily. The first API call is the only reporter
-//! and it reports the wrong cause, sending someone to audit a policy that is fine.
+//! and its missing detail cannot distinguish availability from a policy denial.
 //!
 //! No API answers the question either, and the two that look like they might
 //! disagree with each other: `get_available_endpoints` returns an empty list while
@@ -178,8 +179,7 @@ impl FromStr for Region {
             "region {name:?} is not one this client has seen carry MicroVMs ({offered}). \
              Refused here because the first API call is where the evidence disappears: an \
              unsupported region answers AccessDeniedException with a null message, which is \
-             indistinguishable from a real IAM denial (docs/PLATFORM.md, 'Calling an unpriced \
-             region returns AccessDeniedException with a null message'). If AWS has since \
+             indistinguishable from a real IAM denial (docs/PLATFORM.md, 'A null-message AccessDeniedException can mean region availability or IAM'). If AWS has since \
              launched MicroVMs here, use Region::unlisted({name:?}) and add the region to \
              MICROVM_REGIONS."
         )))
