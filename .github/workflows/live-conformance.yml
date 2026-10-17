@@ -132,7 +132,9 @@ jobs:
     if: ${{ !cancelled() && inputs.mode == 'full' && needs.owner.result == 'success' && needs.native-box.result == 'success' && needs.draft.result == 'success' }}
     runs-on: ubuntu-latest
     environment: live-aws
-    timeout-minutes: 90
+    # These are execution ceilings, not a measured suite duration or a reserved
+    # cleanup window: setup also consumes the gap between the job and suite caps.
+    timeout-minutes: 300
     permissions:
       contents: read
       id-token: write # for OIDC; no long-lived key is stored
@@ -174,10 +176,8 @@ jobs:
         with:
           terraform_wrapper: false
 
-      # Request two hours so the OIDC session outlasts the 90-minute job, including
-      # failure-path cleanup. The action otherwise defaults to one hour, and the
-      # role's MaxSessionDuration must permit this request. The role needs to create
-      # MicroVM images, run MicroVMs, and manage the conformance stack's bucket and roles.
+      # Setup uses the observed two-hour role maximum. The suite uses refreshable
+      # web identity below; cleanup obtains another session after the suite.
       - name: assume AWS role
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6
         with:
@@ -257,9 +257,26 @@ jobs:
       # they fed. It reports the 34 checks it cannot express as SKIP rather than
       # letting them go quiet.
       - name: conformance suite
+        timeout-minutes: 240
         env:
           AWS_REGION: ${{ inputs.region }}
-        run: ./conformance/run_rs.py --binary "$AGENTD" --microvm-binary "$MICROVM"
+          LIVE_ROLE_ARN: ${{ secrets.LIVE_CONFORMANCE_ROLE_ARN }}
+          PYTHONUNBUFFERED: '1'
+        run: python3 tools/live-credentials.py ./conformance/run_rs.py --binary "$AGENTD" --microvm-binary "$MICROVM"
+
+      # No static setup credential is passed to the suite. Native SDK web identity
+      # uses the STS one-hour default and refreshes from the wrapper's private token
+      # file. This separate session remains available to the always-run cleanup.
+      - name: refresh AWS role for cleanup
+        if: always()
+        timeout-minutes: 3
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6
+        with:
+          role-to-assume: ${{ secrets.LIVE_CONFORMANCE_ROLE_ARN }}
+          aws-region: ${{ inputs.region }}
+          role-duration-seconds: 7200
+          unset-current-credentials: true
+          action-timeout-s: 120
 
       # Free, creates nothing, and the only thing here that can tell you a price
       # this repo publishes has gone wrong. Runs after the suite so a rate that

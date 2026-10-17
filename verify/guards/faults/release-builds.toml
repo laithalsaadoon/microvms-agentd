@@ -108,25 +108,25 @@ id = "release-builds-draft-completeness"
 message = "FAIL: test_draft_retry_reuses_the_first_complete_assets"
 transform = { file = ".github/workflows/release.yml", replace = "            cmp expected-files retained-files", with = "            : expected-files retained-files" }
 
-# The live job uses one static OIDC session through failure-path cleanup.
+# Credentials are renewed at setup, suite and cleanup boundaries.
 [[family.fault]]
 id = "release-live-duration-omitted"
-message = "FAIL: test_live_credentials_outlast_the_whole_job"
-transform = { file = ".github/workflows/live-conformance.yml", replace = "          role-duration-seconds: 7200\n", with = "" }
+message = "FAIL: test_live_credentials_follow_setup_suite_and_cleanup_boundaries"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "          role-duration-seconds: 7200\n          unset-current-credentials: true\n", with = "          unset-current-credentials: true\n" }
 
 [[family.fault]]
 id = "release-live-duration-short"
-message = "FAIL: test_live_credentials_outlast_the_whole_job"
-transform = { file = ".github/workflows/live-conformance.yml", replace = "          role-duration-seconds: 7200\n", with = "          role-duration-seconds: 3600\n" }
+message = "FAIL: test_live_credentials_follow_setup_suite_and_cleanup_boundaries"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "          role-duration-seconds: 7200\n          unset-current-credentials: true\n", with = "          role-duration-seconds: 3600\n          unset-current-credentials: true\n" }
 
 [[family.fault]]
-id = "release-live-timeout-exhausts-session"
-message = "FAIL: test_live_credentials_outlast_the_whole_job"
-transform = { file = ".github/workflows/live-conformance.yml", replace = "    timeout-minutes: 90\n", with = "    timeout-minutes: 120\n" }
+id = "release-live-timeout-exhausts-cleanup"
+message = "FAIL: test_live_credentials_follow_setup_suite_and_cleanup_boundaries"
+transform = { file = ".github/workflows/live-conformance.yml", replace = "    timeout-minutes: 300\n", with = "    timeout-minutes: 240\n" }
 
 [[family.fault]]
 id = "release-live-credentials-missing"
-message = "FAIL: test_live_credentials_outlast_the_whole_job"
+message = "FAIL: test_live_credentials_follow_setup_suite_and_cleanup_boundaries"
 transform = { file = ".github/workflows/live-conformance.yml", replace = "      - name: assume AWS role\n        uses: aws-actions/configure-aws-credentials@", with = "      - name: assume AWS role\n        uses: actions/cache@" }
 
 
