@@ -70,6 +70,14 @@ If that phase fails, the failed receipt retains accepted image deletion requests
 and their exact Get absence results; those results do not substitute for the
 final inventory window or independent verifier.
 
+When an exact version Get omits its logging field, recovery can use an explicit
+logging configuration from that version's List row. The image ARN, version,
+creation timestamp and known state must agree. A present malformed Get value,
+missing configuration in both responses, or conflicting explicit configurations
+still refuses log deletion. This is positive configuration evidence, never an
+inference that missing logging means disabled or names a default destination.
+Optional version evidence in the receipt continues to describe Get fields only.
+
 `RunMicrovm` accepts an explicit per-VM log destination, but the VM list and get
 responses do not expose it. Before deleting any selected log group, recovery
 therefore requires every VM in the complete regional inventory to be
@@ -81,7 +89,7 @@ check.
 
 Run `uv run --locked pytest tools/test_recover_live*.py tools/test_recovery_credentials.py`
 for the offline selector, provenance, failure, credential and privacy cases. The seeded faults are in
-`verify/guards/faults/recovery.toml` and `verify/guards/faults/recovery-phases.toml`.
-These tests do not establish AWS behavior;
+`verify/guards/faults/recovery.toml`, `verify/guards/faults/recovery-phases.toml`, and
+`verify/guards/faults/recovery-version-logging.toml`. These tests do not establish AWS behavior;
 the hosted recovery path remains unverified against AWS until a run succeeds.
 The source incident's cancelled run is not acceptance evidence.

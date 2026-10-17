@@ -734,7 +734,7 @@ class Api:
                 ),
                 "imageVersion",
             )
-            for version in versions:
+            for version, listed in versions.items():
                 record = self.call(
                     self.plane,
                     "get_microvm_image_version",
@@ -752,20 +752,48 @@ class Api:
                 self.observe_version(images[arn]["name"], version, record)
                 if group is None:
                     continue
-                logging = record.get("logging")
-                require(isinstance(logging, dict), "version_logging_missing")
-                if logging.get("disabled") == {}:
-                    require(set(logging) == {"disabled"}, "version_logging_ambiguous")
+                destination = self.version_log_destination(record, listed)
+                if destination is None:
                     continue
-                cloud = logging.get("cloudWatch")
-                require(
-                    set(logging) == {"cloudWatch"} and isinstance(cloud, dict),
-                    "version_logging_ambiguous",
-                )
-                destination = text(cloud.get("logGroup"))
                 require(
                     destination != group or arn in deleting, "configured_group_in_use"
                 )
+
+    @staticmethod
+    def logging_destination(logging: Any) -> str | None:
+        require(isinstance(logging, dict), "version_logging_missing")
+        if logging.get("disabled") == {}:
+            require(set(logging) == {"disabled"}, "version_logging_ambiguous")
+            return None
+        cloud = logging.get("cloudWatch")
+        require(
+            set(logging) == {"cloudWatch"} and isinstance(cloud, dict),
+            "version_logging_ambiguous",
+        )
+        return text(cloud.get("logGroup"))
+
+    def version_log_destination(self, record: dict, listed: dict) -> str | None:
+        # Both APIs describe logging for this exact version. Configuration updates
+        # build a new version; the version update API changes only availability.
+        # Missing Get data may use positive List evidence, never an inferred default.
+        present = "logging" in record
+        destination = self.logging_destination(record["logging"]) if present else None
+        if "logging" not in listed:
+            require(present, "version_logging_missing")
+            return destination
+        require(
+            listed.get("imageArn") == record["imageArn"]
+            and listed.get("imageVersion") == record["imageVersion"]
+            and listed.get("state") == record["state"]
+            and stamp(listed.get("createdAt")) == stamp(record.get("createdAt")),
+            "version_logging_ambiguous",
+        )
+        listed_destination = self.logging_destination(listed["logging"])
+        require(
+            not present or record["logging"] == listed["logging"],
+            "version_logging_ambiguous",
+        )
+        return listed_destination
 
     def observe_version(self, name: str, version: str, record: dict) -> None:
         # Version metadata can inform a later reviewed incident amendment. It
