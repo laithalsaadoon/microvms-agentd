@@ -92,7 +92,7 @@ first:
 - `microvms-app`: use cases (the control-plane client, `Sandbox`, `Session`,
   `ensure_image`, the agent recipes, the daemon release's verification policy),
   written only against ports it declares: `Transport`, `BuildServices`,
-  `HttpBackend`, `TokenMinter`, `NameStore`, `LocalTree`, `Clock`, `Entropy`,
+  `HttpBackend`, `TokenMinter`, `NameStore`, `RunStore`, `LocalTree`, `Clock`, `Entropy`,
   `Adapters`, `ReleaseSource` and `AttestationVerifier`. It depends on no crate or tokio feature that
   does network, AWS, filesystem, subprocess or entropy I/O (ARCH-7), and its
   `clippy.toml` refuses the std and tokio I/O items under a crate-root `forbid`.
@@ -108,8 +108,8 @@ first:
   bridge to the host runtime, render output. A default, retry, validation rule,
   wire call, file format or subprocess here belongs in a lower layer.
 
-That's the rule, not a description of today's tree. The CLI still owns file
-formats and file I/O, the run ledger among them. The ratchet's adapter-logic rules
+The run ledger and VM history use `RunStore` in the app and its file store in the
+edges. The ratchet's adapter-logic rules
 (`verify/ratchet/rules/`) refuse an operation name written as a literal and a retyped
 default in the CLI's and both bindings' code; they don't read file formats, or
 attribute defaults such as clap's `default_value_t` and PyO3's `signature`,

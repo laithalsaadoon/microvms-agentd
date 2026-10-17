@@ -1121,6 +1121,7 @@ mod tests {
     use super::*;
     use crate::envelope::{Format, Output};
     use crate::seam::Infra;
+    use microvms_core::prelude::HistoryExt as _;
 
     /// A context over buffers and an empty environment.
     fn ctx<'a>(

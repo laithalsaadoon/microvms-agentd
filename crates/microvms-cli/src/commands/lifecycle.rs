@@ -24,6 +24,8 @@
 //!
 //! (cli.py line numbers resolve at `git show 'c4d396e^:clients/python/src/microvms_agentd/cli.py'` — the retired oracle.)
 
+use microvms_core::prelude::{HistoryExt as _, LedgerExt as _};
+
 use microvms_core::workspace::LocalTree as _;
 use std::time::Duration;
 

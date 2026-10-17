@@ -1,0 +1,66 @@
+# The storage refactor must keep 1.1.1 readers and writers compatible.
+
+[[fault]]
+id = "ledger-storage-legacy-format"
+guard = "legacy_ledger_is_reopened_updated_and_read_by_the_legacy_reader"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "run_storage", "--", "--exact", "legacy_ledger_is_reopened_updated_and_read_by_the_legacy_reader"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/ledger.rs", replace = '#[serde(rename_all = "camelCase")]', with = '#[serde(rename_all = "snake_case")]' }
+
+[[fault]]
+id = "history-storage-legacy-format"
+guard = "history_appends_across_old_and_new_writers_without_replacing_old_lines"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "run_storage", "--", "--exact", "history_appends_across_old_and_new_writers_without_replacing_old_lines"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-app/src/history.rs", replace = '    rename_all_fields = "camelCase"', with = '    rename_all_fields = "snake_case"' }
+
+[[fault]]
+id = "run-storage-path-key"
+guard = "file_store_refuses_keys_that_leave_their_namespace"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "run_storage", "--", "--exact", "file_store_refuses_keys_that_leave_their_namespace"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/run_store.rs", replace = '        Self::check_component(key)?;', with = '' }
+
+[[fault]]
+id = "run-storage-repeated-constructor"
+guard = "ledger::tests::runs_started_in_one_process_and_second_keep_separate_records"
+run = ["cargo", "test", "-p", "microvms-core", "--lib", "--", "--exact", "ledger::tests::runs_started_in_one_process_and_second_keep_separate_records"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-core/src/ledger.rs", replace = 'format!("{epoch}-{}-{sequence:020}", std::process::id())', with = 'format!("{epoch}-{}", std::process::id())' }
+
+# FAIL_TO_PASS: fails on e4bf799e66f2 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-non-unicode-ledger-names-are-read-only-without-aliasing"
+guard = "non_unicode_ledger_names_are_read_only_without_aliasing_unicode_neighbors"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "run_store", "--", "--exact", "non_unicode_ledger_names_are_read_only_without_aliasing_unicode_neighbors"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-non-unicode-ledger-names-are-read-only-without-aliasing.patch"
+
+[[fault]]
+id = "run-storage-prelude-open"
+guard = "legacy_ledger_is_reopened_updated_and_read_by_the_legacy_reader"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "run_storage", "--", "--exact", "legacy_ledger_is_reopened_updated_and_read_by_the_legacy_reader"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-core/src/prelude.rs", replace = "crate::ledger::open_all_for_vm(root, microvm_id)", with = "vec![]" }
+
+[[fault]]
+id = "run-storage-core-unseen-hooks"
+guard = "history_appends_across_old_and_new_writers_without_replacing_old_lines"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "run_storage", "--", "--exact", "history_appends_across_old_and_new_writers_without_replacing_old_lines"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-core/src/history.rs", replace = "microvms_app::history::append_unseen_hooks(&for_vm(root, vm_id), observed);", with = "();" }
+
+[[fault]]
+id = "run-storage-core-remove"
+guard = "removing_a_run_deletes_only_its_stored_key_and_reports_a_missing_record"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "run_storage", "--", "--exact", "removing_a_run_deletes_only_its_stored_key_and_reports_a_missing_record"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-core/src/ledger.rs", replace = "microvms_app::ledger::remove(&FileRunStore::new(root), run_id)", with = "Ok(())" }

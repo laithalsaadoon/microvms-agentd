@@ -411,6 +411,34 @@ impl BuildContextExt for BuildContext {
     }
 }
 
+/// Production constructors for durable run ledgers.
+pub trait LedgerExt {
+    fn new(region: &str, root: &std::path::Path) -> Self;
+    fn open_all_for_vm(root: &std::path::Path, microvm_id: &str) -> Vec<Self>
+    where
+        Self: Sized;
+}
+
+impl LedgerExt for microvms_app::ledger::Ledger {
+    fn new(region: &str, root: &std::path::Path) -> Self {
+        crate::ledger::new(region, root)
+    }
+    fn open_all_for_vm(root: &std::path::Path, microvm_id: &str) -> Vec<Self> {
+        crate::ledger::open_all_for_vm(root, microvm_id)
+    }
+}
+
+/// Production constructor for a VM's durable history.
+pub trait HistoryExt {
+    fn for_vm(root: &std::path::Path, vm_id: &str) -> Self;
+}
+
+impl HistoryExt for microvms_app::history::History {
+    fn for_vm(root: &std::path::Path, vm_id: &str) -> Self {
+        crate::history::for_vm(root, vm_id)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

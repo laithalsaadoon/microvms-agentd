@@ -26,6 +26,8 @@
 //! failure path terminates it and reports the identifiers, exactly as `run` does on an
 //! interrupt (CLI-6). The name is registered last, only over a VM every step succeeded on.
 
+use microvms_core::prelude::{HistoryExt as _, LedgerExt as _};
+
 use microvms_core::workspace::LocalTree as _;
 use std::time::Duration;
 

@@ -8,6 +8,8 @@
 
 #![cfg(test)]
 
+use microvms_core::prelude::LedgerExt as _;
+
 use std::sync::Arc;
 use std::time::Duration;
 

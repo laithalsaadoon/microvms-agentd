@@ -1142,3 +1142,17 @@ core = "microvms_core::session::Session::discovery"
 cli = "discovery"
 py = ["Session.discovery", "Session.discovery_async"]
 ts = "Session.discovery"
+
+[[capability]]
+id = "run-record-storage"
+core = ["microvms_core::ledger::new", "microvms_core::ledger::read_all", "microvms_core::ledger::open_all_for_vm", "microvms_core::ledger::remove"]
+cli = ["ls", "ls --prune", "terminate"]
+py = { exempt = "the local CLI invocation ledger records resources the command owns; SDK callers own and record their lifecycle directly" }
+ts = { exempt = "the local CLI invocation ledger records resources the command owns; SDK callers own and record their lifecycle directly" }
+
+[[capability]]
+id = "vm-history-storage"
+core = ["microvms_core::history::for_vm", "microvms_core::history::read_events", "microvms_core::history::append_unseen_hooks"]
+cli = "history"
+py = { exempt = "the CLI persists the history of its own commands; SDK callers supply their own event recording" }
+ts = { exempt = "the CLI persists the history of its own commands; SDK callers supply their own event recording" }

@@ -6,7 +6,7 @@
 //! outside the process goes through a trait this crate declares:
 //! [`control::transport::Transport`] for the control plane, [`control::BuildServices`] for STS
 //! and S3, [`session::HttpBackend`] for the daemon, [`session::TokenMinter`] for proxy tokens,
-//! [`names::NameStore`] for the name registry, [`clock::Clock`] for time, [`entropy::Entropy`]
+//! [`names::NameStore`] for the name registry, [`run_store::RunStore`] for run records, [`clock::Clock`] for time, [`entropy::Entropy`]
 //! for randomness, [`adapters::Adapters`] for the pieces a use case builds partway through, and
 //! [`provision::ReleaseSource`] and [`provision::AttestationVerifier`] for the daemon release a
 //! fetch proves.
@@ -67,3 +67,7 @@ pub use error::{Error, ErrorKind, WireKind};
 pub use hooks::{BuildHookTimeout, RunHookTimeout};
 pub use region::Region;
 pub use sizing::SizeClass;
+
+pub mod history;
+pub mod ledger;
+pub mod run_store;
