@@ -27,7 +27,7 @@ The codes a build produces:
 - `ERR_INVALID_ARG` (exit 2): the request was refused locally, before any AWS call. The Dockerfile checks below land here.
 - `ERR_BUILD_WEDGED` (exit 6): the image build was never scheduled, the `clientToken` replay signature.
 - `ERR_LAUNCH_DIED` (exit 7): the MicroVM reached a terminal state before `RUNNING`; read `stateReason`.
-- `ERR_CREDENTIALS` (exit 4): check the AWS role or user that made the call. Waiting does not fix an IAM denial. A blank `AccessDeniedException` can also mean the region has no MicroVM service. In a region with this service, read the full denial in CloudTrail and check the policy. To create an image, the caller also needs `lambda:TagResource`.
+- `ERR_CREDENTIALS` (exit 4): check the AWS role or user that made the call. Waiting does not fix an IAM denial. A blank `AccessDeniedException` can also mean the region has no MicroVM service. In a region with this service, read the full denial in CloudTrail and check the policy. Creating an image with tags also requires `lambda:TagResource`.
 
 ## 2. Before building again
 
