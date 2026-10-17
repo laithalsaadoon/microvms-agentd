@@ -218,6 +218,14 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
             Door::AttachSession,
         ),
         (
+            "discovery",
+            Command::Discovery(HealthArgs {
+                attach: attach_flags(),
+                region: region_flags(),
+            }),
+            Door::AttachSession,
+        ),
+        (
             "keepalive",
             Command::Keepalive(KeepaliveArgs {
                 interval: None,
