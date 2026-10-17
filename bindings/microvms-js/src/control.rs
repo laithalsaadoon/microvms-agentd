@@ -494,7 +494,8 @@ impl ControlPlane {
     }
 
     /// `SuspendMicrovm`. Resolves once accepted; `waitForState` for SUSPENDED.
-    #[napi]
+    // PromiseRaw carries structured errors without changing the published unit return.
+    #[napi(ts_return_type = "Promise<void>")]
     pub fn suspend<'env>(
         &self,
         env: &'env napi::Env,
@@ -517,7 +518,7 @@ impl ControlPlane {
 
     /// `ResumeMicrovm`. Resolves once accepted; `waitForState` for RUNNING. A VM that ended
     /// before the resume, whatever ended it, rejects with `ERR_WINDOW_CLOSED` (STATE-12).
-    #[napi]
+    #[napi(ts_return_type = "Promise<void>")]
     pub fn resume<'env>(
         &self,
         env: &'env napi::Env,
@@ -539,7 +540,7 @@ impl ControlPlane {
     }
 
     /// `TerminateMicrovm`. Resolves once accepted; `waitForState` for TERMINATED.
-    #[napi]
+    #[napi(ts_return_type = "Promise<void>")]
     pub fn terminate<'env>(
         &self,
         env: &'env napi::Env,

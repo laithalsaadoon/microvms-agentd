@@ -66,7 +66,7 @@ export declare class AgentVm {
    */
   imageName(options: AgentImageOptions, size?: SizeClass | undefined | null): Promise<string>
   /** The ARN of an existing image named per `imageName`, or `null` when there is none. */
-  findImage(options: AgentImageOptions, size?: SizeClass | undefined | null): Promise<string | undefined | null>
+  findImage(options: AgentImageOptions, size?: SizeClass | undefined | null): Promise<string | null>
   /**
    * Builds or reuses this VM's image, named per `imageName`: resolved at once when ready,
    * waited on while building, deleted and rebuilt when failed, and uploaded to
@@ -215,14 +215,14 @@ export declare class ControlPlane {
   /** `ListMicrovms`, every page, optionally narrowed to one image and version. */
   list(options?: ListMicrovmsOptions | undefined | null): Promise<Array<MicrovmSummary>>
   /** `SuspendMicrovm`. Resolves once accepted; `waitForState` for SUSPENDED. */
-  suspend(microvmId: string): Promise<undefined>
+  suspend(microvmId: string): Promise<void>
   /**
    * `ResumeMicrovm`. Resolves once accepted; `waitForState` for RUNNING. A VM that ended
    * before the resume, whatever ended it, rejects with `ERR_WINDOW_CLOSED` (STATE-12).
    */
-  resume(microvmId: string): Promise<undefined>
+  resume(microvmId: string): Promise<void>
   /** `TerminateMicrovm`. Resolves once accepted; `waitForState` for TERMINATED. */
-  terminate(microvmId: string): Promise<undefined>
+  terminate(microvmId: string): Promise<void>
   /**
    * Polls `GetMicrovm` until the state is one of `wanted`.
    *
@@ -959,7 +959,7 @@ export declare class Sandbox {
    * `buildImage` would, so a caller who uploads its own artifact checks the request before
    * paying for the upload. Takes `buildImage`'s arguments.
    */
-  preflight(options: BuildImageOptions, size?: SizeClass | undefined | null, runHookTimeout?: RunHookTimeout | undefined | null, buildHookTimeout?: BuildHookTimeout | undefined | null): Promise<undefined>
+  preflight(options: BuildImageOptions, size?: SizeClass | undefined | null, runHookTimeout?: RunHookTimeout | undefined | null, buildHookTimeout?: BuildHookTimeout | undefined | null): Promise<void>
   /**
    * `ListManagedMicrovmImageVersions`, every page: the versions of a managed base, the
    * values `buildImage`'s base-version pin takes.

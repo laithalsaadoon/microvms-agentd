@@ -1167,7 +1167,8 @@ impl Sandbox {
     /// Every local guard `buildImage` runs, with zero calls: rejects with the refusal
     /// `buildImage` would, so a caller who uploads its own artifact checks the request before
     /// paying for the upload. Takes `buildImage`'s arguments.
-    #[napi]
+    // Keep the published unit return while PromiseRaw preserves structured failures.
+    #[napi(ts_return_type = "Promise<void>")]
     pub fn preflight<'env>(
         &self,
         env: &'env napi::Env,

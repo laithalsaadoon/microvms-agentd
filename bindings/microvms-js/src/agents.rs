@@ -669,7 +669,9 @@ impl AgentVm {
     }
 
     /// The ARN of an existing image named per `imageName`, or `null` when there is none.
-    #[napi]
+    // Option's runtime conversion returns null; PromiseRaw's generic type generation also
+    // includes undefined, so retain the published return contract explicitly.
+    #[napi(ts_return_type = "Promise<string | null>")]
     pub fn find_image<'env>(
         &self,
         env: &'env napi::Env,
