@@ -11,6 +11,11 @@ It retains credentials only in the recovery child process, captures provider
 diagnostics, and preserves only a validated, sanitized recovery receipt. One
 execution deadline covers both child phases and authentication; the core shares
 its remaining budget across source validation, cleanup and verification.
+Read-only AWS observations make at most six attempts after classified transient
+failures, with equal jitter over capped exponential delays that fit strictly
+within that deadline. Deletion calls retain their existing retry policy.
+An optional IAM role-duration read can be unavailable; its fixed error code
+does not grant authority or establish a configured session maximum.
 
 The dispatch names a reviewed manifest by source run ID and the SHA-256 of its
 exact file bytes. Manifests retain hashes, source-run metadata and proof labels;

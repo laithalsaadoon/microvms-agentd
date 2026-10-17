@@ -1,0 +1,31 @@
+# Observation retries and fixed IAM diagnostics do not expand deletion authority.
+[[family]]
+guard = "test_recover_live_retries.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_retries.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "recovery-read-fourth-attempt"
+message = "test_fourth_observation_attempt_can_succeed_after_throttling"
+transform = { file = "tools/recover-live.py", replace = "OBSERVATION_RETRY_CAPS = (2, 4, 8, 16, 16)", with = "OBSERVATION_RETRY_CAPS = (2, 2)" }
+
+[[family.fault]]
+id = "recovery-read-jitter"
+message = "test_observation_retries_exhaust_at_six_attempts_with_bounded_equal_jitter"
+transform = { file = "tools/recover-live.py", replace = "                        delay = self.jitter(delay / 2, delay)", with = "                        delay = delay" }
+
+[[family.fault]]
+id = "recovery-read-deadline"
+message = "test_observation_wait_must_fit_strictly_within_the_remaining_deadline"
+transform = { file = "tools/recover-live.py", replace = '                        require(delay < self.deadline - self.clock(), "deadline")', with = '                        require(True, "deadline")' }
+
+[[family.fault]]
+id = "recovery-read-mutation-boundary"
+message = "test_mutating_and_unrecognized_operations_keep_the_existing_retry_policy"
+transform = { file = "tools/recover-live.py", replace = "        observation = operation in READ_OPERATIONS", with = "        observation = True" }
+
+[[family.fault]]
+id = "recovery-iam-denial-code"
+message = "test_iam_access_denied_is_optional_fixed_and_nonretrying"
+transform = { file = "tools/recover-live.py", replace = '    "AccessDenied",', with = '' }

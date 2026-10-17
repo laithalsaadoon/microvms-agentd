@@ -100,7 +100,7 @@ transform = { file = "tools/recover-live.py", replace = "    for resource, row, 
 [[family.fault]]
 id = "recovery-core-retry-bound"
 message = "FAIL: test_sdk_retries_are_bounded_and_only_classified_errors_retry"
-transform = { file = "tools/recover-live.py", replace = "                if code in RETRY_CODES and attempt < 2:", with = "                if code in RETRY_CODES and attempt < 1:" }
+transform = { file = "tools/recover-live.py", replace = "                if code in RETRY_CODES and attempt < len(delays):", with = "                if code in RETRY_CODES and attempt < 1:" }
 
 [[family.fault]]
 id = "recovery-core-verifier-exit"
