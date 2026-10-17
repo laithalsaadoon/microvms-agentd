@@ -764,7 +764,7 @@ fn project_files(
 ) -> PyCoreResult<Option<microvms_core::control::ProjectFiles>> {
     dir.map(microvms_core::control::read_project_files)
         .transpose()
-        .map_err(crate::errors::CoreError)
+        .map_err(crate::errors::CoreError::from)
 }
 
 /// The core request for `build_image`'s keywords: each one set on core's own request type,
@@ -973,7 +973,7 @@ impl PySandbox {
     /// The awaitable twin of `Sandbox(region)`: resolves credentials on the shared runtime.
     #[staticmethod]
     async fn create_async(region: PyRegion) -> PyCoreResult<PySandbox> {
-        Ok(runtime::spawn(open(region.inner)).await?)
+        Ok(runtime::spawn(open(region.inner)).await??)
     }
 
     /// The lifecycle state: `"PENDING"`, `"RUNNING"`, `"SUSPENDING"`, `"SUSPENDED"`,
@@ -1053,7 +1053,7 @@ impl PySandbox {
             agent_token,
             port,
         ))
-        .await?;
+        .await??;
         Ok(PySandbox::own(adopted))
     }
 
@@ -1089,7 +1089,7 @@ impl PySandbox {
         let sandbox = runtime::spawn(async move {
             Sandbox::from_name(&store, &name, Some(region.inner), port).await
         })
-        .await?;
+        .await??;
         Ok(PySandbox::own(sandbox))
     }
 
@@ -1110,7 +1110,7 @@ impl PySandbox {
     fn detach(&self, py: Python<'_>) -> PyCoreResult<PyDetached> {
         let inner = runtime::lock_now(py, &self.inner)
             .detach()
-            .map_err(CoreError)?;
+            .map_err(CoreError::from)?;
         Ok(PyDetached { inner })
     }
 
@@ -1359,7 +1359,7 @@ impl PySandbox {
     ) -> PyCoreResult<PyImage> {
         // PyO3 polls this coroutine on the event-loop thread. Project files can live on a
         // slow filesystem, so read them on the blocking pool before creating the image.
-        let project_files = runtime::spawn_blocking(move || project_files(project_dir)).await?;
+        let project_files = runtime::spawn_blocking(move || project_files(project_dir)).await??;
         let request = create_image_request(ImageRequestArgs {
             name: &name,
             binary,
@@ -1379,7 +1379,7 @@ impl PySandbox {
             log_stream,
             token_scope,
         });
-        Ok(runtime::spawn_shielded(self.build_image_op(request)).await?)
+        Ok(runtime::spawn_shielded(self.build_image_op(request)).await??)
     }
 
     /// Builds or reuses the content-addressed image for a task: one call from build inputs
@@ -1528,7 +1528,7 @@ impl PySandbox {
             tags,
             wait_timeout,
         )?;
-        Ok(runtime::spawn(self.ensure_image_op(request, context_dir, project_dir)).await?)
+        Ok(runtime::spawn(self.ensure_image_op(request, context_dir, project_dir)).await??)
     }
 
     /// Every local guard `build_image` runs, with zero calls: raises the refusal `build_image`
@@ -1623,7 +1623,7 @@ impl PySandbox {
         &self,
         base_image_arn: String,
     ) -> PyCoreResult<Vec<PyManagedBaseVersion>> {
-        Ok(runtime::spawn(self.managed_base_versions_op(base_image_arn)).await?)
+        Ok(runtime::spawn(self.managed_base_versions_op(base_image_arn)).await??)
     }
 
     /// The artifact bytes to upload to `code_artifact_uri`.
@@ -1668,7 +1668,10 @@ impl PySandbox {
         request.project_files = project_files(project_dir)?;
         request.inherit_workdir = inherit_workdir;
         let bytes = self.read(py, |sandbox| sandbox.build_artifact_for(&request));
-        Ok(PyBytes::new(py, &bytes.map_err(crate::errors::CoreError)?))
+        Ok(PyBytes::new(
+            py,
+            &bytes.map_err(crate::errors::CoreError::from)?,
+        ))
     }
 
     /// Launches a MicroVM and returns its session. By default it waits for RUNNING
@@ -1886,7 +1889,7 @@ impl PySandbox {
             log_stream,
             disable_logging,
         })?;
-        Ok(runtime::spawn_shielded(self.run_op(request)).await?)
+        Ok(runtime::spawn_shielded(self.run_op(request)).await??)
     }
 
     /// Finishes a `run(wait=False)`: waits for RUNNING and for the daemon to answer, and
@@ -1906,7 +1909,7 @@ impl PySandbox {
     #[pyo3(signature = (*, timeout=None))]
     async fn wait_until_running_async(&self, timeout: Option<f64>) -> PyCoreResult<PySession> {
         let timeout = running_timeout(timeout)?;
-        Ok(runtime::spawn(self.wait_until_running_op(timeout)).await?)
+        Ok(runtime::spawn(self.wait_until_running_op(timeout)).await??)
     }
 
     /// Freezes the VM and waits for the platform to report it.
@@ -1928,7 +1931,7 @@ impl PySandbox {
     /// The awaitable twin of `suspend`. A lifecycle transition: cancelling the awaitable
     /// leaves the suspend running to completion.
     async fn suspend_async(&self) -> PyCoreResult<String> {
-        Ok(runtime::spawn_shielded(self.suspend_op()).await?)
+        Ok(runtime::spawn_shielded(self.suspend_op()).await??)
     }
 
     /// Thaws the VM and returns a usable session.
@@ -1962,7 +1965,7 @@ impl PySandbox {
     /// The awaitable twin of `resume`. A lifecycle transition: cancelling the awaitable leaves
     /// the resume running to completion.
     async fn resume_async(&self) -> PyCoreResult<PySession> {
-        Ok(runtime::spawn_shielded(self.resume_op()).await?)
+        Ok(runtime::spawn_shielded(self.resume_op()).await??)
     }
 
     /// Tears down, best-effort, **never raising**.
@@ -2036,7 +2039,7 @@ impl PySandbox {
             delete_backoff,
             wait_for_terminated,
         )?;
-        Ok(runtime::spawn_shielded(self.terminate_op(opts)).await)
+        runtime::spawn_shielded(self.terminate_op(opts)).await
     }
 
     /// `with sandbox as s:` — returns the sandbox itself.

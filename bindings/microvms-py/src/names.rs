@@ -46,7 +46,7 @@ impl PyNameRecord {
                 agent_token,
                 region.inner.as_str(),
             )
-            .map_err(CoreError)?,
+            .map_err(CoreError::from)?,
         })
     }
 
@@ -55,7 +55,7 @@ impl PyNameRecord {
     fn for_sandbox(py: Python<'_>, name: &str, sandbox: &PySandbox) -> PyCoreResult<Self> {
         let inner = sandbox
             .read(py, |sandbox| sandbox.name_record(name))
-            .map_err(CoreError)?;
+            .map_err(CoreError::from)?;
         Ok(Self { inner })
     }
 
@@ -67,17 +67,17 @@ impl PyNameRecord {
             .and_then(|json| json.call_method1("dumps", (record,)))
             .and_then(|dumped| dumped.extract())
             .map_err(|_| {
-                CoreError(microvms_core::error::Error::invalid_arg(
+                CoreError::from(microvms_core::error::Error::invalid_arg(
                     "a name record dict must be JSON-serializable",
                 ))
             })?;
         let value: serde_json::Value = serde_json::from_str(&text).map_err(|_| {
-            CoreError(microvms_core::error::Error::invalid_arg(
+            CoreError::from(microvms_core::error::Error::invalid_arg(
                 "a name record dict must be JSON-serializable",
             ))
         })?;
         Ok(Self {
-            inner: NameRecord::from_json(value).map_err(CoreError)?,
+            inner: NameRecord::from_json(value).map_err(CoreError::from)?,
         })
     }
 
@@ -138,7 +138,7 @@ impl PyNameRecord {
         Ok(self
             .inner
             .tunnel_identity()
-            .map_err(CoreError)?
+            .map_err(CoreError::from)?
             .map(Into::into))
     }
 
@@ -213,13 +213,13 @@ impl PyNameRegistry {
         Ok(self
             .store
             .get(name)
-            .map_err(CoreError)?
+            .map_err(CoreError::from)?
             .map(|inner| PyNameRecord { inner }))
     }
 
     /// Writes `record` under its name, replacing any earlier record, owner-only on Unix.
     fn put(&self, record: &PyNameRecord) -> PyCoreResult<()> {
-        self.store.put(&record.inner).map_err(CoreError)
+        self.store.put(&record.inner).map_err(CoreError::from)
     }
 
     /// Names the VM `sandbox` addresses and writes the record; returns it.
@@ -236,7 +236,7 @@ impl PyNameRegistry {
 
     /// Removes `name`, answering whether a record was there.
     fn delete(&self, name: &str) -> PyCoreResult<bool> {
-        self.store.delete(name).map_err(CoreError)
+        self.store.delete(name).map_err(CoreError::from)
     }
 
     /// Every readable record, sorted by name.
@@ -244,7 +244,7 @@ impl PyNameRegistry {
         Ok(self
             .store
             .list()
-            .map_err(CoreError)?
+            .map_err(CoreError::from)?
             .into_iter()
             .map(|inner| PyNameRecord { inner })
             .collect())
@@ -253,7 +253,9 @@ impl PyNameRegistry {
     /// Removes every name registered to `microvm_id` and returns them — the step after a
     /// terminate, so no name outlives its VM.
     fn release_by_vm(&self, microvm_id: &str) -> PyCoreResult<Vec<String>> {
-        self.store.release_by_vm(microvm_id).map_err(CoreError)
+        self.store
+            .release_by_vm(microvm_id)
+            .map_err(CoreError::from)
     }
 
     /// Registers a record this registry didn't write, once the VM has answered one
@@ -283,7 +285,7 @@ impl PyNameRegistry {
         session: Py<crate::session::PySession>,
     ) -> PyCoreResult<bool> {
         let op = self.import_op(record.get().inner.clone(), session.get());
-        Ok(crate::runtime::spawn(op).await?)
+        Ok(crate::runtime::spawn(op).await??)
     }
 
     fn __repr__(&self) -> String {

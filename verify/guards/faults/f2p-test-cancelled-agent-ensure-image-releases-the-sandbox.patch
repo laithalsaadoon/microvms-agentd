@@ -18,8 +18,8 @@ index df20176..159fdd2 100644
          s3_key_prefix: Option<String>,
      ) -> PyCoreResult<PyEnsuredImage> {
          let op = self.ensure_image_op(binary, build_role_arn, s3_bucket, size, s3_key_prefix);
--        Ok(runtime::spawn(op).await?)
-+        Ok(runtime::spawn_shielded(op).await?)
+-        Ok(runtime::spawn(op).await??)
++        Ok(runtime::spawn_shielded(op).await??)
      }
  
      /// The artifact bytes to upload to `s3://<bucket>/<image_name>.zip` before `build_image`.
@@ -58,10 +58,10 @@ index bfd06d0..a8e09cd 100644
              tags,
              wait_timeout,
          )?;
--        Ok(runtime::spawn(self.ensure_image_op(request, context_dir, project_dir)).await?)
+-        Ok(runtime::spawn(self.ensure_image_op(request, context_dir, project_dir)).await??)
 +        Ok(
 +            runtime::spawn_shielded(self.ensure_image_op(request, context_dir, project_dir))
-+                .await?,
++                .await??,
 +        )
      }
  

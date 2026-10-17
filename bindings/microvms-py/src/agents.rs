@@ -78,7 +78,7 @@ impl PyAgentSpec {
     #[new]
     #[pyo3(signature = (agent, *, model=None, cli_version=None))]
     fn new(agent: &str, model: Option<String>, cli_version: Option<String>) -> PyCoreResult<Self> {
-        let agent: Agent = agent.parse().map_err(CoreError)?;
+        let agent: Agent = agent.parse().map_err(CoreError::from)?;
         Ok(Self::build(agent, model, cli_version))
     }
 
@@ -235,7 +235,7 @@ pub async fn mint_bedrock_token_async(
     region: PyRegion,
     ttl_seconds: Option<f64>,
 ) -> PyCoreResult<PyBearerToken> {
-    Ok(runtime::spawn(mint_op(region.inner, ttl_seconds)?).await?)
+    Ok(runtime::spawn(mint_op(region.inner, ttl_seconds)?).await??)
 }
 
 /// Mint with explicit STS credentials and their expiry without changing process env.
@@ -281,7 +281,7 @@ pub fn installed_agents(py: Python<'_>, session: &PySession) -> PyCoreResult<Vec
 /// The awaitable twin of `installed_agents`.
 #[pyfunction]
 pub async fn installed_agents_async(session: Py<PySession>) -> PyCoreResult<Vec<PyAgentSpec>> {
-    Ok(runtime::spawn(installed_agents_op(session.get())).await?)
+    Ok(runtime::spawn(installed_agents_op(session.get())).await??)
 }
 
 fn installed_agents_op(
@@ -321,7 +321,7 @@ pub async fn install_agent_access_async(
     agents: Vec<PyAgentSpec>,
     token: PyBearerToken,
 ) -> PyCoreResult<()> {
-    Ok(runtime::spawn(install_access_op(session.get(), agents, &token)).await?)
+    Ok(runtime::spawn(install_access_op(session.get(), agents, &token)).await??)
 }
 
 fn install_access_op(
@@ -385,7 +385,7 @@ pub async fn prompt_agent_async(
 ) -> PyCoreResult<PyExecHandle> {
     let options = prompt_options(exec_id, timeout_sec, permission_mode, reap_group_on_exit)?;
     let op = prompt_agent_op(session.get(), agent.inner, task, options);
-    Ok(runtime::spawn(op).await?)
+    Ok(runtime::spawn(op).await??)
 }
 
 fn prompt_agent_op(
@@ -774,7 +774,7 @@ impl PyAgentVm {
         agents: Option<Vec<PyAgentSpec>>,
     ) -> PyCoreResult<PyAgentVm> {
         let open = Self::open_op(region.inner, specs_or_default(agents))?;
-        Ok(runtime::spawn(open).await?)
+        Ok(runtime::spawn(open).await??)
     }
 
     /// Adopts the agent VM registered as `name` in `registry`; see `Sandbox.from_name`.
@@ -815,7 +815,7 @@ impl PyAgentVm {
             specs_or_default(agents),
             port,
         );
-        Ok(runtime::spawn(op).await?)
+        Ok(runtime::spawn(op).await??)
     }
 
     /// An agent VM for a VM another process launched; see `Sandbox.adopt`.
@@ -863,7 +863,7 @@ impl PyAgentVm {
             agent_token,
             port,
         );
-        Ok(runtime::spawn(op).await?)
+        Ok(runtime::spawn(op).await??)
     }
 
     /// The specs this VM carries, in profile order.
@@ -938,7 +938,7 @@ impl PyAgentVm {
         build_role_arn: String,
         size: Option<PySizeClass>,
     ) -> PyCoreResult<Option<String>> {
-        Ok(runtime::spawn(self.find_image_op(binary, build_role_arn, size)).await?)
+        Ok(runtime::spawn(self.find_image_op(binary, build_role_arn, size)).await??)
     }
 
     /// Builds or reuses this VM's image, named per `image_name`: returned at once when ready,
@@ -977,7 +977,7 @@ impl PyAgentVm {
         s3_key_prefix: Option<String>,
     ) -> PyCoreResult<PyEnsuredImage> {
         let op = self.ensure_image_op(binary, build_role_arn, s3_bucket, size, s3_key_prefix);
-        Ok(runtime::spawn(op).await?)
+        Ok(runtime::spawn(op).await??)
     }
 
     /// The artifact bytes to upload to `s3://<bucket>/<image_name>.zip` before `build_image`.
@@ -1025,7 +1025,7 @@ impl PyAgentVm {
         size: Option<PySizeClass>,
     ) -> PyCoreResult<PyImage> {
         let op = self.build_image_op(binary, code_artifact_uri, build_role_arn, size);
-        Ok(runtime::spawn_shielded(op).await?)
+        Ok(runtime::spawn_shielded(op).await??)
     }
 
     /// Launches with egress and waits for the daemon to answer.
@@ -1180,7 +1180,7 @@ impl PyAgentVm {
                 ready_timeout,
             },
         )?;
-        Ok(runtime::spawn_shielded(self.launch_op(request)).await?)
+        Ok(runtime::spawn_shielded(self.launch_op(request)).await??)
     }
 
     /// Hands the VM off to another process; see `Sandbox.detach`. The adopter passes the
@@ -1213,7 +1213,7 @@ impl PyAgentVm {
         ttl_seconds: Option<f64>,
     ) -> PyCoreResult<PyBearerToken> {
         let op = self.install_access_op(token, ttl_seconds)?;
-        Ok(runtime::spawn(op).await?)
+        Ok(runtime::spawn(op).await??)
     }
 
     /// Starts one task for `agent` and returns its handle. Does not wait.
@@ -1256,7 +1256,7 @@ impl PyAgentVm {
     ) -> PyCoreResult<PyExecHandle> {
         let options = prompt_options(exec_id, timeout_sec, permission_mode, reap_group_on_exit)?;
         let op = self.prompt_op(&agent, task, options)?;
-        Ok(runtime::spawn(op).await?)
+        Ok(runtime::spawn(op).await??)
     }
 
     /// Start, wait, ack: one task's whole result. `timeout` defaults to 900 seconds,
@@ -1300,7 +1300,7 @@ impl PyAgentVm {
     ) -> PyCoreResult<PyExecResult> {
         let options = prompt_options(exec_id, Some(timeout), permission_mode, reap_group_on_exit)?;
         let op = self.prompt_sync_op(&agent, task, options)?;
-        Ok(runtime::spawn(op).await?)
+        Ok(runtime::spawn(op).await??)
     }
 
     /// Tears down, best-effort, never raising; see `Sandbox.terminate`.
@@ -1356,7 +1356,7 @@ impl PyAgentVm {
             delete_backoff,
             wait_for_terminated,
         )?;
-        Ok(runtime::spawn_shielded(self.sandbox().terminate_op(opts)).await)
+        runtime::spawn_shielded(self.sandbox().terminate_op(opts)).await
     }
 
     fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {

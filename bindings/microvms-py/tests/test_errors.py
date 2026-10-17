@@ -396,3 +396,347 @@ for asynchronous in (False, True):
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    assert not result.stderr, result.stderr
+
+
+def test_async_shutdown_retires_pending_wakes_and_refuses_later_awaits() -> None:
+    """Pending Python wakes retire before finalization; later sync callers still work."""
+    code = """
+import atexit
+import asyncio
+
+def earlier_exit_handler():
+    session = microvms.Session.direct("http://127.0.0.1:9", "test-token")
+    try:
+        session.health()
+    except microvms.RetryableError:
+        pass
+    else:
+        raise AssertionError("the closed local port must refuse the request")
+
+atexit.register(earlier_exit_handler)
+import microvms
+
+async def main():
+    connected = asyncio.Event()
+    release = asyncio.Event()
+    handlers = []
+
+    async def hold(reader, writer):
+        handlers.append(asyncio.current_task())
+        connected.set()
+        await release.wait()
+        writer.close()
+        await writer.wait_closed()
+
+    server = await asyncio.start_server(hold, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    session = microvms.Session.direct(f"http://127.0.0.1:{port}", "test-token")
+    try:
+        pending = session.health_async()
+        pending.send(None)
+        await asyncio.wait_for(connected.wait(), 5)
+        atexit._run_exitfuncs()
+        for operation in (pending, session.health_async()):
+            try:
+                await asyncio.wait_for(operation, 1)
+            except RuntimeError as error:
+                assert "asynchronous runtime is shutting down" in str(error)
+            except TimeoutError as error:
+                raise AssertionError("shutdown did not refuse the asynchronous operation") from error
+            else:
+                raise AssertionError("a closed asynchronous bridge must refuse the await")
+    finally:
+        server.close()
+        release.set()
+        await asyncio.gather(*handlers)
+        await server.wait_closed()
+
+asyncio.run(main())
+"""
+    result = subprocess.run(
+        [sys.executable, "-X", "faulthandler", "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not result.stderr, result.stderr
+
+
+@pytest.mark.parametrize("finish", ["complete", "cancel", "shutdown"])
+def test_finishing_an_await_drains_the_inflight_python_wake(finish: str) -> None:
+    """The worker must finish its Python callback before the await or process can end."""
+    code = r"""
+import atexit
+import asyncio
+import socket
+import sys
+import threading
+import microvms
+
+finish = sys.argv[1]
+entered = threading.Event()
+release = threading.Event()
+can_finish = threading.Event()
+respond = threading.Event()
+
+class HeldLoop(asyncio.SelectorEventLoop):
+    def call_soon_threadsafe(self, callback, *args, context=None):
+        if threading.current_thread() is not threading.main_thread():
+            entered.set()
+            assert release.wait(10), "the main thread did not release the worker"
+        return super().call_soon_threadsafe(callback, *args, context=context)
+
+listener = socket.socket()
+listener.bind(("127.0.0.1", 0))
+listener.listen()
+
+def serve():
+    connection, _ = listener.accept()
+    assert respond.wait(10)
+    connection.close()
+    listener.close()
+
+server_thread = threading.Thread(target=serve)
+server_thread.start()
+loop = HeldLoop()
+asyncio.set_event_loop(loop)
+port = listener.getsockname()[1]
+session = microvms.Session.direct(f"http://127.0.0.1:{port}", "test-token")
+
+async def prime():
+    pending = session.health_async()
+    pending.send(None)
+    respond.set()
+    assert entered.wait(10), "the worker did not enter the Python callback"
+    return pending
+
+pending = loop.run_until_complete(prime())
+
+def release_worker():
+    can_finish.wait()
+    release.set()
+
+releaser = threading.Thread(target=release_worker)
+releaser.start()
+# Keep the handoff to the native finishing operation on this thread. Its GIL
+# release must let the releaser run; no scheduler delay or retry repairs a bug.
+sys.setswitchinterval(1000)
+can_finish.set()
+if finish == "complete":
+    try:
+        pending.send(None)
+    except microvms.RetryableError:
+        pass
+    else:
+        raise AssertionError("the peer closed the request without a response")
+elif finish == "cancel":
+    pending.close()
+else:
+    atexit._run_exitfuncs()
+    try:
+        pending.send(None)
+    except RuntimeError as error:
+        assert "asynchronous runtime is shutting down" in str(error)
+    else:
+        raise AssertionError("the closed bridge must refuse the pending await")
+assert release.is_set(), "finishing returned before the Python wake could finish"
+releaser.join()
+server_thread.join()
+assert release.is_set()
+loop.close()
+"""
+    result = subprocess.run(
+        [sys.executable, "-X", "faulthandler", "-c", code, finish],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not result.stderr, result.stderr
+
+
+@pytest.mark.parametrize(
+    "kind", ["keep_awake", "tunnel", "port_forward", "sandbox", "agent_vm"]
+)
+@pytest.mark.parametrize("original_error", [False, True])
+def test_context_exit_preserves_exception_precedence_after_shutdown(
+    kind: str, original_error: bool
+) -> None:
+    """Shutdown errors obey each context manager's existing teardown contract."""
+    code = r"""
+import atexit
+import asyncio
+import os
+import sys
+import microvms
+
+os.environ["AWS_ACCESS_KEY_ID"] = "AKIDEXAMPLE"
+os.environ["AWS_SECRET_ACCESS_KEY"] = "synthetic-test-secret"
+os.environ.pop("AWS_PROFILE", None)
+kind, original_error = sys.argv[1], sys.argv[2] == "True"
+session = microvms.Session.direct("http://127.0.0.1:9", "test-token")
+if kind == "sandbox":
+    manager = microvms.Sandbox(microvms.Region.us_east_1())
+elif kind == "agent_vm":
+    manager = microvms.AgentVm(microvms.Region.us_east_1())
+elif kind == "keep_awake":
+    manager = session.keep_awake(interval=1)
+else:
+    manager = getattr(session, kind)(9000)
+
+atexit._run_exitfuncs()
+
+async def main():
+    original = ValueError("the body failed") if original_error else None
+    try:
+        async with manager:
+            if original is not None:
+                raise original
+    except ValueError as error:
+        assert error is original
+    except RuntimeError as error:
+        assert not original_error and kind not in ("sandbox", "agent_vm")
+        assert "asynchronous runtime is shutting down" in str(error)
+    else:
+        assert not original_error and kind in ("sandbox", "agent_vm")
+
+asyncio.run(main())
+"""
+    result = subprocess.run(
+        [sys.executable, "-X", "faulthandler", "-c", code, kind, str(original_error)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not result.stderr, result.stderr
+
+
+@pytest.mark.parametrize("kind", ["event", "chunk", "callback"])
+def test_cancelling_a_direct_receiver_drains_its_python_wake(kind: str) -> None:
+    """Each direct channel poll owns its wake until the Python callback returns."""
+    code = r"""
+import asyncio
+import http.server
+import sys
+import threading
+import microvms
+
+kind = sys.argv[1]
+entered = threading.Event()
+release = threading.Event()
+close_started = threading.Event()
+close_finished = threading.Event()
+wake_finished = threading.Event()
+send_output = threading.Event()
+end_stream = threading.Event()
+stream_open = threading.Event()
+frame = b'event: output\ndata: {"offset":0,"stream":"stdout","output":"eA=="}\n\n'
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        body = b'{"exec_id":"x-async","phase":"running"}'
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        assert "/stream" in self.path, self.path
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        # The withheld byte keeps the drive alive, so only the channel can wake Python.
+        self.send_header("Content-Length", str(len(frame) + 1))
+        self.end_headers()
+        self.wfile.flush()
+        stream_open.set()
+        assert send_output.wait(10)
+        self.wfile.write(frame)
+        self.wfile.flush()
+        assert end_stream.wait(10)
+
+class HeldLoop(asyncio.SelectorEventLoop):
+    def call_soon_threadsafe(self, callback, *args, context=None):
+        if threading.current_thread() is not threading.main_thread():
+            entered.set()
+            assert release.wait(10), "the main thread did not release the worker"
+        result = super().call_soon_threadsafe(callback, *args, context=context)
+        wake_finished.set()
+        return result
+
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+server_thread = threading.Thread(target=server.serve_forever)
+server_thread.start()
+session = microvms.Session.direct(f"http://127.0.0.1:{server.server_port}", "test-token")
+loop = HeldLoop()
+asyncio.set_event_loop(loop)
+callbacks = []
+async def prime():
+    if kind == "callback":
+        pending = session.run_to_completion_async(
+            ["true"], on_output=callbacks.append, exec_id="x-async"
+        )
+    else:
+        pending = (owner.stdout if kind == "chunk" else owner).__anext__()
+    pending.send(None)
+    assert stream_open.wait(10), "the producer did not open its stream"
+    send_output.set()
+    assert entered.wait(10), "the receiver did not wake Python"
+    assert not callbacks
+    return pending
+
+closer = None
+try:
+    if kind == "event":
+        owner = session.exec("x-async").stream(idle_timeout=5.0)
+    elif kind == "chunk":
+        owner = session.spawn(["true"], exec_id="x-async")
+    pending = loop.run_until_complete(prime())
+
+    def close_pending():
+        close_started.set()
+        pending.close()
+        close_finished.set()
+
+    # The closer cannot switch Python threads between its start handshake and native
+    # close. Observing the handshake therefore means close has released the GIL.
+    sys.setswitchinterval(1000)
+    closer = threading.Thread(target=close_pending)
+    closer.start()
+    assert close_started.wait(10), "the closer did not start"
+    # This bounded observation keeps the callback blocked throughout. Merely
+    # releasing the GIL in an unrelated nested future cannot satisfy the verdict.
+    finished_while_held = close_finished.wait(0.2)
+finally:
+    release.set()
+    send_output.set()
+    end_stream.set()
+    if closer is not None and closer.ident is not None:
+        closer.join(10)
+    server.shutdown()
+    server.server_close()
+    server_thread.join()
+    loop.close()
+assert not closer.is_alive(), "cancellation did not drain after releasing the callback"
+assert not finished_while_held, "cancellation returned with a Python callback still held"
+assert close_finished.is_set() and wake_finished.is_set()
+"""
+    result = subprocess.run(
+        [sys.executable, "-X", "faulthandler", "-c", code, kind],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not result.stderr, result.stderr

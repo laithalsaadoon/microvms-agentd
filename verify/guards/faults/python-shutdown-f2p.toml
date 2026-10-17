@@ -1,0 +1,13 @@
+# ── python-shutdown-f2p: FAIL_TO_PASS entries tools/fail-to-pass.py emitted ──
+
+# FAIL_TO_PASS: fails on e919c83f87ec with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-test-async-shutdown-retires-pending-wakes-and-refuses"
+guard = "bindings/microvms-py/tests/test_errors.py::test_async_shutdown_retires_pending_wakes_and_refuses_later_awaits"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_errors.py::test_async_shutdown_retires_pending_wakes_and_refuses_later_awaits"],
+]
+expect = "test-failed"
+suite = "bindings"
+patch = "verify/guards/faults/f2p-test-async-shutdown-retires-pending-wakes-and-refuses.patch"

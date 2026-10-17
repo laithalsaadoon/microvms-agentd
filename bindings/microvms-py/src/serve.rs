@@ -45,7 +45,7 @@ impl PyTunnelIdentity {
     fn new(host_seed: &str, vm_public_key: &str) -> PyCoreResult<Self> {
         Ok(Self {
             inner: TunnelIdentity::from_encoded_parts(host_seed, vm_public_key)
-                .map_err(CoreError)?,
+                .map_err(CoreError::from)?,
         })
     }
 
@@ -76,7 +76,7 @@ impl PyTunnelIdentity {
 
 /// `stop()`'s grace, from its `timeout` keyword.
 fn grace(timeout: Option<f64>) -> PyCoreResult<Option<std::time::Duration>> {
-    timeout.map(seconds).transpose().map_err(CoreError)
+    timeout.map(seconds).transpose().map_err(CoreError::from)
 }
 
 /// A connection that didn't end clean.
@@ -311,7 +311,7 @@ impl PyTunnel {
     #[pyo3(signature = (timeout=None))]
     async fn stop_async(&self, timeout: Option<f64>) -> PyCoreResult<PyTunnelReport> {
         let grace = grace(timeout)?;
-        Ok(runtime::spawn(self.stop_op(grace)).await?)
+        Ok(runtime::spawn(self.stop_op(grace)).await??)
     }
 
     fn __enter__(slf: Py<Self>) -> Py<Self> {
@@ -352,7 +352,7 @@ impl PyTunnel {
         let _ = (exc_value, traceback);
         let stopped = runtime::spawn(self.stop_op(None)).await;
         if exc_type.is_none() {
-            stopped?;
+            stopped??;
         }
         Ok(false)
     }
@@ -426,7 +426,7 @@ impl PyPortForward {
     #[pyo3(signature = (timeout=None))]
     async fn stop_async(&self, timeout: Option<f64>) -> PyCoreResult<PyPortForwardReport> {
         let grace = grace(timeout)?;
-        Ok(runtime::spawn(self.stop_op(grace)).await?)
+        Ok(runtime::spawn(self.stop_op(grace)).await??)
     }
 
     fn __enter__(slf: Py<Self>) -> Py<Self> {
@@ -467,7 +467,7 @@ impl PyPortForward {
         let _ = (exc_value, traceback);
         let stopped = runtime::spawn(self.stop_op(None)).await;
         if exc_type.is_none() {
-            stopped?;
+            stopped??;
         }
         Ok(false)
     }

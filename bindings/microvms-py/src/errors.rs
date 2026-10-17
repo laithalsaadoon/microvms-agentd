@@ -19,8 +19,9 @@
 //!
 //! # No binding-local validation anywhere in this file
 //!
-//! Every error here originates in `microvms-core`. There is no path where this module
-//! decides something is invalid: it translates a refusal the core already made. A gap in
+//! Domain errors originate in `microvms-core`. This module does not decide whether an input
+//! is invalid: it translates a refusal the core already made. The async bridge can also
+//! forward a native Python error when interpreter shutdown has closed it. A gap in
 //! the core stays a gap and gets noted in the packet (the kickoff rule), because a check
 //! added here would be the copy most callers hit and the copy nothing else tests.
 
@@ -178,16 +179,25 @@ pub(crate) fn to_py_err(py: Python<'_>, error: &Error) -> PyErr {
     raised
 }
 
-/// A core [`Error`] on its way to Python.
+/// A core [`Error`] or a native bridge error on its way to Python.
 ///
 /// `From<Error> for PyErr` is impossible — both types are foreign to this crate — so the
-/// `?` operator needs a local newtype. Every fallible binding method returns
-/// `Result<T, CoreError>`, and PyO3 converts through the impl below.
-pub(crate) struct CoreError(pub(crate) Error);
+/// `?` operator needs a local wrapper. It also preserves Python's own `RuntimeError` for
+/// async admission after shutdown, without reclassifying it as a domain failure.
+pub(crate) enum CoreError {
+    Core(Error),
+    Python(PyErr),
+}
 
 impl From<Error> for CoreError {
     fn from(error: Error) -> Self {
-        CoreError(error)
+        Self::Core(error)
+    }
+}
+
+impl From<PyErr> for CoreError {
+    fn from(error: PyErr) -> Self {
+        Self::Python(error)
     }
 }
 
@@ -196,7 +206,10 @@ impl From<CoreError> for PyErr {
         // `Python::attach` rather than a threaded-through token: this runs during `?`
         // conversion where no token is in scope, and the conversion is always on a
         // thread that is about to return into Python.
-        Python::attach(|py| to_py_err(py, &error.0))
+        match error {
+            CoreError::Core(error) => Python::attach(|py| to_py_err(py, &error)),
+            CoreError::Python(error) => error,
+        }
     }
 }
 

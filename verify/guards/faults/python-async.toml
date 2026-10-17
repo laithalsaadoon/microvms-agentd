@@ -12,7 +12,7 @@ run = [
 expect = "test-failed"
 suite = "bindings"
 note = "bindings/microvms-py/tests/test_async.py::test_bind_26_a_cancelled_wait_stops_its_task"
-transform = { file = "bindings/microvms-py/src/runtime.rs", replace = "        task: RUNTIME.spawn(future),\n        abort_on_drop: true,\n", with = "        task: RUNTIME.spawn(future),\n        abort_on_drop: false,\n" }
+transform = { file = "bindings/microvms-py/src/runtime.rs", replace = "    spawned(|| RUNTIME.spawn(future), true)", with = "    spawned(|| RUNTIME.spawn(future), false)" }
 
 # A lifecycle transition's awaitable aborts its task like a read's, so a cancelled launch or
 # teardown is dropped halfway.
@@ -26,4 +26,4 @@ run = [
 expect = "test-failed"
 suite = "bindings"
 note = "bindings/microvms-py/tests/test_async.py::test_bind_27_a_cancelled_lifecycle_transition_runs_on"
-transform = { file = "bindings/microvms-py/src/runtime.rs", replace = "        task: RUNTIME.spawn(future),\n        abort_on_drop: false,\n", with = "        task: RUNTIME.spawn(future),\n        abort_on_drop: true,\n" }
+transform = { file = "bindings/microvms-py/src/runtime.rs", replace = "    spawned(|| RUNTIME.spawn(future), false)", with = "    spawned(|| RUNTIME.spawn(future), true)" }

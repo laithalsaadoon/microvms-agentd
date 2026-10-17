@@ -108,7 +108,7 @@ struct NextChunk {
 #[pymethods]
 impl NextChunk {
     async fn recv(&self) -> PyResult<Py<PyBytes>> {
-        let received = self.receiver.lock().await.recv().await;
+        let received = runtime::fenced(async { self.receiver.lock().await.recv().await })?.await?;
         Python::attach(|py| match received {
             Some(Ok(chunk)) => Ok(PyBytes::new(py, &chunk).unbind()),
             Some(Err(error)) => Err(to_py_err(py, &error)),
@@ -263,7 +263,7 @@ impl PyExecProcess {
             .map(seconds)
             .transpose()?
             .unwrap_or(DEFAULT_EXEC_WAIT);
-        Ok(runtime::spawn(self.wait_op(timeout)).await?)
+        Ok(runtime::spawn(self.wait_op(timeout)).await??)
     }
 
     /// Signals the whole process group. Idempotent: `False` means nothing was signalled
@@ -275,7 +275,7 @@ impl PyExecProcess {
 
     /// The awaitable twin of `kill`.
     async fn kill_async(&self) -> PyCoreResult<bool> {
-        Ok(runtime::spawn(self.kill_op()).await?)
+        Ok(runtime::spawn(self.kill_op()).await??)
     }
 
     fn __repr__(&self) -> String {

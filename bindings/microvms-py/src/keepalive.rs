@@ -157,7 +157,7 @@ impl PyKeepAwake {
     /// The awaitable twin of `stop`. The stop is asked for before the first await, so
     /// cancelling this still stops the keepalive; only the wait for its report is given up.
     async fn stop_async(&self) -> PyCoreResult<PyKeepAwakeReport> {
-        Ok(runtime::spawn(self.stop_op()).await?)
+        Ok(runtime::spawn(self.stop_op()).await??)
     }
 
     /// Waits for the keepalive to end on its own (`while_busy` or `max_duration`).
@@ -177,7 +177,7 @@ impl PyKeepAwake {
     #[pyo3(signature = (timeout=None))]
     async fn wait_async(&self, timeout: Option<f64>) -> PyCoreResult<Option<PyKeepAwakeReport>> {
         let timeout = timeout.map(crate::exec::seconds).transpose()?;
-        Ok(runtime::spawn(self.wait_op(timeout)).await?)
+        Ok(runtime::spawn(self.wait_op(timeout)).await??)
     }
 
     fn __enter__(slf: Py<Self>) -> Py<Self> {
@@ -217,7 +217,7 @@ impl PyKeepAwake {
         let _ = (exc_value, traceback);
         let stopped = runtime::spawn(self.stop_op()).await;
         if exc_type.is_none() {
-            stopped?;
+            stopped??;
         }
         Ok(false)
     }
