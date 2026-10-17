@@ -333,7 +333,7 @@ def test_observation_reads_both_version_responses_and_never_cleanup_paths(
         imageIdentifier=ARN, imageVersion=VERSION
     )
     census.plane.list_microvm_images.assert_called_once_with()
-    census.plane.list_microvms.assert_called_once_with()
+    census.plane.list_microvms.assert_called_once_with(maxResults=50)
     census.logs.describe_log_groups.assert_called_once_with(
         logGroupNamePrefix=recovery.SERVICE_PREFIX
     )

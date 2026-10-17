@@ -1398,7 +1398,12 @@ OBSERVATION_REASONS = {
     "verifier_output_unrecognized",
     "verifier_exit_mismatch",
 }
+OBSERVATION_SCHEMA_VERSION = 2
 OBSERVATION_MAX_ROWS = 1000
+OBSERVATION_VM_PAGE_ROWS = 50
+OBSERVATION_VM_MAX_PAGES = 1000
+OBSERVATION_VM_TOKEN_BYTES = 8192
+OBSERVATION_TERMINATED_DOMAIN = b"live-recovery-terminated-microvms-v1\0"
 OBSERVATION_MAX_BYTES = 1048576
 OBSERVATION_APPEND_BYTES = OBSERVATION_MAX_BYTES // 2
 OBSERVATION_VERIFIER_BYTES = OBSERVATION_MAX_BYTES // 4
@@ -1524,11 +1529,83 @@ def observation_append(report: dict, section: str, row: dict) -> None:
     report[section].append(row)
 
 
+def terminated_identity_digest(identities: set[bytes]) -> str:
+    """Commit to the accounted terminal prefix without retaining raw history."""
+    return digest(OBSERVATION_TERMINATED_DOMAIN + b"".join(sorted(identities)))
+
+
+def observe_microvms(api: ReadOnlyApi, report: dict, region: str) -> None:
+    """Retain uncertain/live rows and compact only exact terminal identities."""
+    seen: set[bytes] = set()
+    terminated: set[bytes] = set()
+    tokens: set[bytes] = set()
+    pages = 0
+    kwargs = {"maxResults": OBSERVATION_VM_PAGE_ROWS}
+    try:
+        while True:
+            require(pages < OBSERVATION_VM_MAX_PAGES, "observation_limit")
+            page = api.call(api.plane, "list_microvms", **kwargs)
+            pages += 1
+            rows = page.get("items")
+            require(isinstance(rows, list), "missing_page_items")
+            # AWS documents maxResults, but these response and token bounds are
+            # observer limits, not assumptions about service-enforced maxima.
+            require(len(rows) <= OBSERVATION_VM_PAGE_ROWS, "observation_limit")
+            for raw in rows:
+                require(isinstance(raw, dict), "invalid_page_item")
+                identifier = bytes.fromhex(
+                    identity("microvm", region, text(raw.get("microvmId")))
+                )
+                require(identifier not in seen, "duplicate_identity")
+                seen.add(identifier)
+                state = observation_field(raw, "state", VM_STATES)
+                if state == "TERMINATED":
+                    terminated.add(identifier)
+                else:
+                    observation_append(
+                        report, "microvms", {"sha256": identifier.hex(), "state": state}
+                    )
+            continuation = page.get("nextToken")
+            if continuation is None:
+                report["sections"]["microvms"] = "completed"
+                break
+            require(isinstance(continuation, str) and continuation, "pagination_token")
+            encoded = continuation.encode()
+            require(len(encoded) <= OBSERVATION_VM_TOKEN_BYTES, "pagination_token")
+            token = hashlib.sha256(encoded).digest()
+            require(token not in tokens, "pagination_token")
+            tokens.add(token)
+            kwargs["nextToken"] = continuation
+    except (Exception, KeyboardInterrupt) as exc:  # noqa: BLE001 - preserve only accounted unique rows
+        observation_error(report, "microvms", exc, operation="list_microvms")
+    finally:
+        # Derive counters from the actual writes: cancellation can arrive after
+        # an append, before a separate counter update would have occurred.
+        retained = len(report["microvms"])
+        report["microvmCoverage"] = {
+            "pagesScanned": pages,
+            "processedCount": len(terminated) + retained,
+            "terminatedCount": len(terminated),
+            "retainedCount": retained,
+            "terminatedIdentitySha256": terminated_identity_digest(terminated),
+            "paginationComplete": report["sections"]["microvms"] == "completed",
+        }
+
+
 def observe(manifest: dict, ownership: dict, api: ReadOnlyApi, report: dict) -> None:
     """Collect evidence without interpreting it as authority or cleanup acceptance."""
     region = manifest["region"]
     report.update(
+        schemaVersion=OBSERVATION_SCHEMA_VERSION,
         sections={key: "not_run" for key in OBSERVATION_SECTIONS},
+        microvmCoverage={
+            "pagesScanned": 0,
+            "processedCount": 0,
+            "terminatedCount": 0,
+            "retainedCount": 0,
+            "terminatedIdentitySha256": terminated_identity_digest(set()),
+            "paginationComplete": False,
+        },
         errors=[],
         images=[],
         microvms=[],
@@ -1570,7 +1647,6 @@ def observe(manifest: dict, ownership: dict, api: ReadOnlyApi, report: dict) -> 
     images, names = {}, set()
     for section, client, operation, field, key in (
         ("images", api.plane, "list_microvm_images", "items", "imageArn"),
-        ("microvms", api.plane, "list_microvms", "items", "microvmId"),
         ("logGroups", api.logs, "describe_log_groups", "logGroups", "logGroupName"),
     ):
         seen = set()
@@ -1587,16 +1663,6 @@ def observe(manifest: dict, ownership: dict, api: ReadOnlyApi, report: dict) -> 
                     require(name not in names, "duplicate_identity")
                     names.add(name)
                     images[identifier] = (name, raw)
-                elif section == "microvms":
-                    state = observation_field(raw, "state", VM_STATES)
-                    observation_append(
-                        report,
-                        section,
-                        {
-                            "sha256": identity("microvm", region, identifier),
-                            "state": state,
-                        },
-                    )
                 else:
                     observation_append(
                         report,
@@ -1778,6 +1844,8 @@ def observe(manifest: dict, ownership: dict, api: ReadOnlyApi, report: dict) -> 
                 imageSha256=image_key,
                 operation="list_microvm_image_versions",
             )
+    # Gather image/version/log evidence before traversing retained VM history.
+    observe_microvms(api, report, region)
     report["status"] = (
         "completed"
         if all(value == "completed" for value in report["sections"].values())
@@ -1839,6 +1907,8 @@ def validate_observation(value: Any) -> dict:
             valid(hashed(logging["logGroupSha256"]))
 
     valid(type(value) is dict)
+    version = value.get("schemaVersion")
+    valid(type(version) is int and version in {1, 2})
     binding = {
         "sourceRun",
         "sourceSha",
@@ -1871,12 +1941,9 @@ def validate_observation(value: Any) -> dict:
             "independentVerifier",
             "reason",
         }
+        | ({"microvmCoverage"} if version == 2 else set())
     )
-    valid(
-        value["kind"] == "live-recovery-observation"
-        and type(value["schemaVersion"]) is int
-        and value["schemaVersion"] == 1
-    )
+    valid(value["kind"] == "live-recovery-observation")
     valid(
         value["conformance_verified"] is False
         and value["recoveryAccepted"] is False
@@ -1961,6 +2028,8 @@ def validate_observation(value: Any) -> dict:
                     set(row) == {"sha256", "state"}
                     and row["state"] in VM_STATES | {"missing", "null", "malformed"}
                 )
+                if version == 2:
+                    valid(row["state"] != "TERMINATED")
             elif section == "versionCoverage":
                 counts = {
                     "listedCount",
@@ -2024,6 +2093,50 @@ def validate_observation(value: Any) -> dict:
             for key, item in row.items():
                 if key.endswith("Sha256") or key == "sha256":
                     valid(hashed(item))
+    if version == 2:
+        collected = "sections" in value or "microvms" in value
+        valid(("microvmCoverage" in value) == collected)
+        if collected:
+            valid("sections" in value and "microvms" in value)
+            coverage = value["microvmCoverage"]
+            counts = {
+                "pagesScanned",
+                "processedCount",
+                "terminatedCount",
+                "retainedCount",
+            }
+            valid(isinstance(coverage, dict))
+            valid(
+                set(coverage)
+                == counts | {"terminatedIdentitySha256", "paginationComplete"}
+            )
+            valid(
+                all(type(coverage[key]) is int and coverage[key] >= 0 for key in counts)
+            )
+            valid(coverage["pagesScanned"] <= OBSERVATION_VM_MAX_PAGES)
+            valid(
+                coverage["processedCount"]
+                <= OBSERVATION_VM_PAGE_ROWS * coverage["pagesScanned"]
+            )
+            valid(coverage["retainedCount"] == len(value["microvms"]))
+            valid(
+                coverage["processedCount"]
+                == coverage["terminatedCount"] + coverage["retainedCount"]
+            )
+            valid(hashed(coverage["terminatedIdentitySha256"]))
+            valid(
+                (coverage["terminatedCount"] == 0)
+                == (
+                    coverage["terminatedIdentitySha256"]
+                    == terminated_identity_digest(set())
+                )
+            )
+            valid(type(coverage["paginationComplete"]) is bool)
+            valid(
+                coverage["paginationComplete"]
+                == (value["sections"]["microvms"] == "completed")
+            )
+            valid(not coverage["paginationComplete"] or coverage["pagesScanned"] >= 1)
     valid(total <= OBSERVATION_MAX_ROWS)
     for section, fields in (
         ("images", ("imageSha256",)),
@@ -2092,7 +2205,7 @@ def main() -> int:
     if args.mode == "observe":
         report.update(
             kind="live-recovery-observation",
-            schemaVersion=1,
+            schemaVersion=OBSERVATION_SCHEMA_VERSION,
             status="incomplete",
             recoveryAccepted=False,
             mutationsPerformed=False,

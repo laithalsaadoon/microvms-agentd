@@ -97,10 +97,10 @@ credential wrapper selects `recover-live.py observe` explicitly; it never falls
 back to cleanup after a failed observation.
 
 The observer first captures the independent verifier's classified census, then
-collects the complete regional image and VM lists and the service log-group
-namespace. These reads are not an atomic snapshot. Every regional image's full
-version list is recorded, including deleted versions, with an exact Get for each
-version. Per-image coverage records distinguish an empty list from a failed or
+collects regional images, their versions, and the service log-group namespace
+before scanning VM history. These reads are not an atomic snapshot. Every
+regional image's full version list is recorded, including deleted versions, with
+an exact Get for each version. Per-image coverage records distinguish an empty list from a failed or
 partial list. Approved image Get calls also run when the image is absent from
 List, using the source ARN when available. If the name now resolves to another
 image, the source and current List identities remain separately identifiable by
@@ -115,8 +115,39 @@ projections retain only recognized values, finite timestamps, comparison flags,
 and identity hashes. Raw names, ARNs, configurations, and provider messages are
 excluded from the artifact.
 
-The `live-recovery-observation` schema has its own bounded validator. Its
-`completed` status means that all collection sections completed; it can contain
+New `live-recovery-observation` artifacts use schema version 2. The validator
+continues accepting version 1 with its original rules and full VM rows. Version
+2 retains each non-`TERMINATED` VM, including missing, null, malformed, and
+unknown states, and compacts only exact `TERMINATED` identities into
+`microvmCoverage`. That object records pages scanned, processed, terminated and
+retained counts, a terminal identity digest, and pagination completion.
+
+The VM scan requests `maxResults=50`, the maximum documented for
+[`ListMicrovms`](https://docs.aws.amazon.com/lambda/latest/microvm-api/API_ListMicrovms.html),
+and is bounded by the existing API deadline,
+a thousand received pages, at most fifty rows per page, and an eight-KiB UTF-8
+token. The response-page and token limits are observer limits, not AWS service
+guarantees. Repeated tokens, duplicate VM identities, malformed pages, and any
+limit or read failure leave the scan incomplete. Historical terminal rows do not
+consume the shared retained-metadata budget; the retained-row, artifact-byte,
+append-reserve, and independent-verifier limits are unchanged.
+
+Coverage describes the successfully accounted unique prefix, including on
+failure or interruption. The processed count equals the terminated plus retained
+counts; the retained count equals the VM rows in the artifact. Completed
+pagination requires a naturally ended scan with at least one received page,
+even when empty. The terminal digest is SHA-256 over
+`b"live-recovery-terminated-microvms-v1\0"` followed by the sorted, fixed-width
+binary identity digests for the accounted terminal rows. The existing identity
+scheme binds each digest to its region. This is the authenticated producer's
+commitment to omitted identities; the artifact cannot independently reconstruct
+them. Empty coverage uses the digest of that domain prefix alone. Coverage makes
+no atomic-snapshot or stable-ordering claim. The duplicate-page measurement in
+[PLATFORM.md](../../docs/PLATFORM.md#a-paginated-listmicrovms-can-return-one-vm-on-two-of-its-pages)
+explains why duplicate identities remain an incomplete scan rather than proof of
+a consistent census.
+
+The schema has its own bounded validator. Its `completed` status means that all collection sections completed; it can contain
 leaks and unknown configuration. An API, pagination, verifier, or output-limit
 failure produces `incomplete` and preserves earlier safe observations. The
 artifact always records `conformance_verified`, `recoveryAccepted`, and

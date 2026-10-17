@@ -177,7 +177,7 @@ def failure_receipt(path, observe_only=False):
     if observe_only:
         return {
             "kind": "live-recovery-observation",
-            "schemaVersion": 1,
+            "schemaVersion": OBSERVATION_CORE["OBSERVATION_SCHEMA_VERSION"],
             "conformance_verified": False,
             "recoveryAccepted": False,
             "mutationsPerformed": False,

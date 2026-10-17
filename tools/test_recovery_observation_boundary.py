@@ -198,7 +198,7 @@ def test_wrapper_schemas_reject_cross_kind_artifacts_and_keep_incomplete_observa
     fallback = wrapper.failure_receipt(path, True)
     assert fallback == {
         "kind": "live-recovery-observation",
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "conformance_verified": False,
         "recoveryAccepted": False,
         "mutationsPerformed": False,
@@ -237,7 +237,7 @@ def test_observation_failure_never_preserves_completed_receipt(tmp_path):
     path.write_text(json.dumps(observation()))
     assert wrapper.failure_receipt(path, observe_only=True) == {
         "kind": "live-recovery-observation",
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "conformance_verified": False,
         "recoveryAccepted": False,
         "mutationsPerformed": False,
