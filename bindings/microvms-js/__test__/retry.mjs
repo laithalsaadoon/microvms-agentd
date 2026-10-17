@@ -12,6 +12,7 @@ for (const kind of [ControlPlane, Sandbox]) {
     ]) {
       await assert.rejects(kind.create(Region.usEast1(), retry), error => {
         assert.equal(error.cause.message, 'ERR_INVALID_ARG');
+        assert.equal(retryDetails(error), null);
         return true;
       });
     }
@@ -19,7 +20,12 @@ for (const kind of [ControlPlane, Sandbox]) {
 }
 
 test('retryDetails refuses unrelated values and reads telemetry without parsing text', () => {
-  for (const error of [null, undefined, 1, 'throttled', new Error('throttled')]) {
+  for (const error of [
+    null, undefined, 1, 'throttled', new Error('throttled'),
+    Object.assign(new Error('unmeasured'), {
+      attemptCount: 0, backoffSeconds: 0, throttled: false,
+    }),
+  ]) {
     assert.equal(retryDetails(error), null);
   }
   assert.deepEqual(retryDetails(Object.assign(new Error('anything'), {

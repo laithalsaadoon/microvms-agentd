@@ -241,8 +241,13 @@ pub fn retry_details(error: Unknown<'_>) -> Option<RetryDetails> {
         return None;
     }
     let error = Object::from_unknown(error).ok()?;
+    let attempt_count = error.get_named_property("attemptCount").ok()?;
+    // Core uses zero attempts when no request telemetry is available.
+    if attempt_count == 0 {
+        return None;
+    }
     Some(RetryDetails {
-        attempt_count: error.get_named_property("attemptCount").ok()?,
+        attempt_count,
         backoff_seconds: error.get_named_property("backoffSeconds").ok()?,
         throttled: error.get_named_property("throttled").ok()?,
     })
