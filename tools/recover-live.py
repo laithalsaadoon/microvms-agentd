@@ -843,7 +843,9 @@ def fingerprint(kind: str, row: dict, manifest: dict) -> tuple:
     return value
 
 
-def selected(manifest: dict, ownership: dict, api: Api) -> tuple[dict, tuple]:
+def selected(
+    manifest: dict, ownership: dict, api: Api, *, image_phase: bool = False
+) -> tuple[dict, tuple]:
     api.region = manifest["region"]
     api.source_infrastructure = manifest.get("source_infrastructure", {})
     images, vms, groups = api.inventory()
@@ -870,6 +872,11 @@ def selected(manifest: dict, ownership: dict, api: Api) -> tuple[dict, tuple]:
                 "image_in_use",
             )
         plan[key] = (resource, row, current)
+    # Unknown log destinations veto log deletion, not independently authorized
+    # image deletion. Keep the full inventories and incarnation checks above in
+    # both phases; every log mutation below still requires the default phase.
+    if image_phase:
+        return plan, (images, vms, groups)
     deleting = {
         row["imageArn"]
         for resource, row, _ in plan.values()
@@ -891,12 +898,14 @@ def selected(manifest: dict, ownership: dict, api: Api) -> tuple[dict, tuple]:
     return plan, (images, vms, groups)
 
 
-def settled_selection(manifest: dict, ownership: dict, api: Api) -> tuple[dict, tuple]:
+def settled_selection(
+    manifest: dict, ownership: dict, api: Api, *, image_phase: bool = False
+) -> tuple[dict, tuple]:
     # A just-deleted object can remain in a list after its exact Get says gone.
     # Wait for the list to converge; never turn a different API error into absence.
     while True:
         try:
-            return selected(manifest, ownership, api)
+            return selected(manifest, ownership, api, image_phase=image_phase)
         except Refused as exc:
             if str(exc) != "not_found":
                 raise
@@ -905,7 +914,7 @@ def settled_selection(manifest: dict, ownership: dict, api: Api) -> tuple[dict, 
 
 
 def recover(manifest: dict, ownership: dict, api: Api, report: dict) -> None:
-    initial, _ = settled_selection(manifest, ownership, api)
+    initial, _ = settled_selection(manifest, ownership, api, image_phase=True)
     report["resources"] = [
         {
             "kind": r["kind"],
@@ -916,11 +925,12 @@ def recover(manifest: dict, ownership: dict, api: Api, report: dict) -> None:
         for r in manifest["resources"]
     ]
     statuses = {r["sha256"]: r for r in report["resources"]}
-    # No mutation occurs before all initial ownership/incarnation/dependency checks pass.
+    # Image authority is independent of a log destination's observability. Log
+    # dependency checks run afresh after these images are confirmed absent by Get.
     for key, (resource, row, old) in initial.items():
         if resource["kind"] != "image":
             continue
-        current, _ = settled_selection(manifest, ownership, api)
+        current, _ = settled_selection(manifest, ownership, api, image_phase=True)
         require(key in current and current[key][2] == old, "incarnation_changed")
         if row["state"] not in {"DELETING", "DELETED"}:
             api.call(api.plane, "delete_microvm_image", imageIdentifier=row["imageArn"])

@@ -1,0 +1,49 @@
+[[family]]
+guard = "test_recover_live_inventory.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_inventory.py::test_image_phase_preserves_full_inventories_without_observing_versions"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "recovery-image-phase-observation"
+message = "test_image_phase_preserves_full_inventories_without_observing_versions"
+transform = { file = "tools/recover-live.py", replace = "    if image_phase:\n        return plan, (images, vms, groups)", with = "    if False:\n        return plan, (images, vms, groups)" }
+
+[[family]]
+guard = "test_recover_live_inventory.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_inventory.py::test_unknown_logging_stops_logs_after_confirmed_image_absence"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "recovery-image-phase-initial"
+message = "test_unknown_logging_stops_logs_after_confirmed_image_absence"
+transform = { file = "tools/recover-live.py", replace = "    initial, _ = settled_selection(manifest, ownership, api, image_phase=True)", with = "    initial, _ = settled_selection(manifest, ownership, api, image_phase=False)" }
+
+[[family]]
+guard = "test_recover_live_inventory.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_inventory.py::test_unknown_logging_stops_logs_after_confirmed_image_absence"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "recovery-image-phase-recheck"
+message = "test_unknown_logging_stops_logs_after_confirmed_image_absence"
+transform = { file = "tools/recover-live.py", replace = "        current, _ = settled_selection(manifest, ownership, api, image_phase=True)", with = "        current, _ = settled_selection(manifest, ownership, api, image_phase=False)" }
+
+[[family]]
+guard = "test_recover_live_inventory.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_inventory.py::test_vm_appearing_after_image_deletion_vetoes_exact_log_deletion"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "recovery-image-phase-log-barrier"
+message = "test_vm_appearing_after_image_deletion_vetoes_exact_log_deletion"
+transform = { file = "tools/recover-live.py", replace = "        current, state = settled_selection(manifest, ownership, api)", with = "        current, state = settled_selection(manifest, ownership, api, image_phase=True)" }
+
+[[family]]
+guard = "test_recover_live_inventory.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_inventory.py::test_unknown_logging_stops_logs_after_confirmed_image_absence"]
+expect = "exit-nonzero"
+suite = "script"
+[[family.fault]]
+id = "recovery-image-phase-absence-receipt"
+message = "test_unknown_logging_stops_logs_after_confirmed_image_absence"
+transform = { file = "tools/recover-live.py", replace = "        statuses[key][\"status\"] = \"absent\"", with = "        statuses[key][\"status\"] = \"deletion_requested\"" }

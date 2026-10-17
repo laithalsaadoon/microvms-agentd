@@ -92,12 +92,6 @@ message = "FAIL: test_dependency_veto_covers_vm_and_version_references"
 transform = { file = "tools/recover-live.py", replace = "                    destination != group or arn in deleting, \"configured_group_in_use\"", with = "                    True, \"configured_group_in_use\"" }
 
 [[family.fault]]
-id = "recovery-core-selected-logs"
-message = "FAIL: test_dependency_veto_covers_vm_and_version_references"
-transform = { file = "tools/recover-live.py", replace = "    for resource, row, _ in plan.values():\n        if resource[\"kind\"] == \"log-group\":", with = "    for resource, row, _ in plan.values():\n        if resource[\"proof\"] == \"configured-log\":" }
-
-
-[[family.fault]]
 id = "recovery-core-retry-bound"
 message = "FAIL: test_sdk_retries_are_bounded_and_only_classified_errors_retry"
 transform = { file = "tools/recover-live.py", replace = "                if code in RETRY_CODES and attempt < len(delays):", with = "                if code in RETRY_CODES and attempt < 1:" }
@@ -226,3 +220,15 @@ transform = { file = "tools/recover-live.py", replace = "        api.call(api.lo
 id = "recovery-core-log-vm-dependency"
 message = "test_present_log_refuses_unrelated_vm_before_any_deletion"
 transform = { file = "tools/recover-live.py", replace = "                all(vm[\"state\"] == \"TERMINATED\" for vm in vms.values()),", with = "                True," }
+
+
+[[family]]
+guard = "test_recover_live_inventory.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_inventory.py::test_selection_checks_every_log_destination_with_exact_deleting_set"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "recovery-core-selected-logs"
+message = "test_selection_checks_every_log_destination_with_exact_deleting_set"
+transform = { file = "tools/recover-live.py", replace = "    for resource, row, _ in plan.values():\n        if resource[\"kind\"] == \"log-group\":", with = "    for resource, row, _ in plan.values():\n        if resource[\"proof\"] == \"configured-log\":" }
