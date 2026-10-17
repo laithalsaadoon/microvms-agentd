@@ -1,0 +1,13 @@
+diff --git a/crates/microvms-app/src/preflight.rs b/crates/microvms-app/src/preflight.rs
+index 8734ece..76cc56b 100644
+--- a/crates/microvms-app/src/preflight.rs
++++ b/crates/microvms-app/src/preflight.rs
+@@ -78,7 +78,7 @@ pub async fn service_check(plane: &ControlPlane) -> Check {
+             "service",
+             format!("ListManagedMicrovmImages in {region} failed: {error}"),
+             "an AccessDeniedException with no message is also what a region without MicroVMs \
+-             answers; otherwise allow lambda:ListManagedMicrovmImages",
++             answers; otherwise allow lambda-microvms:ListManagedMicrovmImages",
+         ),
+     }
+ }
