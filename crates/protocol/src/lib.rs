@@ -33,6 +33,11 @@ pub mod hook;
 pub mod identity;
 pub mod tunnel;
 
+/// The daemon listener port when `AGENTD_PORT` is unset.
+///
+/// Shared by the daemon, image builders, and clients so their defaults agree.
+pub const DEFAULT_AGENT_PORT: u16 = 9000;
+
 /// Protocol version, distinct from the daemon version.
 ///
 /// It tracks the wire contract, including verified tunnel framing, rather than the crate version: a patch to
