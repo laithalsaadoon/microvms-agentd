@@ -599,6 +599,63 @@ class RuleTests(FixtureCase):
         self.assertProblem("attach: the id is used by more than one row")
 
 
+class DefaultValueComparisonTests(unittest.TestCase):
+    """Default spellings retain each adapter's scalar semantics."""
+
+    def test_cli_strings_keep_their_raw_text_and_case(self):
+        for text, value, expected in [
+            ("table", "table", False),
+            ("", "", False),
+            ('"run"', '"run"', False),
+            ("table", "json", True),
+            ("RUN", "run", True),
+            ('"run"', "run", True),
+        ]:
+            with self.subTest(text=text, value=value):
+                self.assertEqual(PARITY["differs"](text, value, "cli"), expected)
+
+    def test_cli_booleans_accept_case_without_losing_the_value(self):
+        for text, value, expected in [
+            ("true", True, False),
+            ("TRUE", True, False),
+            ("fAlSe", False, False),
+            ("false", True, True),
+            ("true", False, True),
+        ]:
+            with self.subTest(text=text, value=value):
+                self.assertEqual(PARITY["differs"](text, value, "cli"), expected)
+
+    def test_invalid_python_and_typescript_literals_are_not_equal_defaults(self):
+        for key, text in [("py", "'"), ("py", "missing"), ("ts", "'run'")]:
+            with self.subTest(key=key, text=text):
+                self.assertTrue(PARITY["differs"](text, None, key))
+
+    def test_numeric_literals_compare_values_across_integer_and_float_spellings(self):
+        for key in ("py", "ts"):
+            for text, value, expected in [
+                ("1", 1.0, False),
+                ("1.0", 1, False),
+                ("2.0", 1, True),
+                ("1", 2.0, True),
+            ]:
+                with self.subTest(key=key, text=text, value=value):
+                    self.assertEqual(PARITY["differs"](text, value, key), expected)
+
+    def test_booleans_and_numbers_remain_distinct_defaults(self):
+        for key, text, value in [
+            ("py", "True", 1),
+            ("py", "False", 0),
+            ("py", "1", True),
+            ("py", "0", False),
+            ("ts", "true", 1),
+            ("ts", "false", 0),
+            ("ts", "1", True),
+            ("ts", "0", False),
+        ]:
+            with self.subTest(key=key, text=text, value=value):
+                self.assertTrue(PARITY["differs"](text, value, key))
+
+
 class DefaultTests(FixtureCase):
     """The `[[default]]` rules (#300) over the same fixtures, which state defaults the rows hold."""
 

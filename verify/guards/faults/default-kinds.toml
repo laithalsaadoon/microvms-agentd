@@ -87,3 +87,34 @@ transform = [
   { file = "crates/microvms-app/src/control/artifact.rs", replace = "            working_dir: String::new(),\n", with = "            working_dir: \"/shared-default\".to_string(),\n" },
   { file = "bindings/microvms-js/src/sandbox.rs", replace = ".unwrap_or_else(|| CoreBaseImage::default().working_dir)", with = ".unwrap_or_default()" },
 ]
+
+[[family]]
+guard = "tools/test_check_parity.py: DefaultValueComparisonTests"
+run = ["uv", "run", "--locked", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "DefaultValueComparisonTests"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "default-cli-string-spelling"
+message = "FAIL: test_cli_strings_keep_their_raw_text_and_case"
+transform = { file = "tools/check-parity.py", replace = "    if key == \"cli\":\n        if isinstance(value, str):\n", with = "    if key == \"CLI\":\n        if isinstance(value, str):\n" }
+
+[[family.fault]]
+id = "default-cli-boolean-case"
+message = "FAIL: test_cli_booleans_accept_case_without_losing_the_value"
+transform = { file = "tools/check-parity.py", replace = "        return text.lower() != str(value).lower()\n", with = "        return text.upper() != str(value).lower()\n" }
+
+[[family.fault]]
+id = "default-invalid-literal-refused"
+message = "FAIL: test_invalid_python_and_typescript_literals_are_not_equal_defaults"
+transform = { file = "tools/check-parity.py", replace = "    except (ValueError, SyntaxError):\n        return True\n", with = "    except (ValueError, SyntaxError):\n        return False\n" }
+
+[[family.fault]]
+id = "default-numeric-literal-equivalence"
+message = "FAIL: test_numeric_literals_compare_values_across_integer_and_float_spellings"
+transform = { file = "tools/check-parity.py", replace = "    if type(actual) in (int, float) and type(value) in (int, float):\n", with = "    if type(None) in (int, float) and type(value) in (int, float):\n" }
+
+[[family.fault]]
+id = "default-boolean-numeric-distinction"
+message = "FAIL: test_booleans_and_numbers_remain_distinct_defaults"
+transform = { file = "tools/check-parity.py", replace = "    return type(actual) is not type(value) or actual != value\n", with = "    return actual != value\n" }
