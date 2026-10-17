@@ -35,8 +35,8 @@ MANIFESTS = ROOT / "conformance/recovery"
 WORKFLOW = ".github/workflows/live-conformance.yml"
 SERVICE_PREFIX = "/aws/lambda-microvms/"
 SCHEME = "sha256-kind-nul-region-nul-name-v1"
-PARSER_VERSION = 2
-LOG_REPRESENTATION = "gh-run-view-job-log-python-text-utf8-v1"
+PARSER_VERSION = 3
+LOG_REPRESENTATION = "gh-api-job-log-python-text-utf8-lf-spans-v1"
 IMAGE_STATES = {
     "CREATING",
     "CREATED",
@@ -358,18 +358,135 @@ class Github:
         return json.loads(self.command(["api", endpoint]))
 
     def log(self, manifest: dict) -> str:
+        help_text = self.command(["api", "--help"])
+        require(
+            "\nUSAGE\n  gh api <endpoint> [flags]\n" in help_text,
+            "source_log_capability",
+        )
+        flags = re.search(
+            r"\nFLAGS\n([^\n]+(?:\n[^\n]+)*)\n\nINHERITED FLAGS\n", help_text
+        )
+        require(flags is not None, "source_log_capability")
+        escape_lines = [
+            line for line in flags[1].splitlines() if "--allow-escape-sequences" in line
+        ]
+        require(
+            not escape_lines
+            or (
+                len(escape_lines) == 1
+                and re.fullmatch(
+                    r" {6}--allow-escape-sequences {2,}Allow printing terminal escape sequences",
+                    escape_lines[0],
+                )
+            ),
+            "source_log_capability",
+        )
+        # Newer gh versions guard terminal escapes even on pipes. Permit them only
+        # for the captured raw log so its reviewed bytes reach the in-memory hash.
+        options = ["--allow-escape-sequences"] if escape_lines else []
         return self.command(
             [
-                "run",
-                "view",
-                str(manifest["source_run_id"]),
-                "--repo",
-                self.repository,
-                "--job",
-                str(manifest["source_job_id"]),
-                "--log",
+                "api",
+                f"repos/{self.repository}/actions/jobs/{manifest['source_job_id']}/logs",
+                *options,
             ]
         )
+
+
+def source_label(value: Any) -> bool:
+    """A label must not inject columns or lines into the annotated representation."""
+    return (
+        isinstance(value, str)
+        and bool(value)
+        and not any(
+            ord(char) < 32 or 127 <= ord(char) <= 159 or ord(char) in (8232, 8233)
+            for char in value
+        )
+    )
+
+
+def source_steps(job: dict, expected: str) -> list[tuple[int, str]]:
+    """Pin the complete ordered API step projection, including skipped steps."""
+    steps = job.get("steps")
+    require(isinstance(steps, list) and bool(steps), "source_steps_schema")
+    projected = []
+    active = []
+    previous = 0
+    for step in steps:
+        require(isinstance(step, dict), "source_steps_schema")
+        number = step.get("number")
+        name = step.get("name")
+        require(
+            type(number) is int and previous < number <= 2**31 - 1,
+            "source_steps_schema",
+        )
+        require(source_label(name), "source_steps_schema")
+        require(
+            step.get("status") == "completed" and source_label(step.get("conclusion")),
+            "source_steps_schema",
+        )
+        projected.append(
+            {key: step[key] for key in ("number", "name", "status", "conclusion")}
+        )
+        if step["conclusion"] != "skipped":
+            active.append((number, name))
+        previous = number
+    canonical = json.dumps(
+        projected,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    require(digest(canonical) == expected, "source_steps_digest")
+    return active
+
+
+def annotate_source_log(log: str, manifest: dict, job: dict) -> str:
+    """Assign exact raw LF chunks to reviewed spans, never by their timestamps."""
+    # Hash the subprocess text before inspecting or transforming any of its content.
+    require(
+        digest(log.encode()) == manifest["source_log_sha256"],
+        "source_log_digest",
+    )
+    require(log.endswith("\n") and "\r" not in log, "source_log_lines")
+    lines = [line + "\n" for line in log.split("\n")[:-1]]
+    active = source_steps(job, manifest["source_job_steps_sha256"])
+    spans = manifest["source_log_spans"]
+    require(
+        isinstance(spans, list) and len(spans) == len(active), "source_spans_schema"
+    )
+    label = manifest["source_job_name"]
+    require(source_label(label), "source_spans_schema")
+    annotated = []
+    next_line = 1
+    for span, (number, name) in zip(spans, active):
+        require(
+            isinstance(span, dict)
+            and set(span) == {"number", "name", "start", "count", "sha256"},
+            "source_spans_schema",
+        )
+        require(
+            type(span["number"]) is int
+            and span["number"] == number
+            and span["name"] == name,
+            "source_spans_step",
+        )
+        start, count = span["start"], span["count"]
+        require(
+            type(start) is int
+            and type(count) is int
+            and start == next_line
+            and 0 < count <= len(lines) - start + 1,
+            "source_spans_bounds",
+        )
+        chunk = lines[start - 1 : start - 1 + count]
+        require(
+            digest("".join(chunk).encode()) == span["sha256"],
+            "source_span_digest",
+        )
+        annotated.extend(f"{label}\t{name}\t{line}" for line in chunk)
+        next_line += count
+    require(next_line == len(lines) + 1, "source_spans_coverage")
+    return "".join(annotated)
 
 
 def provenance(manifest: dict, github: Github, environ: dict[str, str]) -> dict:
@@ -447,8 +564,7 @@ def provenance(manifest: dict, github: Github, environ: dict[str, str]) -> dict:
         == manifest["source_workflow_sha256"],
         "source_workflow_digest",
     )
-    log = github.log(manifest)
-    require(digest(log.encode()) == manifest["source_log_sha256"], "source_log_digest")
+    log = annotate_source_log(github.log(manifest), manifest, job)
     require(
         source_infrastructure(log, manifest["region"])
         == manifest["source_infrastructure"],
@@ -1020,6 +1136,15 @@ REASONS = [
     "source_infrastructure_digest",
     "source_is_current_run",
     "source_log_digest",
+    "source_log_capability",
+    "source_log_lines",
+    "source_span_digest",
+    "source_spans_bounds",
+    "source_spans_coverage",
+    "source_spans_schema",
+    "source_spans_step",
+    "source_steps_digest",
+    "source_steps_schema",
     "source_ownership_incomplete",
     "source_workflow_digest",
     "unproven_resource",

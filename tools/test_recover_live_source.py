@@ -65,8 +65,8 @@ def manifest_value():
         "version": 1,
         "hash_scheme": "sha256-kind-nul-region-nul-name-v1",
         "source_run_id": 42,
-        "parser_version": 2,
-        "source_log_representation": "gh-run-view-job-log-python-text-utf8-v1",
+        "parser_version": 3,
+        "source_log_representation": "gh-api-job-log-python-text-utf8-lf-spans-v1",
         "workflow_path": ".github/workflows/live-conformance.yml",
         "region": REGION,
         "resources": [
@@ -675,8 +675,8 @@ def full_receipt():
         "sourceSha": "a" * 40,
         "region": REGION,
         "manifestSha256": "b" * 64,
-        "parserVersion": 2,
-        "sourceLogRepresentation": "gh-run-view-job-log-python-text-utf8-v1",
+        "parserVersion": 3,
+        "sourceLogRepresentation": "gh-api-job-log-python-text-utf8-lf-spans-v1",
         "resources": [
             {
                 "kind": "image",

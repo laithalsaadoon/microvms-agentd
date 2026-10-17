@@ -430,19 +430,24 @@ class RuntimeTests(unittest.TestCase):
                 run.call_args.kwargs,
                 {"capture_output": True, "text": True, "timeout": 10, "check": False},
             )
+            run.side_effect = [
+                subprocess.CompletedProcess(
+                    [],
+                    0,
+                    "\nUSAGE\n  gh api <endpoint> [flags]\n\nFLAGS\n"
+                    "      --verbose   Include full HTTP request and response in the output\n"
+                    "\nINHERITED FLAGS\n  --help   Show help for command\n",
+                    "",
+                ),
+                subprocess.CompletedProcess([], 0, "{}", ""),
+            ]
             self.assertEqual(client.log(fixtures.manifest()), "{}")
             self.assertEqual(
                 run.call_args.args[0],
                 [
                     "gh",
-                    "run",
-                    "view",
-                    "9",
-                    "--repo",
-                    "owner/repository",
-                    "--job",
-                    "10",
-                    "--log",
+                    "api",
+                    "repos/owner/repository/actions/jobs/10/logs",
                 ],
             )
         clock.now = 10

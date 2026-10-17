@@ -1,5 +1,51 @@
 # Offline faults for the bounded, incident-specific recovery authority.
 [[family]]
+guard = "test_recover_live_representation.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_representation.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "recovery-direct-log-floor"
+message = "test_raw_digest_is_checked_before_step_metadata_or_annotation"
+transform = { file = "tools/recover-live.py", replace = '    # Hash the subprocess text before inspecting or transforming any of its content.', with = "    if not log:\n        return \"\"\n    # Hash the subprocess text before inspecting or transforming any of its content." }
+
+[[family.fault]]
+id = "recovery-direct-log-sentinel"
+message = "test_raw_digest_is_checked_before_step_metadata_or_annotation"
+transform = { file = "tools/recover-live.py", replace = '        digest(log.encode()) == manifest["source_log_sha256"],', with = '        True,' }
+
+[[family.fault]]
+id = "recovery-direct-log-step-digest"
+message = "test_complete_step_list_is_pinned_including_skipped_steps"
+transform = { file = "tools/recover-live.py", replace = '    require(digest(canonical) == expected, "source_steps_digest")', with = '    require(True, "source_steps_digest")' }
+
+[[family.fault]]
+id = "recovery-direct-log-span-digest"
+message = "test_spans_are_exact_exhaustive_nonoverlapping_step_slices"
+transform = { file = "tools/recover-live.py", replace = '            digest("".join(chunk).encode()) == span["sha256"],', with = '            True,' }
+
+[[family.fault]]
+id = "recovery-direct-log-canonical-unicode"
+message = "test_canonical_steps_escape_non_ascii_and_accept_maximum_step_number"
+transform = { file = "tools/recover-live.py", replace = '        sort_keys=True,', with = '        ensure_ascii=False, sort_keys=True,' }
+
+[[family.fault]]
+id = "recovery-direct-log-coverage"
+message = "test_spans_are_exact_exhaustive_nonoverlapping_step_slices"
+transform = { file = "tools/recover-live.py", replace = '    require(next_line == len(lines) + 1, "source_spans_coverage")', with = '    require(True, "source_spans_coverage")' }
+
+[[family.fault]]
+id = "recovery-direct-log-bounds"
+message = "test_span_bounds_reject_types_ranges_leading_gaps_and_overruns"
+transform = { file = "tools/recover-live.py", replace = '            and start == next_line', with = '            and True' }
+
+[[family.fault]]
+id = "recovery-direct-log-escape-option"
+message = "test_api_help_controls_escape_flag_only_on_captured_log_request"
+transform = { file = "tools/recover-live.py", replace = '        options = ["--allow-escape-sequences"] if escape_lines else []', with = '        options = []' }
+
+[[family]]
 guard = "test_recover_live.py"
 run = ["uv", "run", "--locked", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_recover_live.py"]
 expect = "exit-nonzero"

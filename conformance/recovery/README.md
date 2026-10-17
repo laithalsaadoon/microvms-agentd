@@ -14,10 +14,31 @@ its remaining budget across source validation, cleanup and verification.
 
 The dispatch names a reviewed manifest by source run ID and the SHA-256 of its
 exact file bytes. Manifests retain hashes, source-run metadata and proof labels;
-raw source logs and resource names stay in memory. Parser version 2 hashes the
-UTF-8 encoding of Python's text output from `gh run view <run> --job <job> --log`,
-with universal newline normalization. It verifies the exact source workflow and
-log bytes, derives ownership again from positive source observations, and binds
+raw source logs and resource names stay in memory. Parser version 3 fetches the
+pinned job directly with `gh api repos/<repository>/actions/jobs/<job>/logs`.
+It captures `gh api --help` first and adds `--allow-escape-sequences` when that
+exact option is present; newer CLI versions otherwise refuse escape characters
+even in captured output. Both commands share the source-validation deadline.
+The flag permits only in-memory capture and hashing, not terminal display.
+
+The log digest covers the UTF-8 encoding of Python's captured text, after its
+universal newline normalization and before parsing. The representation requires
+LF-only text with a final LF. It preserves an initial BOM, blank lines, tabs,
+escape characters and each line's LF. The manifest's `source_log_spans` assign
+each raw line to one reviewed step with its exact number and name, one-based
+`start`, positive `count`, and `sha256` of the corresponding UTF-8 slice including
+line endings. Spans cover the entire log in order without gaps or overlap.
+Timestamps do not determine attribution.
+
+The `source_job_steps_sha256` pins the complete ordered API step list, including
+skipped steps. Its canonical JSON projects `number`, `name`, `status` and
+`conclusion`, sorts object keys, uses comma and colon separators without spaces,
+uses JSON's default ASCII escapes, and is encoded as UTF-8 without a trailing LF.
+Step numbers are unique and increasing; names may repeat. Each non-skipped step
+must have one span with its exact number and name. Only after checking the raw
+digest, step metadata, span coverage and slice hashes does the parser prefix
+each original line with the job and step labels. It verifies the exact source workflow,
+derives ownership again from positive source observations, and binds
 observational infrastructure hashes to those same logs. A name prefix or absence
 from an earlier inventory does not establish ownership.
 
