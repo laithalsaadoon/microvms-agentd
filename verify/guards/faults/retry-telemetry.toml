@@ -1,6 +1,18 @@
 # Retry budgets and telemetry: each mutant removes one observable guarantee.
 
 [[fault]]
+id = "retry-python-run-cancel-callback-ignored"
+guard = "bindings/microvms-py/tests/test_async.py::test_cancelled_run_releases_image_resolution_before_launch"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_async.py::test_cancelled_run_releases_image_resolution_before_launch"],
+]
+expect = "test-failed"
+suite = "bindings"
+note = "bindings/microvms-py/tests/test_async.py::test_cancelled_run_releases_image_resolution_before_launch"
+transform = { file = "bindings/microvms-py/src/runtime.rs", replace = "                cancel();", with = "                drop(cancel);" }
+
+[[fault]]
 id = "retry-domain-details-lost"
 guard = "error::tests::retry_details_distinguish_unmeasured_and_observed_failures"
 run = ["cargo", "test", "-p", "microvms-domain", "--lib", "--", "--exact", "error::tests::retry_details_distinguish_unmeasured_and_observed_failures"]
