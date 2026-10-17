@@ -787,7 +787,7 @@ If a caller cancels the awaitable twin of a Python binding call that is not a li
 
 ## BIND-27
 
-If a caller cancels the awaitable twin of a lifecycle transition (a launch, an image build, a suspend, a resume or a teardown), then the Python binding shall run the transition to completion on the object that started it.
+If a caller cancels the awaitable twin of a lifecycle transition (a launch, a non-content-addressed image build, a suspend, a resume or a teardown), then the Python binding shall run the transition to completion on the object that started it.
 
 - **model:** waived: cancellation is the runtime's choice not to abort one task; the transitions it lets finish are core's, which its models hold
 - **gherkin:** waived: no Gherkin tier drives the bindings; the Python suite cancels a lifecycle twin through a stalling proxy

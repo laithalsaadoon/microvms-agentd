@@ -964,8 +964,9 @@ impl PyAgentVm {
         Ok(runtime::block_on(py, op)?)
     }
 
-    /// The awaitable twin of `ensure_image`. A lifecycle transition: cancelling the awaitable
-    /// leaves the build or reuse running to completion.
+    /// The awaitable twin of `ensure_image`. Cancellation stops the local wait and releases
+    /// this sandbox without recording an image. A build already accepted by the service
+    /// keeps running; ensure the same inputs again to join it.
     #[pyo3(signature = (*, binary, build_role_arn, s3_bucket, size=None, s3_key_prefix=None))]
     async fn ensure_image_async(
         &self,
@@ -976,7 +977,7 @@ impl PyAgentVm {
         s3_key_prefix: Option<String>,
     ) -> PyCoreResult<PyEnsuredImage> {
         let op = self.ensure_image_op(binary, build_role_arn, s3_bucket, size, s3_key_prefix);
-        Ok(runtime::spawn_shielded(op).await?)
+        Ok(runtime::spawn(op).await?)
     }
 
     /// The artifact bytes to upload to `s3://<bucket>/<image_name>.zip` before `build_image`.

@@ -146,8 +146,9 @@ class AgentVm:
         """
     async def ensure_image_async(self, /, *, binary: Sequence[int], build_role_arn: str, s3_bucket: str, size: SizeClass |None = None, s3_key_prefix: str |None = None) -> EnsuredImage:
         """
-        The awaitable twin of `ensure_image`. A lifecycle transition: cancelling the awaitable
-        leaves the build or reuse running to completion.
+        The awaitable twin of `ensure_image`. Cancellation stops the local wait and releases
+        this sandbox without recording an image. A build already accepted by the service
+        keeps running; ensure the same inputs again to join it.
         """
     def find_image(self, /, *, binary: Sequence[int], build_role_arn: str, size: SizeClass |None = None) -> str |None:
         """
@@ -2575,8 +2576,9 @@ class Sandbox:
         """
     async def ensure_image_async(self, /, *, name_prefix: str, binary: Sequence[int], dockerfile: str, s3_bucket: str, build_role_arn: str, context_dir: str |PathLike[str] |None = None, s3_key_prefix: str |None = None, size: SizeClass |None = None, base_image: BaseImage |None = None, base_image_version: str |None = None, project_dir: str |PathLike[str] |None = None, force: bool = False, repair_guest_identity: bool = False, tags: dict[str, str] |None = None, wait_timeout: float |None = None) -> EnsuredImage:
         """
-        The awaitable twin of `ensure_image`, with its keywords. A lifecycle transition:
-        cancelling the awaitable leaves the build or reuse running to completion.
+        The awaitable twin of `ensure_image`, with its keywords. Cancellation stops the
+        local wait and releases this sandbox without recording an image. A build already
+        accepted by the service keeps running; ensure the same inputs again to join it.
         """
     @staticmethod
     def from_name(region: Region, name: str, registry: NameRegistry, *, port: int |None = None) -> Sandbox:
