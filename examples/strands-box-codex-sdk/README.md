@@ -22,23 +22,23 @@ only when both metadata probes and all six scenarios pass.
 ## Native build verification
 
 The `native Box build` workflow runs `build-box.sh` on GitHub's native
-`ubuntu-24.04-arm` runner. Its `native-box` artifact contains the binaries and
-`build.json`: the exact Box revision, host architecture, Rust compiler,
-cargo-zigbuild and Zig versions, target glibc, and binary SHA-256 digests.
-The live conformance workflow builds this artifact again at its own revision,
-checks the receipt and digests, then runs this example's metadata probes and
-policy scenarios with those binaries. A native build alone does not establish
-that the example works in a MicroVM; the named `native_box` checks in a green
-live run provide that evidence.
+`ubuntu-24.04-arm` runner. Download its `native-box` artifact for the binaries
+and `build.json`. The receipt records the exact Box commit, host architecture,
+and Rust compiler. It also records the cargo-zigbuild and Zig versions, target
+glibc, and SHA-256 hash of each binary.
 
-For that integration, `run.sh` accepts `MICROVM` (the CLI path), `BOX_IMAGE`
-(an already-built image), `BOX_BIN_DIR`, and `BOX_OUT_DIR`. The conformance
-suite stages a private configuration for either `us-east-1` or `us-west-2`,
-keeping the checked-in east-region template unchanged. It builds the image
-using its daemon under test and independently deletes
-and checks the VM, image, S3 artifacts, and service log groups afterward.
-Raw model responses and Box decision logs stay in temporary storage rather
-than in the workflow's logs or artifacts.
+The live suite builds Box from the same pinned commit and checks the receipt
+and hashes. It then runs this example's metadata probes and policy scenarios.
+A native build alone does not prove that the example works in a MicroVM.
+The named `native_box` checks in a green live run provide that proof.
+
+`run.sh` accepts `MICROVM` (the command-line tool path), `BOX_IMAGE` (an image built earlier),
+`BOX_BIN_DIR`, and `BOX_OUT_DIR`. The live suite stages a private config for
+either `us-east-1` or `us-west-2`. The checked-in east-region template stays
+unchanged. The suite builds the image with its own daemon. After the run, it
+deletes the VM, image, S3 artifacts, and service log groups and checks each
+deletion. Raw model responses and Box decision logs stay in temporary
+storage. They do not enter the workflow's logs or artifacts.
 
 ## The layers
 
