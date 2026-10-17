@@ -1568,7 +1568,7 @@ def observe_microvms(api: ReadOnlyApi, report: dict, region: str) -> None:
             continuation = page.get("nextToken")
             if continuation is None:
                 report["sections"]["microvms"] = "completed"
-                break
+                return
             require(isinstance(continuation, str) and continuation, "pagination_token")
             encoded = continuation.encode()
             require(len(encoded) <= OBSERVATION_VM_TOKEN_BYTES, "pagination_token")

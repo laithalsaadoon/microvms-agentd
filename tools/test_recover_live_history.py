@@ -65,6 +65,24 @@ def initial_report():
     }
 
 
+def minimal_report(version=2):
+    result = {
+        key: value
+        for key, value in initial_report().items()
+        if key
+        in {
+            "kind",
+            "schemaVersion",
+            "conformance_verified",
+            "recoveryAccepted",
+            "mutationsPerformed",
+            "status",
+        }
+    }
+    result["schemaVersion"] = version
+    return result
+
+
 @pytest.fixture
 def history(monkeypatch):
     image = {"name": IMAGE, "imageArn": IMAGE_ID, "state": "CREATED"}
@@ -315,6 +333,38 @@ def test_cancelled_scan_preserves_prior_counts_and_digest(history, exception):
 
 
 @pytest.mark.parametrize("exception", [InterruptedError, KeyboardInterrupt])
+def test_verifier_cancellation_preserves_empty_unscanned_history(
+    history, monkeypatch, exception
+):
+    monkeypatch.setattr(
+        recovery.subprocess,
+        "run",
+        Mock(side_effect=exception("synthetic-cancellation")),
+    )
+    result = initial_report()
+    with pytest.raises(exception):
+        recovery.observe({"region": REGION, "resources": []}, {}, history.api, result)
+    assert result["microvmCoverage"] == {
+        "pagesScanned": 0,
+        "processedCount": 0,
+        "terminatedCount": 0,
+        "retainedCount": 0,
+        "terminatedIdentitySha256": EMPTY_DIGEST,
+        "paginationComplete": False,
+    }
+    assert result["sections"]["independentVerifier"] == "incomplete"
+    assert all(
+        result["sections"][section] == "not_run"
+        for section in ("images", "versions", "logGroups", "microvms")
+    )
+    assert history.calls == []
+    for method in vars(history.plane).values():
+        method.assert_not_called()
+    history.logs.describe_log_groups.assert_not_called()
+    assert recovery.validate_observation(result) is result
+
+
+@pytest.mark.parametrize("exception", [InterruptedError, KeyboardInterrupt])
 def test_cancellation_after_retained_append_keeps_matching_counts(
     history, monkeypatch, exception
 ):
@@ -359,6 +409,11 @@ def test_oversize_vm_page_fails_before_accepting_its_rows(history):
     assert result["microvmCoverage"]["pagesScanned"] == 1
     assert result["microvmCoverage"]["terminatedIdentitySha256"] == terminal_digest([])
     assert result["microvmCoverage"]["paginationComplete"] is False
+    assert result["errors"][-1] == {
+        "section": "microvms",
+        "code": "observation_limit",
+        "operation": "list_microvms",
+    }
     assert_other_evidence(result)
 
 
@@ -466,6 +521,12 @@ def test_terminal_history_page_ceiling_requires_natural_end(history, has_more):
         "terminatedIdentitySha256": terminal_digest(records),
         "paginationComplete": not has_more,
     }
+    if has_more:
+        assert result["errors"][-1] == {
+            "section": "microvms",
+            "code": "observation_limit",
+            "operation": "list_microvms",
+        }
     assert recovery.validate_observation(result) is result
 
 
@@ -588,18 +649,52 @@ def test_v1_incomplete_preflight_receipt_remains_valid(with_binding):
 
 
 def test_v2_minimal_incomplete_receipt_remains_valid():
-    result = {
-        key: value
-        for key, value in initial_report().items()
-        if key
-        in {
-            "kind",
-            "schemaVersion",
-            "conformance_verified",
-            "recoveryAccepted",
-            "mutationsPerformed",
-            "status",
-        }
-    }
-    result["schemaVersion"] = 2
+    result = minimal_report()
     assert recovery.validate_observation(result) is result
+
+
+@pytest.mark.parametrize("version", [True, False, 0, -1, 3, 1.0, 2.0])
+def test_minimal_receipt_requires_known_integer_schema_version(version):
+    result = minimal_report(version)
+    with pytest.raises(recovery.Refused, match="^receipt_schema$"):
+        recovery.validate_observation(result)
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_minimal_receipt_cannot_carry_verifier_without_sections(version):
+    result = minimal_report(version)
+    result["independentVerifier"] = {
+        "resources": [],
+        "summary_present": True,
+        "leakCount": 0,
+        "exitCode": 0,
+    }
+    with pytest.raises(recovery.Refused, match="^receipt_schema$"):
+        recovery.validate_observation(result)
+
+
+@pytest.mark.parametrize("section", ["sections", "microvms"])
+def test_partial_collection_metadata_requires_history_coverage(section):
+    result = minimal_report()
+    result[section] = (
+        {key: "not_run" for key in recovery.OBSERVATION_SECTIONS}
+        if section == "sections"
+        else []
+    )
+    with pytest.raises(recovery.Refused, match="^receipt_schema$"):
+        recovery.validate_observation(result)
+
+
+@pytest.mark.parametrize("missing", ["sections", "microvms"])
+def test_history_coverage_requires_both_collection_fields(
+    history, monkeypatch, missing
+):
+    monkeypatch.setattr(
+        recovery.subprocess, "run", Mock(side_effect=RuntimeError("synthetic-failure"))
+    )
+    result = history.observe([])
+    assert result["status"] == "incomplete"
+    assert "independentVerifier" not in result
+    del result[missing]
+    with pytest.raises(recovery.Refused, match="^receipt_schema$"):
+        recovery.validate_observation(result)
