@@ -1,0 +1,15 @@
+diff --git a/crates/microvms-domain/src/error.rs b/crates/microvms-domain/src/error.rs
+index 210e2ec9..8bcc9331 100644
+--- a/crates/microvms-domain/src/error.rs
++++ b/crates/microvms-domain/src/error.rs
+@@ -109,9 +109,7 @@ impl Error {
+ 
+     /// Attaches the attempts and completed retry sleeps for this control-plane call.
+     #[must_use]
+-    pub fn with_retry_details(mut self, attempts: u32, backoff: std::time::Duration) -> Self {
+-        self.attempts = attempts;
+-        self.backoff = backoff;
++    pub fn with_retry_details(self, _attempts: u32, _backoff: std::time::Duration) -> Self {
+         self
+     }
+ 
