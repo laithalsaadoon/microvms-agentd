@@ -295,6 +295,16 @@ suite = "script"
 message = "FAIL: test_the_base_gets_what_the_head_left_of_the_budget ("
 transform = { file = "tools/check-mutmut.py", replace = "else args.budget - (time.monotonic() - begun)", with = "else args.budget + (time.monotonic() - begun)" }
 
+# A fresh budget for the base loses the time already spent measuring the head.
+[[fault]]
+id = "mutmut-base-share-fresh"
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_the_base_gets_what_the_head_left_of_the_budget"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_base_gets_what_the_head_left_of_the_budget ("
+transform = { file = "tools/check-mutmut.py", replace = "else args.budget - (time.monotonic() - begun)", with = "else args.budget" }
+
 # A rerun given its side's share plus what the failed run took, rather than what it left.
 [[fault]]
 id = "mutmut-rerun-share-unbounded"

@@ -680,18 +680,55 @@ class BudgetTests(unittest.TestCase):
         )
 
     def test_the_base_gets_what_the_head_left_of_the_budget(self):
-        # The head takes about 7 s of a 20 s budget, so the base is stopped about 20 s in. Given
-        # the budget plus what the head took, it would run until its 30 s sleep ended.
+        # Control only the measurement boundary and clock. Process deadlines and partial
+        # result parsing have their own cases; scheduler delays must not decide whether
+        # this orchestration case receives a complete or incomplete base count.
         repo = self.repo()
         repo.commit({"tools/calc.py": calc("0 0 1", "return b + a")})
-        started = time.monotonic()
-        code, out, err = repo.run(
-            "--budget", "20", env={"FAKE_MUTMUT_SLOW": "base", "FAKE_MUTMUT_STEP": "6"}
-        )
-        took = time.monotonic() - started
-        self.assertEqual(code, 1, out + err)
-        self.assertIn("    add: 2 of 3 survive (1 on the base): MORE\n", out)
-        self.assertLess(took, 30, "the base ran past what the head left")
+        for complete in (True, False):
+            with self.subTest(complete=complete):
+                now = 100.0
+                shares = []
+
+                def measure(*args):
+                    nonlocal now
+                    side, seconds = args[4], args[-1]
+                    shares.append((side.name, seconds))
+                    if side.name == "head":
+                        now += 7
+                        survivors, unrun = 2, 0
+                    else:
+                        now += seconds
+                        survivors, unrun = (1, 0) if complete else (0, 1)
+                    return {
+                        ("tools/calc.py", "x_add"): GATE["Tally"](
+                            total=3 - unrun,
+                            counted=[
+                                (f"tools.calc.x_add__mutmut_{n}", "survived")
+                                for n in range(1, survivors + 1)
+                            ],
+                            unrun=unrun,
+                        )
+                    }
+
+                clock = mock.Mock(monotonic=lambda: now)
+                with mock.patch.dict(
+                    script_globals("gate"),
+                    {"measure": measure, "time": clock, "show": lambda *args: "diff"},
+                ):
+                    started = clock.monotonic()
+                    code, out, err = repo.run("--budget", "20")
+                    took = clock.monotonic() - started
+                self.assertEqual(shares, [("head", 12.0), ("base", 13.0)])
+                self.assertEqual(took, 20, "the base ran past what the head left")
+                self.assertEqual(code, 1 if complete else 0, out + err)
+                if complete:
+                    self.assertIn(
+                        "    add: 2 of 3 survive (1 on the base): MORE\n", out
+                    )
+                else:
+                    self.assertIn(": NOT DECIDED within the budget\n", out)
+                    self.assertIn("they pass undecided: add in tools/calc.py", out)
 
     def test_a_rerun_gets_what_the_failed_run_left_of_the_share(self):
         # The failed stats pass takes 8 s of the head's 18 s share, so the rerun is stopped about
