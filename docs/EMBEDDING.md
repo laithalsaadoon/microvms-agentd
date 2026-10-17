@@ -68,14 +68,14 @@ The control API remains available for an explicit-user repair.
 ## Throttle retries and launch timing
 
 `ControlPlane` and `Sandbox` accept an optional throttle retry budget. Python takes
-`retry=(max_attempts, max_elapsed_seconds)`; Node takes
+`retry=(max_attempts, max_elapsed_seconds)`. Node takes
 `{ maxAttempts, maxElapsedSeconds }`. Rust uses
 `ControlPlane::with_retry(RetryPolicy::new(attempts, elapsed)?)` before passing the
 plane to `Sandbox::with_control_plane`. Both limits must be positive. Attempts
 include the initial request, and elapsed time includes requests and backoff.
-An in-flight request may finish after the deadline, but another retry will not
-start. The option applies to HTTP 429 and header-named `ThrottlingException`
-responses; other transient failures retain their existing retry budget.
+An in-flight request may finish after the deadline, but no new retry starts
+after it. The option applies to HTTP 429 and header-named `ThrottlingException`
+responses. Other transient failures keep their existing retry budget.
 Omitting it preserves the default: an initial request and up to five retries.
 Retries reuse the original request and client token.
 
@@ -83,7 +83,7 @@ The returned session exposes `launch_metrics` in Python, `launchMetrics()` in
 Node, and `launch_metrics()` in Rust. Its snapshot includes the launch request's
 attempt count, the total duration of completed scheduled backoff sleeps, and the
 first observed RUNNING and ready times as Unix seconds. A launch with `wait=False` (`wait: false` in Node) initially
-leaves unobserved timestamps empty; subsequent readiness waits update the
+leaves unobserved timestamps empty. Later readiness waits update the
 shared snapshot, including snapshots read through a cloned session.
 
 Control-plane errors expose `attempt_count`, `backoff_seconds`, and `throttled`
@@ -92,7 +92,7 @@ fields, or `null` for an error without telemetry. CLI JSON failures include
 `attemptCount`, `backoffSeconds`, and `throttled` in `data`. These values describe
 one control-plane call, not a caller's own outer retry loop.
 
-Cancelling Python's `run_async` stops before another launch request. If a request
+Canceling Python's `run_async` stops before another launch request. If a request
 is already in flight, it finishes and any accepted VM remains recorded on the
 sandbox for cleanup. Rust callers can use `run_cancellable` with a
 `RetryCancellation` token for the same behavior.
