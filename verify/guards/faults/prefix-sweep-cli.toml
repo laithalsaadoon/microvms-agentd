@@ -8,3 +8,42 @@ expect = "test-failed"
 suite = "rust"
 note = "crates/microvms-cli/src/guards/image.rs::gc_dry_run_requires_explicit_confirmation"
 transform = { file = "crates/microvms-cli/src/commands/image.rs", replace = "dry_run: !args.yes,", with = "dry_run: args.yes," }
+
+# Adding gc changes these existing command-contract tests. Reverting the entire
+# feature would leave its new caller tests referring to absent types, so each
+# fault removes one gc contract while keeping that caller and its test compiling.
+
+[[fault]]
+id = "gc-binary-manifest-response"
+guard = "every_command_the_manifest_lists_is_one_the_binary_routes"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "manifest", "--", "--exact", "every_command_the_manifest_lists_is_one_the_binary_routes"]
+expect = "test-failed"
+suite = "rust"
+transform = [
+  { file = "crates/microvms-cli/src/commands/mod.rs", replace = "    (\n        \"gc\",\n        \"microvm.gc\",\n        &[\n            \"dryRun\",\n            \"imagesMatched\",\n            \"imagesKept\",\n            \"microvmsMatched\",\n            \"microvmsTerminated\",\n            \"imagesDeleted\",\n            \"imagesInUse\",\n            \"failures\",\n        ],\n    ),\n", with = "" },
+  { file = "crates/microvms-cli/src/commands/mod.rs", replace = "pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 39] = [", with = "pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 38] = [" },
+]
+
+[[fault]]
+id = "gc-command-tree-name"
+guard = "cli::tests::the_tree_registers_the_lifecycle_commands_the_attached_block_and_the_local_ones"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "cli::tests::the_tree_registers_the_lifecycle_commands_the_attached_block_and_the_local_ones"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-cli/src/cli.rs", replace = "    Gc(GcArgs),", with = "    #[command(name = \"unregistered-gc\")]\n    Gc(GcArgs)," }
+
+[[fault]]
+id = "gc-manifest-command-omitted"
+guard = "manifest::tests::the_manifest_lists_exactly_the_registered_commands"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "manifest::tests::the_manifest_lists_exactly_the_registered_commands"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-cli/src/manifest.rs", replace = "    let commands: Vec<Value> = command\n        .get_subcommands()\n", with = "    let commands: Vec<Value> = command\n        .get_subcommands()\n        .filter(|sub| sub.get_name() != \"gc\")\n" }
+
+[[fault]]
+id = "gc-human-rendering-command-omitted"
+guard = "manifest::tests::the_human_rendering_names_every_command_and_exit_code"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "manifest::tests::the_human_rendering_names_every_command_and_exit_code"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-cli/src/manifest.rs", replace = "    for command in &commands {\n", with = "    for command in commands.iter().filter(|command| command[\"name\"] != \"gc\") {\n" }
