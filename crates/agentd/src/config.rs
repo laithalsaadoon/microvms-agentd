@@ -203,7 +203,7 @@ impl Config {
         cfg.default_user = configured_default(
             std::env::var_os(DEFAULT_USER_VAR),
             std::env::var_os(crate::image_user::SETTING),
-            crate::image_user::default_user,
+            || crate::image_user::default_user(std::path::Path::new(crate::image_user::RECORD)),
         );
         // Log the effective default at startup; authenticated discovery also exposes it.
         if let Some(user) = &cfg.default_user {

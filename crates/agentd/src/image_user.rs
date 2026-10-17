@@ -89,11 +89,8 @@ fn seal(path: &Path) -> io::Result<()> {
     file.set_permissions(Permissions::from_mode(0o444))
 }
 
-pub fn default_user() -> io::Result<String> {
-    read_default(Path::new(RECORD))
-}
-
-fn read_default(path: &Path) -> io::Result<String> {
+/// Reads the captured identity from a sealed image record.
+pub fn default_user(path: &Path) -> io::Result<String> {
     read_sealed(open(path, false)?)
 }
 
@@ -161,7 +158,7 @@ mod tests {
             expected
         );
         assert!(
-            read_default(&record).is_err(),
+            default_user(&record).is_err(),
             "capture must still be unsealed"
         );
 
@@ -170,7 +167,7 @@ mod tests {
             .unwrap();
         assert_eq!(std::fs::metadata(&record).unwrap().mode() & 0o777, 0o444);
         assert_eq!(
-            read_default(&record).unwrap(),
+            default_user(&record).unwrap(),
             format!("{}:{}", expected.uid, expected.gid)
         );
     }
@@ -241,23 +238,64 @@ mod tests {
 
     #[test]
     fn captured_identity_is_bounded_and_explicit() {
-        let mut file = tempfile::tempfile().unwrap();
-        file.write_all(br#"{"uid":4242,"gid":4343}"#).unwrap();
         use std::io::{Seek, SeekFrom};
-        file.seek(SeekFrom::Start(0)).unwrap();
-        assert_eq!(
-            read(&mut file).unwrap(),
-            Identity {
-                uid: 4242,
-                gid: 4343
-            }
-        );
-        for bytes in [b"{}".as_slice(), br#"{"uid":1,"gid":-1}"#, &[b' '; 129]] {
+        let identity = br#"{"uid":4242,"gid":4343}"#;
+        // Put the closing brace at the limit: a shorter read must not accept a prefix.
+        for length in [127, 128] {
+            let mut bytes = vec![b' '; length - identity.len()];
+            bytes.extend_from_slice(identity);
+            let mut file = tempfile::tempfile().unwrap();
+            file.write_all(&bytes).unwrap();
+            file.seek(SeekFrom::Start(0)).unwrap();
+            assert_eq!(
+                read(&mut file).unwrap(),
+                Identity {
+                    uid: 4242,
+                    gid: 4343
+                },
+                "{length} bytes is within the limit"
+            );
+        }
+        // JSON permits trailing whitespace. Only the size check can reject these
+        // complete documents; a parse error would not prove the bound is enforced.
+        for length in [129, 130] {
+            let mut bytes = vec![b' '; 128 - identity.len()];
+            bytes.extend_from_slice(identity);
+            bytes.resize(length, b' ');
+            let mut file = tempfile::tempfile().unwrap();
+            file.write_all(&bytes).unwrap();
+            file.seek(SeekFrom::Start(0)).unwrap();
+            assert_eq!(
+                read(&mut file).unwrap_err().to_string(),
+                "image user record is too large",
+                "{length} bytes exceeds the limit"
+            );
+        }
+        for bytes in [b"{}".as_slice(), br#"{"uid":1,"gid":-1}"#] {
             let mut file = tempfile::tempfile().unwrap();
             file.write_all(bytes).unwrap();
             file.seek(SeekFrom::Start(0)).unwrap();
             assert!(read(&mut file).is_err());
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn default_user_requires_a_valid_sealed_record() {
+        if !in_root_namespace("image_user::tests::default_user_requires_a_valid_sealed_record") {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let record = dir.path().join("record");
+        assert_eq!(
+            default_user(&record).unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+        std::fs::write(&record, b"{}").unwrap();
+        std::fs::set_permissions(&record, Permissions::from_mode(0o444)).unwrap();
+        assert!(default_user(&record).is_err());
+        std::fs::write(&record, br#"{"uid":4242,"gid":4343}"#).unwrap();
+        assert_eq!(default_user(&record).unwrap(), "4242:4343");
     }
 
     #[test]
@@ -287,7 +325,7 @@ mod tests {
         let link = dir.path().join("link");
         std::os::unix::fs::symlink(&target, &link).unwrap();
         assert_eq!(
-            read_default(&link).unwrap_err().raw_os_error(),
+            default_user(&link).unwrap_err().raw_os_error(),
             Some(nix::libc::ELOOP)
         );
     }

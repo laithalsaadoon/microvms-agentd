@@ -125,3 +125,39 @@ run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "image_user::t
 expect = "test-failed"
 suite = "rust"
 transform = { file = "crates/agentd/src/image_user.rs", replace = "!metadata.is_file() || metadata.uid() != 0", with = "!metadata.is_file()" }
+
+[[family]]
+guard = "image_user::tests::captured_identity_is_bounded_and_explicit"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "image_user::tests::captured_identity_is_bounded_and_explicit"]
+expect = "test-failed"
+suite = "rust"
+
+[[family.fault]]
+id = "wrap-user-record-read-short"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "file.take(MAX_RECORD_BYTES + 1)", with = "file.take(MAX_RECORD_BYTES - 1)" }
+
+[[family.fault]]
+id = "wrap-user-record-read-truncated"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "file.take(MAX_RECORD_BYTES + 1)", with = "file.take(MAX_RECORD_BYTES * 1)" }
+
+[[family.fault]]
+id = "wrap-user-record-cap-equality"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "bytes.len() as u64 > MAX_RECORD_BYTES", with = "bytes.len() as u64 == MAX_RECORD_BYTES" }
+
+[[family.fault]]
+id = "wrap-user-record-cap-exclusive"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "bytes.len() as u64 > MAX_RECORD_BYTES", with = "bytes.len() as u64 >= MAX_RECORD_BYTES" }
+
+[[family]]
+guard = "image_user::tests::default_user_requires_a_valid_sealed_record"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "image_user::tests::default_user_requires_a_valid_sealed_record"]
+expect = "test-failed"
+suite = "rust"
+
+[[family.fault]]
+id = "wrap-user-default-empty"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "    read_sealed(open(path, false)?)", with = "    Ok(String::new())" }
+
+[[family.fault]]
+id = "wrap-user-default-other"
+transform = { file = "crates/agentd/src/image_user.rs", replace = "    read_sealed(open(path, false)?)", with = '    Ok("xyzzy".into())' }
