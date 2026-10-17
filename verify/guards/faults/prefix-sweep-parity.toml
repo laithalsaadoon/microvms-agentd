@@ -1,0 +1,51 @@
+# ── prefix-sweep-parity: FAIL_TO_PASS entries tools/fail-to-pass.py emitted ──
+
+# FAIL_TO_PASS: fails on 32a2a5c6d006 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-parity-core-control-plane-sweep-staggered-termination"
+guard = "core_answers_the_shared_case_corpus"
+run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
+  ["cargo", "test", "--config", "env.MICROVMS_PARITY_CASE.value=\"control-plane/sweep-staggered-termination\"", "--config", "env.MICROVMS_PARITY_CASE.force=true", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"],
+]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-parity-core-control-plane-sweep-staggered-termination.patch"
+
+# FAIL_TO_PASS: fails on 32a2a5c6d006 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-parity-cli-control-plane-sweep-staggered-termination"
+guard = "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"
+run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
+  ["cargo", "test", "--config", "env.MICROVMS_PARITY_CASE.value=\"control-plane/sweep-staggered-termination\"", "--config", "env.MICROVMS_PARITY_CASE.force=true", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"],
+]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-parity-cli-control-plane-sweep-staggered-termination.patch"
+
+# FAIL_TO_PASS: fails on 32a2a5c6d006 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-parity-py-control-plane-sweep-staggered-termination"
+guard = "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[control-plane/sweep-staggered-termination]"
+run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml", "--features", "parity-fixtures"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[control-plane/sweep-staggered-termination]"],
+]
+expect = "test-failed"
+suite = "bindings"
+patch = "verify/guards/faults/f2p-parity-py-control-plane-sweep-staggered-termination.patch"
+
+# FAIL_TO_PASS: fails on 32a2a5c6d006 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-parity-ts-control-plane-sweep-staggered-termination"
+guard = "control-plane/sweep-staggered-termination"
+run = [
+  ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"],
+  ["node", "--test", "--test-reporter=tap", "--test-name-pattern=^control\\-plane/sweep\\-staggered\\-termination$", "bindings/microvms-js/__test__/parity_cases.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+patch = "verify/guards/faults/f2p-parity-ts-control-plane-sweep-staggered-termination.patch"
