@@ -80,6 +80,7 @@ message = "Missing expected rejection"
 transform = { file = "bindings/microvms-js/src/sandbox.rs", replace = "        if let Some(dir) = self.project_dir {\n", with = "        if let Some(dir) = self.project_dir.filter(|_| false) {\n" }
 
 # TypeScript's `ensureImage` drops `projectDir`, so the call goes on toward AWS.
+# The runner matches this exact failed test name; a TAP ordinal would depend on test order.
 [[fault]]
 id = "ts-ensure-project-dir-dropped"
 guard = "ensureImage refuses the project before any call"
@@ -89,5 +90,4 @@ run = [
 ]
 expect = "test-failed"
 suite = "bindings"
-message = "not ok 7 - ensureImage refuses the project before any call"
 transform = { file = "bindings/microvms-js/src/sandbox.rs", replace = "        if let Some(dir) = options.project_dir {\n", with = "        if let Some(dir) = options.project_dir.filter(|_| false) {\n" }
