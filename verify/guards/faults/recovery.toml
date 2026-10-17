@@ -48,7 +48,7 @@ transform = { file = "tools/recover-live.py", replace = "                    des
 [[family.fault]]
 id = "recovery-core-selected-logs"
 message = "FAIL: test_dependency_veto_covers_vm_and_version_references"
-transform = { file = "tools/recover-live.py", replace = "        if resource[\"kind\"] == \"log-group\":\n            api.configured_dependencies", with = "        if resource[\"proof\"] == \"configured-log\":\n            api.configured_dependencies" }
+transform = { file = "tools/recover-live.py", replace = "    for resource, row, _ in plan.values():\n        if resource[\"kind\"] == \"log-group\":", with = "    for resource, row, _ in plan.values():\n        if resource[\"proof\"] == \"configured-log\":" }
 
 
 [[family.fault]]
@@ -170,3 +170,8 @@ transform = { file = "tools/recover-live.py", replace = "            api.call(ap
 id = "recovery-core-log-delete-evidence"
 message = "test_deletion_requested_records_an_accepted_call_even_if_later_work_fails"
 transform = { file = "tools/recover-live.py", replace = "        api.call(api.logs, \"delete_log_group\", logGroupName=row[\"logGroupName\"])\n        statuses[key][\"deletionRequested\"] = True", with = "        statuses[key][\"deletionRequested\"] = True\n        api.call(api.logs, \"delete_log_group\", logGroupName=row[\"logGroupName\"])" }
+
+[[family.fault]]
+id = "recovery-core-log-vm-dependency"
+message = "test_present_log_refuses_unrelated_vm_before_any_deletion"
+transform = { file = "tools/recover-live.py", replace = "                all(vm[\"state\"] == \"TERMINATED\" for vm in vms.values()),", with = "                True," }

@@ -447,12 +447,103 @@ def test_settled_selection_retries_only_exact_not_found(setup, monkeypatch):
         {"microvmId": "unrelated", "imageArn": "other", "state": "RUNNING"},
     ],
 )
-def test_unrelated_or_terminated_vm_does_not_veto_selection(setup, vm):
+def test_unrelated_vm_without_logs_or_terminated_vm_does_not_veto_selection(setup, vm):
     setup.plane.list_microvms.return_value = {"items": [vm]}
-    assert set(recovery.selected(setup.manifest, setup.ownership, setup.api)[0]) == {
-        "image-key",
-        "group-key",
+    if vm["state"] != "TERMINATED":
+        setup.logs.describe_log_groups.return_value = {"logGroups": []}
+    expected = {"image-key"}
+    if vm["state"] == "TERMINATED":
+        expected.add("group-key")
+    assert (
+        set(recovery.selected(setup.manifest, setup.ownership, setup.api)[0])
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
+    "state", ["PENDING", "RUNNING", "SUSPENDING", "SUSPENDED", "TERMINATING"]
+)
+@pytest.mark.parametrize("later_page", [False, True])
+def test_present_log_refuses_unobservable_vm_destination_on_every_page(
+    setup, state, later_page
+):
+    page = {"items": [{"microvmId": "unrelated", "imageArn": "other", "state": state}]}
+    setup.plane.list_microvms.side_effect = (
+        [{"items": [], "nextToken": "second"}, page] if later_page else [page]
+    )
+    with pytest.raises(recovery.Refused, match="^log_vm_dependencies_unobservable$"):
+        recovery.selected(setup.manifest, setup.ownership, setup.api)
+    assert setup.plane.list_microvms.call_count == (2 if later_page else 1)
+
+
+@pytest.mark.parametrize("proof", ["shared-log", "configured-log"])
+def test_present_log_refuses_unrelated_vm_before_any_deletion(setup, proof):
+    setup.manifest["resources"] = [
+        {"kind": "log-group", "sha256": "group-key", "proof": proof}
+    ]
+    setup.ownership = {"group-key": (proof, GROUP, None)}
+    setup.plane.list_microvm_images.return_value = {"items": []}
+    setup.plane.list_microvms.return_value = {
+        "items": [{"microvmId": "unrelated", "imageArn": "other", "state": "RUNNING"}]
     }
+    setup.plane.delete_microvm_image = Mock()
+    setup.logs.delete_log_group = Mock(
+        side_effect=lambda **_: setattr(
+            setup.logs.describe_log_groups, "return_value", {"logGroups": []}
+        )
+    )
+    report = {}
+    with pytest.raises(recovery.Refused, match="^log_vm_dependencies_unobservable$"):
+        recovery.recover(setup.manifest, setup.ownership, setup.api, report)
+    setup.plane.delete_microvm_image.assert_not_called()
+    setup.logs.delete_log_group.assert_not_called()
+    assert report == {}
+
+
+def test_vm_appearing_after_image_deletion_vetoes_exact_log_deletion(setup):
+    class Missing(Exception):
+        response = {"Error": {"Code": "ResourceNotFoundException"}}
+
+    def delete_image(**_):
+        setup.plane.list_microvm_images.return_value = {"items": []}
+        return {}
+
+    def get_image(**_):
+        if setup.plane.delete_microvm_image.called:
+            raise Missing
+        return setup.image
+
+    setup.plane.delete_microvm_image = Mock(side_effect=delete_image)
+    setup.plane.get_microvm_image.side_effect = get_image
+    setup.plane.list_microvms.side_effect = lambda **_: {
+        "items": [{"microvmId": "late", "imageArn": "other", "state": "SUSPENDED"}]
+        if setup.plane.delete_microvm_image.called
+        else []
+    }
+    setup.logs.delete_log_group = Mock(
+        side_effect=lambda **_: setattr(
+            setup.logs.describe_log_groups, "return_value", {"logGroups": []}
+        )
+    )
+    report = {}
+    with pytest.raises(recovery.Refused, match="^log_vm_dependencies_unobservable$"):
+        recovery.recover(setup.manifest, setup.ownership, setup.api, report)
+    setup.plane.delete_microvm_image.assert_called_once_with(imageIdentifier=ARN)
+    setup.logs.delete_log_group.assert_not_called()
+    assert report["resources"] == [
+        {
+            "kind": "image",
+            "sha256": "image-key",
+            "status": "absent",
+            "deletionRequested": True,
+        },
+        {
+            "kind": "log-group",
+            "sha256": "group-key",
+            "status": "present",
+            "deletionRequested": False,
+        },
+    ]
 
 
 def test_selection_checks_every_log_destination_with_exact_deleting_set(

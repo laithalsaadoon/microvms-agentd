@@ -34,7 +34,17 @@ supply ownership evidence. Recovery requires each surviving selected resource's
 creation time to fall within the original job interval, rechecks its identity
 before deletion, refuses active VM and image-version log dependencies, deletes
 images before log groups, records whether it requested each deletion, and checks
-absence through a visibility interval and an independent verifier. Other resources are reported by hash and left alone.
+absence through a visibility interval and an independent verifier. Other
+resources are reported by hash and left alone.
+
+`RunMicrovm` accepts an explicit per-VM log destination, but the VM list and get
+responses do not expose it. While any selected log group is present, recovery
+therefore requires every VM in the complete regional inventory to be
+`TERMINATED`, including VMs using unrelated images. It repeats this check before
+each log deletion. The check cannot exclude a VM launched after the last read,
+so the no-other-writer precondition also covers launches that use selected log
+names. When every selected log is absent, image recovery retains its ordinary
+image-reference dependency check.
 
 Run `uv run --locked pytest tools/test_recover_live*.py tools/test_recovery_credentials.py`
 for the offline selector, provenance, failure, credential and privacy cases. The seeded faults are in

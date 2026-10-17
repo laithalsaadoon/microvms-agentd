@@ -737,6 +737,12 @@ def selected(manifest: dict, ownership: dict, api: Api) -> tuple[dict, tuple]:
     }
     for resource, row, _ in plan.values():
         if resource["kind"] == "log-group":
+            # RunMicrovm accepts a per-VM log destination that List/Get omit.
+            # Even a VM using another image may still write this selected group.
+            require(
+                all(vm["state"] == "TERMINATED" for vm in vms.values()),
+                "log_vm_dependencies_unobservable",
+            )
             api.configured_dependencies(row["logGroupName"], images, deleting)
     if not any(resource["kind"] == "log-group" for resource, _, _ in plan.values()):
         # Read-only version evidence remains useful after an earlier run removed
@@ -954,6 +960,7 @@ REASONS = [
     "invalid_source_run",
     "invalid_timestamp",
     "invalid_deadline",
+    "log_vm_dependencies_unobservable",
     "manifest_digest",
     "manifest_parser",
     "manifest_region",
