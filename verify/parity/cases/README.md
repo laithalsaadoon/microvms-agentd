@@ -17,6 +17,19 @@ The runners:
 The Rust runners share `crates/microvms-core/tests/parity_corpus/mod.rs`; the Python and TypeScript
 runners restate the same rules. This file is the contract all of them follow.
 
+`mise run fail-to-pass -- --emit <owner>` selects changed case files and proves each
+applicable surface against the head and the merge base's product behavior. It records the
+same case and expectation in reproducible guard entries. Every applicable surface must
+pass with the fix; at least one must fail with it reverted. A surface passing on both
+trees is reported as unchanged and gets no FAIL_TO_PASS entry. `fail-to-pass:check`
+requires a case-selected entry for every changed case, and the corpus suites check all
+applicable surfaces on the head.
+
+For a Rust proof, Cargo's per-command `env.MICROVMS_PARITY_CASE` setting selects one
+case at compile time. The ordinary corpus run remains unfiltered. The selected run still
+loads and validates the corpus and its sentinel, and refuses an absent or skipped case.
+Python uses the case's pytest node ID; TypeScript uses its exact test title.
+
 ## A case
 
 `<area>/<case>.json`, one JSON object:

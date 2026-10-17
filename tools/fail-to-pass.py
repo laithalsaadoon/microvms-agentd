@@ -34,12 +34,21 @@ base with `--base` (origin/main by default), as tools/changelog.py reads it.
   ast-grep. A function is changed when a line of it, its attributes or decorators included,
   differs from the merge base. Its guard is what its runner reports: the Rust path inside its
   target, the pytest node id, the node test's title.
+- Changed JSON files in verify/parity/cases/ select each surface named by their capability,
+  excluding explicit exemptions and skips. Each surface runs just that case against its one
+  shared expectation. Every applicable surface must pass on the head; at least one must fail
+  with the fix reverted. A surface passing both is unchanged, not a FAIL_TO_PASS proof.
 
 Two subcommands:
 
   `check [--base REF]` (`mise run fail-to-pass:check`, in `check`; CI's `security` job with the
-          pull request's base) builds nothing. It fails a fix whose tests aren't proven: none
-          of them is the guard of a registry entry the branch adds or changes. CI's `guards`
+          pull request's base) builds nothing. Every selected source test needs a registry
+          entry the branch adds or changes, with its owning runner and selector. One concrete
+          pytest parameter can prove its source function; this does not claim every runtime
+          parameter was independently proven. Every changed shared case needs a case-selected
+          entry from at least one applicable surface. Source tests stay selected even when a
+          shared case also changes; each must have a matching proof of its own runner and guard.
+          CI's `guards`
           job fires that entry, since no recorded verdict covers a new one, and the fire is the
           FAIL_TO_PASS run: the patch seeded, the test must be reported failing, and a broken
           build isn't that. A fix that changes no product source, or adds or changes no test,
@@ -56,8 +65,10 @@ Two subcommands:
           proof: a hand-written fault that reverts the fix where the test still compiles, or
           one R3's Falsification block generates, is the fallback); or it doesn't pass on the
           head. `--emit OWNER` appends each proven entry to verify/guards/faults/<OWNER>.toml,
-          with its patch beside it; without it the entries are printed. Exits 1 when no test is
-          proven. `--any` proves a branch that isn't a fix. Bindings entries fire with
+          with its patch beside it; without it the entries are printed. Exits 1 when any
+          ordinary test is unproven, any shared case lacks a proof, or any shared surface
+          fails on the head. Partial evidence is still emitted. `--any` proves a branch that
+          isn't a fix. Bindings entries fire with
           `--venv-per-worker`. Cargo builds in `--target-dir`, by default the `guards-fire`
           target `mise run guards:fire` builds in.
 """
@@ -75,6 +86,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -119,6 +131,20 @@ PARITY_JS_BUILD = [
     "--dts",
     "parity-fixtures.d.ts",
 ]
+PARITY_DIR = "verify/parity/cases"
+PARITY_TABLE = "verify/parity/capabilities.toml"
+PARITY_SENTINEL = f"{PARITY_DIR}/wrap-dockerfile/sentinel.json"
+PARITY_SELECTOR = "MICROVMS_PARITY_CASE"
+# Pytest's default parameter IDs escape Unicode with this Python codec.
+PYTEST_ID_ENCODING = "unicode_escape"
+PARITY_PEER = [
+    "cargo",
+    "build",
+    "-p",
+    "microvms-core",
+    "--example",
+    "parity-tunnel-peer",
+]
 # A test each finder must find in its file on every run, so a finder that stopped reading
 # fails here instead of reading every fix as one with no test.
 SENTINELS = {
@@ -151,6 +177,11 @@ _ATTRIBUTES = {
     }
 }
 RULES = [
+    {
+        "id": "attribute",
+        "language": "Rust",
+        "rule": {"any": [{"kind": "attribute_item"}, {"kind": "block_comment"}]},
+    },
     {
         "id": "test-fn",
         "language": "Rust",
@@ -343,13 +374,86 @@ def is_rust_test_file(path: str) -> bool:
 
 @dataclass(frozen=True)
 class Test:
-    kind: str  # rust | pytest | node
+    kind: str  # rust | pytest | node | parity
     path: str
     guard: str
     name: str
     first: int  # its first line, attributes and decorators included, from 1
     last: int
     inline: bool = False  # in a `#[cfg(test)]` module of a product file
+    case: str | None = None
+    surface: str | None = None
+
+
+def parity_tests(root: Path, files: list[str]) -> list[Test]:
+    """Each changed case, once per surface its capability and skip table require."""
+    if not files:
+        return []
+    table = tomllib.loads((root / PARITY_TABLE).read_bytes().decode())
+    rows = {row["id"]: row for row in table["capability"]}
+    found = []
+    for path in files:
+        relative = Path(path).relative_to(PARITY_DIR)
+        if len(relative.parts) != 2:
+            raise Failure(f"{path}: a case must be directly under its area")
+        text = (root / path).read_bytes().decode()
+        case = json.loads(text)
+        case_id = relative.with_suffix("").as_posix()
+        row = rows.get(case.get("capability"))
+        if row is None:
+            raise Failure(f"{path}: capability names no row in {PARITY_TABLE}")
+        first_surface = len(found)
+        for surface in ("core", "cli", "py", "ts"):
+            cell = row.get(surface)
+            if isinstance(cell, dict) and cell.get("exempt"):
+                continue
+            if not isinstance(cell, (str, list)) or not cell:
+                raise Failure(f"{path}: capability has no {surface} surface")
+            if surface in case.get("skip", {}):
+                continue
+            if surface == "core":
+                guard = "core_answers_the_shared_case_corpus"
+            elif surface == "cli":
+                source = (
+                    root / "crates/microvms-core/tests/parity_corpus/mod.rs"
+                ).read_text()
+                area = relative.parts[0]
+                tiers = {}
+                for tier in ("PROCESS", "FAKE"):
+                    match = re.search(
+                        rf"pub const CLI_{tier}_AREAS:.*?=\s*\[(.*?)\];", source, re.S
+                    )
+                    if match is None:
+                        raise Failure(
+                            f"cannot read CLI_{tier}_AREAS from parity_corpus"
+                        )
+                    tiers[tier] = re.findall(r'"([^"\\]+)"', match[1])
+                if area in tiers["PROCESS"]:
+                    guard = "the_cli_process_answers_the_shared_case_corpus"
+                elif area in tiers["FAKE"]:
+                    guard = "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"
+                else:
+                    raise Failure(f"{path}: no CLI runner owns area {area!r}")
+            elif surface == "py":
+                pytest_id = case_id.encode(PYTEST_ID_ENCODING).decode()
+                guard = f"bindings/microvms-py/tests/test_parity_cases.py::test_a_case[{pytest_id}]"
+            else:
+                guard = case_id
+            found.append(
+                Test(
+                    "parity",
+                    path,
+                    guard,
+                    f"parity-{surface}-{case_id}",
+                    1,
+                    len(text.splitlines()),
+                    case=case_id,
+                    surface=surface,
+                )
+            )
+        if len(found) == first_surface:
+            raise Failure(f"{path}: no applicable surface can prove this case")
+    return found
 
 
 def ast_grep(root: Path, files: list[str]) -> list[dict]:
@@ -373,10 +477,19 @@ def ast_grep(root: Path, files: list[str]) -> list[dict]:
     return [json.loads(line) for line in done.stdout.splitlines() if line.strip()]
 
 
-def with_attributes(lines: list[str], first: int) -> int:
+def with_attributes(lines: list[str], first: int, attributes: dict[int, int]) -> int:
     """The first line of the attributes and comments right above line `first` (from 0)."""
-    while first > 0 and lines[first - 1].strip().startswith(("#[", "//")):
-        first -= 1
+    while first > 0:
+        if first - 1 in attributes:
+            first = attributes[first - 1]
+        elif not lines[first - 1].strip() or lines[first - 1].strip().startswith("//"):
+            first -= 1
+        else:
+            break
+    # Internal blank gaps join attributes and docs; leading separators belong to neither test.
+    # The declaration we started from is nonblank, so this cannot run past it.
+    while not lines[first].strip():
+        first += 1
     return first
 
 
@@ -391,7 +504,10 @@ def module_path(path: str) -> list[str]:
     else:
         rest = path.split("/src/", 1)[1].removesuffix(".rs").split("/")
         if rest[0] == "bin":
-            return []
+            rest = rest[1:]
+            if len(rest) == 1 or rest[1:] == ["main"]:
+                return []
+            rest = rest[1:]
         if rest in (["lib"], ["main"]):
             return []
     if rest[-1] == "mod":
@@ -409,6 +525,11 @@ def rust_tests(root: Path, files: list[str], inline: bool) -> list[Test]:
     for path in files:
         text = (root / path).read_text(encoding="utf-8").splitlines()
         items = by_file.get(path, [])
+        attributes = {
+            m["range"]["end"]["line"]: m["range"]["start"]["line"]
+            for m in items
+            if m["ruleId"] == "attribute"
+        }
         mods = [
             (m["range"]["start"]["line"], m["range"]["end"]["line"], name(m, "NAME"))
             for m in items
@@ -436,7 +557,7 @@ def rust_tests(root: Path, files: list[str], inline: bool) -> list[Test]:
                     path=path,
                     guard="::".join([*prefix, *scope, fn]),
                     name=fn,
-                    first=with_attributes(text, start) + 1,
+                    first=with_attributes(text, start, attributes) + 1,
                     last=end + 1,
                     inline=inline,
                 )
@@ -447,12 +568,18 @@ def rust_tests(root: Path, files: list[str], inline: bool) -> list[Test]:
 def test_module_lines(root: Path, path: str) -> list[tuple[int, int]]:
     """Each `#[cfg(test)]` module's lines in a Rust file, its attributes included, from 1."""
     text = (root / path).read_text(encoding="utf-8").splitlines()
+    matches = ast_grep(root, [path])
+    attributes = {
+        m["range"]["end"]["line"]: m["range"]["start"]["line"]
+        for m in matches
+        if m["ruleId"] == "attribute"
+    }
     return [
         (
-            with_attributes(text, m["range"]["start"]["line"]) + 1,
+            with_attributes(text, m["range"]["start"]["line"], attributes) + 1,
             m["range"]["end"]["line"] + 1,
         )
-        for m in ast_grep(root, [path])
+        for m in matches
         if m["ruleId"] == "cfg-test-mod"
     ]
 
@@ -499,26 +626,38 @@ def is_test_class(node: ast.ClassDef) -> bool:
 
 
 def node_tests(root: Path, files: list[str]) -> list[Test]:
-    found: list[Test] = []
-    for match in ast_grep(root, files):
-        if match["ruleId"] != "node-test":
-            continue
-        literal = name(match, "TITLE")
-        try:
-            title = ast.literal_eval(literal)
-        except (ValueError, SyntaxError):
-            continue
-        found.append(
-            Test(
-                kind="node",
-                path=match["file"],
-                guard=title,
-                name=title,
-                first=match["range"]["start"]["line"] + 1,
-                last=match["range"]["end"]["line"] + 1,
-            )
+    matches = [m for m in ast_grep(root, files) if m["ruleId"] == "node-test"]
+    if not matches:
+        return []
+    # ast-grep admits only JavaScript string nodes, never expressions or templates.
+    # Decode them with their own language: Python rejects valid JS Unicode escapes.
+    done = subprocess.run(
+        [
+            "node",
+            "-e",
+            "const fs=require('node:fs'),vm=require('node:vm');"
+            "const strings=JSON.parse(fs.readFileSync(0,'utf8'));"
+            "process.stdout.write(JSON.stringify(strings.map(s=>vm.runInNewContext(s))));",
+        ],
+        cwd=root,
+        input=json.dumps([name(m, "TITLE") for m in matches]),
+        capture_output=True,
+        text=True,
+        env=clean_env(),
+    )
+    if done.returncode != 0:
+        raise Failure(f"cannot decode JavaScript test titles:\n{done.stderr.strip()}")
+    return [
+        Test(
+            kind="node",
+            path=match["file"],
+            guard=title,
+            name=title,
+            first=match["range"]["start"]["line"] + 1,
+            last=match["range"]["end"]["line"] + 1,
         )
-    return found
+        for match, title in zip(matches, json.loads(done.stdout), strict=True)
+    ]
 
 
 def sentinel_problems(root: Path) -> list[str]:
@@ -539,6 +678,17 @@ def sentinel_problems(root: Path) -> list[str]:
                 f"the {kind} finder doesn't find {guard} in {path}, so it would read a fix's"
                 " tests as none"
             )
+    if not (root / PARITY_SENTINEL).is_file():
+        problems.append(f"the parity sentinel's file {PARITY_SENTINEL} doesn't exist")
+    elif {test.surface for test in parity_tests(root, [PARITY_SENTINEL])} != {
+        "core",
+        "cli",
+        "py",
+        "ts",
+    }:
+        problems.append(
+            "the parity finder doesn't find every surface of wrap-dockerfile/sentinel"
+        )
     return problems
 
 
@@ -550,11 +700,29 @@ def branch_tests(branch: Branch) -> list[Test]:
         *rust_tests(branch.root, [p for p in files if is_product(p)], True),
         *python_tests(branch.root, [p for p in files if PY_TESTS.match(p)]),
         *node_tests(branch.root, [p for p in files if JS_TESTS.match(p)]),
+        *parity_tests(
+            branch.root,
+            [
+                p
+                for p in files
+                if p.startswith(f"{PARITY_DIR}/") and p.endswith(".json")
+            ],
+        ),
     ]
     tests: dict[tuple[str, str], Test] = {}
+    node_titles: dict[tuple[str, str], int] = {}
+    for test in candidates:
+        if test.kind == "node":
+            key = (test.path, test.guard)
+            node_titles[key] = node_titles.get(key, 0) + 1
     lines = {path: branch.changed_lines(path) for path in {t.path for t in candidates}}
     for test in candidates:
         if any(test.first <= n <= test.last for n in lines[test.path]):
+            if test.kind == "node" and node_titles[(test.path, test.guard)] > 1:
+                raise Failure(
+                    f"{test.path}: changed Node test title {test.guard!r} is ambiguous;"
+                    " use a unique title so its proof identifies one source test"
+                )
             tests.setdefault((test.path, test.guard), test)
     return list(tests.values())
 
@@ -669,6 +837,121 @@ def new_entries(branch: Branch) -> dict[str, dict]:
 # ── check ────────────────────────────────────────────────────────────────────
 
 
+def option_values(command: list[str], names: tuple[str, ...]) -> list[str]:
+    """The values of repeated long or short selectors, including `--name=value`."""
+    values = []
+    for index, argument in enumerate(command):
+        if argument in names:
+            values.append(command[index + 1] if index + 1 < len(command) else "")
+        else:
+            for name in names:
+                prefix = name + "=" if name.startswith("--") else name
+                if argument.startswith(prefix):
+                    values.append(argument[len(prefix) :].removeprefix("="))
+    return values
+
+
+def rust_entry_selects(test: Test, command: list[str], targets: list[dict]) -> bool:
+    expected = rust_command(test, targets)
+    if expected is None or command[:2] != ["cargo", "test"] or "--" not in command:
+        return False
+    cargo = command[: command.index("--")]
+    harness = command[command.index("--") + 1 :]
+    if option_values(cargo, ("-p", "--package")) != [expected[3]]:
+        return False
+    manifests = option_values(cargo, ("--manifest-path",))
+    if (
+        manifests
+        and manifests != ["Cargo.toml"]
+        and manifests != ["/".join(test.path.split("/")[:2]) + "/Cargo.toml"]
+    ):
+        return False
+    if "--exact" not in harness or test.guard not in cargo + harness:
+        return False
+    selected = [arg for arg in cargo if arg == "--lib"]
+    selected += [
+        f"{flag}={value}"
+        for flag in ("--test", "--bin")
+        for value in option_values(cargo, (flag,))
+    ]
+    wanted = ["--lib"] if expected[4] == "--lib" else [f"{expected[4]}={expected[5]}"]
+    # Cargo's implicit target is unambiguous only in a library-only package.
+    if not selected and wanted == ["--lib"]:
+        runnable = [
+            t
+            for t in targets
+            if t["package"] == expected[3]
+            and set(t["kind"]) & {"lib", "rlib", "cdylib", "staticlib", "bin", "test"}
+        ]
+        if len(runnable) == 1:
+            selected = ["--lib"]
+    return selected == wanted and not any(
+        flag in cargo for flag in ("--workspace", "--all-targets", "--tests", "--bins")
+    )
+
+
+def entry_proves(test: Test, entry: dict, targets: list[dict]) -> bool:
+    """A named failure from this test's owning runner, not a same-named test elsewhere."""
+    guard = entry.get("guard")
+    if entry.get("expect") != "test-failed" or not isinstance(guard, str):
+        return False
+    parameter = (
+        test.kind == "pytest"
+        and guard.startswith(test.guard + "[")
+        and guard.endswith("]")
+    )
+    if guard != test.guard and not parameter:
+        return False
+    run = entry.get("run")
+    if not isinstance(run, list) or not run:
+        return False
+    command = run[-1] if isinstance(run[0], list) else run
+    if not isinstance(command, list) or not all(
+        isinstance(arg, str) for arg in command
+    ):
+        return False
+    if test.kind == "rust":
+        return rust_entry_selects(test, command, targets)
+    if test.kind == "pytest":
+        return (
+            command[:3] == ["python", "-m", "pytest"]
+            and "-rA" in command
+            and any(selector in command for selector in (test.path, test.guard, guard))
+        )
+    if command[:2] != ["node", "--test"]:
+        return False
+    _, _, *arguments = command
+    # A preload can register a same-title test from a different source file.
+    preload_options = (
+        "--import",
+        "--require",
+        "--loader",
+        "--experimental-loader",
+        "-r",
+    )
+    if any(arg.startswith(preload_options) for arg in arguments):
+        return False
+    value_options = {
+        "--test-name-pattern",
+        "--test-skip-pattern",
+        "--test-reporter",
+        "--test-reporter-destination",
+        "--test-concurrency",
+        "--test-timeout",
+        "--test-shard",
+    }
+    files = []
+    while arguments:
+        arg = arguments.pop(0)
+        if arg in value_options:
+            if not arguments:
+                return False
+            arguments.pop(0)
+        elif not arg.startswith("-"):
+            files.append(arg)
+    return "--test-reporter=tap" in command and files == [test.path]
+
+
 def what_to_prove(branch: Branch, any_branch: bool) -> tuple[list[Test], str | None]:
     """The tests a fix has to prove, or why there's nothing to prove."""
     fragments = branch.fix_fragments()
@@ -700,23 +983,60 @@ def check(branch: Branch) -> int:
     if why:
         print(f"fail-to-pass: {why} (against {branch.base})")
         return 0
-    guards = {t.guard: t for t in tests}
-    proven = sorted(
-        (entry_id, str(e.get("guard")))
-        for entry_id, e in new_entries(branch).items()
-        if e.get("guard") in guards
+    entries = new_entries(branch)
+    parity_cases = {test.case for test in tests if test.kind == "parity"}
+    parity_proven = set()
+    proven = set()
+    for test in (test for test in tests if test.kind == "parity"):
+        run, _ = parity_command(test)
+        matches = {
+            entry_id
+            for entry_id, entry in entries.items()
+            if entry.get("guard") == test.guard
+            and entry.get("run") == run
+            and entry.get("expect") == "test-failed"
+        }
+        if matches:
+            parity_proven.add(test.case)
+            proven.update(matches)
+    parity_missing = sorted(parity_cases - parity_proven)
+    if parity_missing:
+        print(
+            "fail-to-pass: changed parity cases lack a case-selected proof: "
+            + ", ".join(parity_missing)
+        )
+        print(
+            "Run `mise run fail-to-pass -- --emit <owner>` to test every applicable surface."
+        )
+        return 1
+    ordinary = [test for test in tests if test.kind != "parity"]
+    targets = (
+        cargo_targets(branch.root) if any(t.kind == "rust" for t in ordinary) else []
     )
-    if proven:
+    matched = {
+        test: [
+            entry_id
+            for entry_id, entry in entries.items()
+            if entry_proves(test, entry, targets)
+        ]
+        for test in ordinary
+    }
+    missing = [test for test, entry_ids in matched.items() if not entry_ids]
+    if not missing:
+        proven.update(
+            entry_id for entry_ids in matched.values() for entry_id in entry_ids
+        )
         print(
             "fail-to-pass: this fix's tests have entries this branch adds, which CI's"
-            " `guards` job fires: " + ", ".join(f"{i} ({g})" for i, g in proven)
+            " `guards` job fires: "
+            + ", ".join(f"{i} ({entries[i]['guard']})" for i in sorted(proven))
         )
         return 0
     print(
         f"fail-to-pass: this fix ({', '.join(branch.fix_fragments())}) adds or changes these"
-        " tests, and no registry entry this branch adds names one as its guard:"
+        " tests without a new or changed proof entry selecting their owning runner:"
     )
-    for test in tests:
+    for test in missing:
         where = " (inline)" if test.inline else ""
         print(f"  {test.guard}{where}, in {test.path}")
     print(
@@ -788,9 +1108,38 @@ def rust_command(test: Test, targets: list[dict]) -> list[str] | None:
         )
         flag = ["--test", target["name"]] if target else None
     else:
-        target = next((t for t in mine if "lib" in t["kind"]), None)
-        flag = ["--lib"] if target else None
-        if target is None:
+        binary = next(
+            (
+                t
+                for t in mine
+                if "bin" in t["kind"]
+                and (
+                    t["src"] == test.path
+                    or (
+                        "/src/bin/" in t["src"]
+                        and t["src"].endswith("/main.rs")
+                        and test.path.startswith(t["src"].removesuffix("main.rs"))
+                    )
+                )
+            ),
+            None,
+        )
+        target = binary or next(
+            (
+                t
+                for t in mine
+                if set(t["kind"]) & {"lib", "rlib", "cdylib", "staticlib"}
+                and "/src/bin/" not in test.path
+                and test.path != crate + "src/main.rs"
+            ),
+            None,
+        )
+        flag = ["--bin", binary["name"]] if binary else ["--lib"] if target else None
+        if (
+            target is None
+            and "/src/bin/" not in test.path
+            and test.path != crate + "src/main.rs"
+        ):
             target = next(
                 (
                     t
@@ -824,7 +1173,9 @@ def candidates(branch: Branch, tests: list[Test]) -> tuple[list[Candidate], list
     made: list[Candidate] = []
     skipped: list[str] = []
     for test in tests:
-        if test.kind == "rust":
+        if test.kind == "parity":
+            run, suite = parity_command(test)
+        elif test.kind == "rust":
             argv = rust_command(test, targets)
             if argv is None:
                 skipped.append(
@@ -859,6 +1210,53 @@ def candidates(branch: Branch, tests: list[Test]) -> tuple[list[Candidate], list
         taken.add(entry_id)
         made.append(Candidate(test, entry_id, run, suite))
     return made, skipped
+
+
+def parity_command(test: Test) -> tuple[list[list[str]], str]:
+    """Run exactly this case through its real surface runner, retaining the shared expect."""
+    assert test.case is not None, "a shared proof must name its case"
+    if test.surface in ("core", "cli"):
+        if test.surface == "core":
+            target = ["-p", "microvms-core", "--test", "parity_cases"]
+        elif test.guard.startswith("guards::"):
+            target = ["-p", "microvms-cli", "--bin", "microvm"]
+        else:
+            target = ["-p", "microvms-cli", "--test", "parity_cases"]
+        config = f"env.{PARITY_SELECTOR}.value={toml_str(test.case)}"
+        force = f"env.{PARITY_SELECTOR}.force=true"
+        return [
+            PARITY_PEER,
+            [
+                "cargo",
+                "test",
+                "--config",
+                config,
+                "--config",
+                force,
+                *target,
+                "--",
+                "--exact",
+                test.guard,
+            ],
+        ], "rust"
+    if test.surface == "py":
+        return [
+            PARITY_PEER,
+            PARITY_PY_BUILD,
+            ["python", "-m", "pytest", "-q", "-rA", test.guard],
+        ], "bindings"
+    pattern = f"^{re.escape(test.case)}$"
+    return [
+        PARITY_PEER,
+        PARITY_JS_BUILD,
+        [
+            "node",
+            "--test",
+            "--test-reporter=tap",
+            f"--test-name-pattern={pattern}",
+            "bindings/microvms-js/__test__/parity_cases.mjs",
+        ],
+    ], "bindings"
 
 
 def toml_str(value: str) -> str:
@@ -924,6 +1322,9 @@ VERDICT = re.compile(
     r"^(?P<kind>fired|DID NOT FIRE|already red|guard not found|stale anchor): (?P<id>[a-z0-9-]+)"
     r"(?:: (?P<why>.*?))?(?: \(\d+\.\d s\))?$",
     re.MULTILINE,
+)
+RESTORED = re.compile(
+    r"^guards: restored, every command passes again \([^)]+\)$", re.MULTILINE
 )
 
 
@@ -992,6 +1393,12 @@ def fire(
                 for candidate in pending:
                     verdicts.pop(candidate.id, None)
                 continue
+            # A surviving fault legitimately exits 1, but an incomplete restored pass
+            # cannot prove even the candidates whose earlier fault verdict was green.
+            expected_exit = int(any(kind != "fired" for kind, _ in lines.values()))
+            completed = (
+                bool(RESTORED.search(done.stdout)) and done.returncode == expected_exit
+            )
             for candidate in pending:
                 verdicts.setdefault(
                     candidate.id,
@@ -1000,6 +1407,13 @@ def fire(
                         f"the fire never judged it (exit {done.returncode}):\n{done.stderr[-2000:]}",
                     ),
                 )
+                verdict = verdicts[candidate.id]
+                if not completed and (verdict[0] or parity_base_pass(verdict)):
+                    verdicts[candidate.id] = (
+                        False,
+                        "the fire did not complete its restored verification "
+                        f"(exit {done.returncode}):\n{done.stderr[-2000:]}",
+                    )
             break
     finally:
         subprocess.run(
@@ -1036,7 +1450,18 @@ def prove(branch: Branch, args) -> int:
         f"fail-to-pass: against {branch.fork[:12]}, the merge base with {branch.base}:"
     )
     for candidate in made:
-        print(f"  {candidate.test.guard}: {verdicts[candidate.id][1]}")
+        verdict = verdicts[candidate.id]
+        label = (
+            f"{candidate.test.case} on {candidate.test.surface}"
+            if candidate.test.kind == "parity"
+            else candidate.test.guard
+        )
+        message = (
+            "passes on the head and merge base: unchanged surface, not FAIL_TO_PASS"
+            if candidate.test.kind == "parity" and parity_base_pass(verdict)
+            else verdict[1]
+        )
+        print(f"  {label}: {message}")
     if not proven:
         print("fail-to-pass: no test of this fix is proven")
         return 1
@@ -1050,7 +1475,30 @@ def prove(branch: Branch, args) -> int:
         print("fail-to-pass: the entries, for `--emit <owner>` to write:")
         for candidate in proven:
             print(entry_toml(candidate, branch.fork))
-    return 0
+    # A shared case can expose a bug in one adapter while the others already agree.
+    # Every head must pass, and each case needs a real regression on some surface.
+    cases = {c.test.case for c in made if c.test.kind == "parity"}
+    proven_cases = {c.test.case for c in proven if c.test.kind == "parity"}
+    parity_errors = any(
+        c.test.kind == "parity"
+        and not verdicts[c.id][0]
+        and not parity_base_pass(verdicts[c.id])
+        for c in made
+    )
+    ordinary_missing = any(
+        c.test.kind != "parity" and not verdicts[c.id][0] for c in made
+    )
+    return int(
+        bool(skipped) or ordinary_missing or parity_errors or bool(cases - proven_cases)
+    )
+
+
+def parity_base_pass(verdict: tuple[bool, str]) -> bool:
+    return (
+        not verdict[0]
+        and verdict[1]
+        == "passes with the fix taken out, so it proves nothing about the fix"
+    )
 
 
 def check_patch(root: Path, patch: str) -> None:

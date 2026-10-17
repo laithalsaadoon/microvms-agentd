@@ -555,6 +555,46 @@ class FireVerdicts(unittest.TestCase):
         self.assertEqual(out.returncode, 1)
         self.assertIn("but not with stream reported failed", out.stdout)
 
+    def test_node_skipped_and_todo_tests_are_not_clean_guards(self):
+        script = fire_module()
+        fault = script["Fault"](
+            id="node",
+            guard="named case",
+            expect="test-failed",
+            suite="bindings",
+            run=[["node", "--test", "--test-reporter=tap", "case.mjs"]],
+        )
+        key = script["command_key"](fault)
+        for directive in ("", " # SKIP reason", " # TODO reason", " # skip reason"):
+            for label in ("clean", "restored"):
+                with self.subTest(directive=directive, label=label):
+                    output = f"ok 1 - named case{directive}\n"
+                    board = script["Board"]([[]], False)
+                    board.done[key] = [(0, output, output, 0.1, 1)]
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        passed = script["check_pass"](
+                            [fault], board, {key: 1}, lambda *_: None, label
+                        )
+                    self.assertEqual(passed, not directive)
+
+    def test_node_todo_and_skip_failures_are_not_failure_proofs(self):
+        script = fire_module()
+        fault = script["Fault"](
+            id="node",
+            guard="named case",
+            expect="test-failed",
+            suite="bindings",
+            run=[["node", "--test", "--test-reporter=tap", "case.mjs"]],
+        )
+        self.assertIsNone(script["verdict"](fault, 1, "not ok 1 - named case\n"))
+        for directive in ("TODO", "SKIP", "todo"):
+            with self.subTest(directive=directive):
+                self.assertIsNotNone(
+                    script["verdict"](
+                        fault, 1, f"not ok 1 - named case # {directive} reason\n"
+                    )
+                )
+
     def test_exit_nonzero_needs_its_message(self):
         gate = [
             sys.executable,
