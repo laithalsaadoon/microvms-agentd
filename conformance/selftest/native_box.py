@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import importlib.util
 import json
 import re
+import tomllib
 from pathlib import Path
 
 from harness.results import Results
@@ -20,6 +22,7 @@ from lanes.native_box import (
 
 
 def check_native_box(results: Results, temporary: Path) -> None:
+    check_region_staging(results, temporary)
     directory = temporary / "native-box"
     directory.mkdir()
     for name in BINARIES:
@@ -110,3 +113,52 @@ def check_native_box(results: Results, temporary: Path) -> None:
     probe = Results(probe=True)
     native_box_checks(broken, probe)
     results.check("native Box rejects duplicate scenarios", bool(probe.failed))
+
+
+def check_region_staging(results: Results, temporary: Path) -> None:
+    spec = importlib.util.spec_from_file_location("stage_box", EXAMPLE / "stage_box.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    source = EXAMPLE / "box"
+    before = {
+        path.relative_to(source): path.read_bytes()
+        for path in source.rglob("*")
+        if path.is_file()
+    }
+    for region in ("us-east-1", "us-west-2"):
+        destination = temporary / region
+        module.stage_box(region, source, destination)
+        gateway = tomllib.loads((destination / "box.toml").read_text())
+        model = tomllib.loads((destination / "codex-home/config.toml").read_text())
+        policy = (destination / "policy.dw").read_text()
+        endpoint = f"bedrock-runtime.{region}.amazonaws.com"
+        results.check(
+            f"native Box stages the gateway, policy and model for {region}",
+            gateway["agent"]["env"]["AWS_REGION"] == region
+            and gateway["egress"]["model"]["destinations"] == [endpoint]
+            and model["model_providers"]["amazon-bedrock-runtime"]["aws"]["region"]
+            == region
+            and model["model"] == "global.openai.gpt-6.1-sol"
+            and model["model_provider"] == "amazon-bedrock-runtime"
+            and policy.count(f'context.input.host == "{endpoint}"') == 2
+            and (region == "us-east-1" or "us-east-1" not in policy),
+        )
+    results.check(
+        "native Box staging leaves the source template unchanged",
+        all(
+            (source / relative).read_bytes() == contents
+            for relative, contents in before.items()
+        ),
+    )
+    for region in ("", "eu-west-1", "us-west-2/../other"):
+        try:
+            module.stage_box(region, source, temporary / "invalid-region")
+        except ValueError:
+            rejected = True
+        else:
+            rejected = False
+        results.check(
+            f"native Box staging rejects unsupported region {region!r} before copying",
+            rejected and not (temporary / "invalid-region").exists(),
+        )

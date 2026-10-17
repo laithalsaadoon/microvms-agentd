@@ -33,7 +33,9 @@ live run provide that evidence.
 
 For that integration, `run.sh` accepts `MICROVM` (the CLI path), `BOX_IMAGE`
 (an already-built image), `BOX_BIN_DIR`, and `BOX_OUT_DIR`. The conformance
-suite builds the image using its daemon under test and independently deletes
+suite stages a private configuration for either `us-east-1` or `us-west-2`,
+keeping the checked-in east-region template unchanged. It builds the image
+using its daemon under test and independently deletes
 and checks the VM, image, S3 artifacts, and service log groups afterward.
 Raw model responses and Box decision logs stay in temporary storage rather
 than in the workflow's logs or artifacts.

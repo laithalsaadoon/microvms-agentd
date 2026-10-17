@@ -32,8 +32,9 @@ NAME="strands-box-codex-$$"
 for bin in strands-box strands-box-sock-alias strands-box-contain-trampoline; do
   [ -x "$BOXBIN/$bin" ] || { echo "missing $BOXBIN/$bin: run ./build-box.sh first" >&2; exit 2; }
 done
-# box.toml and policy.dw name bedrock-runtime in us-east-1; another region needs both edited.
-[ "$REGION" = us-east-1 ] || { echo "box/box.toml and box/policy.dw name us-east-1" >&2; exit 2; }
+# Validate before creating AWS resources; stage_box.py later renders a private
+# copy of the policy, gateway destination, and model region from the east template.
+python3 "$HERE/stage_box.py" "$REGION"
 
 jqr() { python3 -c "import json,sys; print(json.load(sys.stdin)['data']$1)"; }
 vm() { "$MICROVM" "$@" --name "$NAME" --region "$REGION"; }
@@ -91,7 +92,7 @@ STAGE=$(mktemp -d)
 mkdir -p "$STAGE/opt" "$STAGE/home/project" "$STAGE/home/codex-tmp"
 cp "$BOXBIN"/strands-box "$BOXBIN"/strands-box-sock-alias "$BOXBIN"/strands-box-contain-trampoline \
   "$HERE/vm/launch_in_fresh_proc.py" "$STAGE/opt/"
-cp -R "$HERE/box" "$STAGE/home/box"
+python3 "$HERE/stage_box.py" "$REGION" "$HERE/box" "$STAGE/home/box"
 mv "$STAGE/home/box/codex-home" "$STAGE/home/codex-home"
 cp "$HERE/vm/driver.py" "$HERE/vm/probe_mmds.py" "$STAGE/home/"
 # The project Codex works on, with a file the policy keeps unread.

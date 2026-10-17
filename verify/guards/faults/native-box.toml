@@ -23,3 +23,8 @@ transform = { file = "conformance/lanes/native_box.py", replace = 'report.get(f"
 id = "native-box-scenario"
 message = "FAIL  native Box rejects release-before-tests checks="
 transform = { file = "conformance/lanes/native_box.py", replace = 'all(check.get("ok") is True for check in checks)', with = 'True' }
+
+[[family.fault]]
+id = "native-box-region"
+message = "FAIL  native Box stages the gateway, policy and model for us-west-2"
+transform = { file = "examples/strands-box-codex-sdk/stage_box.py", replace = 'path.write_text(text.replace("us-east-1", region))', with = 'path.write_text(text)' }
