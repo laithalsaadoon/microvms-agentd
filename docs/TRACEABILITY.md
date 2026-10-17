@@ -99,6 +99,7 @@ traced requirement is missing a layer. Requirements are defined in
 | IMAGE-10 | 1 | 1 | waived | 2 | 1 | 1 |
 | IMAGE-11 | 1 | 1 | waived | 1 | 1 | 1 |
 | IMAGE-12 | waived | waived | waived | 2 | 2 | waived |
+| IMAGE-13 | 1 | 1 | waived | 1 | 1 | 1 |
 | STATE-1 | 1 | waived | waived | 2 | 3 | waived |
 | STATE-2 | 1 | waived | waived | 2 | 4 | waived |
 | STATE-3 | 1 | waived | waived | 2 | 3 | waived |
@@ -1084,7 +1085,7 @@ When a caller supplies a build context directory, the microvms-core shall add ea
 
 ## IMAGE-8
 
-When the microvms-core ensures an image, the microvms-core shall resolve the image ARN from one caller-identity call per sandbox and upload the artifact to the content-addressed key under the caller's bucket and key prefix.
+When the ensure-image decision proceeds to a build attempt, the microvms-core shall upload the artifact to the content-addressed key under the caller's bucket and key prefix before attempting to create the image.
 
 - **model:** `crates/model/src/image.rs`
 - **gherkin:** `crates/microvms-core/tests/features/ensure_image.feature`
@@ -1136,6 +1137,17 @@ The language bindings layer shall expose ensure_image as a thin wrapper that ret
 - **test:** `bindings/microvms-js/__test__/ensure.mjs`, `bindings/microvms-py/tests/test_ensure_image.py`
 - **impl:** `bindings/microvms-js/src/sandbox.rs`, `bindings/microvms-py/src/sandbox.rs`
 - **live:** waived: the conformance section drives core's ensure_image, which each binding forwards unchanged
+
+## IMAGE-13
+
+When the microvms-core has locally validated an ensure-image request, the microvms-core shall resolve the image ARN from the sandbox's cached caller identity, looking up and caching the identity when no cached identity exists.
+
+- **model:** `crates/model/src/image.rs`
+- **gherkin:** `crates/microvms-core/tests/features/ensure_image.feature`
+- **fuzz:** waived: the caller-identity cache is a state transition, explored by the image model; it does not consume unstructured input
+- **test:** `crates/microvms-app/src/control/ensure.rs`
+- **impl:** `crates/microvms-app/src/control/ensure.rs`
+- **live:** `conformance/lanes/ensure_image.py`
 
 ## STATE-1
 

@@ -16,7 +16,7 @@
 //! 2. **Artifact** (IMAGE-7). The Dockerfile, the daemon, and the context, zipped with fixed
 //!    dates and modes, so equal inputs are one object at one content-addressed key.
 //! 3. **ARN and upload** (IMAGE-8). The service takes image ARNs, not names, so the ARN is
-//!    built from the caller's account, looked up once per sandbox
+//!    built from the caller's account, looked up once per sandbox (IMAGE-13)
 //!    ([`super::services::BuildServices::caller_account`]). The artifact goes to
 //!    `s3://<bucket>/<prefix>/<name>/artifact.zip`, and only when a build is needed.
 //! 4. **Decide** (IMAGE-9, IMAGE-10). After each describe, [`plan`] says what to do: reuse a
@@ -726,6 +726,7 @@ struct Progress {
 }
 
 /// The remote half of `ensure_image`: describe, decide, and build, reuse, wait, or join.
+/// The caller has resolved the ARN's account from its sandbox cache (IMAGE-13).
 pub(crate) async fn ensure(
     control: &ControlPlane,
     services: &dyn BuildServices,
@@ -883,6 +884,7 @@ mod tests {
     struct FakeServices {
         account_calls: AtomicUsize,
         puts: Mutex<Vec<(String, String, Vec<u8>)>>,
+        before_create: Option<Arc<FakeControlPlane>>,
     }
 
     impl BuildServices for FakeServices {
@@ -897,6 +899,13 @@ mod tests {
             key: &'a str,
             bytes: Vec<u8>,
         ) -> futures_util::future::BoxFuture<'a, Result<(), Error>> {
+            if let Some(plane) = &self.before_create {
+                assert_eq!(
+                    plane.call_count("CreateMicrovmImage"),
+                    0,
+                    "IMAGE-8: upload must precede the create call"
+                );
+            }
             self.puts.lock().expect("not poisoned").push((
                 bucket.to_string(),
                 key.to_string(),
@@ -1334,7 +1343,7 @@ mod tests {
             fake.paths()[0].contains(&paths_encoded(&format!(
                 "arn:aws:lambda:us-east-1:{ACCOUNT}:microvm-image:{name}"
             ))),
-            "IMAGE-8: the describe names the ARN built from the account: {:?}",
+            "IMAGE-13: the describe names the ARN built from the account: {:?}",
             fake.paths()
         );
     }
@@ -1362,8 +1371,8 @@ mod tests {
     }
 
     /// **IMAGE-8, the build.** No image under the name: the artifact goes to the
-    /// content-addressed key, the create names that URI and the derived name, and the image
-    /// this call built is not reused.
+    /// content-addressed key before create, the create names that URI and the derived name,
+    /// and the image this call built is not reused.
     #[tokio::test]
     async fn an_absent_image_is_uploaded_to_its_key_and_built() {
         let name = expected_name();
@@ -1375,7 +1384,10 @@ mod tests {
                 "CreateMicrovmImage",
                 Answer::created(fake::create_image_response(&name)),
             );
-        let services = Arc::new(FakeServices::default());
+        let services = Arc::new(FakeServices {
+            before_create: Some(Arc::clone(&fake)),
+            ..FakeServices::default()
+        });
         let mut request = request();
         request
             .tags
@@ -1558,7 +1570,7 @@ mod tests {
         );
     }
 
-    /// **IMAGE-8, once per sandbox.** Two ensures on one sandbox make one account lookup.
+    /// **IMAGE-13, once per sandbox.** Two ensures on one sandbox make one account lookup.
     #[tokio::test]
     async fn the_account_is_resolved_once_per_sandbox() {
         let name = expected_name();
@@ -1568,7 +1580,7 @@ mod tests {
         let mut sandbox = sandbox(&fake, &services);
         sandbox.ensure_image(request()).await.expect("first");
         sandbox.ensure_image(request()).await.expect("second");
-        assert_eq!(services.account_calls.load(Ordering::SeqCst), 1, "IMAGE-8");
+        assert_eq!(services.account_calls.load(Ordering::SeqCst), 1, "IMAGE-13");
     }
 
     /// The account lookup of the test below: it records whether the other task's timer had
@@ -1653,7 +1665,7 @@ mod tests {
         timer.await.expect("the timer task");
     }
 
-    /// Every local refusal costs zero calls — not the account lookup, not a describe, not
+    /// **IMAGE-13.** Every local refusal costs zero calls — not the account lookup, not a describe, not
     /// the upload.
     #[tokio::test]
     async fn a_locally_refused_request_makes_no_call() {

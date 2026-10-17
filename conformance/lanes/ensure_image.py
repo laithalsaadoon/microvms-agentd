@@ -110,14 +110,16 @@ def ensure_image_checks(
     uri = f"s3://{bucket}/{key_prefix}/{name}/artifact.zip"
     puts = report.get("puts") or []
     results.check(
-        "IMAGE-8 each sandbox resolved its account once and the artifact is at its "
-        "content-addressed key",
-        report.get("accountCalls") == [1, 1]
-        and report.get("artifactUri") == uri
+        "IMAGE-13 each sandbox resolved its account once",
+        report.get("accountCalls") == [1, 1],
+        f"accountCalls={report.get('accountCalls')!r}",
+    )
+    results.check(
+        "IMAGE-8 the artifact is at its content-addressed key",
+        report.get("artifactUri") == uri
         and bool(puts)
         and all(put == uri for put in puts),
-        f"accountCalls={report.get('accountCalls')!r} artifactUri="
-        f"{report.get('artifactUri')!r} puts={puts!r}",
+        f"artifactUri={report.get('artifactUri')!r} puts={puts!r}",
     )
     results.check(
         "IMAGE-7 the guest has the context's script and neither the ignored file nor the "
