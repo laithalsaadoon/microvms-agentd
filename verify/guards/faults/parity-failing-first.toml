@@ -31,7 +31,7 @@ transform = { file = "tools/fail-to-pass.py", replace = "    if parity_missing:\
 [[family.fault]]
 id = "f2p-parity-partial-proof"
 message = "FAIL: test_a_head_failure_is_rejected_even_if_another_surface_is_proven ("
-transform = { file = "tools/fail-to-pass.py", replace = 'return int(parity_errors or bool(cases - proven_cases))', with = "return 0" }
+transform = { file = "tools/fail-to-pass.py", replace = 'bool(skipped) or ordinary_missing or parity_errors or bool(cases - proven_cases)', with = "False" }
 
 [[family.fault]]
 id = "f2p-parity-base-pass"
@@ -120,3 +120,115 @@ expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_skipped_node_surface_cannot_complete_a_shared_proof ("
 transform = { file = "tools/check-guards-fire.py", replace = 'if kind != "node" or not NODE_DIRECTIVE.search(m.group(0))', with = 'if True' }
+
+# Every changed source test needs its own proof, with the runner selecting its owner.
+[[family]]
+guard = "test_fail_to_pass.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_fail_to_pass.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "f2p-ordinary-partial-entry"
+message = "FAIL: test_every_changed_test_needs_its_own_proof ("
+transform = { file = "tools/fail-to-pass.py", replace = "    if not missing:\n", with = "    if True:\n" }
+
+[[family.fault]]
+id = "f2p-ordinary-changed-entry"
+message = "FAIL: test_a_changed_entry_can_prove_a_changed_test ("
+transform = { file = "tools/fail-to-pass.py", replace = "if base.get(i) != e", with = "if i not in base" }
+
+[[family.fault]]
+id = "f2p-ordinary-rust-selector"
+message = "FAIL: test_a_wrong_rust_selector_cannot_prove_a_named_test ("
+transform = { file = "tools/fail-to-pass.py", replace = "return rust_entry_selects(test, command, targets)", with = "return True" }
+
+[[family.fault]]
+id = "f2p-ordinary-node-owner"
+message = "FAIL: test_a_node_title_in_one_file_cannot_prove_another_file ("
+transform = { file = "tools/fail-to-pass.py", replace = 'and files == [test.path]', with = 'and True' }
+
+[[family.fault]]
+id = "f2p-ordinary-pytest-selector"
+message = "FAIL: test_a_pytest_parameter_cannot_prove_a_near_prefix_or_other_selector ("
+transform = { file = "tools/fail-to-pass.py", replace = 'and any(selector in command for selector in (test.path, test.guard, guard))', with = 'and True' }
+
+[[family.fault]]
+id = "f2p-ordinary-pytest-prefix"
+message = "FAIL: test_a_pytest_parameter_cannot_prove_a_near_prefix_or_other_selector ("
+transform = { file = "tools/fail-to-pass.py", replace = 'and guard.startswith(test.guard + "[")', with = 'and guard.startswith(test.guard)' }
+
+[[family.fault]]
+id = "f2p-ordinary-pytest-parameter"
+message = "FAIL: test_one_concrete_pytest_parameter_proves_its_source_function ("
+transform = { file = "tools/fail-to-pass.py", replace = 'and guard.endswith("]")', with = 'and False' }
+
+[[family.fault]]
+id = "f2p-ordinary-partial-proof"
+message = "FAIL: test_a_partial_proof_fails_but_emits_the_completed_evidence ("
+transform = { file = "tools/fail-to-pass.py", replace = "bool(skipped) or ordinary_missing or parity_errors", with = "bool(skipped) or parity_errors" }
+
+[[family.fault]]
+id = "f2p-ordinary-skipped-proof"
+message = "FAIL: test_a_selected_test_without_a_command_makes_the_proof_incomplete ("
+transform = { file = "tools/fail-to-pass.py", replace = "bool(skipped) or ordinary_missing or parity_errors", with = "ordinary_missing or parity_errors" }
+
+[[family.fault]]
+id = "f2p-ordinary-library-kinds"
+message = "FAIL: test_binding_libraries_use_cargo_metadata_kinds ("
+transform = { file = "tools/fail-to-pass.py", replace = 'if set(t["kind"]) & {"lib", "rlib", "cdylib", "staticlib"}', with = 'if "lib" in t["kind"]' }
+
+[[family.fault]]
+id = "f2p-ordinary-implicit-target"
+message = "FAIL: test_implicit_library_selection_requires_one_runnable_target ("
+transform = { file = "tools/fail-to-pass.py", replace = 'if len(runnable) == 1:', with = 'if True:' }
+
+[[family.fault]]
+id = "f2p-ordinary-node-ambiguous"
+message = "FAIL: test_duplicate_changed_node_titles_cannot_share_a_proof ("
+transform = { file = "tools/fail-to-pass.py", replace = 'if test.kind == "node" and node_titles[(test.path, test.guard)] > 1:', with = 'if False:' }
+
+[[family.fault]]
+id = "f2p-ordinary-foreign-manifest"
+message = "FAIL: test_a_foreign_manifest_cannot_supply_a_named_rust_proof ("
+transform = { file = "tools/fail-to-pass.py", replace = 'manifests = option_values(cargo, ("--manifest-path",))', with = 'manifests = []' }
+
+[[family.fault]]
+id = "f2p-ordinary-node-extra-input"
+message = "FAIL: test_extra_node_inputs_cannot_supply_the_named_files_proof ("
+transform = { file = "tools/fail-to-pass.py", replace = 'and files == [test.path]', with = 'and test.path in files' }
+
+[[family.fault]]
+id = "f2p-ordinary-attached-package"
+message = "FAIL: test_option_values_read_attached_and_missing_values ("
+transform = { file = "tools/fail-to-pass.py", replace = 'prefix = name + "=" if name.startswith("--") else name', with = 'prefix = name + "="' }
+
+[[family.fault]]
+id = "f2p-ordinary-multiline-attribute"
+message = "FAIL: test_a_changed_multiline_attribute_selects_its_test ("
+transform = { file = "tools/fail-to-pass.py", replace = 'if first - 1 in attributes:', with = 'if False:' }
+
+[[family.fault]]
+id = "f2p-ordinary-javascript-title"
+message = "FAIL: test_javascript_unicode_titles_are_selected_as_reported ("
+transform = { file = "tools/fail-to-pass.py", replace = 'matches = [m for m in ast_grep(root, files) if m["ruleId"] == "node-test"]', with = 'matches = [m for m in ast_grep(root, files) if m["ruleId"] == "node-test" and "\\u{" not in name(m, "TITLE")]' }
+
+[[family.fault]]
+id = "f2p-ordinary-binary-owner"
+message = "FAIL: test_binary_source_proofs_select_the_binary_in_a_mixed_package ("
+transform = { file = "tools/fail-to-pass.py", replace = 'flag = ["--bin", binary["name"]] if binary else ["--lib"] if target else None', with = 'flag = ["--lib"] if target else None' }
+
+[[family.fault]]
+id = "f2p-parity-failure-expectation"
+message = "FAIL: test_a_shared_case_entry_must_report_a_test_failure ("
+transform = { file = "tools/fail-to-pass.py", replace = 'and entry.get("expect") == "test-failed"', with = 'and True' }
+
+[[family.fault]]
+id = "f2p-ordinary-node-preload"
+message = "FAIL: test_node_preloads_cannot_supply_another_sources_failure ("
+transform = { file = "tools/fail-to-pass.py", replace = 'if any(arg.startswith(preload_options) for arg in arguments):', with = 'if False:' }
+
+[[family.fault]]
+id = "f2p-ordinary-test-module-attribute"
+message = "FAIL: test_reverse_fix_keeps_multiline_test_module_attributes ("
+transform = { file = "tools/fail-to-pass.py", replace = "if m[\"ruleId\"] == \"attribute\"\n    }\n    return [", with = "if False\n    }\n    return [" }

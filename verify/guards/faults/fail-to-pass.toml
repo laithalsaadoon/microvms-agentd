@@ -46,7 +46,7 @@ transform = { file = "tools/fail-to-pass.py", replace = "FIX_TYPES = (\"fixed\",
 [[family.fault]]
 id = "f2p-no-entry-passes"
 message = "FAIL: test_a_fix_whose_test_has_no_entry_fails ("
-transform = { file = "tools/fail-to-pass.py", replace = "    if proven:\n", with = "    if True:\n" }
+transform = { file = "tools/fail-to-pass.py", replace = "    if not missing:\n", with = "    if True:\n" }
 
 # An entry the base already has proves an older fix, not this one.
 [[family.fault]]

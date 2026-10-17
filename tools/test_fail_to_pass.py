@@ -178,15 +178,26 @@ class Fixture(unittest.TestCase):
         )
 
     def run_script(self, *args: str):
-        return subprocess.run(
-            [sys.executable, str(SCRIPT), *args],
-            cwd=self.root,
-            capture_output=True,
-            text=True,
-            env=clean_env(
-                PATH=os.pathsep.join([str(self.bin), os.environ.get("PATH", "")]),
-                TMPDIR=str(self.top / "tmp"),
-            ),
+        import contextlib
+        import io
+        from unittest.mock import patch
+
+        output, errors = io.StringIO(), io.StringIO()
+        env = clean_env(
+            PATH=os.pathsep.join([str(self.bin), os.environ.get("PATH", "")]),
+            TMPDIR=str(self.top / "tmp"),
+        )
+        # Exercise the command entry point in-process so mutation coverage sees its verdict.
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch.object(sys, "argv", [str(SCRIPT), *args]),
+            contextlib.chdir(self.root),
+            contextlib.redirect_stdout(output),
+            contextlib.redirect_stderr(errors),
+        ):
+            code = TOOL["main"]()
+        return subprocess.CompletedProcess(
+            args, code, output.getvalue(), errors.getvalue()
         )
 
     def assertExit(self, done, code: int):
@@ -202,11 +213,23 @@ class CheckTests(Fixture):
         )
         return name
 
-    def entry(self, guard: str, owner: str = "fix") -> None:
+    def entry(self, guard: str, owner: str = "fix", run=None) -> None:
+        run = run or [
+            "cargo",
+            "test",
+            "-p",
+            "agentd",
+            "--test",
+            "regress",
+            "--",
+            "--exact",
+            guard,
+        ]
+        entry_id = "proof" if owner == "fix" else f"proof-{owner}"
         self.write(
             f"{REGISTRY_DIR}/{owner}.toml",
-            f'# ── {owner} ──\n\n[[fault]]\nid = "proof"\nguard = "{guard}"\n'
-            'run = ["cargo", "test"]\nexpect = "test-failed"\nsuite = "rust"\n'
+            f'# ── {owner} ──\n\n[[fault]]\nid = "{entry_id}"\nguard = "{guard}"\n'
+            f'run = {json.dumps(run)}\nexpect = "test-failed"\nsuite = "rust"\n'
             f'patch = "{REGISTRY_DIR}/proof.patch"\n',
         )
 
@@ -231,6 +254,139 @@ class CheckTests(Fixture):
         done = self.run_script("check")
         self.assertExit(done, 0)
         self.assertIn("proof (the_answer_is_42_now)", done.stdout)
+
+    def test_every_changed_test_needs_its_own_proof(self):
+        self.fix()
+        self.write(
+            TESTS, TEST_FILE + "\n#[test]\nfn first() {}\n#[test]\nfn second() {}\n"
+        )
+        self.entry("first")
+        done = self.run_script("check")
+        self.assertExit(done, 1)
+        self.assertIn(f"  second, in {TESTS}", done.stdout)
+        self.assertNotIn(f"  first, in {TESTS}", done.stdout)
+
+    def test_all_changed_tests_with_proofs_pass(self):
+        self.fix()
+        self.write(
+            TESTS, TEST_FILE + "\n#[test]\nfn first() {}\n#[test]\nfn second() {}\n"
+        )
+        self.entry("first")
+        self.entry("second", owner="second")
+        self.assertExit(self.run_script("check"), 0)
+
+    def test_a_changed_entry_can_prove_a_changed_test(self):
+        self.entry("changed")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "entry")
+        git(self.root, "update-ref", "refs/remotes/origin/main", "HEAD")
+        self.fix()
+        self.new_test("changed")
+        path = f"{REGISTRY_DIR}/fix.toml"
+        self.write(
+            path, (self.root / path).read_text().replace("proof.patch", "changed.patch")
+        )
+        self.assertExit(self.run_script("check"), 0)
+
+    def test_a_wrong_rust_selector_cannot_prove_a_named_test(self):
+        self.fix()
+        name = self.new_test()
+        for package, target, selected in (
+            ("other-package", "regress", name),
+            ("agentd", "other-target", name),
+            ("agentd", "regress", "other-test"),
+        ):
+            with self.subTest(package=package, target=target, selected=selected):
+                self.entry(
+                    name,
+                    run=[
+                        "cargo",
+                        "test",
+                        "-p",
+                        package,
+                        "--test",
+                        target,
+                        "--",
+                        "--exact",
+                        selected,
+                    ],
+                )
+                self.assertExit(self.run_script("check"), 1)
+
+    def test_a_non_failure_entry_cannot_prove_a_test(self):
+        self.fix()
+        self.entry(self.new_test())
+        path = f"{REGISTRY_DIR}/fix.toml"
+        self.write(
+            path,
+            (self.root / path).read_text().replace('"test-failed"', '"exit-nonzero"'),
+        )
+        self.assertExit(self.run_script("check"), 1)
+
+    def test_one_concrete_pytest_parameter_proves_its_source_function(self):
+        self.fix()
+        path = "bindings/microvms-py/tests/test_parameters.py"
+        self.write(
+            path,
+            "import pytest\n@pytest.mark.parametrize('value', [1, 2])\ndef test_case(value):\n    assert value\n",
+        )
+        guard = f"{path}::test_case[1]"
+        self.entry(guard, run=["python", "-m", "pytest", "-q", "-rA", guard])
+        self.assertExit(self.run_script("check"), 0)
+
+    def test_a_pytest_parameter_cannot_prove_a_near_prefix_or_other_selector(self):
+        self.fix()
+        path = "bindings/microvms-py/tests/test_parameters.py"
+        self.write(path, "def test_case():\n    pass\n")
+        for guard, selected in (
+            (f"{path}::test_cases[1]", f"{path}::test_cases[1]"),
+            (f"{path}::test_case[1", f"{path}::test_case[1"),
+            (f"{path}::test_case[1]", f"{path}::test_case[2]"),
+        ):
+            with self.subTest(guard=guard, selected=selected):
+                self.entry(guard, run=["python", "-m", "pytest", "-q", "-rA", selected])
+                self.assertExit(self.run_script("check"), 1)
+
+    def test_a_node_title_in_one_file_cannot_prove_another_file(self):
+        self.fix()
+        paths = [f"bindings/microvms-js/__test__/{name}.mjs" for name in ("one", "two")]
+        for path in paths:
+            self.write(
+                path, "import test from 'node:test';\ntest('same title', () => {});\n"
+            )
+        self.entry(
+            "same title", run=["node", "--test", "--test-reporter=tap", paths[0]]
+        )
+        done = self.run_script("check")
+        self.assertExit(done, 1)
+        self.assertIn(f"  same title, in {paths[1]}", done.stdout)
+        self.assertNotIn(f"  same title, in {paths[0]}", done.stdout)
+
+    def test_duplicate_changed_node_titles_cannot_share_a_proof(self):
+        self.fix()
+        path = "bindings/microvms-js/__test__/answer.mjs"
+        self.write(
+            path,
+            "import test from 'node:test';\ntest('same title', () => {});\ntest('same title', () => {});\n",
+        )
+        self.entry("same title", run=["node", "--test", "--test-reporter=tap", path])
+        done = self.run_script("check")
+        self.assertExit(done, 1)
+        self.assertIn("changed Node test title 'same title' is ambiguous", done.stderr)
+
+    def test_a_changed_node_title_cannot_share_an_unchanged_tests_identity(self):
+        path = "bindings/microvms-js/__test__/answer.mjs"
+        source = "import test from 'node:test';\ntest('same title', () => { return 1; });\ntest('same title', () => {});\n"
+        self.write(path, source)
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "duplicate titles")
+        git(self.root, "update-ref", "refs/remotes/origin/main", "HEAD")
+        self.fix()
+        self.write(path, source.replace("return 1", "return 2"))
+        self.entry("same title", run=["node", "--test", "--test-reporter=tap", path])
+        done = self.run_script("check")
+        self.assertExit(done, 1)
+        self.assertIn("changed Node test title 'same title' is ambiguous", done.stderr)
 
     def test_a_security_fragment_is_a_fix_too(self):
         self.fix(fragment="7.security.md")
@@ -261,6 +417,30 @@ class CheckTests(Fixture):
         self.fix()
         self.write(TESTS, TEST_FILE.replace("#[test]\n", "#[test]\n#[ignore]\n"))
         self.assertIn("  the_answer_is_42, in", self.run_script("check").stdout)
+
+    def test_a_changed_multiline_attribute_selects_its_test(self):
+        source = "#[cfg(\n    unix\n)]\n\n/* the runtime\n   attribute follows */\n#[tokio::test(\n    start_paused = false\n)]\n\nasync fn timed() {}\n"
+        self.write(TESTS, source)
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "multiline attributes")
+        git(self.root, "update-ref", "refs/remotes/origin/main", "HEAD")
+        self.fix()
+        self.write(TESTS, source.replace("unix", "windows").replace("false", "true"))
+        done = self.run_script("check")
+        self.assertExit(done, 1)
+        self.assertIn(f"  timed, in {TESTS}", done.stdout)
+
+    def test_javascript_unicode_titles_are_selected_as_reported(self):
+        self.fix()
+        path = "bindings/microvms-js/__test__/unicode.mjs"
+        self.write(
+            path,
+            r"import test from 'node:test'; test('\u{1F680} answers', () => {});"
+            + "\n",
+        )
+        done = self.run_script("check")
+        self.assertExit(done, 1)
+        self.assertIn(f"  🚀 answers, in {path}", done.stdout)
 
     def test_an_inline_test_in_a_test_module_is_named(self):
         self.fix(lib=FIXED_LIB.replace("    #[test]\n", "    #[test]\n    #[ignore]\n"))
@@ -338,6 +518,112 @@ class ParityTests(Fixture):
             "--test-name-pattern=^wrap\\-dockerfile/changed$", made[3].run[-1]
         )
 
+    def test_shared_proof_commands_keep_exact_runner_selectors(self):
+        self.add_case()
+        tests = TOOL["parity_tests"](
+            self.root, [f"{TOOL['PARITY_DIR']}/wrap-dockerfile/changed.json"]
+        )
+        configs = [
+            "--config",
+            'env.MICROVMS_PARITY_CASE.value="wrap-dockerfile/changed"',
+            "--config",
+            "env.MICROVMS_PARITY_CASE.force=true",
+        ]
+        expectations = {
+            "core": (
+                "rust",
+                [
+                    "cargo",
+                    "test",
+                    *configs,
+                    "-p",
+                    "microvms-core",
+                    "--test",
+                    "parity_cases",
+                    "--",
+                    "--exact",
+                    "core_answers_the_shared_case_corpus",
+                ],
+            ),
+            "cli": (
+                "rust",
+                [
+                    "cargo",
+                    "test",
+                    *configs,
+                    "-p",
+                    "microvms-cli",
+                    "--test",
+                    "parity_cases",
+                    "--",
+                    "--exact",
+                    "the_cli_process_answers_the_shared_case_corpus",
+                ],
+            ),
+            "py": (
+                "bindings",
+                [
+                    "python",
+                    "-m",
+                    "pytest",
+                    "-q",
+                    "-rA",
+                    "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[wrap-dockerfile/changed]",
+                ],
+            ),
+            "ts": (
+                "bindings",
+                [
+                    "node",
+                    "--test",
+                    "--test-reporter=tap",
+                    r"--test-name-pattern=^wrap\-dockerfile/changed$",
+                    "bindings/microvms-js/__test__/parity_cases.mjs",
+                ],
+            ),
+        }
+        for test in tests:
+            with self.subTest(surface=test.surface):
+                run, suite = TOOL["parity_command"](test)
+                self.assertEqual((suite, run[-1]), expectations[test.surface])
+                self.assertEqual(
+                    run[0],
+                    [
+                        "cargo",
+                        "build",
+                        "-p",
+                        "microvms-core",
+                        "--example",
+                        "parity-tunnel-peer",
+                    ],
+                )
+                if test.surface in ("py", "ts"):
+                    self.assertEqual(len(run), 3)
+                    self.assertEqual(
+                        run[1],
+                        TOOL[
+                            "PARITY_PY_BUILD"
+                            if test.surface == "py"
+                            else "PARITY_JS_BUILD"
+                        ],
+                    )
+                else:
+                    self.assertEqual(len(run), 2)
+        fake = TOOL["Test"](
+            "parity",
+            "case.json",
+            "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes",
+            "fake",
+            1,
+            2,
+            case="start/options",
+            surface="cli",
+        )
+        self.assertEqual(
+            TOOL["parity_command"](fake)[0][-1][-7:],
+            ["-p", "microvms-cli", "--bin", "microvm", "--", "--exact", fake.guard],
+        )
+
     def test_the_capability_and_case_skip_omit_only_their_surfaces(self):
         path = self.add_case()
         table = self.root / TOOL["PARITY_TABLE"]
@@ -366,6 +652,17 @@ class ParityTests(Fixture):
         TOOL["write_entries"](self.root, "complete", made[4:5], "", branch.fork)
         self.assertExit(self.run_script("check"), 0)
 
+    def test_a_shared_case_entry_must_report_a_test_failure(self):
+        self.fix()
+        self.add_case()
+        branch = TOOL["Branch"](self.root, "origin/main")
+        made, _ = TOOL["candidates"](branch, TOOL["branch_tests"](branch))
+        entry = TOOL["entry_toml"](made[0], branch.fork).replace(
+            'expect = "test-failed"', 'expect = "exit-nonzero"'
+        )
+        self.write(f"{REGISTRY_DIR}/wrong-verdict.toml", entry)
+        self.assertExit(self.run_script("check"), 1)
+
     def test_the_parity_sentinel_refuses_a_finder_that_reads_no_cases(self):
         from unittest.mock import patch
 
@@ -375,6 +672,59 @@ class ParityTests(Fixture):
             "the parity finder doesn't find every surface of wrap-dockerfile/sentinel",
             problems,
         )
+
+    def test_a_shared_case_proof_does_not_cover_an_ordinary_test(self):
+        self.fix()
+        self.add_case()
+        path = "bindings/microvms-py/tests/test_ordinary.py"
+        self.write(path, "def test_ordinary():\n    pass\n")
+        branch = TOOL["Branch"](self.root, "origin/main")
+        made, _ = TOOL["candidates"](branch, TOOL["branch_tests"](branch))
+        shared = next(c for c in made if c.test.kind == "parity")
+        TOOL["write_entries"](self.root, "shared", [shared], "", branch.fork)
+        done = self.run_script("check")
+        self.assertExit(done, 1)
+        self.assertIn(f"  {path}::test_ordinary, in {path}", done.stdout)
+        ordinary = next(c for c in made if c.test.kind == "pytest")
+        TOOL["write_entries"](self.root, "ordinary", [ordinary], "", branch.fork)
+        self.assertExit(self.run_script("check"), 0)
+
+    def test_a_mixed_proof_needs_both_ordinary_and_shared_regressions(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        self.fix()
+        self.add_case()
+        self.write(
+            "bindings/microvms-py/tests/test_ordinary.py",
+            "def test_ordinary():\n    pass\n",
+        )
+        branch = TOOL["Branch"](self.root, "origin/main")
+        for ordinary, shared, expected in (
+            (False, True, 1),
+            (True, False, 1),
+            (True, True, 0),
+        ):
+            with self.subTest(ordinary=ordinary, shared=shared):
+
+                def fire(_branch, made, _patch, _args):
+                    return {
+                        c.id: (True, "proven")
+                        if (
+                            ordinary
+                            if c.test.kind != "parity"
+                            else shared and c.test.surface == "core"
+                        )
+                        else (
+                            False,
+                            "passes with the fix taken out, so it proves nothing about the fix",
+                        )
+                        for c in made
+                    }
+
+                with patch.dict(TOOL_GLOBALS, {"fire": fire}):
+                    code = TOOL["prove"](branch, SimpleNamespace(any=False, emit=None))
+                self.assertEqual(code, expected)
 
     def test_a_head_failure_is_rejected_even_if_another_surface_is_proven(self):
         from types import SimpleNamespace
@@ -605,6 +955,32 @@ class FireCompletionTests(Fixture):
 class PatchTests(Fixture):
     """The patch takes out the product hunks and nothing else, and applies to the head."""
 
+    def test_reverse_fix_keeps_multiline_test_module_attributes(self):
+        attribute = '#[cfg_attr(\n    feature = "checks",\n    allow(dead_code)\n)]\n'
+        base = BASE_LIB.replace("#[cfg(test)]", attribute + "#[cfg(test)]")
+        self.write(PRODUCT, base)
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "test module attributes")
+        git(self.root, "update-ref", "refs/remotes/origin/main", "HEAD")
+        fixed = base.replace("    41\n", "    42\n").replace(
+            "allow(dead_code)", "allow(unused)"
+        )
+        self.fix(lib=fixed)
+        patch = TOOL["fix_patch"](TOOL["Branch"](self.root, "origin/main"))
+        done = subprocess.run(
+            ["git", "apply", "-"],
+            cwd=self.root,
+            input=patch,
+            text=True,
+            capture_output=True,
+        )
+        self.assertExit(done, 0)
+        self.assertEqual(
+            (self.root / PRODUCT).read_text(),
+            fixed.replace("    42\n", "    41\n"),
+            "reverting product behavior must retain the test module's changed attributes",
+        )
+
     def test_reverted_keeps_hunks_inside_test_modules(self):
         base = ["a\n", "b\n", "mod t {\n", "x\n", "}\n"]
         head = ["a\n", "B\n", "mod t {\n", "x\n", "y\n", "}\n"]
@@ -676,6 +1052,42 @@ class ProveTests(Fixture):
         self.assertIn('guard = "the_answer_is_42_again"', done.stdout)
         self.assertFalse((self.root / REGISTRY_DIR / "answer.toml").exists())
 
+    def test_a_partial_proof_fails_but_emits_the_completed_evidence(self):
+        self.fix()
+        self.write(
+            TESTS,
+            TEST_FILE
+            + "\n#[test]\nfn fixed() {}\n// always: passes anyway\n#[test]\nfn always() {}\n",
+        )
+        done = self.prove("--emit", "partial")
+        self.assertExit(done, 1)
+        entries = tomllib.loads(
+            (self.root / REGISTRY_DIR / "partial.toml").read_text()
+        )["fault"]
+        self.assertEqual([entry["guard"] for entry in entries], ["fixed"])
+        self.assertExit(self.run_script("check"), 1)
+
+    def test_all_ordinary_tests_must_be_proven(self):
+        self.fix()
+        self.write(
+            TESTS, TEST_FILE + "\n#[test]\nfn first() {}\n#[test]\nfn second() {}\n"
+        )
+        self.assertExit(self.prove("--emit", "complete"), 0)
+        self.assertExit(self.run_script("check"), 0)
+
+    def test_a_selected_test_without_a_command_makes_the_proof_incomplete(self):
+        self.fix()
+        self.write(TESTS, TEST_FILE + "\n#[test]\nfn fixed() {}\n")
+        self.write("crates/agentd/tests/unknown.rs", "#[test]\nfn unknown() {}\n")
+        done = self.prove("--emit", "partial")
+        self.assertExit(done, 1)
+        self.assertIn("skipped unknown", done.stdout)
+        entries = tomllib.loads(
+            (self.root / REGISTRY_DIR / "partial.toml").read_text()
+        )["fault"]
+        self.assertEqual([entry["guard"] for entry in entries], ["fixed"])
+        self.assertExit(self.run_script("check"), 1)
+
     def test_a_test_that_passes_on_the_base_is_no_proof(self):
         self.fix()
         self.write(
@@ -709,6 +1121,467 @@ class ProveTests(Fixture):
         self.assertExit(done, 0)
         self.assertIn("isn't a fix", done.stdout)
         self.assertIn("proven", self.prove("--any").stdout)
+
+
+class EntryMatchingTests(unittest.TestCase):
+    """A partial or malformed entry never provides a named failure proof."""
+
+    def test_incomplete_entries_cannot_supply_a_proof(self):
+        test = TOOL["Test"](
+            "pytest", "test_case.py", "test_case.py::test_case", "test_case", 1, 2
+        )
+        entry = {
+            "expect": "test-failed",
+            "guard": test.guard,
+            "run": ["python", "-m", "pytest", "-q", "-rA", test.guard],
+        }
+        self.assertTrue(TOOL["entry_proves"](test, entry, []))
+        for field, value in (
+            ("expect", None),
+            ("guard", None),
+            ("guard", ""),
+            ("run", None),
+            ("run", []),
+            ("run", [["build"], [1]]),
+            ("run", [["build"], "bad"]),
+            ("run", [*entry["run"], 1]),
+        ):
+            with self.subTest(field=field, value=value):
+                self.assertFalse(
+                    TOOL["entry_proves"](test, {**entry, field: value}, [])
+                )
+        self.assertFalse(
+            TOOL["entry_proves"](
+                test, {"expect": "test-failed", "run": entry["run"]}, []
+            )
+        )
+        self.assertTrue(
+            TOOL["entry_proves"](
+                test, {**entry, "run": [["build"], ["prepare"], entry["run"]]}, []
+            )
+        )
+
+    def test_option_values_read_attached_and_missing_values(self):
+        self.assertEqual(
+            TOOL["option_values"](["--package"], ("-p", "--package")), [""]
+        )
+        for flag in ("-pagentd", "-p=agentd", "--package=agentd"):
+            with self.subTest(flag=flag):
+                self.assertEqual(
+                    TOOL["option_values"]([flag], ("-p", "--package")), ["agentd"]
+                )
+        self.assertEqual(
+            TOOL["option_values"](["--package-extra=agentd"], ("--package",)), []
+        )
+
+    def test_a_foreign_manifest_cannot_supply_a_named_rust_proof(self):
+        test = TOOL["Test"]("rust", TESTS, "answer", "answer", 1, 2)
+        targets = [
+            {
+                "package": "agentd",
+                "name": "regress",
+                "kind": ["test"],
+                "src": TESTS,
+                "features": [],
+            }
+        ]
+        for manifest, expected in (
+            ("Cargo.toml", True),
+            ("crates/agentd/Cargo.toml", True),
+            ("scratch/other/Cargo.toml", False),
+        ):
+            with self.subTest(manifest=manifest):
+                run = [
+                    "cargo",
+                    "test",
+                    "-pagentd",
+                    "--manifest-path",
+                    manifest,
+                    "--test",
+                    "regress",
+                    "--",
+                    "--exact",
+                    "answer",
+                ]
+                self.assertEqual(
+                    TOOL["entry_proves"](
+                        test,
+                        {"guard": "answer", "expect": "test-failed", "run": run},
+                        targets,
+                    ),
+                    expected,
+                )
+
+    def test_extra_node_inputs_cannot_supply_the_named_files_proof(self):
+        path = "bindings/microvms-js/__test__/answer.mjs"
+        test = TOOL["Test"]("node", path, "answer", "answer", 1, 2)
+        entry = {"guard": "answer", "expect": "test-failed"}
+        self.assertTrue(
+            TOOL["entry_proves"](
+                test,
+                {**entry, "run": ["node", "--test", path, "--test-reporter=tap"]},
+                [],
+            )
+        )
+        for run in (
+            ["other", "--test", "--test-reporter=tap", path],
+            ["node", "other", "--test-reporter=tap", path],
+            ["node", "--test", path],
+            ["node", "--test", "--test-reporter=tap", path, "--test-name-pattern"],
+        ):
+            with self.subTest(run=run):
+                self.assertFalse(TOOL["entry_proves"](test, {**entry, "run": run}, []))
+        for extra in ("decoy.cjs", "decoy.js", "decoy.mjs", "directory"):
+            with self.subTest(extra=extra):
+                run = ["node", "--test", "--test-reporter=tap", path, extra]
+                self.assertFalse(
+                    TOOL["entry_proves"](
+                        test,
+                        {"guard": "answer", "expect": "test-failed", "run": run},
+                        [],
+                    )
+                )
+        for option in (
+            "--test-name-pattern",
+            "--test-skip-pattern",
+            "--test-reporter",
+            "--test-reporter-destination",
+            "--test-concurrency",
+            "--test-timeout",
+            "--test-shard",
+        ):
+            with self.subTest(option=option):
+                run = ["node", "--test", "--test-reporter=tap", option, "fixture", path]
+                self.assertTrue(
+                    TOOL["entry_proves"](
+                        test,
+                        {"guard": "answer", "expect": "test-failed", "run": run},
+                        [],
+                    )
+                )
+        run = [
+            "node",
+            "--test",
+            "--test-reporter=tap",
+            "--test-name-pattern",
+            "answer",
+            path,
+        ]
+        self.assertTrue(
+            TOOL["entry_proves"](
+                test, {"guard": "answer", "expect": "test-failed", "run": run}, []
+            )
+        )
+
+    def test_node_preloads_cannot_supply_another_sources_failure(self):
+        path = "bindings/microvms-js/__test__/answer.mjs"
+        test = TOOL["Test"]("node", path, "answer", "answer", 1, 2)
+        for option in (
+            "--import",
+            "--require",
+            "--loader",
+            "--experimental-loader",
+            "-r",
+        ):
+            forms = ([option, "./decoy.mjs"], [option + "=./decoy.mjs"])
+            if option == "-r":
+                forms += (["-r./decoy.mjs"],)
+            for flags in forms:
+                with self.subTest(flags=flags):
+                    run = ["node", "--test", "--test-reporter=tap", *flags, path]
+                    self.assertFalse(
+                        TOOL["entry_proves"](
+                            test,
+                            {"guard": "answer", "expect": "test-failed", "run": run},
+                            [],
+                        )
+                    )
+
+    def test_semantic_selectors_preserve_existing_proof_commands(self):
+        test = TOOL["Test"]("rust", TESTS, "answer", "answer", 1, 2)
+        targets = [
+            {
+                "package": "agentd",
+                "name": "regress",
+                "kind": ["test"],
+                "src": TESTS,
+                "features": [],
+            }
+        ]
+        for run in (
+            [
+                "cargo",
+                "test",
+                "--package=agentd",
+                "--test=regress",
+                "--",
+                "--ignored",
+                "--exact",
+                "answer",
+            ],
+            [
+                "cargo",
+                "test",
+                "-p",
+                "agentd",
+                "--features",
+                "extra",
+                "--test",
+                "regress",
+                "answer",
+                "--",
+                "--exact",
+            ],
+        ):
+            with self.subTest(run=run):
+                self.assertTrue(
+                    TOOL["entry_proves"](
+                        test,
+                        {"guard": "answer", "expect": "test-failed", "run": run},
+                        targets,
+                    )
+                )
+
+        path = "bindings/microvms-py/tests/test_answer.py"
+        test = TOOL["Test"]("pytest", path, f"{path}::test_answer", "test_answer", 1, 2)
+        entry = {
+            "guard": test.guard + "[one]",
+            "expect": "test-failed",
+            "run": ["python", "-m", "pytest", "-q", "-rA", path, "-k", "answer"],
+        }
+        self.assertTrue(TOOL["entry_proves"](test, entry, []))
+        path = "bindings/microvms-js/__test__/answer.mjs"
+        test = TOOL["Test"]("node", path, "answer", "answer", 1, 2)
+        entry = {
+            "guard": test.guard,
+            "expect": "test-failed",
+            "run": [
+                "node",
+                "--test",
+                "--test-reporter=tap",
+                "--test-name-pattern=answer",
+                path,
+            ],
+        }
+        self.assertTrue(TOOL["entry_proves"](test, entry, []))
+
+    def test_conflicting_or_missing_rust_selectors_cannot_supply_a_proof(self):
+        test = TOOL["Test"]("rust", TESTS, "answer", "answer", 1, 2)
+        targets = [
+            {
+                "package": "agentd",
+                "name": "regress",
+                "kind": ["test"],
+                "src": TESTS,
+                "features": [],
+            }
+        ]
+        command = [
+            "cargo",
+            "test",
+            "-p",
+            "agentd",
+            "--test",
+            "regress",
+            "--",
+            "--exact",
+            "answer",
+        ]
+        runs = [
+            command[1:],
+            command[:6] + command[7:],
+            command[:7] + ["answer"],
+            command[:-1] + ["wrong"],
+            command[:6] + ["--package", "another"] + command[6:],
+            command[:6] + ["--bin", "regress"] + command[6:],
+            command[:6] + ["--workspace"] + command[6:],
+            ["cargo", "test", "--package"],
+            command[:6] + ["--exact", "--", "answer"],
+        ]
+        runs += [
+            command[:6] + [flag] + command[6:]
+            for flag in ("--all-targets", "--tests", "--bins")
+        ]
+        for run in runs:
+            with self.subTest(run=run):
+                self.assertFalse(
+                    TOOL["entry_proves"](
+                        test,
+                        {"guard": "answer", "expect": "test-failed", "run": run},
+                        targets,
+                    )
+                )
+
+    def test_implicit_library_selection_requires_one_runnable_target(self):
+        test = TOOL["Test"](
+            "rust", PRODUCT, "tests::answer", "answer", 1, 2, inline=True
+        )
+        library = {
+            "package": "agentd",
+            "name": "agentd",
+            "kind": ["lib"],
+            "src": PRODUCT,
+            "features": [],
+        }
+        other = {
+            "package": "agentd",
+            "name": "regress",
+            "kind": ["test"],
+            "src": TESTS,
+            "features": [],
+        }
+        run = ["cargo", "test", "-p", "agentd", "tests::answer", "--", "--exact"]
+        entry = {"guard": test.guard, "expect": "test-failed", "run": run}
+        self.assertTrue(TOOL["entry_proves"](test, entry, [library]))
+        self.assertFalse(TOOL["entry_proves"](test, entry, [library, other]))
+        self.assertFalse(
+            TOOL["entry_proves"](test, entry, [library, {**other, "kind": ["bin"]}])
+        )
+        wrong = {
+            **entry,
+            "run": [
+                "cargo",
+                "test",
+                "-p",
+                "agentd",
+                "--test",
+                "not-the-library",
+                "--",
+                "--exact",
+                test.guard,
+            ],
+        }
+        self.assertFalse(TOOL["entry_proves"](test, wrong, [library]))
+        explicit = {
+            **entry,
+            "run": [
+                "cargo",
+                "test",
+                "-p",
+                "agentd",
+                "--lib",
+                "--",
+                "--exact",
+                test.guard,
+            ],
+        }
+        self.assertTrue(TOOL["entry_proves"](test, explicit, [library, other]))
+        for kind in ("lib", "rlib", "cdylib", "staticlib"):
+            with self.subTest(kind=kind):
+                self.assertTrue(
+                    TOOL["entry_proves"](
+                        test, explicit, [{**library, "kind": [kind]}, other]
+                    )
+                )
+                self.assertTrue(
+                    TOOL["entry_proves"](test, entry, [{**library, "kind": [kind]}])
+                )
+
+    def test_binding_libraries_use_cargo_metadata_kinds(self):
+        targets = TOOL["cargo_targets"](REPO)
+        for package in ("microvms-py", "microvms-js"):
+            with self.subTest(package=package):
+                test = TOOL["Test"](
+                    "rust",
+                    f"bindings/{package}/src/lib.rs",
+                    "tests::answer",
+                    "answer",
+                    1,
+                    2,
+                    inline=True,
+                )
+                command = TOOL["rust_command"](test, targets)
+                self.assertIsNotNone(command)
+                self.assertEqual(command[:5], ["cargo", "test", "-p", package, "--lib"])
+                run = ["cargo", "test", "-p", package, "--", "--exact", test.guard]
+                self.assertTrue(
+                    TOOL["entry_proves"](
+                        test,
+                        {"guard": test.guard, "expect": "test-failed", "run": run},
+                        targets,
+                    )
+                )
+
+    def test_binary_source_proofs_select_the_binary_in_a_mixed_package(self):
+        library = {
+            "package": "demo",
+            "name": "demo",
+            "kind": ["lib"],
+            "src": "crates/demo/src/lib.rs",
+            "features": [],
+        }
+        for path in (
+            "crates/demo/src/main.rs",
+            "crates/demo/src/bin/worker.rs",
+            "crates/demo/src/bin/worker/main.rs",
+        ):
+            with self.subTest(path=path):
+                binary = {
+                    "package": "demo",
+                    "name": "worker",
+                    "kind": ["bin"],
+                    "src": path,
+                    "features": [],
+                }
+                test = TOOL["Test"](
+                    "rust", path, "tests::answer", "answer", 1, 3, inline=True
+                )
+                run = [
+                    "cargo",
+                    "test",
+                    "-p",
+                    "demo",
+                    "--bin",
+                    "worker",
+                    "--",
+                    "--exact",
+                    test.guard,
+                ]
+                self.assertEqual(TOOL["rust_command"](test, [library, binary]), run)
+                entry = {"guard": test.guard, "expect": "test-failed", "run": run}
+                self.assertTrue(TOOL["entry_proves"](test, entry, [library, binary]))
+                self.assertFalse(
+                    TOOL["entry_proves"](
+                        test,
+                        {
+                            **entry,
+                            "run": [
+                                "cargo",
+                                "test",
+                                "-p",
+                                "demo",
+                                "--lib",
+                                "--",
+                                "--exact",
+                                test.guard,
+                            ],
+                        },
+                        [library, binary],
+                    )
+                )
+        test = TOOL["Test"](
+            "rust",
+            "crates/demo/src/bin/absent.rs",
+            "tests::answer",
+            "answer",
+            1,
+            3,
+            inline=True,
+        )
+        self.assertIsNone(TOOL["rust_command"](test, [library, binary]))
+        test = TOOL["Test"](
+            "rust",
+            "crates/demo/src/bin/worker/helper.rs",
+            "helper::tests::answer",
+            "answer",
+            1,
+            3,
+            inline=True,
+        )
+        self.assertEqual(TOOL["module_path"](test.path), ["helper"])
+        self.assertEqual(
+            TOOL["rust_command"](test, [library, binary])[4:6], ["--bin", "worker"]
+        )
 
 
 class RegistryShapeTests(unittest.TestCase):
@@ -746,6 +1619,13 @@ class RegistryShapeTests(unittest.TestCase):
             text=True,
         )
         self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_a_shared_proof_requires_a_case_identifier(self):
+        test = TOOL["Test"]("parity", "case.json", "guard", "case", 1, 2, surface="ts")
+        with self.assertRaisesRegex(
+            AssertionError, "a shared proof must name its case"
+        ):
+            TOOL["parity_command"](test)
 
 
 class CandidateBuildTests(unittest.TestCase):
