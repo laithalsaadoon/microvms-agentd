@@ -335,9 +335,9 @@ The `spec` and `spec:core` tasks are separate from `check`. Install their option
 commands. The setup uses Node 24.22.0 for these tasks only, installs symspec 2.0.0
 and its dependencies from `verify/formal/package-lock.json`, and downloads its
 checksum-pinned semantic model into the ignored `verify/formal/model/` directory.
-The verifier and its dependencies are distributed under their package licenses;
+The verifier and its dependencies retain their package licenses;
 symspec is Apache-2.0 and its semantic model is MIT. The model revision and asset
-checksums are part of the pinned verifier. Setup needs network access; subsequent
+checksums are part of the pinned verifier. Setup needs network access; later
 checks use the local assets. To reproduce from scratch, remove
 `verify/formal/node_modules/` and `verify/formal/model/`, then run setup again.
 `tools/check-spec.sh` refuses a missing or different verifier. A passing `check`
