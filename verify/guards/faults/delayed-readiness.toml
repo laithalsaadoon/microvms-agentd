@@ -1,0 +1,37 @@
+# The delayed-ready lane cannot infer a runtime cap from a fast hook or a missing field.
+
+[[family]]
+guard = "conformance/selftest/delayed_readiness.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "delayed-readiness-delay-shortened"
+message = "FAIL  delayed readiness fixture sleeps only"
+transform = { file = "conformance/fixtures/delayed_ready.py", replace = "DELAY_SECONDS = 310", with = "DELAY_SECONDS = 1" }
+
+[[family.fault]]
+id = "delayed-readiness-elapsed-ignored"
+message = "FAIL  delayed readiness refuses invalid elapsed 0"
+transform = { file = "conformance/lanes/delayed_readiness.py", replace = "310 <= value < requested", with = "0 <= value < requested" }
+
+[[family.fault]]
+id = "delayed-readiness-timeout-ignored"
+message = "FAIL  delayed readiness refuses absent requestedTimeout from FAILED"
+transform = { file = "conformance/lanes/delayed_readiness.py", replace = "requested != HOOK_TIMEOUT_SECONDS", with = "False" }
+
+[[family.fault]]
+id = "delayed-readiness-echo-ignored"
+message = "FAIL  delayed readiness refuses absent echoedTimeouts"
+transform = { file = "conformance/lanes/delayed_readiness.py", replace = "or report.get(\"echoedTimeouts\") != [HOOK_TIMEOUT_SECONDS]", with = "or False" }
+
+[[family.fault]]
+id = "delayed-readiness-begin-ignored"
+message = "FAIL  delayed readiness refuses absent records from FAILED"
+transform = { file = "conformance/lanes/delayed_readiness.py", replace = "or starts == 0", with = "or False" }
+
+[[family.fault]]
+id = "delayed-readiness-reason-ignored"
+message = "FAIL  delayed readiness refuses inconclusive reasons"
+transform = { file = "conformance/lanes/delayed_readiness.py", replace = "\"Ready hook invocation timed out after PT5M\" in reason", with = "True" }
