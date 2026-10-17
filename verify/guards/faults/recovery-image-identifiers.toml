@@ -51,3 +51,18 @@ transform = { file = "tools/recover-live.py", replace = "if name in derived:\n  
 id = "readonly-image-unlisted-version-coverage"
 message = "test_"
 transform = { file = "tools/recover-live.py", replace = "if listed is None:\n                # An image that appeared after List has no enumerated versions.", with = "if False:\n                # An image that appeared after List has no enumerated versions." }
+
+[[family.fault]]
+id = "readonly-image-uppercase-target"
+message = "test_"
+transform = { file = "tools/recover-live.py", replace = "r\"[A-Za-z0-9_-]{1,64}\", name", with = "r\"[a-za-z0-9_-]{1,64}\", name" }
+
+[[family.fault]]
+id = "readonly-image-uppercase-source"
+message = "test_"
+transform = { file = "tools/recover-live.py", replace = "r\"[A-Za-z0-9_-]{1,64}\", source_name", with = "r\"[a-za-z0-9_-]{1,64}\", source_name" }
+
+[[family.fault]]
+id = "readonly-image-namespace-error-binding"
+message = "test_"
+transform = { file = "tools/recover-live.py", replace = "report, \"images\", exc, imageSha256=identity(\"image\", region, name)", with = "report, \"images\", exc" }
