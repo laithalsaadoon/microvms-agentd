@@ -147,6 +147,7 @@ def census(monkeypatch):
             {"kind": "cloudWatch", "logGroupSha256": None},
         ),
         ({"logging": []}, {"kind": "malformed"}),
+        ({"logging": {}}, {"kind": "malformed"}),
         ({"logging": {"disabled": True}}, {"kind": "malformed"}),
         ({"logging": {"cloudWatch": {}}}, {"kind": "malformed"}),
         (
@@ -177,6 +178,10 @@ def test_logging_observation_retains_exact_uncertainty_without_raw_values(
         (None, "null"),
         (True, "malformed"),
         ("not-a-date", "malformed"),
+        (-1, "malformed"),
+        (float("nan"), "malformed"),
+        (datetime(1969, 12, 31, tzinfo=timezone.utc), "malformed"),
+        (datetime(1970, 1, 1, tzinfo=timezone.utc), "valid"),
         (CREATED, "valid"),
     ],
 )
@@ -185,7 +190,7 @@ def test_observed_timestamp_is_typed_and_never_copied_raw(value, kind):
     assert snapshot["createdAtKind"] == kind
     assert ("createdAt" in snapshot) == (kind == "valid")
     if kind == "valid":
-        assert snapshot["createdAt"] == CREATED.timestamp()
+        assert snapshot["createdAt"] == value.timestamp()
 
 
 @pytest.mark.parametrize(
@@ -299,6 +304,9 @@ def test_observation_reads_both_version_responses_and_never_cleanup_paths(
     assert census.events[0:2] == ["verifier", "list_microvm_images"]
     assert value["status"] == "completed"
     assert len(value["images"]) == len(value["versions"]) == 1
+    assert value["logGroups"] == [
+        {"sha256": recovery.identity("log-group", REGION, GROUP)}
+    ]
     assert value["images"][0]["approved"] is True
     row = value["versions"][0]
     assert row["imageSha256"] == recovery.identity("image", REGION, NAME)
@@ -457,6 +465,14 @@ def test_incomplete_version_scan_preserves_other_sections_and_marks_failure(
     assert value["errors"] and all(
         row["section"] == "versions" for row in value["errors"]
     )
+    assert {row["code"] for row in value["errors"]} == {
+        {
+            "missing_page": "missing_page_items",
+            "repeated_token": "pagination_token",
+            "duplicate": "duplicate_identity",
+            "provider_error": "api_failed",
+        }[failure]
+    }
     assert "synthetic-provider-secret" not in json.dumps(value)
     census.logs.delete_log_group.assert_not_called()
 
@@ -515,8 +531,42 @@ def test_each_regional_census_section_fails_closed_independently(
     assert value["status"] == "incomplete"
     assert value["sections"][section] == "incomplete"
     assert value["sections"]["independentVerifier"] == "completed"
-    assert any(error["section"] == section for error in value["errors"])
+    assert value["errors"] == [
+        {
+            "section": section,
+            "code": {
+                "missing_page": "missing_page_items",
+                "duplicate": "duplicate_identity",
+                "provider_error": "api_failed",
+            }[failure],
+            "operation": operation,
+        }
+    ]
     assert "synthetic-private-provider-error" not in json.dumps(value)
+
+
+def test_regional_image_census_rejects_one_name_attached_to_distinct_arns(census):
+    census.plane.list_microvm_images.return_value = {
+        "items": [
+            census.image,
+            {**census.image, "imageArn": ARN + "-other"},
+        ]
+    }
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    assert value["status"] == "incomplete"
+    assert value["sections"]["images"] == "incomplete"
+    assert value["sections"]["versions"] == "incomplete"
+    assert value["errors"] == [
+        {
+            "section": "images",
+            "code": "duplicate_identity",
+            "operation": "list_microvm_images",
+        }
+    ]
+    assert len(value["images"]) == 1
+    assert value["images"][0]["imageArnSha256"] == recovery.digest(ARN.encode())
+    assert recovery.validate_observation(value) is value
 
 
 def test_later_version_page_error_retains_the_previous_exact_pair(census):
@@ -1321,6 +1371,22 @@ def test_full_list_inventory_and_source_image_identity_are_kept_distinct(census)
     assert value["versionCoverage"][0]["imageArnSha256"] == recovery.digest(
         replacement["imageArn"].encode()
     )
+
+
+def test_manifest_vm_ownership_cannot_approve_an_image_read(census):
+    vm_name = "synthetic-owned-vm"
+    vm_key = recovery.identity("microvm", REGION, vm_name)
+    census.manifest["resources"].append({"kind": "microvm", "sha256": vm_key})
+    census.owned[vm_key] = ("microvm", vm_name, None)
+    value = report()
+    recovery.observe(census.manifest, census.owned, census.api, value)
+    assert value["status"] == "completed"
+    assert len(value["images"]) == 1
+    assert value["images"][0]["imageSha256"] == recovery.identity("image", REGION, NAME)
+    assert value["images"][0]["approved"] is True
+    census.plane.get_microvm_image.assert_called_once_with(imageIdentifier=ARN)
+    assert vm_key not in json.dumps(value)
+    assert recovery.validate_observation(value) is value
 
 
 def test_conflicting_source_arn_keeps_listed_image_and_versions_in_incomplete_census(
