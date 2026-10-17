@@ -39,11 +39,13 @@ def delayed_recipe() -> str:
         conformance_dockerfile(resolve_base_ref())
         + "RUN dnf install -y python3 && dnf clean all\n"
         + f"RUN printf '%s' '{encoded}' | base64 -d > /delayed_ready.py\n"
-        + "RUN printf '#!/bin/sh\\npython3 /delayed_ready.py &\\nexec \"$@\"\\n' "
-        + "> /ready-entrypoint && chmod 0755 /ready-entrypoint\n"
-        + "ENV AGENTD_PORT=9001\n"
-        + 'ENTRYPOINT ["/ready-entrypoint"]\n'
-        + 'CMD ["/agentd"]\n'
+        # Keep the declared hook port and bootstrap command compatible with core
+        # preflight. Only the daemon process moves behind the relay; exec keeps
+        # the supplied daemon as PID 1 after the launcher starts the relay.
+        + "RUN mv /agentd /real-agentd && "
+        + "printf '#!/bin/sh\\npython3 /delayed_ready.py &\\n"
+        + "export AGENTD_PORT=9001\\nexec /real-agentd\\n' "
+        + "> /agentd && chmod 0755 /agentd\n"
     )
 
 
@@ -73,19 +75,21 @@ def measurement_outcome(report: dict[str, Any]) -> str | None:
         or starts == 0
     ):
         return None
-    if report.get("state") in READY_IMAGE_STATES and len(ends) == starts:
-        if all(
-            type(value) in (int, float) and 310 <= value < requested for value in ends
-        ):
-            return "completed beyond five minutes"
-    if (
-        report.get("state") in {"FAILED", "CREATE_FAILED"}
-        and not ends
-        and any(
-            "Ready hook invocation timed out after PT5M" in reason
-            for reason in report.get("reasons") or []
-        )
+    # Even a cap diagnostic cannot make contradictory timing evidence valid.
+    # No end is expected if the container stopped; any observed end must prove
+    # that this fixture actually delayed the hook beyond five minutes.
+    if not all(
+        type(value) in (int, float) and 310 <= value < requested for value in ends
     ):
+        return None
+    if report.get("state") in READY_IMAGE_STATES and len(ends) == starts:
+        return "completed beyond five minutes"
+    if report.get("state") in {"FAILED", "CREATE_FAILED"} and any(
+        "Ready hook invocation timed out after PT5M" in reason
+        for reason in report.get("reasons") or []
+    ):
+        # A timed-out caller does not terminate the relay. Its sleep can finish
+        # and emit an end marker after the service has reported the PT5M cap.
         return "service capped the ready hook at five minutes"
     return None
 

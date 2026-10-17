@@ -44,6 +44,11 @@ def check_delayed_readiness(results: Results) -> None:
         measurement_outcome({**capped, "state": "CREATE_FAILED"}),
         "service capped the ready hook at five minutes",
     )
+    results.eq(
+        "delayed readiness recognizes a service cap with a late end marker",
+        measurement_outcome({**capped, "records": success["records"]}),
+        "service capped the ready hook at five minutes",
+    )
     for original in (success, capped):
         for field in original:
             broken = copy.deepcopy(original)
@@ -53,12 +58,14 @@ def check_delayed_readiness(results: Results) -> None:
                 measurement_outcome(broken),
             )
     for elapsed in (0, 300, 309.99, 600, True, "310", None):
-        broken = copy.deepcopy(success)
-        broken["records"][1]["elapsed"] = elapsed
-        results.absent(
-            f"delayed readiness refuses invalid elapsed {elapsed!r}",
-            measurement_outcome(broken),
-        )
+        for state in ("CREATED", "FAILED", "CREATE_FAILED"):
+            broken = copy.deepcopy({**success, **capped, "records": success["records"]})
+            broken["state"] = state
+            broken["records"][1]["elapsed"] = elapsed
+            results.absent(
+                f"delayed readiness refuses invalid elapsed {elapsed!r} from {state}",
+                measurement_outcome(broken),
+            )
     for field, value in (
         ("state", "CREATING"),
         ("requestedTimeout", 300),
@@ -85,9 +92,11 @@ def check_delayed_readiness(results: Results) -> None:
     results.check(
         "delayed readiness image runs the supplied daemon behind the relay",
         "COPY agentd /agentd" in recipe
-        and "ENV AGENTD_PORT=9001" in recipe
-        and 'ENTRYPOINT ["/ready-entrypoint"]' in recipe
-        and recipe.endswith('CMD ["/agentd"]\n'),
+        and "ENV AGENTD_PORT=9000" in recipe
+        and "ENTRYPOINT []" in recipe
+        and 'CMD ["/agentd"]' in recipe
+        and "mv /agentd /real-agentd" in recipe
+        and "export AGENTD_PORT=9001\\nexec /real-agentd" in recipe,
     )
     check_relay(results)
 
