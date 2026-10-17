@@ -532,8 +532,18 @@ def test_existing_image_deletion_is_observed_without_reissuing_mutation(
     wait.assert_called_once_with(ARN)
     assert report == {
         "resources": [
-            {"kind": "image", "sha256": "image-key", "status": "absent"},
-            {"kind": "log-group", "sha256": "group-key", "status": "absent"},
+            {
+                "kind": "image",
+                "sha256": "image-key",
+                "status": "absent",
+                "deletionRequested": False,
+            },
+            {
+                "kind": "log-group",
+                "sha256": "group-key",
+                "status": "absent",
+                "deletionRequested": False,
+            },
         ]
     }
     assert setup.clock.sleeps == [2] * 5
@@ -592,16 +602,33 @@ def test_recovery_orders_deletions_reports_each_stage_and_restarts_visibility(
     assert events[0][1] == {"imageIdentifier": ARN}
     assert events[-1][1] == {"logGroupName": GROUP}
     expected = [
-        {"kind": "image", "sha256": "image-key", "status": "present"},
-        {"kind": "log-group", "sha256": "group-key", "status": "present"},
-        {"kind": "image", "sha256": "already-absent", "status": "absent"},
+        {
+            "kind": "image",
+            "sha256": "image-key",
+            "status": "present",
+            "deletionRequested": False,
+        },
+        {
+            "kind": "log-group",
+            "sha256": "group-key",
+            "status": "present",
+            "deletionRequested": False,
+        },
+        {
+            "kind": "image",
+            "sha256": "already-absent",
+            "status": "absent",
+            "deletionRequested": False,
+        },
     ]
     assert events[0][2] == expected
     expected[0]["status"] = "deletion_requested"
+    expected[0]["deletionRequested"] = True
     assert events[1][2] == expected
     expected[0]["status"] = "absent"
     assert events[2][2] == events[3][2] == expected
     expected[1]["status"] = "deletion_requested"
+    expected[1]["deletionRequested"] = True
     assert observed[-1] == expected
     for row in expected:
         row["status"] = "absent"
@@ -638,8 +665,18 @@ def test_absent_approved_groups_still_observe_excluded_image_without_deleting_it
     recovery.recover(setup.manifest, setup.ownership, setup.api, report)
     assert report == {
         "resources": [
-            {"kind": "image", "sha256": "image-key", "status": "absent"},
-            {"kind": "log-group", "sha256": "group-key", "status": "absent"},
+            {
+                "kind": "image",
+                "sha256": "image-key",
+                "status": "absent",
+                "deletionRequested": False,
+            },
+            {
+                "kind": "log-group",
+                "sha256": "group-key",
+                "status": "absent",
+                "deletionRequested": False,
+            },
         ]
     }
     assert len(setup.api.version_evidence) == 1
@@ -733,4 +770,121 @@ def test_no_selected_log_group_requests_read_only_versions_with_exact_context(
         None,
         {ARN: setup.image} if image_present else {},
         {ARN} if image_present else set(),
+    )
+
+
+@pytest.mark.parametrize(
+    "kind,failure_stage,expected_status,requested",
+    [
+        ("image", "delete", "present", False),
+        ("image", "wait", "deletion_requested", True),
+        ("log-group", "delete", "present", False),
+    ],
+)
+def test_deletion_requested_records_an_accepted_call_even_if_later_work_fails(
+    setup, monkeypatch, kind, failure_stage, expected_status, requested
+):
+    initial = plan_for(setup, kind)
+    monkeypatch.setattr(
+        recovery, "settled_selection", lambda *_: (initial, ({}, {}, {}))
+    )
+    monkeypatch.setattr(setup.api, "configured_dependencies", Mock())
+    delete = Mock(
+        side_effect=recovery.Refused("api_failed")
+        if failure_stage == "delete"
+        else None
+    )
+    monkeypatch.setattr(setup.api, "call", delete)
+    monkeypatch.setattr(
+        setup.api, "wait_image_absent", Mock(side_effect=recovery.Refused("deadline"))
+    )
+    report = {}
+    with pytest.raises(recovery.Refused, match="^(api_failed|deadline)$"):
+        recovery.recover(setup.manifest, setup.ownership, setup.api, report)
+    key = "image-key" if kind == "image" else "group-key"
+    target = next(row for row in report["resources"] if row["sha256"] == key)
+    assert target == {
+        "kind": kind,
+        "sha256": key,
+        "status": expected_status,
+        "deletionRequested": requested,
+    }
+    assert all(
+        row["deletionRequested"] is False
+        for row in report["resources"]
+        if row["sha256"] != key
+    )
+    assert delete.call_count == 1
+
+
+def test_explicit_additional_image_does_not_authorize_its_log_group(setup, monkeypatch):
+    additional_arn = ARN.replace(":reviewed", ":additional")
+    related_group = GROUP.replace("reviewed", "additional")
+    image = {**setup.image, "name": "additional", "imageArn": additional_arn}
+    group = {**setup.group, "logGroupName": related_group}
+    images = {additional_arn: image}
+    setup.manifest["resources"] = [
+        {
+            "kind": "image",
+            "sha256": "additional-key",
+            "proof": "explicit-incident-image",
+        }
+    ]
+    setup.ownership = {
+        "additional-key": ("explicit-incident-image", "additional", None)
+    }
+    setup.plane.list_microvm_images = Mock(
+        side_effect=lambda: {"items": list(images.values())}
+    )
+    setup.logs.describe_log_groups.return_value = {"logGroups": [group]}
+
+    class Missing(Exception):
+        response = {"Error": {"Code": "ResourceNotFoundException"}}
+
+    def read(*, imageIdentifier):
+        if imageIdentifier not in images:
+            raise Missing
+        return images[imageIdentifier]
+
+    setup.plane.get_microvm_image = Mock(side_effect=read)
+    setup.plane.delete_microvm_image = Mock(
+        side_effect=lambda *, imageIdentifier: images.pop(imageIdentifier)
+    )
+    setup.plane.list_microvm_image_versions.return_value = {
+        "items": [{"imageVersion": "1"}]
+    }
+    setup.plane.get_microvm_image_version = Mock(
+        return_value={
+            "imageArn": additional_arn,
+            "imageVersion": "1",
+            "state": "SUCCESSFUL",
+            "createdAt": CREATED,
+            "logging": {"cloudWatch": {"logGroup": related_group}},
+        }
+    )
+    setup.logs.delete_log_group = Mock()
+    dependencies = Mock(wraps=setup.api.configured_dependencies)
+    monkeypatch.setattr(setup.api, "configured_dependencies", dependencies)
+    report = {}
+    recovery.recover(setup.manifest, setup.ownership, setup.api, report)
+    assert report == {
+        "resources": [
+            {
+                "kind": "image",
+                "sha256": "additional-key",
+                "status": "absent",
+                "deletionRequested": True,
+            }
+        ]
+    }
+    setup.plane.delete_microvm_image.assert_called_once_with(
+        imageIdentifier=additional_arn
+    )
+    setup.logs.delete_log_group.assert_not_called()
+    assert setup.logs.describe_log_groups.return_value == {"logGroups": [group]}
+    assert dependencies.call_args_list
+    assert all(call.args[0] is None for call in dependencies.call_args_list)
+    assert len(setup.api.version_evidence) == 1
+    assert setup.api.version_evidence[0]["logGroupSha256"] == recovery.identity(
+        "log-group", REGION, related_group
     )

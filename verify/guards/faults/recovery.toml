@@ -123,3 +123,50 @@ suite = "script"
 id = "recovery-core-receipt-schema"
 message = "test_receipt_refuses_unsanitized_or_inconsistent_field"
 transform = { file = "tools/recover-live.py", replace = "    valid(isinstance(value, dict))", with = "    return value\n    valid(isinstance(value, dict))" }
+
+
+[[family.fault]]
+id = "recovery-core-cleanup-floor"
+message = "test_source_leaked_images_reads_only_exact_post_destroy_records"
+transform = { file = "tools/recover-live.py", replace = "    \"\"\"Resolve exact names from the pinned post-destroy inventory, without ownership.\"\"\"\n    names = set()", with = "    \"\"\"Resolve exact names from the pinned post-destroy inventory, without ownership.\"\"\"\n    names = {\"unobserved\"}" }
+
+[[family.fault]]
+id = "recovery-core-cleanup-sentinel"
+message = "test_source_leaked_images_reads_only_exact_post_destroy_records"
+transform = { file = "tools/recover-live.py", replace = "        if len(columns) != 3 or columns[1] != \"verify again after destroy\":", with = "        if len(columns) != 3:" }
+
+[[family.fault]]
+id = "recovery-core-explicit-authority"
+message = "test_explicit_selection_needs_reviewed_authority_and_exact_observation"
+transform = { file = "tools/recover-live.py", replace = "    if not selected:\n        return {}", with = "    if not selected:\n        return {identity(\"image\", region, name): (\"explicit-incident-image\", name, None) for name in source_leaked_images(log)}" }
+
+[[family.fault]]
+id = "recovery-core-explicit-exact-hash"
+message = "test_explicit_selection_never_substitutes_family_or_region"
+transform = { file = "tools/recover-live.py", replace = "        if identity(\"image\", region, name) == row[\"sha256\"]", with = "        if True" }
+
+[[family.fault]]
+id = "recovery-core-explicit-unique"
+message = "test_explicit_selection_refuses_duplicate_or_already_proven_authority"
+transform = { file = "tools/recover-live.py", replace = "    require(len(selected) <= 1, \"explicit_image_conflict\")", with = "    require(True, \"explicit_image_conflict\")" }
+
+[[family.fault]]
+id = "recovery-core-explicit-conflict"
+message = "test_explicit_selection_refuses_duplicate_or_already_proven_authority"
+transform = { file = "tools/recover-live.py", replace = "    require(row[\"sha256\"] not in proven, \"explicit_image_conflict\")", with = "    require(True, \"explicit_image_conflict\")" }
+
+[[family]]
+guard = "test_recover_live_inventory.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_inventory.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "recovery-core-image-delete-evidence"
+message = "test_deletion_requested_records_an_accepted_call_even_if_later_work_fails"
+transform = { file = "tools/recover-live.py", replace = "            api.call(api.plane, \"delete_microvm_image\", imageIdentifier=row[\"imageArn\"])\n            statuses[key][\"deletionRequested\"] = True", with = "            statuses[key][\"deletionRequested\"] = True\n            api.call(api.plane, \"delete_microvm_image\", imageIdentifier=row[\"imageArn\"])" }
+
+[[family.fault]]
+id = "recovery-core-log-delete-evidence"
+message = "test_deletion_requested_records_an_accepted_call_even_if_later_work_fails"
+transform = { file = "tools/recover-live.py", replace = "        api.call(api.logs, \"delete_log_group\", logGroupName=row[\"logGroupName\"])\n        statuses[key][\"deletionRequested\"] = True", with = "        statuses[key][\"deletionRequested\"] = True\n        api.call(api.logs, \"delete_log_group\", logGroupName=row[\"logGroupName\"])" }

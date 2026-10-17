@@ -65,7 +65,7 @@ def manifest_value():
         "version": 1,
         "hash_scheme": "sha256-kind-nul-region-nul-name-v1",
         "source_run_id": 42,
-        "parser_version": 1,
+        "parser_version": 2,
         "source_log_representation": "gh-run-view-job-log-python-text-utf8-v1",
         "workflow_path": ".github/workflows/live-conformance.yml",
         "region": REGION,
@@ -224,7 +224,7 @@ def test_manifest_checks_content_hash_and_rejects_symlink(tmp_path):
         ("version", 2, "manifest_schema"),
         ("hash_scheme", "sha256", "manifest_schema"),
         ("source_run_id", 43, "manifest_run"),
-        ("parser_version", 2, "manifest_parser"),
+        ("parser_version", 1, "manifest_parser"),
         ("source_log_representation", "other", "manifest_parser"),
         ("workflow_path", ".github/workflows/other.yml", "manifest_workflow"),
         ("region", "eu-west-1", "manifest_region"),
@@ -284,6 +284,135 @@ def test_manifest_refuses_resource_set_changes(tmp_path, change, reason):
     with patch.object(recovery, "MANIFESTS", tmp_path):
         with pytest.raises(recovery.Refused, match=f"^{reason}$"):
             recovery.load_manifest("42", sha)
+
+
+def explicit_row(name="microvm-cli-slow-ready-deadbeef-0123"):
+    return {
+        "kind": "image",
+        "proof": "explicit-incident-image",
+        "sha256": reference_identity("image", REGION, name),
+    }
+
+
+def test_manifest_accepts_one_separately_reviewed_image(tmp_path):
+    value = manifest_value()
+    value["resources"].append(explicit_row())
+    sha = write_manifest(tmp_path, value)
+    with patch.object(recovery, "MANIFESTS", tmp_path):
+        assert recovery.load_manifest("42", sha) == value
+
+
+@pytest.mark.parametrize(
+    "change,reason",
+    [
+        ("second", "resource_proofs"),
+        ("log", "resource_kind"),
+        ("duplicate_hash", "resource_hashes"),
+        ("excluded", "excluded_resource"),
+        ("extra_field", "resource_schema"),
+    ],
+)
+def test_manifest_refuses_broadened_explicit_selection(tmp_path, change, reason):
+    value = manifest_value()
+    row = explicit_row()
+    value["resources"].append(row)
+    if change == "second":
+        value["resources"].append(explicit_row("other"))
+    elif change == "log":
+        row["kind"] = "log-group"
+    elif change == "duplicate_hash":
+        row["sha256"] = value["resources"][0]["sha256"]
+    elif change == "excluded":
+        value["excluded"].append(row["sha256"])
+    else:
+        row["current_run_owned"] = True
+    sha = write_manifest(tmp_path, value)
+    with patch.object(recovery, "MANIFESTS", tmp_path):
+        with pytest.raises(recovery.Refused, match=f"^{reason}$"):
+            recovery.load_manifest("42", sha)
+
+
+@pytest.mark.parametrize("timestamp", [False, True])
+def test_source_leaked_images_reads_only_exact_post_destroy_records(timestamp):
+    names = {"Example-A_b.1", "other-image"}
+    log = "".join(
+        source_line(
+            "verify again after destroy",
+            f"LEAK image {name} in UPDATED",
+            timestamp=timestamp,
+        )
+        for name in names
+    )
+    noise = "unformatted\njust\ttwo\n"
+    noise += source_line("conformance suite", "LEAK image not-owned in CREATED")
+    noise += source_line(
+        "verify again after destroy", "LEAK image prefix-only in lower"
+    )
+    noise += source_line(
+        "verify again after destroy", "LEAK image spaced name in CREATED"
+    )
+    noise += source_line(
+        "verify again after destroy", "LEAK log group other in CREATED"
+    )
+    assert recovery.source_leaked_images(noise + log + log) == names
+    assert recovery.source_leaked_images(log.replace("\n", "\t\n")) == names
+    assert recovery.source_leaked_images(log.replace("LEAK", "\x1b[KLEAK")) == names
+    assert recovery.source_leaked_images("") == set()
+
+
+def test_explicit_selection_needs_reviewed_authority_and_exact_observation():
+    name = "microvm-cli-slow-ready-deadbeef-0123"
+    row = explicit_row(name)
+    log = "".join(ownership_lines())
+    log += source_line(
+        "verify again after destroy", f"LEAK image {name} in CREATE_FAILED"
+    )
+    log += source_line(
+        "verify again after destroy", f"LEAK image {name}-other in CREATED"
+    )
+    proven = recovery.source_ownership(log, REGION)
+    assert row["sha256"] not in proven
+    assert recovery.explicit_image_selection(log, REGION, [], proven) == {}
+    assert recovery.explicit_image_selection(log, REGION, [row], proven) == {
+        row["sha256"]: ("explicit-incident-image", name, None)
+    }
+    assert recovery.source_ownership(log, REGION) == proven
+
+
+@pytest.mark.parametrize("kind", ["log-group", "microvm", "bucket", "IMAGE"])
+def test_explicit_selection_refuses_nonimage_authority(kind):
+    row = explicit_row()
+    row["kind"] = kind
+    with pytest.raises(recovery.Refused, match="^explicit_image_kind$"):
+        recovery.explicit_image_selection("", REGION, [row], {})
+
+
+def test_explicit_selection_refuses_duplicate_or_already_proven_authority():
+    row = explicit_row("name")
+    log = source_line("verify again after destroy", "LEAK image name in CREATED")
+    with pytest.raises(recovery.Refused, match="^explicit_image_conflict$"):
+        recovery.explicit_image_selection(log, REGION, [row, row], {})
+    with pytest.raises(recovery.Refused, match="^explicit_image_conflict$"):
+        recovery.explicit_image_selection(log, REGION, [row], {row["sha256"]: ()})
+
+
+@pytest.mark.parametrize("region,observed", [(REGION, "other"), ("us-west-2", "name")])
+def test_explicit_selection_never_substitutes_family_or_region(region, observed):
+    row = explicit_row("name")
+    log = source_line("verify again after destroy", f"LEAK image {observed} in CREATED")
+    with pytest.raises(recovery.Refused, match="^explicit_image_unresolved$"):
+        recovery.explicit_image_selection(log, region, [row], {})
+
+
+def test_explicit_selection_refuses_ambiguous_hash_resolution():
+    row = explicit_row("name")
+    log = "".join(
+        source_line("verify again after destroy", f"LEAK image {name} in CREATED")
+        for name in ("name", "other")
+    )
+    with patch.object(recovery, "identity", return_value=row["sha256"]):
+        with pytest.raises(recovery.Refused, match="^explicit_image_unresolved$"):
+            recovery.explicit_image_selection(log, REGION, [row], {})
 
 
 @pytest.mark.parametrize(
@@ -546,11 +675,21 @@ def full_receipt():
         "sourceSha": "a" * 40,
         "region": REGION,
         "manifestSha256": "b" * 64,
-        "parserVersion": 1,
+        "parserVersion": 2,
         "sourceLogRepresentation": "gh-run-view-job-log-python-text-utf8-v1",
         "resources": [
-            {"kind": "image", "sha256": "c" * 64, "status": "absent"},
-            {"kind": "log-group", "sha256": "d" * 64, "status": "absent"},
+            {
+                "kind": "image",
+                "sha256": "c" * 64,
+                "status": "absent",
+                "deletionRequested": True,
+            },
+            {
+                "kind": "log-group",
+                "sha256": "d" * 64,
+                "status": "absent",
+                "deletionRequested": False,
+            },
         ],
         "versionEvidence": [
             {
@@ -626,6 +765,7 @@ def receipt_invalid_cases():
     bad(("resources", 0, "kind"), None, "vm", "bucket", 0)
     bad(("resources", 0, "sha256"), None, "c" * 63, "C" * 64, "g" * 64)
     bad(("resources", 0, "status"), None, "deleted", "DELETING", 1)
+    bad(("resources", 0, "deletionRequested"), None, 0, 1, "true", [], {})
     for field in (
         "imageSha256",
         "versionSha256",
@@ -699,6 +839,13 @@ def test_receipt_accepts_version_identity_without_optional_observations():
         {"imageSha256": "c" * 64, "versionSha256": "d" * 64, "createdAt": 0}
     ]
     value["roleDuration"]["maxSessionDurationSeconds"] = 1
+    assert recovery.validate_receipt(value) is value
+
+
+def test_receipt_retains_legacy_resource_rows_without_action_history():
+    value = full_receipt()
+    for row in value["resources"]:
+        del row["deletionRequested"]
     assert recovery.validate_receipt(value) is value
 
 

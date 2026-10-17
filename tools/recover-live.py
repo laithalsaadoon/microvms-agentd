@@ -4,10 +4,11 @@
 # dependencies = ["boto3>=1.40"]
 # ///
 # SPDX-License-Identifier: Apache-2.0
-"""Recover only reviewed, source-run-owned images and log groups.
+"""Recover exact reviewed incident images and source-run-owned log groups.
 
 The source log stays in memory. It must match the reviewed digest and independently
-produce each manifest identity before AWS clients are constructed. No VM or
+produce the source-owned identities and resolve any explicitly authorized image
+identity before AWS clients are constructed. No VM or
 infrastructure mutation is available here. Recovery never establishes conformance.
 """
 
@@ -34,7 +35,7 @@ MANIFESTS = ROOT / "conformance/recovery"
 WORKFLOW = ".github/workflows/live-conformance.yml"
 SERVICE_PREFIX = "/aws/lambda-microvms/"
 SCHEME = "sha256-kind-nul-region-nul-name-v1"
-PARSER_VERSION = 1
+PARSER_VERSION = 2
 LOG_REPRESENTATION = "gh-run-view-job-log-python-text-utf8-v1"
 IMAGE_STATES = {
     "CREATING",
@@ -153,14 +154,16 @@ def load_manifest(run: str, expected: str) -> dict:
     require(manifest["region"] in {"us-east-1", "us-west-2"}, "manifest_region")
     resources = manifest["resources"]
     require(isinstance(resources, list) and resources, "empty_resources")
-    allowed = {
+    required = {
         "shared-image",
         "shared-log",
         "configured-log",
         "capability-default-image",
     }
+    proofs = {r["proof"] for r in resources}
     require(
-        {r["proof"] for r in resources} == allowed and len(resources) == len(allowed),
+        proofs in (required, required | {"explicit-incident-image"})
+        and len(resources) == len(proofs),
         "resource_proofs",
     )
     hashes = [r["sha256"] for r in resources]
@@ -180,10 +183,25 @@ def load_manifest(run: str, expected: str) -> dict:
     return manifest
 
 
+def source_leaked_images(log: str) -> set[str]:
+    """Resolve exact names from the pinned post-destroy inventory, without ownership."""
+    names = set()
+    for line in log.splitlines():
+        columns = line.split("\t", 2)
+        if len(columns) != 3 or columns[1] != "verify again after destroy":
+            continue
+        value = re.sub(r"^\d{4}-\d\d-\d\dT\S+\s*", "", columns[2]).strip()
+        value = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", value)
+        match = re.fullmatch(r"LEAK image ([A-Za-z0-9_.-]+) in [A-Z_]+", value)
+        if match:
+            names.add(match[1])
+    return names
+
+
 def source_ownership(log: str, region: str) -> dict[str, tuple[str, str, str | None]]:
     """Reproduce only the incident's positively observed ownership, never name families."""
     shared = configured = prefix = None
-    leaked_images: set[str] = set()
+    leaked_images = source_leaked_images(log)
     phase = None  # pragma: no mutate (only exact active-step equality matters before a group)
     for line in log.splitlines():
         columns = line.split("\t", 2)
@@ -196,10 +214,6 @@ def source_ownership(log: str, region: str) -> dict[str, tuple[str, str, str | N
             phase = "conformance suite" if "conformance/run_rs.py" in value else None
         if step == "UNKNOWN STEP":
             step = phase
-        if step == "verify again after destroy":
-            match = re.fullmatch(r"LEAK image ([A-Za-z0-9_.-]+) in [A-Z_]+", value)
-            if match:
-                leaked_images.add(match[1])
         if step != "conformance suite":
             continue
         match = re.fullmatch(r"(PASS|FAIL)\s+(.+?) — (.*)", value)
@@ -261,6 +275,26 @@ def source_ownership(log: str, region: str) -> dict[str, tuple[str, str, str | N
         identity(kind, region, name): (proof, name, arn)
         for kind, name, proof, arn in rows
     }
+
+
+def explicit_image_selection(
+    log: str, region: str, resources: list[dict], proven: dict
+) -> dict:
+    """A reviewed manifest supplies authority; cleanup rows only resolve exact identity."""
+    selected = [row for row in resources if row["proof"] == "explicit-incident-image"]
+    require(len(selected) <= 1, "explicit_image_conflict")
+    if not selected:
+        return {}
+    row = selected[0]
+    require(row["kind"] == "image", "explicit_image_kind")
+    names = [
+        name
+        for name in source_leaked_images(log)
+        if identity("image", region, name) == row["sha256"]
+    ]
+    require(len(names) == 1, "explicit_image_unresolved")
+    require(row["sha256"] not in proven, "explicit_image_conflict")
+    return {row["sha256"]: ("explicit-incident-image", names[0], None)}
 
 
 def source_infrastructure(log: str, region: str) -> dict:
@@ -419,13 +453,21 @@ def provenance(manifest: dict, github: Github, environ: dict[str, str]) -> dict:
         "source_infrastructure_digest",
     )
     ownership = source_ownership(log, manifest["region"])
-    for row in manifest["resources"]:
+    positive = [
+        row
+        for row in manifest["resources"]
+        if row["proof"] != "explicit-incident-image"
+    ]
+    for row in positive:
         require(
             row["sha256"] in ownership and ownership[row["sha256"]][0] == row["proof"],
             "unproven_resource",
         )
-    require(
-        set(ownership) == {r["sha256"] for r in manifest["resources"]}, "ownership_set"
+    require(set(ownership) == {r["sha256"] for r in positive}, "ownership_set")
+    ownership.update(
+        explicit_image_selection(
+            log, manifest["region"], manifest["resources"], ownership
+        )
     )
     return ownership
 
@@ -723,6 +765,7 @@ def recover(manifest: dict, ownership: dict, api: Api, report: dict) -> None:
             "kind": r["kind"],
             "sha256": r["sha256"],
             "status": "present" if r["sha256"] in initial else "absent",
+            "deletionRequested": False,
         }
         for r in manifest["resources"]
     ]
@@ -735,6 +778,7 @@ def recover(manifest: dict, ownership: dict, api: Api, report: dict) -> None:
         require(key in current and current[key][2] == old, "incarnation_changed")
         if row["state"] not in {"DELETING", "DELETED"}:
             api.call(api.plane, "delete_microvm_image", imageIdentifier=row["imageArn"])
+            statuses[key]["deletionRequested"] = True
         statuses[key]["status"] = "deletion_requested"
         api.wait_image_absent(row["imageArn"])
         statuses[key]["status"] = "absent"
@@ -749,6 +793,7 @@ def recover(manifest: dict, ownership: dict, api: Api, report: dict) -> None:
         require(key in current and current[key][2] == old, "incarnation_changed")
         api.configured_dependencies(row["logGroupName"], state[0], set())
         api.call(api.logs, "delete_log_group", logGroupName=row["logGroupName"])
+        statuses[key]["deletionRequested"] = True
         statuses[key]["status"] = "deletion_requested"
     # Full inventories, including later pages, must remain clear through a visibility window.
     clear_since = None
@@ -888,6 +933,9 @@ REASONS = [
     "duplicate_identity",
     "empty_resources",
     "excluded_resource",
+    "explicit_image_conflict",
+    "explicit_image_kind",
+    "explicit_image_unresolved",
     "exclusive_names_required",
     "group_creation_time",
     "hosted_main_required",
@@ -1039,9 +1087,15 @@ def validate_receipt(value: Any) -> dict:
     if "sourceLogRepresentation" in value:
         valid(value["sourceLogRepresentation"] == LOG_REPRESENTATION)
     for row in rows(value.get("resources", [])):
-        valid(isinstance(row, dict) and set(row) == {"kind", "sha256", "status"})
+        valid(
+            isinstance(row, dict)
+            and {"kind", "sha256", "status"} <= set(row)
+            and set(row) <= {"kind", "sha256", "status", "deletionRequested"}
+        )
         valid(row["kind"] in {"image", "log-group"} and hashed(row["sha256"]))
         valid(row["status"] in {"present", "absent", "deletion_requested"})
+        if "deletionRequested" in row:
+            valid(type(row["deletionRequested"]) is bool)
     for row in rows(value.get("apiFailures", [])):
         valid(isinstance(row, dict) and set(row) == {"operation", "code"})
         valid(row["operation"] in OPERATIONS | {"unknown"})

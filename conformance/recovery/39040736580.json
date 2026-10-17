@@ -36,16 +36,20 @@
       "kind": "log-group",
       "proof": "configured-log",
       "sha256": "13ac18bd5192851e7ee08f404000655b673a38b884caaabbcf81033cbeddbc68"
+    },
+    {
+      "kind": "image",
+      "proof": "explicit-incident-image",
+      "sha256": "238c445ae1b10c92bfad6b9d738f77114f8503e435a0f95bd640dbf2b21ecc78"
     }
   ],
   "excluded": [
-    "238c445ae1b10c92bfad6b9d738f77114f8503e435a0f95bd640dbf2b21ecc78",
     "abb2e03ca16d24f92846f367a8e6400b194935d4fde2a154eed6b72cdc38a1cf"
   ],
   "source_infrastructure": {
     "bucket_sha256": "0317ddbb3f0542317438a809cfa2879c4ac476b8bbaff7256b1101e6aa59b6b2",
     "build_role_arn_sha256": "e0b1b911f182e46dea5a09d929e145e0c05d8e900fc0a37626b4a24734e1874e"
   },
-  "parser_version": 1,
+  "parser_version": 2,
   "source_log_representation": "gh-run-view-job-log-python-text-utf8-v1"
 }
