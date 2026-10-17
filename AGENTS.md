@@ -160,8 +160,9 @@ capabilities, or `verify/parity/capabilities.toml` says why one doesn't.
   a row naming something a surface doesn't have. An exemption is a decision
   with its reason: `parity:check` refuses one that names an issue, because that
   is a parity gap, and the ratchet holds parity-gap at zero (#280). The
-  script's docstring has the rules; option-level parity (flags, keyword
-  arguments) isn't checked yet.
+  script's docstring has the rules. Its reviewed inventory also holds every
+  command argument, keyword argument, callable signature, and public type to a
+  cross-surface contract or an explicit language or composition decision.
 - Defaults live at or below core. The CLI and the bindings use the constant
   core re-exports from the layer that owns it, and don't add a duration, size
   or retry literal of their own without a decision in `verify/ratchet/decisions.toml`.

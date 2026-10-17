@@ -186,6 +186,19 @@ fn parameter(arg: &clap::Arg) -> Value {
         "choices": choices,
         "required": arg.is_required_set(),
         "positional": arg.is_positional(),
+        // Preserve accepted invocation shape, including hidden aliases. These are contract
+        // inputs even when help output chooses not to display them.
+        "index": arg.get_index(),
+        "short": arg.get_short(),
+        "aliases": arg.get_all_aliases().unwrap_or_default(),
+        "shortAliases": arg.get_all_short_aliases().unwrap_or_default(),
+        "action": format!("{:?}", arg.get_action()),
+        "arity": arg.get_num_args().map(|range| json!({
+            "min": range.min_values(),
+            "max": (range.max_values() != usize::MAX).then_some(range.max_values()),
+        })),
+        "valueDelimiter": arg.get_value_delimiter(),
+        "valueTerminator": arg.get_value_terminator().map(|value| value.as_str()),
         "help": arg.get_help().map(|help| help.to_string()).unwrap_or_default(),
         "default": arg.get_default_values()
             .first()
@@ -297,6 +310,28 @@ pub fn render(manifest: &Value, dense: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parameter_contract_keeps_aliases_arity_and_position() {
+        let option = clap::Arg::new("values")
+            .long("values")
+            .short('v')
+            .alias("items")
+            .short_alias('i')
+            .num_args(1..=3)
+            .action(clap::ArgAction::Append)
+            .value_delimiter(',')
+            .value_terminator(";");
+        let value = parameter(&option);
+        assert_eq!(value["short"], "v");
+        assert_eq!(value["aliases"], json!(["items"]));
+        assert_eq!(value["shortAliases"], json!(["i"]));
+        assert_eq!(value["arity"], json!({ "min": 1, "max": 3 }));
+        assert_eq!(value["action"], "Append");
+        assert_eq!(value["valueDelimiter"], ",");
+        assert_eq!(value["valueTerminator"], ";");
+        assert_eq!(parameter(&clap::Arg::new("source").index(2))["index"], 2);
+    }
 
     /// The manifest's commands are exactly the clap tree's, in the same order.
     ///

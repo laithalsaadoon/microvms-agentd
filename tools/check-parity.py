@@ -37,10 +37,10 @@ The check fails when:
     variables, a TS namespace's functions), a method of a class a row or a `[[type]]` names,
     or a CLI command. A `[[type]]`'s accessors (Python properties and their TS twins, which
     napi-rs writes as methods) count as mapped, since the pairing below holds them; its other
-    methods need a row like any class's. Classes themselves, TS interfaces, flags, positionals
-    and global flags aren't in this rule, so a method of a class no row names isn't either;
-    option-level parity is the follow-up issue. `[exempt_names]` lists a name no row should
-    hold, with a reason.
+    methods need a row like any class's. The exhaustive inventory below additionally holds
+    every class, type, callable signature, option, positional and global flag, including
+    members outside these operation rows. `[exempt_names]` lists a name no row should hold,
+    with a reason.
 (b) a name in a row doesn't exist on its surface: a core path, a CLI command or one of its flags,
     a Python or TypeScript name (`Class`, `Class.member`, or a module-level name).
 (c) a row has no cell for a surface, or an exemption has an empty reason.
@@ -57,6 +57,16 @@ The check fails when:
   pass. A surface with no names at all is reported as well.
 - `index.d.ts` carries `@hidden`, `@ignore` or `@private`: TypeDoc leaves such a declaration
   out of what it reports, so the check refuses to read around it.
+
+Inventory (#567). The table's `inventory` file maps every collected input, callable and
+public type to a cross-surface contract or a named permanent exemption. It records each
+surface's accepted shape: argument order and kind, requiredness, aliases, arity, types,
+overloads and receivers. Rust request fields and TypeScript options-object fields are inputs
+too. The check compares independent collector observations with that reviewed manifest;
+there is no mode that automatically enrolls or exempts new declarations. Unknown forms,
+empty collectors, missing shapes, unclaimed or duplicate items, stale mappings and unused
+exemptions fail. Language wrappers may have different syntax, and each wrapper's exact
+shape is held independently within its shared contract.
 
 Defaults (#300). A default a surface states is a copy of core's unless it names core's
 constant, and a copy can drift. Core publishes its defaults as `data.clientDefaults` in the
@@ -131,6 +141,7 @@ from pathlib import Path
 from typing import Any
 
 import npx_cache
+import parity_inventory
 
 ROOT = Path(__file__).resolve().parent.parent
 TABLE = ROOT / "verify" / "parity" / "capabilities.toml"
@@ -140,6 +151,7 @@ PYI = ROOT / "bindings" / "microvms-py" / "microvms.pyi"
 DTS = ROOT / "bindings" / "microvms-js" / "index.d.ts"
 GRIFFE_DUMP = ROOT / "site" / "scripts" / "reference" / "griffe_dump.py"
 TSCONFIG = ROOT / "site" / "scripts" / "reference" / "sdk" / "typedoc.tsconfig.json"
+TS_GLOBALS = ROOT / "tools" / "typescript-globals.cjs"
 SITE_PACKAGE = ROOT / "site" / "package.json"
 
 # The site renders the TypeScript reference with these, so the gate reads the declarations the
@@ -151,7 +163,14 @@ LABELS = {"core": "core", "cli": "CLI", "py": "Python", "ts": "TypeScript"}
 SENTINELS = ("launch", "health", "kill", "run-report")
 CAPABILITY_KEYS = {"id", "sentinel", *SURFACES}
 TYPE_KEYS = {"name", "exempt_members"}
-TABLE_KEYS = {"capability", "type", "flag_groups", "exempt_names", "default"}
+TABLE_KEYS = {
+    "capability",
+    "type",
+    "flag_groups",
+    "exempt_names",
+    "default",
+    "inventory",
+}
 DEFAULT_KEYS = {"id", "sentinel", "core", "exempt", "value", "cli", "py", "ts"}
 ISSUE = re.compile(r"#[1-9][0-9]*")
 
@@ -186,6 +205,7 @@ class Surface:
     defaults: dict[str, str] = field(default_factory=dict)
     # CLI only: the manifest's `clientDefaults`, core's values, or None when it has none
     client_defaults: dict[str, Any] | None = None
+    inventory: parity_inventory.Inventory = field(default_factory=dict)
 
 
 def dunder(name: str) -> bool:
@@ -965,7 +985,24 @@ def run_typedoc(dts: Path, scratch: Path) -> dict[str, Any]:
         ],
         f"typedoc over {dts}",
     )
-    return json.loads(out.read_text(encoding="utf-8"))
+    project = json.loads(out.read_text(encoding="utf-8"))
+    extra = json.loads(
+        run(
+            [
+                "node",
+                str(TS_GLOBALS),
+                str(type_roots.parent / "typescript" / "lib" / "typescript.js"),
+                str(dts.resolve()),
+            ],
+            f"TypeScript ambient declarations in {dts}",
+        )
+    )
+    reported = {item["name"] for item in project.get("children", [])}
+    missing = set(extra["exports"]) - reported
+    if missing:
+        raise ParityError(f"TypeDoc omitted exported declarations: {sorted(missing)}")
+    project["globalDeclarations"] = extra["globals"]
+    return project
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -1005,6 +1042,11 @@ def main() -> int:
     parser.add_argument("--dts", type=Path, default=DTS)
     parser.add_argument("--json", action="store_true", help="print the result as JSON")
     parser.add_argument(
+        "--inventory",
+        action="store_true",
+        help="print observed declaration shapes without enrolling or exempting them",
+    )
+    parser.add_argument(
         "--exemptions",
         action="store_true",
         help="print the table's exemption records as JSON, reading no surface",
@@ -1020,11 +1062,32 @@ def main() -> int:
         return 1
     if args.exemptions:
         return print_exemptions(table)
+
+    inventory_refused = []
+
+    def collected(data, reader, collect):
+        surface = reader(data)
+        try:
+            surface.inventory = collect(data)
+        except parity_inventory.InventoryError as error:
+            # Keep checking the names the existing reader saw. An unreadable inventory
+            # cannot hide a missing capability or change its sentinel's verdict.
+            inventory_refused.append(f"inventory: {error}")
+        return surface
+
     readers: dict[str, Callable[[Path], Surface]] = {
-        "core": lambda scratch: core_surface(read_json(args.core_api)),
-        "cli": lambda scratch: cli_surface(read_json(args.manifest)),
-        "py": lambda scratch: py_surface(run_griffe(args.pyi)),
-        "ts": lambda scratch: ts_surface(run_typedoc(args.dts, scratch)),
+        "core": lambda scratch: collected(
+            read_json(args.core_api), core_surface, parity_inventory.core
+        ),
+        "cli": lambda scratch: collected(
+            read_json(args.manifest), cli_surface, parity_inventory.cli
+        ),
+        "py": lambda scratch: collected(
+            run_griffe(args.pyi), py_surface, parity_inventory.python
+        ),
+        "ts": lambda scratch: collected(
+            run_typedoc(args.dts, scratch), ts_surface, parity_inventory.typescript
+        ),
     }
     surfaces: dict[str, Surface] = {}
     refused: dict[str, str] = {}
@@ -1032,12 +1095,43 @@ def main() -> int:
         for key, read in readers.items():
             try:
                 surfaces[key] = read(Path(scratch))
-            except (ParityError, OSError, json.JSONDecodeError) as error:
+            except (
+                ParityError,
+                parity_inventory.InventoryError,
+                OSError,
+                json.JSONDecodeError,
+            ) as error:
                 surfaces[key] = Surface()
                 refused[key] = str(error)
                 if not args.json:
                     print(f"parity: {error}")
+    if args.inventory:
+        if refused or inventory_refused:
+            for problem in [*refused.values(), *inventory_refused]:
+                print(problem, file=sys.stderr)
+            return 1
+        json.dump(
+            {key: surface.inventory for key, surface in surfaces.items()},
+            sys.stdout,
+            indent=2,
+        )
+        sys.stdout.write("\n")
+        return 0
     problems = pin_problems() + check(table, surfaces, frozenset(refused))
+    problems += inventory_refused
+    inventory_path = table.get("inventory")
+    if not isinstance(inventory_path, str):
+        problems.append("table: name the reviewed inventory file")
+    else:
+        try:
+            inventory = read_json(args.table.parent / inventory_path)
+            problems += parity_inventory.problems(
+                inventory,
+                {key: surface.inventory for key, surface in surfaces.items()},
+                {row["id"] for row in table.get("capability", [])},
+            )
+        except (ParityError, OSError, json.JSONDecodeError) as error:
+            problems.append(f"inventory: {error}")
     if args.json:
         json.dump(
             {

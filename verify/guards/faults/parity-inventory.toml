@@ -1,0 +1,107 @@
+# Exhaustive option/type inventory: each omission changes an asserted verdict.
+[[family]]
+guard = "tools/test_parity_inventory.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "tools/test_parity_inventory.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "parity-inventory-empty-accepted"
+message = "test_each_surface_rejects_new_missing_and_changed_declarations"
+transform = { file = "tools/parity_inventory.py", replace = "        if not actual:\n", with = "        if False:\n" }
+
+[[family.fault]]
+id = "parity-inventory-shape-accepted"
+message = "test_each_surface_rejects_new_missing_and_changed_declarations"
+transform = { file = "tools/parity_inventory.py", replace = "            if actual[name] != expected[name]:\n", with = "            if False:\n" }
+
+[[family.fault]]
+id = "parity-inventory-unmapped-accepted"
+message = "test_each_surface_rejects_new_missing_and_changed_declarations"
+transform = { file = "tools/parity_inventory.py", replace = "        for name in sorted(actual.keys() - claimed[surface]):\n", with = "        for name in []:\n" }
+
+[[family.fault]]
+id = "parity-inventory-cli-order"
+message = "test_cli_positional_order_and_aliases_change_the_contract"
+transform = { file = "tools/parity_inventory.py", replace = "                position += 1\n", with = "                position += 0\n" }
+
+[[family.fault]]
+id = "parity-inventory-python-overload"
+message = "test_griffe_preserves_overload_changes_and_explicit_reexports"
+transform = { file = "tools/parity_inventory.py", replace = "                    for overload in item.get(\"overloads\", [])\n", with = "                    for overload in []\n" }
+
+[[family.fault]]
+id = "parity-inventory-core-field"
+message = "test_core_collects_every_type_field_and_callable_argument"
+transform = { file = "tools/parity_inventory.py", replace = "            for field, type_ in declaration.get(\"fields\", {}).items():\n", with = "            for field, type_ in declaration.get(\"omitted_fields\", {}).items():\n" }
+
+[[family.fault]]
+id = "parity-inventory-typescript-inheritance"
+message = "test_typescript_inheritance_and_accessor_returns_are_held"
+transform = { file = "tools/parity_inventory.py", replace = "                        \"extends\": stable(item.get(\"extendedTypes\", [])),\n", with = "                        \"extends\": [],\n" }
+
+[[family.fault]]
+id = "parity-inventory-rust-target"
+message = "test_rust_canonical_targets_and_parameter_order_are_held"
+transform = { file = "tools/rustdoc_walk.py", replace = "            if target is not None:\n", with = "            if False:\n" }
+
+[[family.fault]]
+id = "parity-inventory-python-reexport"
+message = "test_python_includes_unenrolled_types_all_inputs_and_aliases"
+transform = { file = "tools/parity_inventory.py", replace = "    for alias in dump.get(\"aliases\", []):\n", with = "    for alias in []:\n" }
+
+[[family.fault]]
+id = "parity-inventory-typescript-flags"
+message = "test_typescript_static_readonly_and_abstract_flags_are_held"
+transform = { file = "tools/parity_inventory.py", replace = "\"flags\": stable(item.get(\"flags\", {})),\n                        \"members\": {", with = "\"flags\": {},\n                        \"members\": {" }
+
+[[family.fault]]
+id = "parity-inventory-python-property"
+message = "test_writable_fields_and_readonly_properties_have_distinct_shapes"
+transform = { file = "tools/parity_inventory.py", replace = "\"labels\": child.get(\"labels\", []),", with = "\"labels\": []," }
+
+[[family.fault]]
+id = "parity-inventory-rust-trait-safety"
+message = "test_rust_trait_safety_and_struct_construction_are_held"
+transform = { file = "tools/rustdoc_walk.py", replace = "result[\"is_unsafe\"] = inner.get(\"is_unsafe\", False)", with = "result[\"is_unsafe\"] = False" }
+
+[[family.fault]]
+id = "parity-inventory-rust-construction"
+message = "test_rust_trait_safety_and_struct_construction_are_held"
+transform = { file = "tools/rustdoc_walk.py", replace = "next(iter(shape)) if isinstance(shape, dict) else shape", with = "\"unit\"" }
+
+[[family.fault]]
+id = "parity-inventory-rust-discriminant"
+message = "test_rust_discriminants_and_associated_type_bounds_are_held"
+transform = { file = "tools/rustdoc_walk.py", replace = "\"discriminant\": stable_type(variant.get(\"discriminant\"), doc)", with = "\"discriminant\": None" }
+
+[[family.fault]]
+id = "parity-inventory-rust-associated-type"
+message = "test_rust_discriminants_and_associated_type_bounds_are_held"
+transform = { file = "tools/rustdoc_walk.py", replace = "\"constant\", \"static\", \"assoc_const\", \"assoc_type\"", with = "\"constant\", \"static\", \"assoc_const\"" }
+
+[[family.fault]]
+id = "parity-inventory-rust-impl-bounds"
+message = "test_rust_enclosing_impl_bounds_are_held"
+transform = { file = "tools/rustdoc_walk.py", replace = "if declaration is not None and impl is not None:", with = "if False:" }
+
+[[family.fault]]
+id = "parity-inventory-typescript-ambient"
+message = "test_exported_types_and_ambient_globals_both_enter_the_inventory"
+transform = { file = "tools/typescript-globals.cjs", replace = "    (globals[key] ??= []).push(declaration);", with = "    void declaration;" }
+
+[[family.fault]]
+id = "parity-inventory-python-field"
+message = "test_python_class_fields_are_individually_mapped"
+transform = { file = "tools/parity_inventory.py", replace = "                elif prefix:\n", with = "                elif False:\n" }
+
+[[family]]
+guard = "manifest::tests::parameter_contract_keeps_aliases_arity_and_position"
+run = ["cargo", "test", "-q", "-p", "microvms-cli", "--bin", "microvm", "manifest::tests::parameter_contract_keeps_aliases_arity_and_position"]
+expect = "exit-nonzero"
+suite = "rust"
+
+[[family.fault]]
+id = "parity-inventory-cli-arity"
+message = "manifest::tests::parameter_contract_keeps_aliases_arity_and_position"
+transform = { file = "crates/microvms-cli/src/manifest.rs", replace = "\"min\": range.min_values(),", with = "\"min\": 0," }

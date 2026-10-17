@@ -38,7 +38,7 @@ import json
 import os
 import subprocess
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
 
@@ -121,6 +121,9 @@ class Entry:
     owner: str | None = None
     via: str | None = None
     generic: bool = False
+    # Stable declaration data for the option/type inventory. Numeric rustdoc IDs vary
+    # between builds, so only their named paths enter the contract snapshot.
+    declaration: dict | None = field(default=None, compare=False)
 
     @property
     def name(self) -> str:
@@ -202,6 +205,22 @@ def kind(item: dict) -> str:
     return next(iter(item["inner"]))
 
 
+def stable_type(value, doc):
+    """Drop rustdoc's build-local references while keeping the spelled type structure."""
+    if isinstance(value, list):
+        return [stable_type(child, doc) for child in value]
+    if isinstance(value, dict):
+        result = {
+            key: stable_type(child, doc) for key, child in value.items() if key != "id"
+        }
+        if "id" in value and "path" in value:
+            target = doc.get("paths", {}).get(str(value["id"]))
+            if target is not None:
+                result["path"] = "::".join(target["path"])
+        return result
+    return value
+
+
 class _Walk:
     def __init__(self, doc_dir: Path, read: Iterable[str]):
         self.doc_dir = doc_dir
@@ -224,6 +243,116 @@ class _Walk:
 
     def add(self, entry: Entry) -> None:
         self.entries.setdefault(entry.path, entry)
+
+    @staticmethod
+    def origin(doc: dict, item: dict, fallback: str) -> str:
+        summary = doc.get("paths", {}).get(str(item["id"]))
+        return "::".join(summary["path"]) if summary else fallback
+
+    def declaration(
+        self, doc: dict, item: dict, origin: str | None = None
+    ) -> dict | None:
+        """The public inputs/type shape, independent of rustdoc's build-local IDs."""
+        what = kind(item)
+        inner = item["inner"][what]
+
+        def fields(ids, public_only=True):
+            return {
+                member["name"] or str(position): stable_type(
+                    member["inner"]["struct_field"], doc
+                )
+                for position, member_id in enumerate(ids)
+                if member_id is not None
+                and (member := doc["index"][str(member_id)])
+                and (not public_only or member["visibility"] == "public")
+            }
+
+        def variant_shape(variant):
+            variant = doc["index"][str(variant)]["inner"]["variant"]
+            shape = variant["kind"]
+            result = {"discriminant": stable_type(variant.get("discriminant"), doc)}
+            if isinstance(shape, str):
+                return {**result, "kind": shape}
+            if "tuple" in shape:
+                return {
+                    **result,
+                    "kind": "tuple",
+                    "fields": fields(shape["tuple"], False),
+                }
+            return {
+                **result,
+                "kind": "struct",
+                "fields": fields(shape["struct"]["fields"], False),
+            }
+
+        if what == "function":
+            return {
+                "origin": origin,
+                "parameters": {
+                    name: {"position": position, "type": stable_type(type_, doc)}
+                    for position, (name, type_) in enumerate(
+                        inner.get("sig", {}).get("inputs", [])
+                    )
+                    if name != "self"
+                },
+                "returns": stable_type(inner.get("sig", {}).get("output"), doc),
+                "generics": stable_type(inner.get("generics", {}), doc),
+                "receiver": next(
+                    (
+                        stable_type(type_, doc)
+                        for name, type_ in inner.get("sig", {}).get("inputs", [])
+                        if name == "self"
+                    ),
+                    None,
+                ),
+                "header": inner.get("header", {}),
+            }
+        if what in ("constant", "static", "assoc_const", "assoc_type"):
+            return {"kind": what, "origin": origin, **stable_type(inner, doc)}
+        if what not in (
+            "struct",
+            "enum",
+            "union",
+            "trait",
+            "type_alias",
+            "trait_alias",
+        ):
+            return None
+        result = {"kind": what}
+        result["origin"] = origin
+        result["attributes"] = [
+            attribute
+            for attribute in item.get("attrs", [])
+            if "non_exhaustive" in str(attribute) or "repr" in str(attribute)
+        ]
+        if "generics" in inner:
+            result["generics"] = stable_type(inner["generics"], doc)
+        if what in ("trait", "trait_alias"):
+            result["bounds"] = stable_type(inner.get("bounds", []), doc)
+        if what == "trait":
+            result["is_unsafe"] = inner.get("is_unsafe", False)
+            result["is_auto"] = inner.get("is_auto", False)
+            result["is_dyn_compatible"] = inner.get("is_dyn_compatible", False)
+        if what == "struct":
+            shape = inner["kind"]
+            result["construction"] = (
+                next(iter(shape)) if isinstance(shape, dict) else shape
+            )
+            result["fields"] = fields(
+                shape.get("plain", {}).get("fields", shape.get("tuple", []))
+                if isinstance(shape, dict)
+                else []
+            )
+        elif what == "union":
+            result["fields"] = fields(inner["fields"])
+        elif what == "enum":
+            result["variants"] = {
+                doc["index"][str(variant)]["name"]: variant_shape(variant)
+                for variant in inner["variants"]
+            }
+        elif what == "type_alias":
+            result["type"] = stable_type(inner["type"], doc)
+        return result
 
     def canonical(self, doc: dict, item_id) -> tuple:
         summary = doc["paths"].get(str(item_id))
@@ -311,7 +440,8 @@ class _Walk:
         if (path, what) in self.seen:
             return
         self.seen.add((path, what))
-        self.add(Entry(path, what))
+        origin = self.origin(doc, item, f"{doc['_name']}::{item['name']}")
+        self.add(Entry(path, what, declaration=self.declaration(doc, item, origin)))
         inner = item["inner"][what]
         if what == "module":
             self.walk(doc, item, path)
@@ -323,7 +453,9 @@ class _Walk:
         elif what == "trait":
             generic = bool(inner["generics"]["params"])
             for member_id in inner["items"]:
-                self.member(path, doc["index"][str(member_id)], "trait", generic)
+                self.member(
+                    path, doc["index"][str(member_id)], "trait", generic, doc, origin
+                )
             if doc is self.root:
                 self.extensions.setdefault(str(item["id"]), (doc, item, path))
         if what in ("struct", "enum", "union"):
@@ -337,9 +469,20 @@ class _Walk:
                 for member_id in impl["items"]:
                     member = doc["index"][str(member_id)]
                     if member["visibility"] == "public":
-                        self.member(path, member, "inherent", generic)
+                        self.member(
+                            path, member, "inherent", generic, doc, origin, impl
+                        )
 
-    def member(self, owner: str, member: dict, via: str, generic: bool) -> None:
+    def member(
+        self,
+        owner: str,
+        member: dict,
+        via: str,
+        generic: bool,
+        doc: dict,
+        origin_owner: str,
+        impl: dict | None = None,
+    ) -> None:
         what = kind(member)
         if what not in MEMBER_KINDS:
             return
@@ -348,6 +491,15 @@ class _Walk:
                 "type" in param["kind"]
                 for param in member["inner"]["function"]["generics"]["params"]
             )
+        declaration = self.declaration(
+            doc, member, self.origin(doc, member, f"{origin_owner}::{member['name']}")
+        )
+        if declaration is not None and impl is not None:
+            # A method's callable domain includes the enclosing impl's constraints.
+            declaration["impl"] = {
+                key: stable_type(impl.get(key), doc)
+                for key in ("generics", "for", "trait", "is_unsafe", "is_negative")
+            }
         self.add(
             Entry(
                 f"{owner}::{member['name']}",
@@ -355,6 +507,7 @@ class _Walk:
                 owner=owner,
                 via=via,
                 generic=generic,
+                declaration=declaration,
             )
         )
 
@@ -372,7 +525,13 @@ class _Walk:
                 for home in self.homes.get(self.canonical(doc, target["id"]), []):
                     for member_id in inner["items"]:
                         self.member(
-                            home, doc["index"][str(member_id)], trait_path, generic
+                            home,
+                            doc["index"][str(member_id)],
+                            trait_path,
+                            generic,
+                            doc,
+                            self.origin(doc, trait, trait_path),
+                            impl,
                         )
 
 

@@ -89,7 +89,22 @@ def render(doc_dir: Path) -> str:
         "crates": list(CRATES),
         "paths": paths,
     }
-    return json.dumps(snapshot, indent=2) + "\n"
+    # Keep one declaration per line: changes to an input remain reviewable without
+    # expanding every nested Rust type into a page of JSON formatting.
+    declarations = ",\n".join(
+        "    "
+        + json.dumps(entry.path)
+        + ": "
+        + json.dumps(entry.declaration, sort_keys=True)
+        for entry in entries
+        if entry.declaration is not None
+    )
+    return (
+        json.dumps(snapshot, indent=2)[:-2]
+        + ',\n  "declarations": {\n'
+        + declarations
+        + "\n  }\n}\n"
+    )
 
 
 def main() -> int:

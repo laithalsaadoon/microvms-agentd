@@ -164,8 +164,11 @@ def function(name, **defaults):
         "labels": [],
         "special": name.startswith("__"),
         "parameters": [
-            {"name": "self", "default": None},
-            *({"name": key, "default": value} for key, value in defaults.items()),
+            {"name": "self", "default": None, "kind": "positional-only"},
+            *(
+                {"name": key, "default": value, "kind": "positional or keyword"}
+                for key, value in defaults.items()
+            ),
         ],
     }
 
@@ -258,10 +261,19 @@ def command(name, *flags, positional=(), defaults=None):
     """A manifest command; `defaults` maps a flag to the string the manifest prints for it."""
     defaults = defaults or {}
     parameters = [
-        {"name": flag, "positional": False, "default": defaults.get(flag)}
+        {
+            "name": flag,
+            "positional": False,
+            "default": defaults.get(flag),
+            "type": "string",
+            "required": False,
+        }
         for flag in flags
     ]
-    parameters += [{"name": arg, "positional": True} for arg in positional]
+    parameters += [
+        {"name": arg, "positional": True, "type": "string", "required": True}
+        for arg in positional
+    ]
     return {"name": name, "parameters": parameters}
 
 
@@ -288,7 +300,9 @@ MANIFEST = {
                 defaults={"interval-sec": "2", "format": "table"},
             ),
         ],
-        "globalFlags": [{"name": "json", "positional": False}],
+        "globalFlags": [
+            {"name": "json", "positional": False, "type": "boolean", "required": False}
+        ],
         "clientDefaults": {
             "execWaitSeconds": 300.0,
             "launch": {"wait": True},
@@ -300,6 +314,7 @@ MANIFEST = {
 }
 
 CORE = {
+    "declarations": {"microvms_core::sandbox::Sandbox::run": {"parameters": {}}},
     "paths": {
         "microvms_core::sandbox::Sandbox::run": "method",
         "microvms_core::session::Session::health": "method",
@@ -498,6 +513,7 @@ class RuleTests(FixtureCase):
             [
                 f"parity: {table} doesn't match the surfaces:",
                 "  py: orphan belongs to no row",
+                "  table: name the reviewed inventory file",
             ],
         )
 
@@ -1581,18 +1597,26 @@ class NpxLockTests(unittest.TestCase):
             (cache / "_npx" / "other").mkdir(parents=True)
             declarations = root / "index.d.ts"
             declarations.write_text(DECLARATIONS, encoding="utf-8")
+            globals_reader = root / "globals.cjs"
+            globals_reader.write_text(
+                "process.stdout.write(JSON.stringify({globals: {}, exports: []}));",
+                encoding="utf-8",
+            )
             env = {
                 **first_on_path(bin_dir),
                 "npm_config_cache": str(cache),
                 # spelled here, not asked of the helper, so a lock on any other file fails
                 "FAKE_NPX_LOCK": str(cache / "microvms-agentd-npx.lock"),
             }
-            with mock.patch.dict(os.environ, env):
+            with (
+                mock.patch.dict(os.environ, env),
+                mock.patch.dict(PARITY_GLOBALS, {"TS_GLOBALS": globals_reader}),
+            ):
                 try:
                     project = PARITY["run_typedoc"](declarations, root)
                 except PARITY["ParityError"] as error:
                     self.fail(str(error))
-        self.assertEqual(project, {"children": []})
+        self.assertEqual(project, {"children": [], "globalDeclarations": {}})
 
     def test_a_second_caller_waits_for_the_lock(self):
         # The test holds the lock itself; flock locks belong to an open file, so the helper's

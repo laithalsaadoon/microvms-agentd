@@ -30,6 +30,7 @@ The JSON is printed to stdout. Nothing is written.
 
 from __future__ import annotations
 
+import ast
 import json
 import sys
 from importlib.metadata import version
@@ -139,12 +140,27 @@ def main(argv: list[str]) -> int:
     module = griffe.visit(
         path.stem, filepath=path, code=path.read_text(encoding="utf-8")
     )
+    # In stubs an import re-exports a name only when it uses the explicit `X as X`
+    # spelling or __all__ names it (PEP 484). Ordinary typing imports stay private.
+    explicit_exports = {
+        alias.asname
+        for node in ast.parse(path.read_text(encoding="utf-8")).body
+        if isinstance(node, ast.Import | ast.ImportFrom)
+        for alias in node.names
+        if alias.asname == alias.name
+    } | set(module.exports or ())
+    aliases = [
+        {"kind": "alias", "name": name, "target": member.target_path}
+        for name, member in module.members.items()
+        if member.is_alias and name in explicit_exports
+    ]
     json.dump(
         {
             "griffe": version("griffelib"),
             "module": module.name,
             "docstring": docstring(module),
             "members": member_records(module),
+            "aliases": aliases,
         },
         sys.stdout,
         indent=1,
