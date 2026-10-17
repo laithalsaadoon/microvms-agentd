@@ -23,6 +23,57 @@ use crate::control::ControlPlane;
 use crate::control::transport::Transport;
 use crate::region::Region;
 
+/// In-memory run documents for tests of the ledger and history policies.
+#[derive(Debug, Default)]
+pub struct MemoryRunStore {
+    pub documents: std::sync::Mutex<Vec<crate::run_store::StoredLedger>>,
+    pub histories: std::sync::Mutex<std::collections::HashMap<String, String>>,
+    pub removed: std::sync::Mutex<Vec<String>>,
+}
+
+impl crate::run_store::RunStore for MemoryRunStore {
+    fn ledgers(&self) -> Vec<crate::run_store::StoredLedger> {
+        self.documents.lock().unwrap().clone()
+    }
+
+    fn write_ledger(&self, key: &str, text: &str) -> std::io::Result<()> {
+        let mut documents = self.documents.lock().unwrap();
+        documents.retain(|document| document.key != key);
+        documents.push(crate::run_store::StoredLedger {
+            key: key.into(),
+            location: format!("memory/{key}"),
+            text: Some(text.into()),
+        });
+        Ok(())
+    }
+
+    fn remove_ledger(&self, key: &str) -> std::io::Result<()> {
+        self.documents
+            .lock()
+            .unwrap()
+            .retain(|document| document.key != key);
+        self.removed.lock().unwrap().push(key.into());
+        Ok(())
+    }
+
+    fn read_history(&self, vm_id: &str) -> std::io::Result<String> {
+        self.histories
+            .lock()
+            .unwrap()
+            .get(vm_id)
+            .cloned()
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no history"))
+    }
+
+    fn append_history(&self, vm_id: &str, line: &str) -> std::io::Result<()> {
+        let mut histories = self.histories.lock().unwrap();
+        let history = histories.entry(vm_id.into()).or_default();
+        history.push_str(line);
+        history.push('\n');
+        Ok(())
+    }
+}
+
 /// Daemon bytes every check accepts: a little-endian ELF header naming aarch64
 /// (`EM_AARCH64`), then `payload`, so two tests that need different artifact hashes pass
 /// different payloads.

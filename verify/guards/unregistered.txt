@@ -137,8 +137,8 @@ crates/microvms-cli/src/guards/interrupt.rs::an_interrupt_after_launch_tears_dow
 crates/microvms-cli/src/guards/run.rs::the_run_envelope_and_the_launched_session_report_the_same_posture
 crates/microvms-cli/src/guards/run_dir.rs::a_failing_exec_still_brings_the_artifacts_back
 crates/microvms-cli/src/guards/run_dir.rs::run_dir_uploads_the_tree_execs_in_it_and_brings_back_matched_artifacts
-crates/microvms-cli/src/history.rs::a_terminated_event_appends_and_the_file_survives_it
-crates/microvms-cli/src/history.rs::unseen_hook_observations_append_once_and_a_repeat_poll_appends_nothing
+crates/microvms-cli/src/history_tests.rs::a_terminated_event_appends_and_the_file_survives_it
+crates/microvms-cli/src/history_tests.rs::unseen_hook_observations_append_once_and_a_repeat_poll_appends_nothing
 crates/microvms-cli/src/ledger.rs::clear_refuses_to_remove_a_ledger_that_still_names_a_live_resource
 crates/microvms-cli/src/render.rs::a_launch_with_no_exec_still_states_its_egress_posture
 crates/microvms-cli/src/render.rs::the_dense_cost_rendering_is_three_fields_and_no_total

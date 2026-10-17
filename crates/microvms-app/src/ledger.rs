@@ -208,3 +208,149 @@ pub fn read_all(store: &dyn RunStore) -> Vec<serde_json::Value> {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::run_store::StoredLedger;
+    use crate::testing::MemoryRunStore;
+    use serde_json::json;
+
+    #[test]
+    fn lifecycle_flushes_each_transition_and_keeps_outstanding_runs() {
+        let store = Arc::new(MemoryRunStore::default());
+        store
+            .histories
+            .lock()
+            .unwrap()
+            .insert("vm".into(), "history\n".into());
+        let mut ledger = Ledger::from_store("region", "run-1".into(), store.clone());
+        ledger.record_image("image-arn", "image-name");
+        assert_eq!(
+            read_all(store.as_ref()),
+            vec![json!({
+                "runId": "run-1", "region": "region", "imageIdentifier": "image-arn",
+                "imageName": "image-name", "microvmId": null, "leaked": [],
+            })]
+        );
+        ledger.record_microvm("vm");
+        ledger.record_vm_log_group("logs");
+        ledger.mark_outstanding();
+        assert_eq!(
+            read_all(store.as_ref()),
+            vec![json!({
+                "runId": "run-1", "region": "region", "imageIdentifier": "image-arn",
+                "imageName": "image-name", "microvmId": "vm", "vmLogGroup": "logs",
+                "leaked": ["vm", "image-arn"],
+            })]
+        );
+        ledger.clear();
+        assert!(store.removed.lock().unwrap().is_empty());
+        ledger.mark_deleted(&["image-arn".into()]);
+        assert_eq!(read_all(store.as_ref())[0]["leaked"], json!(["image-arn"]));
+        ledger.clear();
+        assert!(store.removed.lock().unwrap().is_empty());
+        ledger.mark_deleted(&[]);
+        assert_eq!(read_all(store.as_ref())[0]["leaked"], json!([]));
+        ledger.clear();
+        assert_eq!(*store.removed.lock().unwrap(), ["run-1"]);
+        assert!(read_all(store.as_ref()).is_empty());
+        assert_eq!(store.read_history("vm").unwrap(), "history\n");
+    }
+
+    #[test]
+    fn reopening_uses_the_original_key_and_returns_newest_matching_records_first() {
+        let store = Arc::new(MemoryRunStore::default());
+        for (key, vm, run_id) in [
+            ("a", "vm", "old-field"),
+            ("c", "other", "other"),
+            ("b", "vm", "new-field"),
+        ] {
+            store
+                .write_ledger(
+                    key,
+                    &json!({"runId": run_id, "region": "r", "microvmId": vm}).to_string(),
+                )
+                .unwrap();
+        }
+        store.documents.lock().unwrap().push(StoredLedger {
+            key: "z".into(),
+            location: "memory/z".into(),
+            text: None,
+        });
+        store.write_ledger("y", "broken").unwrap();
+        let mut records = Ledger::open_all_for_vm_with_store(store.clone(), "vm");
+        assert_eq!(
+            records
+                .iter()
+                .map(|ledger| ledger.record.run_id.as_str())
+                .collect::<Vec<_>>(),
+            ["new-field", "old-field"]
+        );
+        records[1].record_microvm("changed");
+        let documents = store.ledgers();
+        assert_eq!(documents.len(), 5);
+        assert!(documents.iter().all(|doc| doc.key != "old-field"));
+        let old: Value = serde_json::from_str(
+            documents
+                .iter()
+                .find(|doc| doc.key == "a")
+                .unwrap()
+                .text
+                .as_deref()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(old["microvmId"], "changed");
+    }
+
+    #[test]
+    fn listing_orders_documents_and_preserves_unreadable_locations() {
+        let store = MemoryRunStore::default();
+        *store.documents.lock().unwrap() = vec![
+            StoredLedger {
+                key: "c".into(),
+                location: "file-c".into(),
+                text: None,
+            },
+            StoredLedger {
+                key: "b".into(),
+                location: "file-b".into(),
+                text: Some("broken".into()),
+            },
+            StoredLedger {
+                key: "a".into(),
+                location: "file-a".into(),
+                text: Some("{\"kept\":true}".into()),
+            },
+        ];
+        assert_eq!(
+            read_all(&store),
+            vec![
+                json!({"kept": true}),
+                json!({"runId": "b", "unreadable": "file-b"}),
+                json!({"runId": "c", "unreadable": "file-c"})
+            ]
+        );
+    }
+
+    #[test]
+    fn removal_accepts_each_legal_character_and_refuses_every_other_class() {
+        let store = MemoryRunStore::default();
+        for key in ["abc", "ABC", "123", "-", "_", "1700000000-12_3"] {
+            remove(&store, key).unwrap();
+        }
+        assert_eq!(
+            *store.removed.lock().unwrap(),
+            ["abc", "ABC", "123", "-", "_", "1700000000-12_3"]
+        );
+        for key in ["", ".", "../names/x", "a/b", "a\\b", "a:b", "a b", "café"] {
+            assert_eq!(
+                remove(&store, key).unwrap_err().kind(),
+                std::io::ErrorKind::InvalidInput,
+                "{key:?}"
+            );
+        }
+        assert_eq!(store.removed.lock().unwrap().len(), 6);
+    }
+}

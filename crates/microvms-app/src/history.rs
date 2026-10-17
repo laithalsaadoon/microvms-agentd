@@ -250,3 +250,109 @@ pub fn read_events(store: &dyn RunStore, vm_id: &str) -> Vec<serde_json::Value> 
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::{MemoryRunStore, TestClock};
+    use serde_json::json;
+    use std::time::Duration;
+
+    #[test]
+    fn appends_preserve_old_lines_and_record_sequence_clock_and_event() {
+        let store = Arc::new(MemoryRunStore::default());
+        let original = "{\"seq\":0,\"at\":12,\"event\":\"resumed\"}\n";
+        store
+            .histories
+            .lock()
+            .unwrap()
+            .insert("vm".into(), original.into());
+        let clock = Arc::new(TestClock::new());
+        let now = clock.unix_now().as_secs();
+        let history = History::from_store("vm", store.clone(), clock.clone());
+        history.append(Event::Suspended);
+        clock.advance(Duration::from_secs(7));
+        history.append(Event::Terminated {
+            terminate_accepted: true,
+            undeleted: vec!["image".into()],
+        });
+        assert!(store.read_history("vm").unwrap().starts_with(original));
+        assert_eq!(
+            read_events(store.as_ref(), "vm"),
+            vec![
+                json!({"seq":0,"at":12,"event":"resumed"}),
+                json!({"seq":1,"at":now,"event":"suspended"}),
+                json!({"seq":2,"at":now+7,"event":"terminated","terminateAccepted":true,"undeleted":["image"]}),
+            ]
+        );
+    }
+
+    #[test]
+    fn reading_preserves_objects_and_reports_each_malformed_line() {
+        let store = MemoryRunStore::default();
+        assert!(read_events(&store, "missing").is_empty());
+        store
+            .histories
+            .lock()
+            .unwrap()
+            .insert("vm".into(), "{\"seq\":0}\nbroken\nfalse\n\n".into());
+        assert_eq!(
+            read_events(&store, "vm"),
+            vec![
+                json!({"seq":0}),
+                json!({"line":2,"unreadable":"broken"}),
+                json!({"line":3,"unreadable":"false"}),
+                json!({"line":4,"unreadable":""}),
+            ]
+        );
+    }
+
+    #[test]
+    fn observed_hooks_deduplicate_against_prior_lines_and_the_same_poll() {
+        let store = Arc::new(MemoryRunStore::default());
+        let history = History::from_store("vm", store.clone(), Arc::new(TestClock::new()));
+        append_unseen_hooks(&history, &[]);
+        assert!(store.histories.lock().unwrap().is_empty());
+        history.append(Event::HookObserved {
+            hook: "ready".into(),
+            fired_at: 100,
+        });
+        let observed = [
+            crate::protocol::health::HookObservation {
+                handler: None,
+                hook: "ready".into(),
+                fired_at: 100,
+            },
+            crate::protocol::health::HookObservation {
+                handler: None,
+                hook: "resume".into(),
+                fired_at: 101,
+            },
+            crate::protocol::health::HookObservation {
+                handler: None,
+                hook: "resume".into(),
+                fired_at: 101,
+            },
+            crate::protocol::health::HookObservation {
+                handler: None,
+                hook: "ready".into(),
+                fired_at: 102,
+            },
+        ];
+        append_unseen_hooks(&history, &observed);
+        append_unseen_hooks(&history, &observed);
+        let events = read_events(store.as_ref(), "vm");
+        assert_eq!(events.len(), 3);
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| (&event["hook"], &event["firedAt"]))
+                .collect::<Vec<_>>(),
+            vec![
+                (&json!("ready"), &json!(100)),
+                (&json!("resume"), &json!(101)),
+                (&json!("ready"), &json!(102))
+            ]
+        );
+    }
+}
