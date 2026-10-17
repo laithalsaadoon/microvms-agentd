@@ -258,6 +258,14 @@ class DecideTests(unittest.TestCase):
     def test_a_run_without_a_marker_is_refused(self):
         self.assert_refused([run()], "no marker", markers={})
 
+    def test_successful_recovery_without_live_marker_is_refused(self):
+        recovery = run(display_title="recover reviewed incident resources")
+        self.assert_refused(
+            [recovery],
+            "no live-verified marker",
+            markers={7: "no live-verified marker"},
+        )
+
     def test_a_marker_for_another_draft_is_refused(self):
         other = marker(sha256sums=SUMS.replace("aaaa", "cccc"))
         self.assert_refused([run()], "tested another draft", markers={7: other})

@@ -1,0 +1,125 @@
+# Offline faults for the bounded, incident-specific recovery authority.
+[[family]]
+guard = "test_recover_live.py"
+run = ["uv", "run", "--locked", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_recover_live.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "recovery-core-source-floor"
+message = "FAIL: test_source_proofs_cannot_be_replaced_by_family_or_cleanup_alone"
+transform = { file = "tools/recover-live.py", replace = "    shared = configured = prefix = None", with = "    if not log:\n        return {}\n    shared = configured = prefix = None" }
+
+[[family.fault]]
+id = "recovery-core-source-sentinel"
+message = "FAIL: test_source_proofs_cannot_be_replaced_by_family_or_cleanup_alone"
+transform = { file = "tools/recover-live.py", replace = "        if step != \"conformance suite\":", with = "        if step == \"untrusted\":" }
+
+[[family.fault]]
+id = "recovery-core-manifest-digest"
+message = "FAIL: test_manifest_digest_and_exact_schema_gate"
+transform = { file = "tools/recover-live.py", replace = "    require(digest(raw) == expected, \"manifest_digest\")", with = "    require(True, \"manifest_digest\")" }
+
+[[family.fault]]
+id = "recovery-core-origin-fields"
+message = "FAIL: test_provenance_requires_current_fetch_and_every_origin_field"
+transform = { file = "tools/recover-live.py", replace = "        require(run.get(key) == expected, \"origin_\" + key)", with = "        require(True, \"origin_\" + key)" }
+
+[[family.fault]]
+id = "recovery-core-infra-binding"
+message = "FAIL: test_source_infrastructure_is_derived_from_current_pinned_log"
+transform = { file = "tools/recover-live.py", replace = "        == manifest[\"source_infrastructure\"],", with = "        != manifest[\"source_infrastructure\"]," }
+
+[[family.fault]]
+id = "recovery-core-pagination"
+message = "FAIL: test_every_page_and_bad_page_fail_before_mutation"
+transform = { file = "tools/recover-live.py", replace = "            token = page.get(\"nextToken\")", with = "            token = None" }
+
+[[family.fault]]
+id = "recovery-core-incarnation"
+message = "FAIL: test_preexisting_and_replaced_incarnations_never_delete"
+transform = { file = "tools/recover-live.py", replace = "    require(start <= created <= end, \"outside_source_lifetime\")", with = "    require(True, \"outside_source_lifetime\")" }
+
+[[family.fault]]
+id = "recovery-core-dependency"
+message = "FAIL: test_dependency_veto_covers_vm_and_version_references"
+transform = { file = "tools/recover-live.py", replace = "                    destination != group or arn in deleting, \"configured_group_in_use\"", with = "                    True, \"configured_group_in_use\"" }
+
+[[family.fault]]
+id = "recovery-core-selected-logs"
+message = "FAIL: test_dependency_veto_covers_vm_and_version_references"
+transform = { file = "tools/recover-live.py", replace = "        if resource[\"kind\"] == \"log-group\":\n            api.configured_dependencies", with = "        if resource[\"proof\"] == \"configured-log\":\n            api.configured_dependencies" }
+
+
+[[family.fault]]
+id = "recovery-core-retry-bound"
+message = "FAIL: test_sdk_retries_are_bounded_and_only_classified_errors_retry"
+transform = { file = "tools/recover-live.py", replace = "                if code in RETRY_CODES and attempt < 2:", with = "                if code in RETRY_CODES and attempt < 1:" }
+
+[[family.fault]]
+id = "recovery-core-verifier-exit"
+message = "FAIL: test_verifier_counts_exit_and_duplicate_rows_fail_closed"
+transform = { file = "tools/recover-live.py", replace = "    require(done.returncode == int(result[\"leakCount\"] > 0), \"verifier_exit_mismatch\")", with = "    require(True, \"verifier_exit_mismatch\")" }
+
+[[family.fault]]
+id = "recovery-core-verifier-count"
+message = "FAIL: test_verifier_counts_exit_and_duplicate_rows_fail_closed"
+transform = { file = "tools/recover-live.py", replace = "        leaks == sum(row[\"category\"] == \"leak\" for row in rows)", with = "        True" }
+
+[[family.fault]]
+id = "recovery-core-independent-survivor"
+message = "FAIL: test_independent_verifier_refuses_approved_survivor_but_reports_unrelated"
+transform = { file = "tools/recover-live.py", replace = "        not any(\n            (row[\"kind\"], row[\"sha256\"]) in approved for row in result[\"resources\"]\n        ),", with = "        True," }
+
+[[family.fault]]
+id = "recovery-core-receipt-privacy"
+message = "FAIL: test_failure_and_interrupt_write_only_sanitized_receipt"
+transform = { file = "tools/recover-live.py", replace = "        report[\"reason\"] = \"interrupted_or_invalid_input\"", with = "        report[\"reason\"] = \"private-secret\"" }
+
+[[family]]
+guard = "test_recover_live.py"
+run = ["uv", "run", "--locked", "python", "-m", "unittest", "tools.test_recover_live.RecoveryTests.test_deadline_rejects_calls_before_provider_execution"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "recovery-core-deadline"
+message = "FAIL: test_deadline_rejects_calls_before_provider_execution"
+transform = { file = "tools/recover-live.py", replace = "    def check_time(self) -> None:\n        require(self.clock() < self.deadline, \"deadline\")", with = "    def check_time(self) -> None:\n        require(True, \"deadline\")" }
+
+[[family]]
+guard = "test_recover_live_runtime.py"
+run = ["uv", "run", "--locked", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_recover_live_runtime.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "recovery-core-cancel-iam"
+message = "FAIL: test_duration_observation_exact_role_value_and_interruption"
+transform = { file = "tools/recover-live.py", replace = "            except (Refused, InterruptedError):", with = "            except Refused:" }
+
+[[family.fault]]
+id = "recovery-core-total-budget"
+message = "FAIL: test_total_deadline_includes_successful_provenance_before_aws"
+transform = { file = "tools/recover-live.py", replace = "            require(time.monotonic() < deadline, \"deadline\")", with = "            require(True, \"deadline\")" }
+
+[[family.fault]]
+id = "recovery-core-inherited-budget"
+message = "FAIL: test_inherited_deadline_is_finite_and_shared_with_apply"
+transform = { file = "tools/recover-live.py", replace = "            deadline = min(deadline, inherited)", with = "            deadline = max(deadline, inherited)" }
+
+[[family.fault]]
+id = "recovery-core-api-diagnostic-privacy"
+message = "FAIL: test_terminal_api_diagnostics_use_only_allowlisted_names"
+transform = { file = "tools/recover-live.py", replace = "                        \"code\": code if code in ERROR_CODES else \"unknown\",", with = "                        \"code\": code," }
+
+[[family]]
+guard = "test_recover_live_source.py"
+run = ["uv", "run", "--locked", "pytest", "-q", "-p", "no:cacheprovider", "tools/test_recover_live_source.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "recovery-core-receipt-schema"
+message = "test_receipt_refuses_unsanitized_or_inconsistent_field"
+transform = { file = "tools/recover-live.py", replace = "    valid(isinstance(value, dict))", with = "    return value\n    valid(isinstance(value, dict))" }
