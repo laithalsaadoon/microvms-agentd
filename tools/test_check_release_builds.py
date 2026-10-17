@@ -445,31 +445,63 @@ class ReleaseBuildTests(unittest.TestCase):
                         "release builds: fresh dependencies and pinned tools\n",
                     )
 
-    def test_live_credentials_outlast_the_whole_job(self):
-        # One static session serves the suite and its failure-path cleanup. Comparing
-        # against the job budget catches both a shorter session and a longer job.
+    def test_live_credentials_follow_setup_suite_and_cleanup_boundaries(self):
         workflow = yaml.safe_load(
             (ROOT / ".github/workflows/live-conformance.yml").read_text()
         )
-        job = workflow.get("jobs", {}).get("live", {})
-        timeout = job.get("timeout-minutes")
-        self.assertIs(type(timeout), int, "live job needs an explicit numeric timeout")
-        self.assertGreater(timeout, 0)
+        job = workflow["jobs"]["live"]
+        self.assertEqual(job["timeout-minutes"], 300)
+        steps = job["steps"]
         credentials = [
-            step
-            for step in job.get("steps", [])
+            (index, step)
+            for index, step in enumerate(steps)
             if str(step.get("uses", "")).split("@")[0]
             == "aws-actions/configure-aws-credentials"
         ]
-        self.assertEqual(len(credentials), 1, "live job needs its credential step")
-        duration = credentials[0].get("with", {}).get("role-duration-seconds")
-        self.assertIs(
-            type(duration), int, "live credentials need an explicit numeric duration"
+        self.assertEqual(len(credentials), 2)
+        setup_index, setup = credentials[0]
+        cleanup_index, cleanup = credentials[1]
+        for step in (setup, cleanup):
+            self.assertEqual(step["with"].get("role-duration-seconds"), 7200)
+            self.assertEqual(step["uses"], setup["uses"])
+            self.assertEqual(
+                step["with"]["role-to-assume"], setup["with"]["role-to-assume"]
+            )
+        suite_index = next(
+            i for i, step in enumerate(steps) if step.get("name") == "conformance suite"
         )
-        self.assertGreater(
-            duration,
-            timeout * 60,
-            "live credentials must outlast the whole job, including cleanup",
+        suite = steps[suite_index]
+        self.assertLess(setup_index, suite_index)
+        self.assertEqual(cleanup_index, suite_index + 1)
+        self.assertEqual(suite["timeout-minutes"], 240)
+        self.assertEqual(suite["env"]["PYTHONUNBUFFERED"], "1")
+        self.assertEqual(suite["env"]["LIVE_ROLE_ARN"], setup["with"]["role-to-assume"])
+        self.assertEqual(
+            suite["run"],
+            'python3 tools/live-credentials.py ./conformance/run_rs.py --binary "$AGENTD" --microvm-binary "$MICROVM"',
+        )
+        self.assertEqual(cleanup["if"], "always()")
+        self.assertIs(cleanup["with"]["unset-current-credentials"], True)
+        self.assertEqual(cleanup["with"]["action-timeout-s"], 120)
+        self.assertEqual(cleanup["timeout-minutes"], 3)
+        following = steps[cleanup_index + 1 : cleanup_index + 5]
+        self.assertEqual(
+            [step["name"] for step in following],
+            [
+                "pinned rates match the Pricing API",
+                "verify nothing leaked",
+                "destroy the stack",
+                "verify again after destroy",
+            ],
+        )
+        self.assertEqual(
+            [step.get("if") for step in following],
+            [
+                None,
+                "always()",
+                "always() && inputs.destroy_after",
+                "always() && inputs.destroy_after",
+            ],
         )
 
     def test_node_build_commands_use_the_manifest_generator_pin(self):
