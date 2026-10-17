@@ -18,6 +18,29 @@ verification: uncovered requirements and undecided guard relationships remain.
   remain recorded with their implementation references; they are not quantities.
   The old unscoped waivers for these codes have been removed.
 
+## Suspend call history
+
+`STATE-5` requires the sticky `suspend_outside_running` audit flag to remain
+false. The `STATE-4` effect records the lifecycle before the suspend transition,
+and every other effect preserves the flag. This matches the audit counter in
+`crates/model/src/client.rs` and the local guard in
+`crates/microvms-app/src/sandbox.rs::suspend`, read October 17, 2026. A legal
+suspend and a repeated call from `SUSPENDING` leave the same lifecycle and token
+state, so the resulting state alone does not establish the call's legality.
+
+`mise run spec:regression` requires a frame-closed, certificate-verified proof
+for the authored model. It then widens the `STATE-4` guard to admit calls from
+`SUSPENDING` and `SUSPENDED`, and requires a `STATE-5` violation whose trace records
+the bad pre-state. Registered faults `formal-state5-post-state-only` and
+`formal-state5-pre-state-unrecorded` each make this test fail. The existing model
+counterexample and the runtime's zero-wire-call test check the corresponding
+implementation guard.
+
+This transition model describes accepted suspend calls; failed outbound attempts
+are not represented. The regression isolates reachability without loading the
+semantic model. It establishes neither strict coverage nor exhaustive runtime
+call-attempt coverage.
+
 ## Ensure-image obligations
 
 `IMAGE-8` applies to a build attempt: upload the artifact to its content-addressed

@@ -30,6 +30,15 @@ env = { SYMSPEC_MODEL_DIR = "{{config_root}}/verify/formal/model" }
 # Z3 cancellation is cooperative; an explicit reachability timeout is required.
 run = "./tools/check-spec.sh verify/spec/core.symspec.json --reachability-timeout-ms 5000"
 
+["spec:regression"]
+description = "Prove the core suspend invariant rejects an illegal-call transition"
+tools = { node = "24.22.0" }
+# This exercises only reachability; the semantic model and strict coverage are separate.
+run = [
+  "npm ci --prefix verify/formal --ignore-scripts --no-audit --no-fund",
+  "node --test verify/formal/state5.test.mjs",
+]
+
 ["trace:check"]
 description = "Every traced requirement appears in the model, a Gherkin tag, a fuzz harness and a test that name it, and the code; docs/TRACEABILITY.md is current"
 # Offline: ast-grep from `[tools]` reads the Rust and Node tests, stdlib `ast` the Python ones,

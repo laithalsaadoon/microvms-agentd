@@ -262,7 +262,7 @@
       "responseKind": "effect",
       "satisfies": [],
       "sentence": "While the lifecycle is RUNNING, the microvms-core shall accept a suspend request and transition the lifecycle to SUSPENDING.",
-      "stateEffect": "when vm_state = RUNNING: vm_state := SUSPENDING, token_installed := token_installed, image_exists := image_exists, was_terminated := was_terminated, bootstrap_count := bootstrap_count",
+      "stateEffect": "when vm_state = RUNNING: vm_state := SUSPENDING, token_installed := token_installed, image_exists := image_exists, was_terminated := was_terminated, bootstrap_count := bootstrap_count, suspend_outside_running := suspend_outside_running or vm_state != RUNNING",
       "status": "approved",
       "systemName": "microvms-core",
       "systemResponse": "accept a suspend request and transition the lifecycle to SUSPENDING",
@@ -552,13 +552,14 @@
       "responseKind": "constraint",
       "satisfies": [],
       "sentence": "The microvms-core shall not issue a suspend call while the lifecycle is not RUNNING.",
-      "stateConstraint": "not (vm_state = SUSPENDING and (was_terminated or not token_installed))",
+      "stateConstraint": "not suspend_outside_running",
       "status": "approved",
       "systemName": "microvms-core",
       "systemResponse": "issue a suspend call while the lifecycle is not RUNNING",
       "updatedAt": "2026-08-08T02:10:17.186Z",
       "verificationMethod": "test",
-      "verifies": []
+      "verifies": [],
+      "verificationNote": "The sticky audit flag records the pre-state of each modeled suspend call, matching client::State::suspends_outside_running. STATE-4 models accepted calls; failed outbound attempts remain outside this transition model. The regression widens its guard and requires a counterexample for a repeated suspend from SUSPENDING."
     },
     "56662dbf-116c-45d4-b86c-38ab51d4a223": {
       "createdAt": "2026-08-08T01:56:50.991Z",
@@ -687,7 +688,7 @@
       "responseKind": "effect",
       "satisfies": [],
       "sentence": "When the platform reports that the run hook answered with a success status, the microvms-core shall mark the lifecycle RUNNING and the agent token installed.",
-      "stateEffect": "when vm_state = PENDING and bootstrap_count = 0 and image_exists: vm_state := RUNNING, token_installed := true, bootstrap_count := bootstrap_count + 1, image_exists := image_exists, was_terminated := was_terminated",
+      "stateEffect": "when vm_state = PENDING and bootstrap_count = 0 and image_exists: vm_state := RUNNING, token_installed := true, bootstrap_count := bootstrap_count + 1, image_exists := image_exists, was_terminated := was_terminated, suspend_outside_running := suspend_outside_running",
       "status": "approved",
       "systemName": "microvms-core",
       "systemResponse": "mark the lifecycle RUNNING and the agent token installed",
@@ -985,7 +986,7 @@
       "responseKind": "effect",
       "satisfies": [],
       "sentence": "When the platform reports suspension complete, the microvms-core shall mark the lifecycle SUSPENDED.",
-      "stateEffect": "when vm_state = SUSPENDING: vm_state := SUSPENDED, token_installed := token_installed, image_exists := image_exists, was_terminated := was_terminated, bootstrap_count := bootstrap_count",
+      "stateEffect": "when vm_state = SUSPENDING: vm_state := SUSPENDED, token_installed := token_installed, image_exists := image_exists, was_terminated := was_terminated, bootstrap_count := bootstrap_count, suspend_outside_running := suspend_outside_running",
       "status": "approved",
       "systemName": "microvms-core",
       "systemResponse": "mark the lifecycle SUSPENDED",
@@ -1007,7 +1008,7 @@
       "responseKind": "effect",
       "satisfies": [],
       "sentence": "When a terminate request is accepted, the microvms-core shall transition the lifecycle to TERMINATING and record the VM as terminated.",
-      "stateEffect": "when vm_state = PENDING or vm_state = RUNNING or vm_state = SUSPENDED: vm_state := TERMINATING, was_terminated := true, token_installed := token_installed, image_exists := image_exists, bootstrap_count := bootstrap_count",
+      "stateEffect": "when vm_state = PENDING or vm_state = RUNNING or vm_state = SUSPENDED: vm_state := TERMINATING, was_terminated := true, token_installed := token_installed, image_exists := image_exists, bootstrap_count := bootstrap_count, suspend_outside_running := suspend_outside_running",
       "status": "approved",
       "systemName": "microvms-core",
       "systemResponse": "transition the lifecycle to TERMINATING and record the VM as terminated",
@@ -1127,7 +1128,7 @@
       "responseKind": "effect",
       "satisfies": [],
       "sentence": "While the lifecycle is SUSPENDED, the microvms-core shall accept a resume request, reuse the installed agent token, and transition the lifecycle to RUNNING without re-delivering a run-hook payload.",
-      "stateEffect": "when vm_state = SUSPENDED: vm_state := RUNNING, token_installed := token_installed, image_exists := image_exists, was_terminated := was_terminated, bootstrap_count := bootstrap_count",
+      "stateEffect": "when vm_state = SUSPENDED: vm_state := RUNNING, token_installed := token_installed, image_exists := image_exists, was_terminated := was_terminated, bootstrap_count := bootstrap_count, suspend_outside_running := suspend_outside_running",
       "status": "approved",
       "systemName": "microvms-core",
       "systemResponse": "accept a resume request, reuse the installed agent token, and transition the lifecycle to RUNNING without re-delivering a run-hook payload",
@@ -1148,7 +1149,7 @@
       "responseKind": "effect",
       "satisfies": [],
       "sentence": "When a launch request is accepted, the microvms-core shall transition the lifecycle to PENDING and record the image as existing.",
-      "stateEffect": "when vm_state = PENDING: image_exists := true, vm_state := vm_state, token_installed := token_installed, was_terminated := was_terminated, bootstrap_count := bootstrap_count",
+      "stateEffect": "when vm_state = PENDING: image_exists := true, vm_state := vm_state, token_installed := token_installed, was_terminated := was_terminated, bootstrap_count := bootstrap_count, suspend_outside_running := suspend_outside_running",
       "status": "approved",
       "systemName": "microvms-core",
       "systemResponse": "transition the lifecycle to PENDING and record the image as existing",
@@ -1338,7 +1339,7 @@
       "responseKind": "effect",
       "satisfies": [],
       "sentence": "When the platform reports termination complete, the microvms-core shall mark the lifecycle TERMINATED.",
-      "stateEffect": "when vm_state = TERMINATING: vm_state := TERMINATED, token_installed := token_installed, image_exists := image_exists, was_terminated := was_terminated, bootstrap_count := bootstrap_count",
+      "stateEffect": "when vm_state = TERMINATING: vm_state := TERMINATED, token_installed := token_installed, image_exists := image_exists, was_terminated := was_terminated, bootstrap_count := bootstrap_count, suspend_outside_running := suspend_outside_running",
       "status": "approved",
       "systemName": "microvms-core",
       "systemResponse": "mark the lifecycle TERMINATED",
@@ -1797,7 +1798,7 @@
     }
   },
   "stateModel": {
-    "initial": "vm_state = PENDING and token_installed = false and image_exists = false and was_terminated = false and bootstrap_count = 0",
+    "initial": "vm_state = PENDING and token_installed = false and image_exists = false and was_terminated = false and bootstrap_count = 0 and suspend_outside_running = false",
     "variables": [
       {
         "domain": [
@@ -1835,6 +1836,11 @@
         "initial": "bootstrap_count = 0",
         "name": "bootstrap_count",
         "type": "int"
+      },
+      {
+        "initial": "suspend_outside_running = false",
+        "name": "suspend_outside_running",
+        "type": "bool"
       }
     ]
   },
