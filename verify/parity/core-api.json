@@ -1159,6 +1159,7 @@
     "microvms_core::provision::Failure::NotAarch64": "variant",
     "microvms_core::provision::Fetch": "trait",
     "microvms_core::provision::Fetch::fetch": "method",
+    "microvms_core::provision::Fetch::fetch_bytes": "method",
     "microvms_core::provision::Fetched": "struct",
     "microvms_core::provision::GitHubRelease": "struct",
     "microvms_core::provision::GitHubRelease::from_env": "method",

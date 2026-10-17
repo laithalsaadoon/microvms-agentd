@@ -62,7 +62,7 @@
 //! truncated binary where the next request reads. Beside each entry sits a digest record
 //! written after verification, and a cache hit is served only when the bytes still hash to
 //! it (BIND-19). An entry that does not match, or that has no record (one an older client
-//! installed), is discarded and fetched again. The record lives in the same directory as
+//! installed), is ignored and fetched again. The record lives in the same directory as
 //! the binary, so this catches corruption and a binary copied over the entry, not a writer
 //! who replaces both; such a writer could replace a caller-supplied binary just as well.
 //!
@@ -79,6 +79,7 @@
 //! lets a test open a socket to GitHub.
 
 use std::fmt;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 // The ELF checks read bytes, so they're rules with no I/O; this module is where a caller has
@@ -290,6 +291,24 @@ pub trait Fetch {
         dest: &Path,
         progress: &mut dyn FnMut(&str),
     ) -> Result<Verification, String>;
+
+    /// Return the verified bytes. `dest` is a private temporary file for legacy
+    /// implementations of [`Self::fetch`]; production fetches return their verified
+    /// in-memory download without reading it back from disk.
+    fn fetch_bytes(
+        &self,
+        tag: &str,
+        dest: &Path,
+        progress: &mut dyn FnMut(&str),
+    ) -> Result<Fetched, String> {
+        let verification = self.fetch(tag, dest, progress)?;
+        let bytes = std::fs::read(dest)
+            .map_err(|error| format!("could not read {}: {error}", dest.display()))?;
+        Ok(Fetched {
+            bytes,
+            verification,
+        })
+    }
 }
 
 /// A version as a release tag spells it, without the leading `v`, or a refusal.
@@ -492,7 +511,7 @@ fn caller_supplied(
 }
 
 /// The cache entry for `version`, when its bytes still match its record; otherwise the
-/// entry is discarded and `None` sends the caller to a fetch (BIND-19).
+/// entry is ignored and `None` sends the caller to a fetch (BIND-19).
 fn cache_hit(
     state_dir: &Path,
     cached: &Path,
@@ -522,16 +541,12 @@ fn cache_hit(
         _ => {
             progress(&format!(
                 "cached agentd v{version} at {} does not match the digest recorded when it \
-                 was verified; discarding it and fetching the release again",
+                 was verified; ignoring it and fetching the release again",
                 cached.display()
             ));
-            for path in [cached.to_path_buf(), record_path(state_dir, version)] {
-                match std::fs::remove_file(&path) {
-                    Ok(()) => {}
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(io_error(&path, "discard", &error)),
-                }
-            }
+            // Another caller may have installed the binary and not its record yet.
+            // Never unlink either path here: only this call's verified replacement
+            // may change the cache, so a concurrent successful install stays usable.
             Ok(None)
         }
     }
@@ -550,23 +565,17 @@ fn fetched(
     ));
     let dir = cached.parent().expect("the cache path has a parent");
     std::fs::create_dir_all(dir).map_err(|error| io_error(dir, "create", &error))?;
-    // A partial name in the same directory, so the final `rename` is atomic on the same
-    // filesystem: an interrupted download leaves a `.partial` nothing trusts, never a
-    // truncated `agentd` the next request reads.
-    let partial = dir.join(format!(".{ASSET}.partial-{}", std::process::id()));
-    let verification = match fetch.fetch(&tag, &partial, progress) {
-        Ok(verification) => verification,
-        Err(reason) => {
-            let _ = std::fs::remove_file(&partial);
-            return Err(fetch_error(&tag, &reason));
-        }
-    };
-    let bytes = std::fs::read(&partial).map_err(|error| {
-        let _ = std::fs::remove_file(&partial);
-        io_error(&partial, "read", &error)
-    })?;
+    // Every call owns its temporary files. A PID-only name lets a second thread
+    // truncate a verified download before the first thread reads or installs it.
+    let mut partial = tempfile::NamedTempFile::new_in(dir)
+        .map_err(|error| io_error(dir, "create temporary binary in", &error))?;
+    let Fetched {
+        bytes,
+        verification,
+    } = fetch
+        .fetch_bytes(&tag, partial.path(), progress)
+        .map_err(|reason| fetch_error(&tag, &reason))?;
     if let Some(why) = not_aarch64(&bytes) {
-        let _ = std::fs::remove_file(&partial);
         return Err(ProvisionError::new(
             Failure::NotAarch64,
             format!(
@@ -577,27 +586,34 @@ fn fetched(
         .remedy("this is a release-asset defect worth reporting, not a local mistake"));
     }
 
+    partial
+        .as_file_mut()
+        .set_len(0)
+        .and_then(|()| partial.write_all(&bytes))
+        .map_err(|error| io_error(partial.path(), "write", &error))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(&partial, std::fs::Permissions::from_mode(0o755))
-            .map_err(|error| io_error(&partial, "chmod", &error))?;
+        partial
+            .as_file()
+            .set_permissions(std::fs::Permissions::from_mode(0o755))
+            .map_err(|error| io_error(partial.path(), "chmod", &error))?;
     }
-    std::fs::rename(&partial, cached).map_err(|error| io_error(cached, "install", &error))?;
+    partial
+        .persist(cached)
+        .map_err(|error| io_error(cached, "install", &error.error))?;
     // The record after the binary: a crash between the two leaves a binary with no record,
-    // which the next request discards and fetches again rather than trusts.
+    // which the next request ignores and fetches again rather than trusts.
     let sha256 = sha256_hex(&bytes);
     let record = record_path(state_dir, &version);
-    let record_partial = dir.join(format!(".{RECORD}.partial-{}", std::process::id()));
-    std::fs::write(
-        &record_partial,
-        record_json(&version, &sha256, verification),
-    )
-    .and_then(|()| std::fs::rename(&record_partial, &record))
-    .map_err(|error| {
-        let _ = std::fs::remove_file(&record_partial);
-        io_error(&record, "record", &error)
-    })?;
+    let mut record_partial = tempfile::NamedTempFile::new_in(dir)
+        .map_err(|error| io_error(dir, "create temporary record in", &error))?;
+    record_partial
+        .write_all(record_json(&version, &sha256, verification).as_bytes())
+        .map_err(|error| io_error(&record, "write record", &error))?;
+    record_partial
+        .persist(&record)
+        .map_err(|error| io_error(&record, "record", &error.error))?;
     progress(&format!(
         "fetched and verified agentd {tag} ({}); cached at {}",
         verification.as_str(),

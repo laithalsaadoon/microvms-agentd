@@ -519,10 +519,19 @@ impl<S: ReleaseSource, V: AttestationVerifier> Fetch for PolicyFetch<S, V> {
         dest: &Path,
         progress: &mut dyn FnMut(&str),
     ) -> Result<Verification, String> {
-        let fetched = fetch_release(&self.source, &self.verifier, tag, progress)?;
+        let fetched = self.fetch_bytes(tag, dest, progress)?;
         std::fs::write(dest, &fetched.bytes)
             .map_err(|error| format!("could not write {ASSET} to {}: {error}", dest.display()))?;
         Ok(fetched.verification)
+    }
+
+    fn fetch_bytes(
+        &self,
+        tag: &str,
+        _: &Path,
+        progress: &mut dyn FnMut(&str),
+    ) -> Result<super::Fetched, String> {
+        fetch_release(&self.source, &self.verifier, tag, progress)
     }
 }
 
@@ -557,6 +566,18 @@ impl Fetch for HttpsFetch {
         dest: &Path,
         progress: &mut dyn FnMut(&str),
     ) -> Result<Verification, String> {
+        let fetched = self.fetch_bytes(tag, dest, progress)?;
+        std::fs::write(dest, &fetched.bytes)
+            .map_err(|error| format!("could not write {ASSET} to {}: {error}", dest.display()))?;
+        Ok(fetched.verification)
+    }
+
+    fn fetch_bytes(
+        &self,
+        tag: &str,
+        dest: &Path,
+        progress: &mut dyn FnMut(&str),
+    ) -> Result<super::Fetched, String> {
         let verifier = SigstoreVerifier::public_good()?;
         match &self.directory {
             Some(directory) => {
@@ -568,13 +589,13 @@ impl Fetch for HttpsFetch {
                     source: directory.clone(),
                     verifier,
                 }
-                .fetch(tag, dest, progress)
+                .fetch_bytes(tag, dest, progress)
             }
             None => PolicyFetch {
                 source: self.release.clone(),
                 verifier,
             }
-            .fetch(tag, dest, progress),
+            .fetch_bytes(tag, dest, progress),
         }
     }
 }

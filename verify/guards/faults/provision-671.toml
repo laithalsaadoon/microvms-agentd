@@ -1,0 +1,19 @@
+# ── provision-671: FAIL_TO_PASS entries tools/fail-to-pass.py emitted ──
+
+# FAIL_TO_PASS: fails on 5bf08393dcf8 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-concurrent-cache-misses-own-their-temporary-files"
+guard = "concurrent_cache_misses_own_their_temporary_files"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "provision_concurrent", "--", "--exact", "concurrent_cache_misses_own_their_temporary_files"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-concurrent-cache-misses-own-their-temporary-files.patch"
+
+# FAIL_TO_PASS: fails on 5bf08393dcf8 with the fix taken out (tools/fail-to-pass.py).
+[[fault]]
+id = "f2p-a-cache-miss-preserves-an-install-waiting-for-its-record"
+guard = "a_cache_miss_preserves_an_install_waiting_for_its_record"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "provision_concurrent", "--", "--exact", "a_cache_miss_preserves_an_install_waiting_for_its_record"]
+expect = "test-failed"
+suite = "rust"
+patch = "verify/guards/faults/f2p-a-cache-miss-preserves-an-install-waiting-for-its-record.patch"
