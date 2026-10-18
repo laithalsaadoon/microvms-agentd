@@ -561,14 +561,18 @@ while True: time.sleep(.01)
 
     def test_refresh_failure_during_grace_forces_kill_and_reap(self):
         child = Mock(pid=123)
+        refresh = Mock(side_effect=RuntimeError("secret"))
         with (
             patch.object(wrapper.os, "killpg") as kill,
             patch.object(wrapper.time, "monotonic", return_value=0),
+            patch.object(
+                wrapper.time,
+                "sleep",
+                side_effect=AssertionError("refresh failure must stop without waiting"),
+            ),
         ):
-            self.assertIs(
-                wrapper.stop_group(child, Mock(side_effect=RuntimeError("secret"))),
-                False,
-            )
+            self.assertIs(wrapper.stop_group(child, refresh), False)
+        refresh.assert_called_once_with(wrapper.STOP_SECONDS)
         self.assertEqual(
             [c.args for c in kill.call_args_list],
             [
