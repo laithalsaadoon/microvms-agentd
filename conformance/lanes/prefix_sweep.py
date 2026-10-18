@@ -13,6 +13,7 @@ from typing import Any
 from harness.constants import SERVICE
 from harness.envelope import Envelope
 from harness.image import conformance_dockerfile, resolve_base_ref
+from harness.observation import listing_pages
 from harness.results import Results
 
 from lanes.ensure_image import READY_IMAGE_STATES, image_state
@@ -57,7 +58,7 @@ def check_reports(
 def image_vm_ids(plane: Any, image_arn: str) -> set[str]:
     return {
         str(item["microvmId"])
-        for page in plane.get_paginator("list_microvms").paginate()
+        for page in listing_pages(plane, "list_microvms", imageIdentifier=image_arn)
         for item in page.get("items", [])
         if item.get("imageArn") == image_arn
     }

@@ -112,6 +112,7 @@ def drive_native_box(cli: Cli, binary: Path, aws: Any, results: Results) -> None
                 str(binary),
                 "--name",
                 prefix,
+                "--reuse",
                 "--s3-key-prefix",
                 prefix,
                 "--repair-identity",

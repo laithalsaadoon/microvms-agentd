@@ -1,5 +1,5 @@
 [[family]]
-guard = "conformance/run_rs.py --self-test: conformance/selftest/retry_telemetry.py and conformance/selftest/ensure_image.py"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/retry_telemetry.py, conformance/selftest/ensure_image.py, and conformance/selftest/prefix_sweep.py"
 run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
 expect = "exit-nonzero"
 suite = "script"
@@ -37,3 +37,23 @@ message = "FAIL  the ensure-image cleanup fails exactly where each account misle
 transform = { file = "conformance/lanes/ensure_image.py", replace = '''states = retry_observation(
                 read_states, deadline=deadline, clock=clock, sleep=sleep
             )''', with = 'states = read_states()' }
+
+[[family.fault]]
+id = "observer-listing-image-filter"
+message = "FAIL  retry probe lists only its image's VMs, 50 to a page"
+transform = { file = "conformance/lanes/retry_telemetry.py", replace = 'listing_pages(plane, "list_microvms", imageIdentifier=image)', with = 'listing_pages(plane, "list_microvms")' }
+
+[[family.fault]]
+id = "observer-listing-page-size"
+message = "FAIL  retry probe lists only its image's VMs, 50 to a page"
+transform = { file = "conformance/harness/observation.py", replace = 'LISTING_PAGES = {"PageSize": 50}', with = 'LISTING_PAGES = {"PageSize": 10}' }
+
+[[family.fault]]
+id = "prefix-sweep-listing-foreign-image"
+message = "FAIL  prefix sweep lists only its image's VMs by ARN, 50 to a page"
+transform = { file = "conformance/lanes/prefix_sweep.py", replace = 'if item.get("imageArn") == image_arn', with = 'if item.get("microvmId")' }
+
+[[family.fault]]
+id = "prefix-sweep-listing-image-filter"
+message = "FAIL  prefix sweep lists only its image's VMs by ARN, 50 to a page"
+transform = { file = "conformance/lanes/prefix_sweep.py", replace = 'listing_pages(plane, "list_microvms", imageIdentifier=image_arn)', with = 'listing_pages(plane, "list_microvms")' }

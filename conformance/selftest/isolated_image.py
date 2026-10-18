@@ -21,7 +21,7 @@ class HiddenVmAws(FakeEnsureImageAws):
 
     def get_paginator(self, operation: str):
         if operation == "list_microvms":
-            return SimpleNamespace(paginate=lambda: [{"items": []}])
+            return SimpleNamespace(paginate=lambda **_: [{"items": []}])
         return super().get_paginator(operation)
 
     def get_microvm(self, *, microvmIdentifier: str) -> dict:

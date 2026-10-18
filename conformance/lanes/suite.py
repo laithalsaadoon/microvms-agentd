@@ -184,8 +184,8 @@ def run_suite(args: argparse.Namespace) -> int:
             # anything was launched so a reader knew what the run would not tell them
             # *while* it spent money. Every one of those became a real check when the CLI
             # grew the five surfaces `docs/CLI-COVERAGE-PLAN.md` names, so there is nothing
-            # left to announce. The summary still prints a skip count, which should read
-            # zero — see `Results.skip`.
+            # left to announce. The summary still prints each skip with its reason, and the
+            # one expected entry is #629's deferred measurement (see `Results.skip`).
             # The Python and Node bindings build from the working tree on a thread of their
             # own, started first so the build overlaps the suite image's build in
             # `drive_lifecycle`; `drive_binding_handles` joins it. It calls no AWS API.
@@ -641,24 +641,22 @@ def run_suite(args: argparse.Namespace) -> int:
     expressed = len(results.passed) + len(results.failed)
     total = expressed + len(results.skipped)
     print(
-        f"\n  {expressed} of {total} named checks are expressible through this client."
+        f"\n  {expressed} of {total} named checks reached a verdict through this client."
     )
     if results.skipped:
-        # Never reached today, and the branch stays: the moment a surface goes away or a
-        # check becomes inexpressible again, this is the line that says so instead of the
-        # count quietly shrinking.
+        # #629's deferred measurement is the one expected skip, when the service answers
+        # inconclusively. Any other skip is a check this client can no longer settle, and
+        # this line names it instead of the count quietly shrinking.
         print(
-            f"  {len(results.skipped)} are not, and each is named above with the surface "
-            "that would have to grow."
+            f"  {len(results.skipped)} did not, and each is named above with its reason."
         )
-    else:
-        print(
-            "  The 34 the deleted Python oracle alone could reach — file transfer, tar "
-            "round trips,\n  the four hostile archives, SSE ordering, the stdin lifecycle, "
-            "double-ack, the 8 MiB cap\n  trio, the identity-repair flags — are live checks "
-            "now, under the names run.py gave them.\n  This report diffs line for line "
-            "against the last oracle run in git history."
-        )
+    print(
+        "  The 34 the deleted Python oracle alone could reach — file transfer, tar "
+        "round trips,\n  the four hostile archives, SSE ordering, the stdin lifecycle, "
+        "double-ack, the 8 MiB cap\n  trio, the identity-repair flags — are live checks "
+        "now, under the names run.py gave them.\n  This report diffs line for line "
+        "against the last oracle run in git history."
+    )
     print("\n  every invocation (secret arguments and agent tasks redacted):")
     for line in cli.log:
         print(f"    {line}")

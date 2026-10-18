@@ -7,7 +7,8 @@
 """The live conformance suite: the **Rust** client stack, driven through the `microvm` CLI.
 
 This is the only live suite. It drives the real CLI against AWS and records each named check as
-PASS or FAIL, with none recorded SKIP. A check's name is its identity: a report diffs line for
+PASS or FAIL. The one expected SKIP is #629's deferred measurement, recorded when the service
+answers inconclusively (see `Results.skipped` below). A check's name is its identity: a report diffs line for
 line against earlier runs, the last run of the deleted Python oracle (`conformance/run.py`)
 among them, and every check that suite had still carries its name byte for byte.
 
@@ -59,8 +60,9 @@ A hybrid driver, and every path is deliberate
    through the binding's public API alone. The request through each handle is the suite's own,
    with httpx, so the client on this side of a handle is never the code under test.
 
-`Results.skipped` stays in the summary as a count that should read zero: a suite that removed
-its own ability to report a skip is a suite whose next gap is silent.
+`Results.skipped` stays in the summary as a count with each entry's reason. Its one expected
+entry is #629's deferred measurement when the service's outcome is inconclusive; any other
+skip is a new gap.
 
 Money
 -----

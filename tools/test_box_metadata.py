@@ -109,8 +109,10 @@ class RunOrderingTests(unittest.TestCase):
         self.assertLess(route, outside)
         self.assertLess(outside, inside)
         self.assertLess(inside, driver)
+        # An exec's PATH has no /sbin, where iproute installs `ip`: a bare `ip` exits 127
+        # in the guest and stops the run at its first root command.
         self.assertEqual(
-            calls[route][1], "ip -4 route replace blackhole 169.254.169.254/32"
+            calls[route][1], "/sbin/ip -4 route replace blackhole 169.254.169.254/32"
         )
         for call in calls:
             if call[0] == "exec":

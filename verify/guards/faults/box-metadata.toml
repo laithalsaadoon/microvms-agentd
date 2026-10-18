@@ -7,12 +7,17 @@ suite = "script"
 [[family.fault]]
 id = "box-metadata-route-required"
 message = "test_root_route_precedes_driver_and_all_launchers_are_explicit_root"
-transform = { file = "examples/strands-box-codex-sdk/run.sh", replace = 'vmroot "ip -4 route replace blackhole 169.254.169.254/32" >/dev/null', with = ':' }
+transform = { file = "examples/strands-box-codex-sdk/run.sh", replace = 'vmroot "/sbin/ip -4 route replace blackhole 169.254.169.254/32" >/dev/null', with = ':' }
 
 [[family.fault]]
 id = "box-metadata-setup-fails-closed"
 message = "test_route_or_either_probe_failure_prevents_the_driver"
-transform = { file = "examples/strands-box-codex-sdk/run.sh", replace = 'vmroot "ip -4 route replace blackhole 169.254.169.254/32" >/dev/null', with = 'vmroot "ip -4 route replace blackhole 169.254.169.254/32" >/dev/null || true' }
+transform = { file = "examples/strands-box-codex-sdk/run.sh", replace = 'vmroot "/sbin/ip -4 route replace blackhole 169.254.169.254/32" >/dev/null', with = 'vmroot "/sbin/ip -4 route replace blackhole 169.254.169.254/32" >/dev/null || true' }
+
+[[family.fault]]
+id = "box-metadata-route-full-path"
+message = "test_root_route_precedes_driver_and_all_launchers_are_explicit_root"
+transform = { file = "examples/strands-box-codex-sdk/run.sh", replace = 'vmroot "/sbin/ip -4 route', with = 'vmroot "ip -4 route' }
 
 [[family.fault]]
 id = "box-metadata-explicit-root"
