@@ -21,7 +21,7 @@ from typing import Any
 from harness.cli import Cli
 from harness.constants import REPO
 from harness.envelope import Envelope
-from harness.observation import bounded_plane, retry_observation
+from harness.observation import bounded_plane, listing_pages, retry_observation
 from harness.results import Results
 
 from lanes.bindings import BINDINGS, BUILD_TIMEOUT_SEC, BindingBuild
@@ -182,7 +182,10 @@ def run_driver(command: list[str], request: dict) -> tuple[dict, set[str], str]:
 
 def inventory(plane: Any, image: str) -> dict[str, str]:
     found = {}
-    for page in plane.get_paginator("list_microvms").paginate():
+    # The service filters by the image's ARN, which is one page here instead of the
+    # account's whole history. Given a name, the same filter answers with no VMs rather
+    # than an error (measured 2026-10-18, us-east-1), so each item's ARN is still checked.
+    for page in listing_pages(plane, "list_microvms", imageIdentifier=image):
         for item in page["items"]:
             if item.get("imageArn") == image:
                 found[item["microvmId"]] = item["state"]

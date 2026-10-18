@@ -9,6 +9,7 @@ import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 from botocore.exceptions import ClientError
@@ -196,13 +197,15 @@ class Plane:
             "other-image": "RUNNING",
         }
         self.listings = 0
+        self.params: list[dict[str, Any]] = []
         self.terminated: set[str] = set()
         self.stuck = stuck
 
     def get_paginator(self, operation: str) -> SimpleNamespace:
         assert operation == "list_microvms"
 
-        def paginate() -> list[dict]:
+        def paginate(**params: Any) -> list[dict]:
+            self.params.append(params)
             self.listings += 1
             ids = ["baseline", "other-image"] + (
                 ["delayed"] if self.listings > 1 else []
@@ -215,6 +218,10 @@ class Plane:
                 }
                 for key in ids
             ]
+            if "imageIdentifier" in params:
+                rows = [
+                    row for row in rows if row["imageArn"] == params["imageIdentifier"]
+                ]
             return [{"items": rows[:1]}, {"items": rows[1:]}]
 
         return SimpleNamespace(paginate=paginate)
@@ -429,14 +436,16 @@ def check_baseline_retries(results: Results) -> None:
 
     for failure_code in (None, target, "AccessDeniedException"):
         calls = []
+        listed: list[dict] = []
         elapsed = [0.0]
 
         class SnapshotPlane:
             def get_paginator(self, operation: str) -> SimpleNamespace:
                 assert operation == "list_microvms"
 
-                def pages():
+                def pages(**params):
                     calls.append("listing")
+                    listed.append(params)
                     yield {
                         "items": [
                             {
@@ -517,6 +526,14 @@ def check_baseline_retries(results: Results) -> None:
             and calls == ["listing", "listing", "build", "driver", "driver", "cleanup"]
             and not probe.failed,
         )
+        if failure_code is None:
+            results.check(
+                "retry probe lists only its image's VMs, 50 to a page",
+                listed
+                == [{"imageIdentifier": "image", "PaginationConfig": {"PageSize": 50}}]
+                * 2,
+                repr(listed),
+            )
 
 
 def check_observation_resolution(results: Results) -> None:

@@ -19,6 +19,7 @@ import boto3
 from harness.cli import Cli, attach_args
 from harness.constants import BASELINE_MEMORY_MIB, REPO, SERVICE
 from harness.envelope import Envelope
+from harness.observation import listing_pages
 from harness.redact import command_for_log
 from harness.results import Results
 
@@ -219,7 +220,7 @@ def drive_closed_output(cli: Cli, launched: Envelope, results: Results) -> None:
         window = launched_in_window(
             [
                 item
-                for page in plane.get_paginator("list_microvms").paginate()
+                for page in listing_pages(plane, "list_microvms")
                 for item in page.get("items", [])
             ],
             image.rsplit(":", 1)[-1],

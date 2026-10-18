@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from harness.constants import REPO, SERVICE
-from harness.observation import bounded_plane, retry_observation
+from harness.observation import bounded_plane, listing_pages, retry_observation
 from harness.results import Results
 
 #: What `drive_ensure_image` names the image it ensures: a fresh nonce per run, so the
@@ -290,7 +290,7 @@ def ensure_image_images(plane: Any, prefix: str) -> list[dict[str, Any]]:
     """Every image this run's prefix names, across every page of the listing."""
     return [
         item
-        for page in plane.get_paginator("list_microvm_images").paginate()
+        for page in listing_pages(plane, "list_microvm_images")
         for item in page.get("items", [])
         if run_owns(prefix, item.get("name"))
     ]
@@ -300,7 +300,7 @@ def ensure_image_vms(plane: Any, prefix: str) -> dict[str, str]:
     """Every VM launched from one of this run's images, by id, with its listed state."""
     return {
         str(item.get("microvmId")): str(item.get("state"))
-        for page in plane.get_paginator("list_microvms").paginate()
+        for page in listing_pages(plane, "list_microvms")
         for item in page.get("items", [])
         if run_owns(prefix, image_name_of(item.get("imageArn")))
     }
