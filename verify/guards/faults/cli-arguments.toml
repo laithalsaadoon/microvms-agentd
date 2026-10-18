@@ -23,4 +23,9 @@ transform = { file = "conformance/selftest/cli_arguments.py", replace = 'flags &
 [[family.fault]]
 id = "cli-arguments-source"
 message = "FAIL  the CLI source names the build flags that need --reuse"
-transform = { file = "conformance/selftest/cli_arguments.py", replace = 'requires = "reuse"[^\]]*', with = 'requires = "never"[^\]]*' }
+transform = { file = "conformance/selftest/cli_arguments.py", replace = '''if 'requires = "reuse"' in body''', with = '''if 'requires = "never"' in body''' }
+
+[[family.fault]]
+id = "cli-arguments-bracketed"
+message = "FAIL  a reuse-only flag is read past brackets and attributes in its field"
+transform = { file = "conformance/selftest/cli_arguments.py", replace = '((?:(?!#\[arg\().)*?)', with = '([^\]]*)' }

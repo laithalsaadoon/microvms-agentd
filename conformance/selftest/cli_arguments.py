@@ -14,13 +14,31 @@ CLI_SOURCE = CONFORMANCE.parent / "crates" / "microvms-cli" / "src" / "cli.rs"
 # A `build` argument that clap refuses without `--reuse`. The parser rejects the whole
 # invocation before anything is built, so a lane that passes one alone fails on its first
 # live run and never offline, where every lane talks to a stub CLI. Read from cli.rs so a
-# flag that gains the dependency there is held here too.
-REUSE_ONLY = re.compile(r'#\[arg\([^\]]*requires = "reuse"[^\]]*\)\]\s*pub (\w+):')
+# flag that gains the dependency there is held here too. Each match is one field's
+# `#[arg(...)]` body, which may hold brackets of its own, and the field's name; doc comments
+# and other attributes can sit between the two, and no body runs into the next `#[arg(`.
+ARG = re.compile(
+    r"#\[arg\(((?:(?!#\[arg\().)*?)\)\]\s*(?:///[^\n]*\s*|#\[[^\n]*\]\s*)*pub (\w+):",
+    re.S,
+)
 SAMPLE = 'cli.call("build", "agentd", "--name", "n", "--s3-key-prefix", "n")'
+SAMPLE_SOURCE = """
+    #[arg(long, value_parser = ["a", "b"], requires = "reuse")]
+    /// A flag whose attribute holds a bracketed list.
+    #[serde(skip)]
+    pub sample_flag: bool,
+
+    #[arg(long)]
+    pub other_flag: bool,
+"""
 
 
 def reuse_only_flags(source: str) -> set[str]:
-    return {"--" + name.replace("_", "-") for name in REUSE_ONLY.findall(source)}
+    return {
+        "--" + name.replace("_", "-")
+        for body, name in ARG.findall(source)
+        if 'requires = "reuse"' in body
+    }
 
 
 def build_calls(source: str) -> list[list[str]]:
@@ -57,6 +75,12 @@ def check_build_flag_dependencies(results: Results) -> None:
         "the CLI source names the build flags that need --reuse",
         {"--s3-key-prefix", "--force"} <= flags,
         f"found {sorted(flags)}",
+    )
+    sample_flags = reuse_only_flags(SAMPLE_SOURCE)
+    results.check(
+        "a reuse-only flag is read past brackets and attributes in its field",
+        sample_flags == {"--sample-flag"},
+        f"found {sorted(sample_flags)}",
     )
     calls = {
         path.name: build_calls(path.read_text())
