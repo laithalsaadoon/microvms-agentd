@@ -85,7 +85,8 @@ echo "microvm: $ID" >&2
 
 # Block the driver as well as the boxed process. Root installs the route before
 # any driver code is uploaded or started; an error exits through the cleanup trap.
-vmroot "ip -4 route replace blackhole 169.254.169.254/32" >/dev/null
+# An exec's PATH has no /sbin, where iproute installs `ip`, so the route names it in full.
+vmroot "/sbin/ip -4 route replace blackhole 169.254.169.254/32" >/dev/null
 
 # ── 3. Box, its config, and the driver ──────────────────────────────────────
 STAGE=$(mktemp -d)
