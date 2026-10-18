@@ -26,6 +26,10 @@ from lanes.retry_telemetry import (
     verdicts,
 )
 
+# The service filters a listing by an image's ARN and answers a name with no VMs, so the
+# fakes' images are ARN-shaped and their listings honor that filter the same way.
+IMAGE = "arn:aws:lambda:us-east-1:000000000000:microvm-image:image"
+OTHER_IMAGE = "arn:aws:lambda:us-east-1:000000000000:microvm-image:other"
 PYTHON_BINDING = """
 import time
 class MicrovmError(Exception):
@@ -214,13 +218,16 @@ class Plane:
                 {
                     "microvmId": key,
                     "state": self.states[key],
-                    "imageArn": "other" if key == "other-image" else "image",
+                    "imageArn": OTHER_IMAGE if key == "other-image" else IMAGE,
                 }
                 for key in ids
             ]
             if "imageIdentifier" in params:
+                wanted = params["imageIdentifier"]
                 rows = [
-                    row for row in rows if row["imageArn"] == params["imageIdentifier"]
+                    row
+                    for row in rows
+                    if wanted.startswith("arn:") and row["imageArn"] == wanted
                 ]
             return [{"items": rows[:1]}, {"items": rows[1:]}]
 
@@ -242,7 +249,7 @@ def clean(plane: Plane) -> bool:
         now[0] += seconds
 
     return cleanup(
-        plane, "image", {"baseline"}, {"hidden"}, clock=lambda: now[0], sleep=sleep
+        plane, IMAGE, {"baseline"}, {"hidden"}, clock=lambda: now[0], sleep=sleep
     )
 
 
@@ -343,7 +350,7 @@ def check_retry_telemetry(results: Results) -> None:
     plane = Plane()
     results.check(
         "retry inventory uses the exact image and every page",
-        inventory(plane, "image") == {"baseline": "RUNNING"},
+        inventory(plane, IMAGE) == {"baseline": "RUNNING"},
     )
     results.check(
         "retry cleanup finds delayed and hidden VMs without touching the baseline",
@@ -446,11 +453,13 @@ def check_baseline_retries(results: Results) -> None:
                 def pages(**params):
                     calls.append("listing")
                     listed.append(params)
+                    if not params.get("imageIdentifier", "").startswith("arn:"):
+                        return
                     yield {
                         "items": [
                             {
                                 "microvmId": "existing",
-                                "imageArn": "image",
+                                "imageArn": IMAGE,
                                 "state": "RUNNING",
                             }
                         ]
@@ -463,7 +472,7 @@ def check_baseline_retries(results: Results) -> None:
                         "items": [
                             {
                                 "microvmId": "second",
-                                "imageArn": "image",
+                                "imageArn": IMAGE,
                                 "state": "RUNNING",
                             }
                         ]
@@ -503,7 +512,7 @@ def check_baseline_retries(results: Results) -> None:
             try:
                 drive_retry_telemetry(
                     SimpleNamespace(region="us-east-1"),
-                    SimpleNamespace(data={"imageIdentifier": "image"}),
+                    SimpleNamespace(data={"imageIdentifier": IMAGE}),
                     SimpleNamespace(wait=wait),
                     None,
                     probe,
@@ -530,7 +539,7 @@ def check_baseline_retries(results: Results) -> None:
             results.check(
                 "retry probe lists only its image's VMs, 50 to a page",
                 listed
-                == [{"imageIdentifier": "image", "PaginationConfig": {"PageSize": 50}}]
+                == [{"imageIdentifier": IMAGE, "PaginationConfig": {"PageSize": 50}}]
                 * 2,
                 repr(listed),
             )
