@@ -13,6 +13,51 @@ CONTRIBUTING.md, "Changelog", says how to write one.
 
 <!-- towncrier release notes start -->
 
+## [1.2.0] - 2026-10-18
+
+### Added
+
+- **Invocation contracts:** Parity checks now inventory public types, callable signatures, and inputs across Rust, the CLI, Python, and TypeScript. The command manifest also records argument aliases, arity, actions, delimiters, and positional indexes for consumers checking accepted calls.
+- **Default parity checks cover strings, zero, omitted values, and TypeScript inputs (#570).**
+  Published defaults are compared with their shared Rust owners. Optional override markers
+  are explicitly recorded separately from the effective defaults selected by core.
+- **The default daemon port has a shared protocol constant (#573).**
+  `microvms_protocol::DEFAULT_AGENT_PORT` is also available through the existing
+  client imports. The default remains 9000.
+- **Discover the configured image user (#625).** Rust, CLI, Python, and Node clients can read authenticated image-user configuration without changing the published `Health` response. Older daemons report discovery as unavailable.
+- **Preserve a wrapped Dockerfile's final user (#626).** Opt-in wrappers record the builder-resolved uid and primary gid for workload execs while keeping the daemon as root and retaining explicit image and request user precedence.
+- **Verify the Box example on native ARM64 Linux (#628).** The hosted build records its source, toolchain, and binary digests, and the full live suite runs those binaries through the metadata probes and policy scenarios.
+- **Expose launch retry and readiness observations (#674).** Sessions report control-plane attempt counts, total backoff time, and observed RUNNING and daemon-ready timestamps; launch failures include typed retry details.
+- **Prefix cleanup:** add `ControlPlane.sweep` and `microvm gc --prefix` to discover or clean up a job's images and VMs, with exact-name or ARN keep lists, dry-run defaults, paced pagination, and confirmed cleanup reports.
+- **Allow custom throttle retry budgets (#677).** Python and Node control-plane and sandbox constructors accept an optional attempt and elapsed-time budget while preserving the default behavior.
+
+### Changed
+
+- **Run records and VM history are reusable from the shared Rust client (#569).**
+  The CLI uses the shared storage policies and file store without changing existing
+  JSON records, history lines, or state directory locations.
+  Ledger filenames that cannot be represented as Unicode remain untouched and are
+  reported as unreadable, so they cannot alias another record during cleanup.
+- **Strict formal verification is deferred (#571).** Coverage and guard-relation
+  findings remain unresolved. The issue stays open, and this release makes no
+  strict formal verification claim.
+- **The ready-hook measurement past five minutes is deferred (#629).** The live suite
+  still runs it and prints its result, and it records an inconclusive service outcome as
+  a skip instead of failing the run. The issue stays open, and the platform notes keep
+  their current entry.
+
+### Fixed
+
+- **VM listing timestamps:** preserve `startedAt` in Rust, Python, and Node list summaries so age-based cleanup can avoid a separate request for each VM.
+- **The Box example's metadata route installs (#628).** `run.sh` names `/sbin/ip` in full, because an exec's PATH has no `/sbin`, so the example no longer stops with exit 13 at its first root command.
+- **Share cached credential providers across clients (#670).** Reuse one credential chain per region for control-plane clients and image builds, refresh temporary credentials without a metadata request for every signed call, and preserve safe provider failure categories in Python exception causes and JavaScript diagnostics without exposing credential values.
+- **Concurrent daemon provisioning keeps complete verified binaries (#671).** Each download and verification record owns its temporary file, so threads sharing a cold cache cannot truncate or rename each other's downloads.
+- **Canceling `ensure_image_async` releases the Sandbox for cleanup (#672).** The Python Sandbox and AgentVm stop waiting without recording an image. A build already accepted by the service continues and can be joined by ensuring the same inputs again.
+- **Clarify null-message access denials (#673).** Explain both IAM denials and unsupported regions for null-message HTTP 403 responses, using the request region and a CloudTrail lookup to guide diagnosis.
+- **Correct the preflight IAM action hint (#676).** Service failures now recommend `lambda:ListManagedMicrovmImages`, so the suggested permission uses the IAM namespace.
+- **Guest shutdown retries a procfs observation when a process disappears during its stat read.** A vanished row remains inconclusive, so shutdown still waits for a complete observation of an exited process group.
+- **Python async calls drain their pending callbacks before interpreter shutdown (#700).** Completing or canceling an awaitable also waits for its in-flight Python wake, while shielded Rust work keeps its existing lifecycle behavior.
+
 ## [1.1.1] - 2026-10-15
 
 ### Added
