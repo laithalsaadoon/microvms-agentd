@@ -21,11 +21,10 @@ class Results:
     `passed` is how a suite that covers half of what it claims looks identical to one that
     covers all of it.
 
-    It is now always empty, and it stays here anyway. The `unsupported()` primitive that
-    filled it was the honest record of 34 checks this client could not express; those
-    surfaces landed and the entries became real check bodies. Deleting the list along with
-    them would remove the suite's ability to *say* a gap exists — so the count is still
-    printed, and it should read zero. The next gap gets a line rather than a silence.
+    Its one live entry is #629's measurement when the service's answer is inconclusive:
+    the measurement is deferred past 1.2.0, so it's recorded as a gap with its report
+    rather than gating a release on an answer nobody has. Any other skip is a new gap, and
+    the count is printed so it gets a line rather than a silence.
     """
 
     passed: list[str] = field(default_factory=list)
@@ -116,11 +115,9 @@ class Results:
         but it is never silent, which is the whole difference between a coverage statement
         and a gap.
 
-        **No caller, on purpose.** This was `unsupported()` and it had 34; the CLI grew the
-        surfaces and every one became a real check. It is kept as the shape the next gap
-        takes, because the alternative is that the next gap has nowhere to be recorded and
-        gets a comment instead. `--self-test` calls it once against a throwaway `Results`
-        so it cannot rot into something that no longer runs.
+        Its one live caller is `record_measurement` in `lanes/delayed_readiness.py`, for
+        #629's deferred measurement. `--self-test` also calls it against a throwaway
+        `Results` so the primitive is exercised offline.
         """
         self.skipped.append((name, reason))
         print(f"  SKIP  {name} — {reason}")

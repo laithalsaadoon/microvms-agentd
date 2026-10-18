@@ -18,7 +18,13 @@ from unittest.mock import patch
 
 from harness.constants import AGENT_PORT, REPO
 from harness.results import Results
-from lanes.delayed_readiness import delayed_recipe, measurement_outcome, timing_records
+from lanes.delayed_readiness import (
+    MEASUREMENT,
+    delayed_recipe,
+    measurement_outcome,
+    record_measurement,
+    timing_records,
+)
 
 
 def check_delayed_readiness(results: Results) -> None:
@@ -111,6 +117,26 @@ def check_delayed_readiness(results: Results) -> None:
         ):
             check_launcher_ports(results, delayed_recipe(), front_port)
     check_relay(results)
+
+
+def check_deferred_measurement(results: Results) -> None:
+    """#629's measurement passes when conclusive and is a skip, never a pass, when not."""
+    inconclusive = Results(probe=True)
+    record_measurement(inconclusive, {"state": "CREATE_FAILED", "outcome": None})
+    results.check(
+        "delayed readiness records an inconclusive outcome as a skip (#629)",
+        len(inconclusive.skipped) == 1
+        and not inconclusive.passed
+        and not inconclusive.failed,
+        repr((inconclusive.passed, inconclusive.failed, inconclusive.skipped)),
+    )
+    conclusive = Results(probe=True)
+    record_measurement(conclusive, {"state": "FAILED", "outcome": "capped"})
+    results.check(
+        "delayed readiness passes a conclusive outcome (#629)",
+        conclusive.passed == [MEASUREMENT] and not conclusive.skipped,
+        repr((conclusive.passed, conclusive.skipped)),
+    )
 
 
 def check_changed_shared_port(results: Results) -> None:

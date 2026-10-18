@@ -59,8 +59,9 @@ A hybrid driver, and every path is deliberate
    through the binding's public API alone. The request through each handle is the suite's own,
    with httpx, so the client on this side of a handle is never the code under test.
 
-`Results.skipped` stays in the summary as a count that should read zero: a suite that removed
-its own ability to report a skip is a suite whose next gap is silent.
+`Results.skipped` stays in the summary as a count with each entry's reason. Its one expected
+entry is #629's deferred measurement when the service's outcome is inconclusive; any other
+skip is a new gap.
 
 Money
 -----

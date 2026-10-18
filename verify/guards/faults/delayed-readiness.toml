@@ -46,6 +46,11 @@ id = "delayed-readiness-cap-timing-ignored"
 message = "FAIL  delayed readiness refuses invalid elapsed 0 from FAILED"
 transform = { file = "conformance/lanes/delayed_readiness.py", replace = "if not all(", with = "if report.get(\"state\") not in {\"FAILED\", \"CREATE_FAILED\"} and not all(" }
 
+[[family.fault]]
+id = "delayed-readiness-inconclusive-passes"
+message = "FAIL  delayed readiness records an inconclusive outcome as a skip (#629)"
+transform = { file = "conformance/lanes/delayed_readiness.py", replace = 'results.skip(MEASUREMENT, f"{DEFERRED}: {detail}")', with = 'results.check(MEASUREMENT, True, detail)' }
+
 [[family]]
 guard = "delayed_readiness_recipe_passes_create_image_preflight"
 run = ["cargo", "test", "-p", "microvms-core", "--test", "delayed_readiness", "--", "--exact", "delayed_readiness_recipe_passes_create_image_preflight"]

@@ -29,6 +29,7 @@ from lanes.isolated_image import CleanupResults
 
 HOOK_TIMEOUT_SECONDS = 600
 MEASUREMENT = "ready hook beyond five minutes has a conclusive service outcome (#629)"
+DEFERRED = "#629 is deferred past 1.2.0 and this run's outcome is inconclusive"
 
 
 def delayed_recipe() -> str:
@@ -109,6 +110,20 @@ def read_timing_logs(logs: Any, prefix: str) -> list[dict[str, Any]]:
                 for record in timing_records([event["message"]]):
                     records.append({**record, "loggedAtMillis": event.get("timestamp")})
     return records
+
+
+def record_measurement(results: Results, report: dict[str, Any]) -> None:
+    """A conclusive outcome passes. An inconclusive one is a skip carrying its report.
+
+    #629 is deferred past 1.2.0: whether the service lets a ready hook run past five
+    minutes is still unknown, and a release can't wait on an answer nobody has. The lane
+    still runs and prints its measurement, and its cleanup checks still gate the run.
+    """
+    detail = json.dumps(report, sort_keys=True)
+    if report.get("outcome") is None:
+        results.skip(MEASUREMENT, f"{DEFERRED}: {detail}")
+    else:
+        results.check(MEASUREMENT, True, detail)
 
 
 def drive_delayed_readiness(cli: Cli, binary: Path, aws: Any, results: Results) -> None:
@@ -205,9 +220,7 @@ def drive_delayed_readiness(cli: Cli, binary: Path, aws: Any, results: Results) 
                 time.sleep(5)
             report["outcome"] = outcome
             print("READY_MEASUREMENT_RESULT " + json.dumps(report, sort_keys=True))
-            results.check(
-                MEASUREMENT, outcome is not None, json.dumps(report, sort_keys=True)
-            )
+            record_measurement(results, report)
         finally:
             ensure_image_cleanup(
                 cleanup,
