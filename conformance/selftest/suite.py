@@ -18,6 +18,7 @@ from lanes.quickstart import digest_record_agrees
 from selftest.bindings import check_binding_handles
 from selftest.caller_artifact import check_caller_artifact_section
 from selftest.capability_policy import check_policy_lane
+from selftest.cli_arguments import check_build_flag_dependencies
 from selftest.closed_output import (
     check_bdd_outcome,
     check_cli8_attribution,
@@ -28,6 +29,7 @@ from selftest.default_user import check_default_user
 from selftest.defaults import check_agent_port, check_example_agent_ports
 from selftest.delayed_readiness import (
     check_changed_shared_port,
+    check_deferred_measurement,
     check_delayed_readiness,
 )
 from selftest.ensure_image import check_ensure_image_section
@@ -72,6 +74,7 @@ def self_test() -> int:
         check_run_section(results)
         check_terminate_fallback(results)
         check_native_box(results, Path(tmp))
+        check_build_flag_dependencies(results)
         check_bdd_outcome(results)
         check_posture_lines(results)
         check_execution_role_policy(results)
@@ -82,6 +85,7 @@ def self_test() -> int:
         check_agent_port(results, Path(tmp))
         check_example_agent_ports(results)
         check_delayed_readiness(results)
+        check_deferred_measurement(results)
         check_changed_shared_port(results)
         check_wrapped_user(results)
         check_platform_measurements(results)
@@ -525,13 +529,10 @@ def self_test() -> int:
             repr([(member.name, member.type) for member in device]),
         )
 
-        # -- the skip primitive still works, with no live caller ---------------
+        # -- the skip primitive records rather than passing ----------------------
         #
-        # `Results.skip` has no caller in the live path any more: the 34 entries it used to
-        # print became real checks. Exercised here against a throwaway `Results` so it
-        # cannot rot into a function that no longer runs — the next inexpressible check
-        # needs somewhere to be recorded, and a primitive nothing ever calls is one nobody
-        # notices has broken.
+        # `Results.skip`'s one live caller, #629's deferred measurement, runs only in a
+        # live run, so the primitive is exercised here against a throwaway `Results` too.
         skip_probe = Results()
         skip_probe.skip("a future gap", "recorded rather than silent")
         results.eq(

@@ -1,0 +1,26 @@
+[[family]]
+guard = "conformance/run_rs.py --self-test: conformance/selftest/cli_arguments.py"
+run = ["./conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "cli-arguments-native-reuse"
+message = "FAIL  every lane build call that passes a --reuse-only flag also passes --reuse"
+transform = { file = "conformance/lanes/native_box.py", replace = '''"--reuse",
+                "--s3-key-prefix",''', with = '''"--s3-key-prefix",''' }
+
+[[family.fault]]
+id = "cli-arguments-floor"
+message = "FAIL  the lanes' literal build calls are found, the native Box lane's among them"
+transform = { file = "conformance/selftest/cli_arguments.py", replace = '(CONFORMANCE / "lanes").glob("*.py")', with = '(CONFORMANCE / "lanes").glob("*.none")' }
+
+[[family.fault]]
+id = "cli-arguments-sentinel"
+message = "FAIL  a build call with --s3-key-prefix and no --reuse is caught"
+transform = { file = "conformance/selftest/cli_arguments.py", replace = 'flags & set(call) and "--reuse" not in call', with = 'flags & set(call) and False' }
+
+[[family.fault]]
+id = "cli-arguments-source"
+message = "FAIL  the CLI source names the build flags that need --reuse"
+transform = { file = "conformance/selftest/cli_arguments.py", replace = 'requires = "reuse"[^\]]*', with = 'requires = "never"[^\]]*' }
