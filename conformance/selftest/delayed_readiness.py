@@ -120,7 +120,8 @@ def check_delayed_readiness(results: Results) -> None:
 
 
 def check_deferred_measurement(results: Results) -> None:
-    """#629's measurement passes when conclusive and is a skip, never a pass, when not."""
+    """#629's measurement passes when conclusive, is a skip when the service answered
+    inconclusively, and fails when the build never reached the service."""
     inconclusive = Results(probe=True)
     record_measurement(inconclusive, {"state": "CREATE_FAILED", "outcome": None})
     results.check(
@@ -136,6 +137,13 @@ def check_deferred_measurement(results: Results) -> None:
         "delayed readiness passes a conclusive outcome (#629)",
         conclusive.passed == [MEASUREMENT] and not conclusive.skipped,
         repr((conclusive.passed, conclusive.skipped)),
+    )
+    unbuilt = Results(probe=True)
+    record_measurement(unbuilt, {"errorCode": "ERR_USAGE", "outcome": None})
+    results.check(
+        "delayed readiness fails a build that never reached the service (#629)",
+        [name for name, _ in unbuilt.failed] == [MEASUREMENT] and not unbuilt.skipped,
+        repr((unbuilt.passed, unbuilt.failed, unbuilt.skipped)),
     )
 
 

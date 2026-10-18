@@ -108,7 +108,7 @@ class Results:
         return self.check(name, True)
 
     def skip(self, name: str, reason: str) -> None:
-        """Records a check this client has no way to express.
+        """Records a check this run could not settle as a pass or a failure.
 
         Printed as `SKIP` and counted apart from both passes and failures. It does not
         fail the run — a suite that is permanently red is a suite people stop reading —

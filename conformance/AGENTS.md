@@ -1,7 +1,8 @@
 # conformance
 
 The live suite: `run_rs.py` drives the real `microvm` CLI against AWS and records each named
-check as PASS or FAIL. `infra/` is the Terraform stack it runs in. Everything here except the
+check as PASS or FAIL. Its one expected SKIP is #629's deferred measurement when the service
+answers inconclusively; any other SKIP is a new gap. `infra/` is the Terraform stack it runs in. Everything here except the
 self-test is billable.
 
 `run_rs.py` is the entry point and holds only the command line. The suite is the three

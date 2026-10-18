@@ -113,17 +113,21 @@ def read_timing_logs(logs: Any, prefix: str) -> list[dict[str, Any]]:
 
 
 def record_measurement(results: Results, report: dict[str, Any]) -> None:
-    """A conclusive outcome passes. An inconclusive one is a skip carrying its report.
+    """A conclusive outcome passes, and an inconclusive one is a skip carrying its report.
 
     #629 is deferred past 1.2.0: whether the service lets a ready hook run past five
     minutes is still unknown, and a release can't wait on an answer nobody has. The lane
     still runs and prints its measurement, and its cleanup checks still gate the run.
+    The skip needs a service answer: a report with no image state means the build never
+    reached the service (a CLI usage error, a harness fault), and that still fails.
     """
     detail = json.dumps(report, sort_keys=True)
-    if report.get("outcome") is None:
+    if report.get("outcome") is not None:
+        results.check(MEASUREMENT, True, detail)
+    elif "state" in report:
         results.skip(MEASUREMENT, f"{DEFERRED}: {detail}")
     else:
-        results.check(MEASUREMENT, True, detail)
+        results.check(MEASUREMENT, False, detail)
 
 
 def drive_delayed_readiness(cli: Cli, binary: Path, aws: Any, results: Results) -> None:
