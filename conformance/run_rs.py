@@ -65,9 +65,9 @@ its own ability to report a skip is a suite whose next gap is silent.
 Money
 -----
 
-This run creates real MicroVMs and is billable, about 20 minutes: about 15 for the main flow,
-about five for `drive_idle_keepalive`, which launches a second VM from the image already built
-and deliberately waits out a 60-second idle window twice, plus `drive_agent_vm`, which builds
+This run creates real MicroVMs and is billable. `drive_idle_keepalive` launches a second VM
+from the image already built and deliberately waits out a 60-second idle window twice.
+`drive_agent_vm` builds
 the two-agent image on the arm64 builder, launches a VM with egress, and pays for two model
 calls on Bedrock. Building the two bindings costs no AWS call and runs on a thread beside the
 suite image's build: from an empty target directory on a 16-core host at 0552d8c the Python
