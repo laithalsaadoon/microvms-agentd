@@ -92,7 +92,7 @@ tempfile = "3"
 # A Sigstore key rotation reaches this crate as a version bump, and `tests/release_bundle.rs`, run
 # by `release.yml` before it publishes, is what says one is due.
 sigstore-verify = { version = "=0.14.0", default-features = false }
-sigstore-trust-root = { version = "=0.14.0", default-features = false }
+sigstore-trust-root = { version = "=0.15.0", default-features = false }
 sigstore-types = "=0.14.0"
 
 # ── the in-VM session (T-W2-5) ──────────────────────────────────────────────
