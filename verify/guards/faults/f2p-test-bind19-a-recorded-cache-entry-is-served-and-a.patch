@@ -1,5 +1,5 @@
 diff --git a/crates/microvms-edges/src/provision.rs b/crates/microvms-edges/src/provision.rs
-index 33e8e58c..29f0901b 100644
+index 360c0c4b..46fb276b 100644
 --- a/crates/microvms-edges/src/provision.rs
 +++ b/crates/microvms-edges/src/provision.rs
 @@ -62,7 +62,7 @@
@@ -44,7 +44,7 @@ index 33e8e58c..29f0901b 100644
  }
  
  /// A version as a release tag spells it, without the leading `v`, or a refusal.
-@@ -511,7 +492,7 @@ fn caller_supplied(
+@@ -530,7 +511,7 @@ fn caller_supplied(
  }
  
  /// The cache entry for `version`, when its bytes still match its record; otherwise the
@@ -53,7 +53,7 @@ index 33e8e58c..29f0901b 100644
  fn cache_hit(
      state_dir: &Path,
      cached: &Path,
-@@ -541,12 +522,16 @@ fn cache_hit(
+@@ -560,12 +541,16 @@ fn cache_hit(
          _ => {
              progress(&format!(
                  "cached agentd v{version} at {} does not match the digest recorded when it \
@@ -74,7 +74,7 @@ index 33e8e58c..29f0901b 100644
              Ok(None)
          }
      }
-@@ -565,20 +550,23 @@ fn fetched(
+@@ -584,20 +569,23 @@ fn fetched(
      ));
      let dir = cached.parent().expect("the cache path has a parent");
      std::fs::create_dir_all(dir).map_err(|error| io_error(dir, "create", &error))?;
@@ -111,7 +111,7 @@ index 33e8e58c..29f0901b 100644
          return Err(ProvisionError::new(
              Failure::NotAarch64,
              format!(
-@@ -589,41 +577,27 @@ fn fetched(
+@@ -608,46 +596,27 @@ fn fetched(
          .remedy("this is a release-asset defect worth reporting, not a local mistake"));
      }
  
@@ -135,25 +135,30 @@ index 33e8e58c..29f0901b 100644
 +        std::fs::set_permissions(&partial, std::fs::Permissions::from_mode(0o755))
 +            .map_err(|error| io_error(&partial, "chmod", &error))?;
      }
--    partial
+-    let installed = partial
 -        .into_temp_path()
 -        .persist(cached)
--        .map_err(|error| io_error(cached, "install", &error.error))?;
+-        .map_err(|error| error.error);
+-    installed_or_identical(installed, cached, &bytes)
+-        .map_err(|error| io_error(cached, "install", &error))?;
 +    std::fs::rename(&partial, cached).map_err(|error| io_error(cached, "install", &error))?;
      // The record after the binary: a crash between the two leaves a binary with no record,
 -    // which the next request ignores and fetches again rather than trusts.
 +    // which the next request discards and fetches again rather than trusts.
      let sha256 = sha256_hex(&bytes);
      let record = record_path(state_dir, &version);
+-    let record_body = record_json(&version, &sha256, verification);
 -    let mut record_partial = tempfile::NamedTempFile::new_in(dir)
 -        .map_err(|error| io_error(dir, "create temporary record in", &error))?;
 -    record_partial
--        .write_all(record_json(&version, &sha256, verification).as_bytes())
+-        .write_all(record_body.as_bytes())
 -        .map_err(|error| io_error(&record, "write record", &error))?;
--    record_partial
+-    let recorded = record_partial
 -        .into_temp_path()
 -        .persist(&record)
--        .map_err(|error| io_error(&record, "record", &error.error))?;
+-        .map_err(|error| error.error);
+-    installed_or_identical(recorded, &record, record_body.as_bytes())
+-        .map_err(|error| io_error(&record, "record", &error))?;
 +    let record_partial = dir.join(format!(".{RECORD}.partial-{}", std::process::id()));
 +    std::fs::write(
 +        &record_partial,
