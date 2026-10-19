@@ -6,30 +6,30 @@ No current per-file diagnostic dataset supports warning or error totals, so this
 
 | File | Trend | Top owner | Citation |
 | --- | --- | --- | --- |
-| `conformance/run_rs.py` | ↑ rising | Conformance maintainers | `conformance/run_rs.py:140` |
+| `conformance/run_rs.py` | ↑ rising | Conformance maintainers | `conformance/run_rs.py:142` |
 | `crates/microvms-cli/src/cli.rs` | ↑ rising | CLI interface maintainers | `crates/microvms-cli/src/cli.rs:65` |
-| `crates/microvms-cli/src/commands/lifecycle.rs` | ↑ rising | CLI lifecycle maintainers | `crates/microvms-cli/src/commands/lifecycle.rs:435` |
-| `bindings/microvms-py/src/session.rs` | ↑ rising | Python binding maintainers | `bindings/microvms-py/src/session.rs:534` |
-| `crates/microvms-cli/src/commands/attached.rs` | ↑ rising | CLI session maintainers | `crates/microvms-cli/src/commands/attached.rs:243` |
+| `crates/microvms-cli/src/commands/lifecycle.rs` | ↑ rising | CLI lifecycle maintainers | `crates/microvms-cli/src/commands/lifecycle.rs:437` |
+| `bindings/microvms-py/src/session.rs` | ↑ rising | Python binding maintainers | `bindings/microvms-py/src/session.rs:542` |
+| `crates/microvms-cli/src/commands/attached.rs` | ↑ rising | CLI session maintainers | `crates/microvms-cli/src/commands/attached.rs:245` |
 | `tools/ratchet.py` | ↑ rising | Architecture gate maintainers | `tools/ratchet.py:875` |
 | `crates/microvms-cli/src/commands/mod.rs` | ↑ rising | CLI output maintainers | `crates/microvms-cli/src/commands/mod.rs:47` |
-| `bindings/microvms-py/src/sandbox.rs` | ↑ rising | Python binding maintainers | `bindings/microvms-py/src/sandbox.rs:512` |
-| `conformance/lanes/suite.py` | ↑ rising | Conformance maintainers | `conformance/lanes/suite.py:87` |
+| `bindings/microvms-py/src/sandbox.rs` | ↑ rising | Python binding maintainers | `bindings/microvms-py/src/sandbox.rs:536` |
+| `conformance/lanes/suite.py` | ↑ rising | Conformance maintainers | `conformance/lanes/suite.py:92` |
 | `crates/microvms-app/src/sandbox.rs` | ↑ rising | Sandbox lifecycle maintainers | `crates/microvms-app/src/sandbox.rs:628` |
-| `bindings/microvms-js/src/sandbox.rs` | ↑ rising | Node binding maintainers | `bindings/microvms-js/src/sandbox.rs:711` |
+| `bindings/microvms-js/src/sandbox.rs` | ↑ rising | Node binding maintainers | `bindings/microvms-js/src/sandbox.rs:732` |
 | `bindings/microvms-py/src/agents.rs` | ↑ rising | Python binding maintainers | `bindings/microvms-py/src/agents.rs:464` |
 
 ## Per-file detail
 
 ### 1. `conformance/run_rs.py`
 
-**What's there.** The conformance entry point parses command-line options and selects either the offline self-test or the live suite (`conformance/run_rs.py:94-145`). The offline suite constructs a stub CLI and exercises the harness and lane helpers (`conformance/selftest/suite.py:44-83`).
+**What's there.** The conformance entry point parses command-line options and selects either the offline self-test or the live suite (`conformance/run_rs.py:96-147`). The offline suite constructs a stub CLI and exercises the harness and lane helpers (`conformance/selftest/suite.py:55-104`).
 
-**Recent activity.** 28 commits; `↑ rising`, in the dated window above. Activity in the current entry-point path can include behavior that later moved into the harness and lanes; its current dispatch is small (`conformance/run_rs.py:90-145`).
+**Recent activity.** 28 commits; `↑ rising`, in the dated window above. Activity in the current entry-point path can include behavior that later moved into the harness and lanes; its current dispatch is small (`conformance/run_rs.py:92-147`).
 
 **Review ownership.** Conformance maintainers should review changes with the affected lane owner. Recorded contributions are concentrated: the leading author's share is 64%, with the remainder at 36% in this window.
 
-**Review focus.** Preserve the explicit choice between the self-test and the live suite when changing argument handling (`conformance/run_rs.py:142-145`). Follow a change into the selected suite rather than treating the entry point's activity as evidence that its present body owns the behavior (`conformance/run_rs.py:90-91`).
+**Review focus.** Preserve the explicit choice between the self-test and the live suite when changing argument handling (`conformance/run_rs.py:144-147`). Follow a change into the selected suite rather than treating the entry point's activity as evidence that its present body owns the behavior (`conformance/run_rs.py:92-93`).
 
 ### 2. `crates/microvms-cli/src/cli.rs`
 
@@ -39,37 +39,37 @@ No current per-file diagnostic dataset supports warning or error totals, so this
 
 **Review ownership.** CLI interface maintainers should coordinate with the handler's review area. Recorded contributions are concentrated: the leading author's share is 90%, with the remainder at 10%.
 
-**Review focus.** Treat changes to accepted arguments as interface changes. The parser's size-request test checks both valid combinations and conflicts with the older memory option (`crates/microvms-cli/src/cli.rs:3892-3917`); the duration test separately checks the accepted domain for seconds-valued flags (`crates/microvms-cli/src/cli.rs:3921-3936`). These source references identify useful tests; this measurement did not run them.
+**Review focus.** Treat changes to accepted arguments as interface changes. The parser's size-request test checks both valid combinations and conflicts with the older memory option (`crates/microvms-cli/src/cli.rs:3962-3987`); the duration test separately checks the accepted domain for seconds-valued flags (`crates/microvms-cli/src/cli.rs:3991-4006`). These source references identify useful tests; this measurement did not run them.
 
 ### 3. `crates/microvms-cli/src/commands/lifecycle.rs`
 
-**What's there.** The lifecycle adapter merges run configuration into effective arguments and a report of their sources (`crates/microvms-cli/src/commands/lifecycle.rs:110-140`). Its run path owns a sandbox across the launch/interrupt race, then reads identifiers and performs teardown (`crates/microvms-cli/src/commands/lifecycle.rs:635-701`, `crates/microvms-cli/src/commands/lifecycle.rs:744-756`).
+**What's there.** The lifecycle adapter merges run configuration into effective arguments and a report of their sources (`crates/microvms-cli/src/commands/lifecycle.rs:112-142`). Its run path owns a sandbox across the launch/interrupt race, then reads identifiers and performs teardown (`crates/microvms-cli/src/commands/lifecycle.rs:637-703`, `crates/microvms-cli/src/commands/lifecycle.rs:746-758`).
 
 **Recent activity.** 15 commits; `↑ rising`, in the dated window above.
 
-**Review ownership.** CLI lifecycle maintainers should review changes alongside the sandbox lifecycle implementation (`crates/microvms-app/src/sandbox.rs:1111`, `crates/microvms-app/src/sandbox.rs:1775`). The recorded activity is concentrated in one author during this window.
+**Review ownership.** CLI lifecycle maintainers should review changes alongside the sandbox lifecycle implementation (`crates/microvms-app/src/sandbox.rs:1113`, `crates/microvms-app/src/sandbox.rs:1827`). The recorded activity is concentrated in one author during this window.
 
-**Review focus.** Preserve the sandbox's ownership outside the cancellable launch future so the following code can read its recorded identifiers (`crates/microvms-cli/src/commands/lifecycle.rs:640-701`). Review result reporting and ledger updates together with teardown, because this adapter reads all of them after the race (`crates/microvms-cli/src/commands/lifecycle.rs:701-756`).
+**Review focus.** Preserve the sandbox's ownership outside the cancellable launch future so the following code can read its recorded identifiers (`crates/microvms-cli/src/commands/lifecycle.rs:642-703`). Review result reporting and ledger updates together with teardown, because this adapter reads all of them after the race (`crates/microvms-cli/src/commands/lifecycle.rs:703-758`).
 
 ### 4. `bindings/microvms-py/src/session.rs`
 
-**What's there.** `PySession` wraps either an owned session or a session reached through a shared sandbox, and a lease holds the latter's mutex during an operation (`bindings/microvms-py/src/session.rs:451-489`, `bindings/microvms-py/src/session.rs:532-548`). The blocking and awaitable health methods drive the same operation future through different runtime entry points (`bindings/microvms-py/src/session.rs:568-572`, `bindings/microvms-py/src/session.rs:1003-1009`).
+**What's there.** `PySession` wraps either an owned session or a session reached through a shared sandbox, and a lease holds the latter's mutex during an operation (`bindings/microvms-py/src/session.rs:459-497`, `bindings/microvms-py/src/session.rs:540-556`). The blocking and awaitable health methods drive the same operation future through different runtime entry points (`bindings/microvms-py/src/session.rs:586-590`, `bindings/microvms-py/src/session.rs:1050-1057`).
 
 **Recent activity.** 12 commits; `↑ rising`, in the dated window above.
 
 **Review ownership.** Python binding maintainers should coordinate with session and runtime maintainers. Recorded contributions are concentrated: the leading author's share is 92%, with the remainder at 8%.
 
-**Review focus.** Keep operation construction shared between blocking and awaitable methods, and preserve the lease's scope across awaited work (`bindings/microvms-py/src/session.rs:513-528`). The binding's async suite documents separate expectations for signature parity, wire behavior, event-loop progress, and cancellation (`bindings/microvms-py/tests/test_async.py:2-18`); use those categories when reviewing a new method.
+**Review focus.** Keep operation construction shared between blocking and awaitable methods, and preserve the lease's scope across awaited work (`bindings/microvms-py/src/session.rs:521-536`). The binding's async suite documents separate expectations for signature parity, wire behavior, event-loop progress, and cancellation (`bindings/microvms-py/tests/test_async.py:2-18`); use those categories when reviewing a new method.
 
 ### 5. `crates/microvms-cli/src/commands/attached.rs`
 
-**What's there.** The attached exec handler obtains a session, branches to polling when requested, and builds new exec requests through the lifecycle adapter's request constructor (`crates/microvms-cli/src/commands/attached.rs:243-282`). Streaming execution translates events for output and records terminal information while consuming the stream (`crates/microvms-cli/src/commands/attached.rs:480-518`).
+**What's there.** The attached exec handler obtains a session, branches to polling when requested, and builds new exec requests through the lifecycle adapter's request constructor (`crates/microvms-cli/src/commands/attached.rs:245-284`). Streaming execution translates events for output and records terminal information while consuming the stream (`crates/microvms-cli/src/commands/attached.rs:482-520`).
 
 **Recent activity.** 12 commits; `↑ rising`, in the dated window above. Its tie with the Python session adapter is resolved by path order.
 
 **Review ownership.** CLI session maintainers should coordinate with output maintainers for streaming changes. The recorded activity is concentrated in one author during this window.
 
-**Review focus.** Review polling, new execution, and streaming as distinct paths: polling returns before request construction (`crates/microvms-cli/src/commands/attached.rs:247-278`). Streaming emits events while it runs, so changes to completion and error handling also need to preserve the already-emitted output contract (`crates/microvms-cli/src/commands/attached.rs:498-518`).
+**Review focus.** Review polling, new execution, and streaming as distinct paths: polling returns before request construction (`crates/microvms-cli/src/commands/attached.rs:249-280`). Streaming emits events while it runs, so changes to completion and error handling also need to preserve the already-emitted output contract (`crates/microvms-cli/src/commands/attached.rs:500-520`).
 
 ## See also
 
