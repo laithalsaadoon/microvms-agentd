@@ -19,14 +19,14 @@ _none_
 
 `SessionBuilder::with_timeout` is used by the production session constructor when
 an attachment requests a timeout. Its declaration and caller are
-`crates/microvms-app/src/session/mod.rs:638-643` and
+`crates/microvms-app/src/session/mod.rs:697-702` and
 `crates/microvms-core/src/prelude.rs:350-368`.
 
 Runtime-exported functions remain part of their binding's public surface even
 without direct Rust calls. Examples include the Node binding's error-code
 enumeration and base-image helpers, which carry export attributes at
-`bindings/microvms-js/src/errors.rs:147-165` and
-`bindings/microvms-js/src/sandbox.rs:256-274`.
+`bindings/microvms-js/src/errors.rs:193-211` and
+`bindings/microvms-js/src/sandbox.rs:259-277`.
 
 ## Unreferenced files
 
@@ -38,7 +38,7 @@ module declarations: the app's control tests include `posture_fuzz` under
 `cfg(test)`. The ratchet's sentinel source is an intentional scanner input, not an
 application module awaiting a caller.
 `Cargo.toml:1-19`
-`crates/microvms-app/src/control/mod.rs:1090-1097`
+`crates/microvms-app/src/control/mod.rs:1140-1147`
 `tools/ratchet.py:265-270`
 `tools/ratchet.py:1454-1461`
 
@@ -46,21 +46,21 @@ application module awaiting a caller.
 
 | Path | Symbol | Imported from |
 | --- | --- | --- |
-| `crates/microvms-cli/src/commands/lifecycle.rs:2539` | `ControlPlane as _DocsOnly` | `crates/microvms-cli/src/commands/lifecycle.rs:30` |
-| `crates/microvms-cli/src/commands/attached.rs:2881` | `ErrorKind as _DocsOnly` | `crates/microvms-cli/src/commands/attached.rs:41` |
+| `crates/microvms-cli/src/commands/lifecycle.rs:2541` | `ControlPlane as _DocsOnly` | `crates/microvms-cli/src/commands/lifecycle.rs:32` |
+| `crates/microvms-cli/src/commands/attached.rs:2912` | `ErrorKind as _DocsOnly` | `crates/microvms-cli/src/commands/attached.rs:43` |
 
 These aliases have no subsequent references. Both explicitly allow
 `unused_imports`, with a documentation-related reason, so they are intentional
 exceptions to the lint rather than evidence that the source types are unused.
-`crates/microvms-cli/src/commands/lifecycle.rs:2537-2539`
-`crates/microvms-cli/src/commands/attached.rs:2879-2881`
+`crates/microvms-cli/src/commands/lifecycle.rs:2539-2541`
+`crates/microvms-cli/src/commands/attached.rs:2910-2912`
 
 The lifecycle module links `ControlPlane` in its documentation. The attached
 commands also use `ErrorKind` directly when handling a timeout. Removing either
 underlying import solely because its `_DocsOnly` alias is unused would ignore
 these uses.
 `crates/microvms-cli/src/commands/lifecycle.rs:8`
-`crates/microvms-cli/src/commands/attached.rs:392`
+`crates/microvms-cli/src/commands/attached.rs:394`
 
 ## See also
 

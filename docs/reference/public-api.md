@@ -160,7 +160,7 @@ pub fn agentd(version: Option<&str>, state_dir: Option<&Path>) -> Result<Provisi
 
 Returns the requested daemon binary from an override, the cache, or a verified release download in a blocking call.
 
-`crates/microvms-edges/src/provision.rs:620`
+`crates/microvms-edges/src/provision.rs:646`
 
 ### sandbox::Sandbox::adopt
 
@@ -175,7 +175,7 @@ Returns the requested daemon binary from an override, the cache, or a verified r
 
 Reconstructs a sandbox for an existing VM from retained connection details and the lifecycle reported by the service.
 
-`crates/microvms-app/src/sandbox.rs:1359`
+`crates/microvms-app/src/sandbox.rs:1411`
 
 ### sandbox::Sandbox::detach
 
@@ -185,7 +185,7 @@ Reconstructs a sandbox for an existing VM from retained connection details and t
 
 Returns the details another process needs to adopt the VM and makes this sandbox inactive without stopping the VM.
 
-`crates/microvms-app/src/sandbox.rs:1498`
+`crates/microvms-app/src/sandbox.rs:1550`
 
 ### sandbox::Sandbox::ensure_image
 
@@ -198,7 +198,7 @@ Returns the details another process needs to adopt the VM and makes this sandbox
 
 Builds or reuses the content-addressed image selected by the request.
 
-`crates/microvms-app/src/sandbox.rs:946`
+`crates/microvms-app/src/sandbox.rs:948`
 
 ### sandbox::Sandbox::resume
 
@@ -208,7 +208,7 @@ Builds or reuses the content-addressed image selected by the request.
 
 Resumes a suspended VM within its allowed window and returns a usable session.
 
-`crates/microvms-app/src/sandbox.rs:1667`
+`crates/microvms-app/src/sandbox.rs:1719`
 
 ### sandbox::Sandbox::run
 
@@ -218,7 +218,7 @@ Resumes a suspended VM within its allowed window and returns a usable session.
 
 Launches a VM and returns its session, waiting for the running state and daemon readiness when requested.
 
-`crates/microvms-app/src/sandbox.rs:1111`
+`crates/microvms-app/src/sandbox.rs:1113`
 
 ### sandbox::Sandbox::suspend
 
@@ -228,7 +228,7 @@ Launches a VM and returns its session, waiting for the running state and daemon 
 
 Requests suspension and waits for SUSPENDED or TERMINATED, recording the resulting lifecycle on the sandbox.
 
-`crates/microvms-app/src/sandbox.rs:1583`
+`crates/microvms-app/src/sandbox.rs:1635`
 
 ### sandbox::Sandbox::terminate
 
@@ -238,7 +238,7 @@ Requests suspension and waits for SUSPENDED or TERMINATED, recording the resulti
 
 Attempts the configured teardown steps and returns a report containing any failures and remaining resources.
 
-`crates/microvms-app/src/sandbox.rs:1775`
+`crates/microvms-app/src/sandbox.rs:1827`
 
 ### session::ExecHandle::kill
 
@@ -291,7 +291,7 @@ Writes bytes to an execution started with stdin enabled and optionally sends EOF
 
 Reads a remote file into a byte vector.
 
-`crates/microvms-app/src/session/mod.rs:544`
+`crates/microvms-app/src/session/mod.rs:603`
 
 ### session::Session::download_tar
 
@@ -301,7 +301,7 @@ Reads a remote file into a byte vector.
 
 Downloads a remote directory tree as tar bytes.
 
-`crates/microvms-app/src/session/mod.rs:572`
+`crates/microvms-app/src/session/mod.rs:631`
 
 ### session::Session::run
 
@@ -311,7 +311,7 @@ Downloads a remote directory tree as tar bytes.
 
 Starts a command and returns its execution handle without waiting for completion.
 
-`crates/microvms-app/src/session/mod.rs:461`
+`crates/microvms-app/src/session/mod.rs:520`
 
 ### session::Session::run_to_completion
 
@@ -341,7 +341,7 @@ Starts a command and drives streaming, deadline handling, and acknowledgment to 
 
 Writes a remote file, creating parent directories and applying an optional mode expressed as an octal string.
 
-`crates/microvms-app/src/session/mod.rs:534`
+`crates/microvms-app/src/session/mod.rs:593`
 
 ### session::Session::upload_tar
 
@@ -351,7 +351,7 @@ Writes a remote file, creating parent directories and applying an optional mode 
 
 Uploads tar bytes for extraction under the requested remote directory.
 
-`crates/microvms-app/src/session/mod.rs:567`
+`crates/microvms-app/src/session/mod.rs:626`
 
 ## See also
 

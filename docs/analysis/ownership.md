@@ -50,10 +50,10 @@ The review boundaries below describe what to examine, not exclusive ownership.
 | `site/authored/` | 3% | Reader-oriented pages and navigation content; review the published route and audience. | `site/scripts/sync-docs.mjs:21-33` |
 | `examples/` | 2% | Runnable workflows; keep instructions consistent with their scripts and supported API. | `examples/s3-prefetch-at-build/README.md:20-24` |
 | `crates/microvms-core/` | 2% | Composition and public re-exports; review compatibility when a lower layer changes. | `crates/microvms-core/src/lib.rs:57-76` |
-| `crates/microvms-edges/` | 2% | Production implementations of app ports; review effects and adapters with the port contract. | `crates/microvms-edges/src/lib.rs:2-20` |
+| `crates/microvms-edges/` | 2% | Production implementations of app ports; review effects and adapters with the port contract. | `crates/microvms-edges/src/lib.rs:2-22` |
 | `crates/agentd/` | 2% | Guest behavior and the shared wire contract; coordinate protocol changes with clients. | `crates/agentd/Cargo.toml:15-20` |
 | `verify/ratchet/` | 2% | Declared decisions and drift policy; distinguish accepted exceptions from new drift. | `tools/ratchet.py:7-16` |
-| `verify/spec/` | 1% | Formal requirements and their trace evidence; review requirements with the code and tests they name. | `.config/mise/tasks/trace.toml:1-16` |
+| `verify/spec/` | 1% | Formal requirements and their trace evidence; review requirements with the code and tests they name. | `.config/mise/tasks/trace.toml:1-43` |
 | `crates/microvms-domain/` | 1% | Shared rules and values; supply external inputs as parameters. | `crates/microvms-domain/src/lib.rs:2-17` |
 | `crates/model/` | 0% | Executable lifecycle models; review their assumptions as well as their properties. | `crates/model/src/lib.rs:2-6` |
 | `crates/protocol/` | 0% | Shared wire data; assess serialization and client/daemon compatibility together. | `crates/protocol/src/lib.rs:2-27` |
@@ -75,8 +75,8 @@ Model-conformance tests compare the app's answers with model rows and exercise t
 and client together. Formal requirement checks are separate from the local `check` task;
 traceability checks are included in it. Passing the local task does not establish that the
 formal verification tasks ran.
-`crates/model-conformance/src/lib.rs:2-14`, `.config/mise/tasks/trace.toml:3-39`,
-`.config/mise/tasks/check.toml:13-44`
+`crates/model-conformance/src/lib.rs:2-14`, `.config/mise/tasks/trace.toml:18-43`,
+`.config/mise/tasks/check.toml:13-45`
 
 The fault registry records ways to make guards fail. Listing the registry checks that its
 entries still apply; firing the faults is a separate task. Review evidence should identify
@@ -102,7 +102,7 @@ implementation boundary and evidence. Apply these mitigations during review:
   `verify/parity/cases/README.md:3-18`
 - **Model or requirement changes:** review the model's assumptions, the app comparison, and
   the relevant formal and traceability evidence together.
-  `crates/model-conformance/src/lib.rs:2-14`, `.config/mise/tasks/trace.toml:3-39`
+  `crates/model-conformance/src/lib.rs:2-14`, `.config/mise/tasks/trace.toml:18-43`
 - **Platform-dependent changes:** retain live evidence separately from offline evidence;
   the conformance self-test exercises the suite's helpers, not the AWS service.
   `conformance/AGENTS.md:3-17`, `conformance/AGENTS.md:29-32`

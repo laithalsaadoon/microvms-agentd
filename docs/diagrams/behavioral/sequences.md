@@ -4,7 +4,7 @@
 
 ```mermaid
 sequenceDiagram
-    %% `crates/microvms-app/src/sandbox.rs:946`
+    %% `crates/microvms-app/src/sandbox.rs:948`
     participant Sandbox
     %% `crates/microvms-app/src/control/ensure.rs:729`
     participant Ensure as ensure
@@ -15,7 +15,7 @@ sequenceDiagram
     %% `crates/microvms-app/src/control/services.rs:17`
     participant Build as BuildServices
 
-    %% `crates/microvms-app/src/sandbox.rs:977`
+    %% `crates/microvms-app/src/sandbox.rs:979`
     Sandbox->>Ensure: ensure()
     %% `crates/microvms-app/src/control/ensure.rs:755`
     Ensure->>Plane: describe_image
@@ -56,46 +56,46 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    %% `crates/microvms-app/src/sandbox.rs:1111`
+    %% `crates/microvms-app/src/sandbox.rs:1113`
     participant Sandbox
     %% `crates/microvms-app/src/control/microvm.rs:433`
     participant Plane as ControlPlane
-    %% `crates/microvms-app/src/control/microvm.rs:466`
+    %% `crates/microvms-app/src/control/microvm.rs:476`
     participant Lambda as Lambda MicroVMs
-    %% `crates/microvms-app/src/session/mod.rs:229`
+    %% `crates/microvms-app/src/session/mod.rs:244`
     participant Session
-    %% `crates/agentd/src/routes.rs:431`
+    %% `crates/agentd/src/routes.rs:438`
     participant Agent as agentd
 
-    %% `crates/microvms-app/src/sandbox.rs:1211`
-    Sandbox->>Plane: run_microvm
-    %% `crates/microvms-app/src/control/microvm.rs:466-467`
+    %% `crates/microvms-app/src/sandbox.rs:1244-1247`
+    Sandbox->>Plane: run_microvm_reported
+    %% `crates/microvms-app/src/control/microvm.rs:476-485`
     Plane->>Lambda: RunMicrovm
-    %% `crates/microvms-app/src/control/microvm.rs:468`
+    %% `crates/microvms-app/src/control/microvm.rs:487`
     Lambda-->>Plane: accepted VM
-    %% `crates/microvms-app/src/control/microvm.rs:469`
+    %% `crates/microvms-app/src/control/microvm.rs:488`
     Plane-->>Sandbox: accepted VM
-    %% `crates/microvms-app/src/sandbox.rs:1233-1234`
+    %% `crates/microvms-app/src/sandbox.rs:1276-1277`
     opt fresh launch, wait
-        %% `crates/microvms-app/src/sandbox.rs:1295`
+        %% `crates/microvms-app/src/sandbox.rs:1340`
         Sandbox->>Plane: wait running
         loop until RUNNING
-            %% `crates/microvms-app/src/control/microvm.rs:759-762`
+            %% `crates/microvms-app/src/control/microvm.rs:778-781`
             Plane->>Lambda: GetMicrovm
         end
-        %% `crates/microvms-app/src/control/microvm.rs:655`
+        %% `crates/microvms-app/src/control/microvm.rs:674`
         Plane-->>Sandbox: running VM
-        %% `crates/microvms-app/src/sandbox.rs:1256-1264`
+        %% `crates/microvms-app/src/sandbox.rs:1299-1309`
         Sandbox->>Session: builder()
-        %% `crates/microvms-app/src/sandbox.rs:1307-1310`
+        %% `crates/microvms-app/src/sandbox.rs:1359-1362`
         Sandbox->>Session: wait ready
         loop until ready
-            %% `crates/microvms-app/src/session/mod.rs:392-395`
+            %% `crates/microvms-app/src/session/mod.rs:417-420`
             Session->>Agent: GET /v1/health
-            %% `crates/agentd/src/routes.rs:435-466`
+            %% `crates/agentd/src/routes.rs:442-473`
             Agent-->>Session: health
         end
-        %% `crates/microvms-app/src/session/mod.rs:426-427`
+        %% `crates/microvms-app/src/session/mod.rs:476-486`
         Session-->>Sandbox: ready
     end
 ```
@@ -104,45 +104,45 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    %% `crates/microvms-app/src/sandbox.rs:1583`
+    %% `crates/microvms-app/src/sandbox.rs:1635`
     participant Sandbox
-    %% `crates/microvms-app/src/control/microvm.rs:829`
+    %% `crates/microvms-app/src/control/microvm.rs:862`
     participant Plane as ControlPlane
-    %% `crates/microvms-app/src/control/microvm.rs:831`
+    %% `crates/microvms-app/src/control/microvm.rs:864`
     participant Lambda as Lambda MicroVMs
-    %% `crates/microvms-app/src/session/mod.rs:377`
+    %% `crates/microvms-app/src/session/mod.rs:402`
     participant Session
 
-    %% `crates/microvms-app/src/sandbox.rs:1602`
+    %% `crates/microvms-app/src/sandbox.rs:1654`
     Sandbox->>Plane: suspend
-    %% `crates/microvms-app/src/control/microvm.rs:831-832`
+    %% `crates/microvms-app/src/control/microvm.rs:864-865`
     Plane->>Lambda: SuspendMicrovm
-    %% `crates/microvms-app/src/control/microvm.rs:833`
+    %% `crates/microvms-app/src/control/microvm.rs:866`
     Plane-->>Sandbox: accepted
-    %% `crates/microvms-app/src/sandbox.rs:1605-1613`
+    %% `crates/microvms-app/src/sandbox.rs:1657-1665`
     Sandbox->>Plane: wait_for_state
     loop until settled
-        %% `crates/microvms-app/src/control/microvm.rs:710`
+        %% `crates/microvms-app/src/control/microvm.rs:729`
         Plane->>Lambda: GetMicrovm
     end
-    %% `crates/microvms-app/src/sandbox.rs:1619-1636`
+    %% `crates/microvms-app/src/sandbox.rs:1671-1688`
     Plane-->>Sandbox: settled VM
     opt settled SUSPENDED
-        %% `crates/microvms-app/src/sandbox.rs:1727`
+        %% `crates/microvms-app/src/sandbox.rs:1779`
         Sandbox->>Plane: resume
-        %% `crates/microvms-app/src/control/microvm.rs:856-857`
+        %% `crates/microvms-app/src/control/microvm.rs:889-890`
         Plane->>Lambda: ResumeMicrovm
-        %% `crates/microvms-app/src/control/microvm.rs:858`
+        %% `crates/microvms-app/src/control/microvm.rs:891`
         Plane-->>Sandbox: accepted
-        %% `crates/microvms-app/src/sandbox.rs:1739-1747`
+        %% `crates/microvms-app/src/sandbox.rs:1791-1799`
         Sandbox->>Plane: wait_for_state
         loop until RUNNING
-            %% `crates/microvms-app/src/control/microvm.rs:710`
+            %% `crates/microvms-app/src/control/microvm.rs:729`
             Plane->>Lambda: GetMicrovm
         end
-        %% `crates/microvms-app/src/control/microvm.rs:712-713`
+        %% `crates/microvms-app/src/control/microvm.rs:731-732`
         Plane-->>Sandbox: running VM
-        %% `crates/microvms-app/src/sandbox.rs:1753-1756`
+        %% `crates/microvms-app/src/sandbox.rs:1805-1808`
         Sandbox->>Session: rebind
     end
 ```

@@ -5,7 +5,7 @@ and ending with the adapters and portable models. `Cargo.toml:2-14`
 
 ## microvms-protocol
 
-The shared wire contract defines execution, file-transfer, health, lifecycle-hook, identity, and tunnel types used by the daemon and client stack. `crates/protocol/src/lib.rs:29-34` Its module declarations are the starting point for a wire-format change; transport implementations live in their consumers. `crates/protocol/src/lib.rs:16-21`
+The shared wire contract defines execution, file-transfer, health, lifecycle-hook, identity, and tunnel types used by the daemon and client stack. `crates/protocol/src/lib.rs:30-35` Its module declarations are the starting point for a wire-format change; transport implementations live in their consumers. `crates/protocol/src/lib.rs:16-21`
 
 - `crates/protocol/src/exec.rs:2`
 - `crates/protocol/src/health.rs:2`
@@ -17,7 +17,7 @@ The shared wire contract defines execution, file-transfer, health, lifecycle-hoo
 
 ## agentd
 
-The guest daemon owns command execution, file transfer, lifecycle hooks, guest identity setup, TCP relay handlers, and the optional guest power-off after an exec's process group ends. `crates/agentd/src/lib.rs:37-56` Its router assembles the endpoint descriptions into the served application, while the schema module describes request and response shapes. `crates/agentd/src/routes.rs:29-58` `crates/agentd/src/schema.rs:2-12`
+The guest daemon owns command execution, file transfer, lifecycle hooks, guest identity setup, TCP relay handlers, and the optional guest power-off after an exec's process group ends. `crates/agentd/src/lib.rs:37-57` Its router assembles the endpoint descriptions into the served application, while the schema module describes request and response shapes. `crates/agentd/src/routes.rs:29-58` `crates/agentd/src/schema.rs:2-12`
 
 - `crates/agentd/src/exec.rs:2`
 - `crates/agentd/src/fs.rs:2`
@@ -57,7 +57,7 @@ The application layer owns the control-plane client, sandbox lifecycle, in-VM se
 
 ## microvms-edges
 
-The edges layer implements the application ports with production I/O: signed control-plane requests, daemon HTTP calls, socket relays, local storage, release retrieval, clock, and entropy. `crates/microvms-edges/src/lib.rs:2-21` The files below lead to the connection-serving loops and provisioning paths; the crate root also identifies the smaller port implementations. `crates/microvms-edges/src/session/serve.rs:2-6` `crates/microvms-edges/src/provision.rs:2-3` `crates/microvms-edges/src/lib.rs:27-40`
+The edges layer implements the application ports with production I/O: signed control-plane requests, daemon HTTP calls, socket relays, local storage, release retrieval, clock, and entropy. `crates/microvms-edges/src/lib.rs:2-22` The files below lead to the connection-serving loops and provisioning paths; the crate root also identifies the smaller port implementations. `crates/microvms-edges/src/session/serve.rs:2-6` `crates/microvms-edges/src/provision.rs:2-3` `crates/microvms-edges/src/lib.rs:28-41`
 
 - `crates/microvms-edges/src/session/forward.rs:2`
 - `crates/microvms-edges/src/provision/release.rs:2`
@@ -91,7 +91,7 @@ The `microvm` binary parses the command tree, dispatches handlers through its li
 
 ## microvms-py
 
-The Python binding maps the core client into PyO3 classes for values, lifecycle operations, sessions, execution, and coding-agent workflows. `bindings/microvms-py/src/lib.rs:44-57` Blocking methods and awaitable `_async` twins use a shared Tokio runtime; the runtime module owns that bridge and its cancellation policies. `bindings/microvms-py/src/runtime.rs:4-40`
+The Python binding maps the core client into PyO3 classes for values, lifecycle operations, sessions, execution, and coding-agent workflows. `bindings/microvms-py/src/lib.rs:44-57` Blocking methods and awaitable `_async` twins use a shared Tokio runtime; the runtime module owns that bridge and its cancellation policies. `bindings/microvms-py/src/runtime.rs:4-42`
 
 - `bindings/microvms-py/src/session.rs:2`
 - `bindings/microvms-py/src/sandbox.rs:2`
@@ -132,7 +132,7 @@ The portable model crate expresses daemon and client behavior as state machines 
 
 - `crates/model-conformance/src/lib.rs:2-14`
 - `crates/model-conformance/tests/client_lifecycle.rs:2`
-- `conformance/run_rs.py:90-140`
+- `conformance/run_rs.py:92-142`
 - `conformance/lanes/suite.py:2`
 - `conformance/selftest/suite.py:2`
 - `site/astro.config.ts:1`
