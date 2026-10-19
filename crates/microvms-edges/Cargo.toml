@@ -91,7 +91,7 @@ tempfile = "3"
 # brings in `option-ext` (MPL-2.0, through `directories`), which `.cargo/deny.toml` doesn't allow.
 # A Sigstore key rotation reaches this crate as a version bump, and `tests/release_bundle.rs`, run
 # by `release.yml` before it publishes, is what says one is due.
-sigstore-verify = { version = "=0.14.0", default-features = false }
+sigstore-verify = { version = "=0.15.0", default-features = false }
 sigstore-trust-root = { version = "=0.14.0", default-features = false }
 sigstore-types = "=0.14.0"
 
