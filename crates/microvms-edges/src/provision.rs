@@ -388,6 +388,25 @@ pub(crate) fn parse_record(text: &str, version: &str, sha256: &str) -> Option<Ve
         .find(|verification| matches && verification.as_str() == written)
 }
 
+/// Whether a rename onto `target` installed `expected`: it did when the rename succeeded, and
+/// also when the rename failed but `target` already holds exactly `expected`. Windows refuses a
+/// rename onto a file another rename is replacing at that moment (`ERROR_ACCESS_DENIED`), so of
+/// two callers installing the same verified bytes, one can be refused after the other has put
+/// those bytes in place (#717). Any other content, or no file, keeps the rename's own error.
+fn installed_or_identical(
+    renamed: std::io::Result<()>,
+    target: &Path,
+    expected: &[u8],
+) -> std::io::Result<()> {
+    let Err(error) = renamed else {
+        return Ok(());
+    };
+    match std::fs::read(target) {
+        Ok(present) if present == expected => Ok(()),
+        _ => Err(error),
+    }
+}
+
 /// A filesystem failure under the state directory.
 fn io_error(path: &Path, verb: &str, error: &std::io::Error) -> ProvisionError {
     ProvisionError::new(
@@ -607,23 +626,28 @@ fn fetched(
             .set_permissions(std::fs::Permissions::from_mode(0o755))
             .map_err(|error| io_error(partial.path(), "chmod", &error))?;
     }
-    partial
+    let installed = partial
         .into_temp_path()
         .persist(cached)
-        .map_err(|error| io_error(cached, "install", &error.error))?;
+        .map_err(|error| error.error);
+    installed_or_identical(installed, cached, &bytes)
+        .map_err(|error| io_error(cached, "install", &error))?;
     // The record after the binary: a crash between the two leaves a binary with no record,
     // which the next request ignores and fetches again rather than trusts.
     let sha256 = sha256_hex(&bytes);
     let record = record_path(state_dir, &version);
+    let record_body = record_json(&version, &sha256, verification);
     let mut record_partial = tempfile::NamedTempFile::new_in(dir)
         .map_err(|error| io_error(dir, "create temporary record in", &error))?;
     record_partial
-        .write_all(record_json(&version, &sha256, verification).as_bytes())
+        .write_all(record_body.as_bytes())
         .map_err(|error| io_error(&record, "write record", &error))?;
-    record_partial
+    let recorded = record_partial
         .into_temp_path()
         .persist(&record)
-        .map_err(|error| io_error(&record, "record", &error.error))?;
+        .map_err(|error| error.error);
+    installed_or_identical(recorded, &record, record_body.as_bytes())
+        .map_err(|error| io_error(&record, "record", &error))?;
     progress(&format!(
         "fetched and verified agentd {tag} ({}); cached at {}",
         verification.as_str(),
@@ -661,6 +685,31 @@ pub fn agentd_with(request: &Request<'_>) -> Result<Provisioned, Error> {
 mod tests {
     use super::*;
     use std::cell::Cell;
+
+    /// A rename refused after an identical install still installs (#717). A Linux or macOS
+    /// rename replaces its target, so the Windows refusal is injected as the `PermissionDenied`
+    /// std maps `ERROR_ACCESS_DENIED` to; other bytes, or no file, keep that refusal.
+    ///
+    /// **Falsification**: return the rename's error without reading the target, and the
+    /// identical case fails with "identical bytes are installed".
+    #[test]
+    fn a_rename_refused_after_an_identical_install_still_installs() {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let target = dir.path().join("agentd");
+        let refused = || Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        std::fs::write(&target, b"verified").expect("writes");
+        installed_or_identical(refused(), &target, b"verified")
+            .expect("identical bytes are installed");
+        let other = installed_or_identical(refused(), &target, b"different")
+            .expect_err("other bytes keep the refusal");
+        assert_eq!(other.kind(), std::io::ErrorKind::PermissionDenied);
+        std::fs::remove_file(&target).expect("removes");
+        let missing = installed_or_identical(refused(), &target, b"verified")
+            .expect_err("a missing target keeps the refusal");
+        assert_eq!(missing.kind(), std::io::ErrorKind::PermissionDenied);
+        installed_or_identical(Ok(()), &target, b"verified")
+            .expect("a rename that succeeded is installed");
+    }
 
     /// A scripted fetch: writes `bytes` to the destination and counts invocations.
     struct Scripted {

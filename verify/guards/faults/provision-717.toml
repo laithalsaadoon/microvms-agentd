@@ -1,0 +1,16 @@
+# ── provision-717: a rename refused after an identical install still installs (#717) ──
+#
+# Windows refuses a rename onto a file another rename is replacing (`ERROR_ACCESS_DENIED`); a
+# Linux or macOS rename never does, so FAIL_TO_PASS can't reach the fallback through `resolve`
+# on a Linux runner, and the merge base has no helper for the unit test to call. This fault
+# makes the helper ignore the identical file, and the test injects the refusal.
+
+[[fault]]
+id = "edges-provision-refused-rename-ignores-identical-install"
+guard = "provision::tests::a_rename_refused_after_an_identical_install_still_installs"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "provision::tests::a_rename_refused_after_an_identical_install_still_installs"]
+expect = "test-failed"
+suite = "rust"
+message = "identical bytes are installed"
+note = "crates/microvms-edges/src/provision.rs::a_rename_refused_after_an_identical_install_still_installs"
+transform = { file = "crates/microvms-edges/src/provision.rs", replace = "        Ok(present) if present == expected => Ok(()),\n", with = "        Ok(present) if present == expected => Err(error),\n" }
