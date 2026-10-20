@@ -1049,6 +1049,7 @@ Flags:
 - `--port`: The port agentd listens on inside the guest. `crates/microvms-cli/src/cli.rs:2422`.
 - `--workdir`: A working directory to create and set. Strongly recommended. `crates/microvms-cli/src/cli.rs:2430`.
 - `--wrap`: Append the agentd stanza to this task Dockerfile rather than print the default one. `crates/microvms-cli/src/cli.rs:2438`.
+- `--preserve-user` keeps the final `USER` the builder resolves as the default identity for workload execs, with `--wrap`. The daemon still starts as root, and an `AGENTD_DEFAULT_USER` the image sets or a request's `user` takes precedence. `crates/microvms-cli/src/cli.rs:2443`, `crates/microvms-app/src/control/artifact.rs:631-645`.
 - `--inherit-workdir`: With --wrap: the exec working directory is the image's own `WORKDIR`, so one must be declared, by the task or by --workdir. `crates/microvms-cli/src/cli.rs:2448`.
 - `--agent`: Print the Dockerfile of an agent VM image carrying this agent, the one `agent-up` builds. Repeatable. `crates/microvms-cli/src/cli.rs:2453`.
 - `--claude-version`: With --agent: pin the Claude Code npm package to this version. `crates/microvms-cli/src/cli.rs:2457`.
