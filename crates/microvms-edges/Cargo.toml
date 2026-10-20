@@ -83,17 +83,21 @@ tempfile = "3"
 # never checks the Rekor inclusion proof, checkpoint or SET (both steps are TODOs in its bundle
 # verifier), so it accepted all seven tampered bundles `gh attestation verify` refuses, and its
 # `verify` feature brings in `rsa` 0.9.10 through `openidconnect`, with RUSTSEC-2023-0071 and no
-# patched release. `sigstore-verify` refused all seven at 0.13.0 and at 0.14.0 (measured
-# 2026-10-08; eight bundles on 2026-09-25). Pinned exactly: it's pre-1.0 and ships breaking minors
-# often, so each bump is a reviewed change, and the three move together because `sigstore-verify`
-# takes the other two's types. Default features off and never `tuf`: the trusted root is the one
-# embedded in `sigstore-trust-root`, so verifying needs no network, and at 0.14.0 `tuf` still
-# brings in `option-ext` (MPL-2.0, through `directories`), which `.cargo/deny.toml` doesn't allow.
+# patched release. `sigstore-verify` refused all seven at 0.13.0, 0.14.0 and 0.15.0 (measured
+# 2026-10-20; eight bundles on 2026-09-25 and 2026-10-08). Pinned exactly: it's pre-1.0 and ships
+# breaking minors often, so each bump is a reviewed change, and the three move together because
+# `sigstore-verify` takes the other two's types. Default features off and never `tuf`: the trusted
+# root is the one embedded in `sigstore-trust-root`, so verifying needs no network, and at 0.15.0
+# `tuf` still brings in `option-ext` (MPL-2.0, through `directories`), which `.cargo/deny.toml`
+# doesn't allow. `aws-lc-rs` on by name: since 0.15.0 the crypto backend is a feature of
+# `sigstore-crypto`, and with none on the crate still compiles but the first verification panics
+# ("no sigstore-crypto CryptoProvider installed"). It's the backend 0.14.0 hard-wired and the one
+# `rustls` already builds in this tree, so the lockfile gains no crate for it.
 # A Sigstore key rotation reaches this crate as a version bump, and `tests/release_bundle.rs`, run
 # by `release.yml` before it publishes, is what says one is due.
-sigstore-verify = { version = "=0.14.0", default-features = false }
-sigstore-trust-root = { version = "=0.14.0", default-features = false }
-sigstore-types = "=0.14.0"
+sigstore-verify = { version = "=0.15.0", default-features = false, features = ["aws-lc-rs"] }
+sigstore-trust-root = { version = "=0.15.0", default-features = false }
+sigstore-types = "=0.15.0"
 
 # ── the in-VM session (T-W2-5) ──────────────────────────────────────────────
 # `net` is the port forwarder's listener (`session::forward`) and the tunnel's socket. It lives
