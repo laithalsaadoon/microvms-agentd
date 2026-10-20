@@ -160,7 +160,7 @@ pub fn agentd(version: Option<&str>, state_dir: Option<&Path>) -> Result<Provisi
 
 Returns the requested daemon binary from an override, the cache, or a verified release download in a blocking call.
 
-`crates/microvms-edges/src/provision.rs:646`
+`crates/microvms-edges/src/provision.rs:670`
 
 ### sandbox::Sandbox::adopt
 
