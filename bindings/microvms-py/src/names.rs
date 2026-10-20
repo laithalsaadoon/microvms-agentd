@@ -20,7 +20,7 @@ use crate::sandbox::PySandbox;
 ///
 /// Holds a secret. `agent_token` is readable so the VM can be adopted, but it stays out of
 /// `repr`; keep records (and `to_dict()` output) in private storage.
-#[pyclass(frozen, skip_from_py_object, name = "NameRecord", module = "microvms")]
+#[pyclass(frozen, name = "NameRecord", module = "microvms")]
 #[derive(Clone)]
 pub struct PyNameRecord {
     pub(crate) inner: NameRecord,

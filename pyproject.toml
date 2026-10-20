@@ -163,3 +163,8 @@ select = ["E4", "E7", "E9", "F", "I", "BLE", "RUF100"]
 # read both as third-party and wanted them sorted in beside `pytest`. Declaring them is what
 # makes the grouping ruff enforces the grouping a reader would write.
 known-first-party = ["microvms", "conftest"]
+# `_typeshed` is a stub-only module: it is absent from `sys.stdlib_module_names`, so ruff sorts
+# it as third-party, after `typing`. pyo3 0.30's generated stub imports `SupportsGetItem` from
+# it on the first import line, where a standard-library import goes, and the stub is linted
+# here but formatted by nobody (`[tool.ruff.format]` above says why).
+extra-standard-library = ["_typeshed"]
