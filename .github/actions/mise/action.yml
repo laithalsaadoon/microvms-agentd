@@ -81,7 +81,7 @@ runs:
         path: ~/.local/share/mise
         key: ${{ steps.key.outputs.key }}
         restore-keys: ${{ inputs.tools-cache == 'restore' && format('mise-tools-{0}-{1}-', runner.os, runner.arch) || '' }}
-    - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+    - uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
       with:
         version: ${{ steps.key.outputs.version }}
         minimum_release_age: 24h
