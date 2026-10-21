@@ -280,7 +280,7 @@ Mitigation: review consumers that branch on the affected variant alongside its m
 **Consumer(s):**
 
 - `bindings/microvms-js/src/cost.rs:41`
-- `bindings/microvms-py/src/cost.rs:68`
+- `bindings/microvms-py/src/cost.rs:67`
 - `bindings/microvms-py/src/sandbox.rs:44`
 - `crates/microvms-app/src/agents/mod.rs:52`
 - `crates/microvms-app/src/control/ensure.rs:55`
