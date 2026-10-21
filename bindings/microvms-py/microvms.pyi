@@ -10,9 +10,10 @@
 The MicroVMs client, as Python sees it.
 """
 
-from collections.abc import Awaitable, Sequence
+from _typeshed import SupportsGetItem
+from collections.abc import Awaitable
 from os import PathLike
-from typing import Any, Final, final
+from typing import Any, Final, SupportsFloat, SupportsIndex, final
 
 @final
 class AgentSpec:
@@ -83,7 +84,7 @@ class AgentVm:
         Tears down on the way out, whatever happened inside the block. Returns `False`, so
         an exception raised inside the block propagates.
         """
-    def __new__(cls, /, region: Region, agents: Sequence[AgentSpec] |None = None) -> AgentVm:
+    def __new__(cls, /, region: Region, agents: SupportsGetItem[int, AgentSpec] |None = None) -> AgentVm:
         """
         Resolves credentials for `region` and returns a VM with nothing built or launched.
         
@@ -92,7 +93,7 @@ class AgentVm:
         """
     def __repr__(self, /) -> str: ...
     @staticmethod
-    def adopt(region: Region, microvm_id: str, endpoint: str, agent_token: str, agents: Sequence[AgentSpec] |None = None, *, port: int |None = None) -> AgentVm:
+    def adopt(region: Region, microvm_id: str, endpoint: str, agent_token: str, agents: SupportsGetItem[int, AgentSpec] |None = None, *, port: SupportsIndex |None = None) -> AgentVm:
         """
         An agent VM for a VM another process launched; see `Sandbox.adopt`.
         
@@ -100,7 +101,7 @@ class AgentVm:
         `installed_agents(session)` first when the adopting process does not know.
         """
     @staticmethod
-    async def adopt_async(region: Region, microvm_id: str, endpoint: str, agent_token: str, agents: Sequence[AgentSpec] |None = None, *, port: int |None = None) -> AgentVm:
+    async def adopt_async(region: Region, microvm_id: str, endpoint: str, agent_token: str, agents: SupportsGetItem[int, AgentSpec] |None = None, *, port: SupportsIndex |None = None) -> AgentVm:
         """
         The awaitable twin of `AgentVm.adopt`.
         """
@@ -109,22 +110,22 @@ class AgentVm:
         """
         The specs this VM carries, in profile order.
         """
-    def build_artifact(self, /, *, binary: Sequence[int], build_role_arn: str, size: SizeClass |None = None) -> bytes:
+    def build_artifact(self, /, *, binary: SupportsGetItem[int, SupportsIndex], build_role_arn: str, size: SizeClass |None = None) -> bytes:
         """
         The artifact bytes to upload to `s3://<bucket>/<image_name>.zip` before `build_image`.
         """
-    def build_image(self, /, *, binary: Sequence[int], code_artifact_uri: str, build_role_arn: str, size: SizeClass |None = None) -> Image:
+    def build_image(self, /, *, binary: SupportsGetItem[int, SupportsIndex], code_artifact_uri: str, build_role_arn: str, size: SizeClass |None = None) -> Image:
         """
         Builds the image and waits for it to become usable. `code_artifact_uri` is where
         you uploaded `build_artifact`'s bytes. Several minutes, server-side.
         """
-    async def build_image_async(self, /, *, binary: Sequence[int], code_artifact_uri: str, build_role_arn: str, size: SizeClass |None = None) -> Image:
+    async def build_image_async(self, /, *, binary: SupportsGetItem[int, SupportsIndex], code_artifact_uri: str, build_role_arn: str, size: SizeClass |None = None) -> Image:
         """
         The awaitable twin of `build_image`. A lifecycle transition: cancelling the awaitable
         leaves the build running to completion.
         """
     @staticmethod
-    async def create_async(region: Region, agents: Sequence[AgentSpec] |None = None) -> AgentVm:
+    async def create_async(region: Region, agents: SupportsGetItem[int, AgentSpec] |None = None) -> AgentVm:
         """
         The awaitable twin of `AgentVm(region, agents)`.
         """
@@ -138,55 +139,55 @@ class AgentVm:
         The Dockerfile `build_image` will send: the client's agentd stanza plus the agent
         layers. Read it to see what the image will contain; nothing in it is a secret.
         """
-    def ensure_image(self, /, *, binary: Sequence[int], build_role_arn: str, s3_bucket: str, size: SizeClass |None = None, s3_key_prefix: str |None = None) -> EnsuredImage:
+    def ensure_image(self, /, *, binary: SupportsGetItem[int, SupportsIndex], build_role_arn: str, s3_bucket: str, size: SizeClass |None = None, s3_key_prefix: str |None = None) -> EnsuredImage:
         """
         Builds or reuses this VM's image, named per `image_name`: returned at once when ready,
         waited on while building, deleted and rebuilt when failed, and uploaded to
         `s3://<s3_bucket>/<s3_key_prefix>/<name>/artifact.zip` only when a build is needed.
         """
-    async def ensure_image_async(self, /, *, binary: Sequence[int], build_role_arn: str, s3_bucket: str, size: SizeClass |None = None, s3_key_prefix: str |None = None) -> EnsuredImage:
+    async def ensure_image_async(self, /, *, binary: SupportsGetItem[int, SupportsIndex], build_role_arn: str, s3_bucket: str, size: SizeClass |None = None, s3_key_prefix: str |None = None) -> EnsuredImage:
         """
         The awaitable twin of `ensure_image`. Cancellation stops the local wait and releases
         this sandbox without recording an image. A build already accepted by the service
         keeps running; ensure the same inputs again to join it.
         """
-    def find_image(self, /, *, binary: Sequence[int], build_role_arn: str, size: SizeClass |None = None) -> str |None:
+    def find_image(self, /, *, binary: SupportsGetItem[int, SupportsIndex], build_role_arn: str, size: SizeClass |None = None) -> str |None:
         """
         The ARN of an existing image named per `image_name`, or `None` when there is none.
         """
-    async def find_image_async(self, /, *, binary: Sequence[int], build_role_arn: str, size: SizeClass |None = None) -> str |None:
+    async def find_image_async(self, /, *, binary: SupportsGetItem[int, SupportsIndex], build_role_arn: str, size: SizeClass |None = None) -> str |None:
         """
         The awaitable twin of `find_image`.
         """
     @staticmethod
-    def from_name(region: Region, name: str, registry: NameRegistry, agents: Sequence[AgentSpec] |None = None, *, port: int |None = None) -> AgentVm:
+    def from_name(region: Region, name: str, registry: NameRegistry, agents: SupportsGetItem[int, AgentSpec] |None = None, *, port: SupportsIndex |None = None) -> AgentVm:
         """
         Adopts the agent VM registered as `name` in `registry`; see `Sandbox.from_name`.
         """
     @staticmethod
-    async def from_name_async(region: Region, name: str, registry: NameRegistry, agents: Sequence[AgentSpec] |None = None, *, port: int |None = None) -> AgentVm:
+    async def from_name_async(region: Region, name: str, registry: NameRegistry, agents: SupportsGetItem[int, AgentSpec] |None = None, *, port: SupportsIndex |None = None) -> AgentVm:
         """
         The awaitable twin of `AgentVm.from_name`.
         """
-    def image_name(self, /, *, binary: Sequence[int], build_role_arn: str, size: SizeClass |None = None) -> str:
+    def image_name(self, /, *, binary: SupportsGetItem[int, SupportsIndex], build_role_arn: str, size: SizeClass |None = None) -> str:
         """
         The image name for these specs and this daemon binary: `agent-vm-<agents>-<hash12>`.
         
         Content-addressed, so an unchanged binary, spec set and size name the image a previous
         run built; `find_image` looks it up, and `ensure_image` builds or reuses it.
         """
-    def install_access(self, /, *, token: BearerToken |None = None, ttl_seconds: float |None = None) -> BearerToken:
+    def install_access(self, /, *, token: BearerToken |None = None, ttl_seconds: SupportsFloat |SupportsIndex |None = None) -> BearerToken:
         """
         Mints a token (or takes yours) and installs Bedrock access for this VM's agents.
         
         Returns the token used, so `expires_at` says when to call this again. Re-runnable
         on a running VM: that call is the credential refresh.
         """
-    async def install_access_async(self, /, *, token: BearerToken |None = None, ttl_seconds: float |None = None) -> BearerToken:
+    async def install_access_async(self, /, *, token: BearerToken |None = None, ttl_seconds: SupportsFloat |SupportsIndex |None = None) -> BearerToken:
         """
         The awaitable twin of `install_access`.
         """
-    def launch(self, /, *, image_identifier: str, execution_role_arn: str |None = None, agent_token: str |None = None, client_token: str |None = None, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None, image_version: str |None = None, egress_network_connectors: Sequence[str] |None = None, log_group: str |None = None, log_stream: str |None = None, disable_logging: bool = False, launch_env: dict[str, str] |None = None, shell: bool = False, ready_timeout: float |None = None) -> Session:
+    def launch(self, /, *, image_identifier: str, execution_role_arn: str |None = None, agent_token: str |None = None, client_token: str |None = None, max_idle_sec: SupportsIndex |None = None, suspended_sec: SupportsIndex |None = None, auto_resume: bool = False, max_duration_sec: SupportsIndex |None = None, image_version: str |None = None, egress_network_connectors: SupportsGetItem[int, str] |None = None, log_group: str |None = None, log_stream: str |None = None, disable_logging: bool = False, launch_env: dict[str, str] |None = None, shell: bool = False, ready_timeout: SupportsFloat |SupportsIndex |None = None) -> Session:
         """
         Launches with egress and waits for the daemon to answer.
         
@@ -204,27 +205,27 @@ class AgentVm:
         `ready_timeout` bounds the wait for RUNNING, and the wait for the daemon after it is
         `session_constants()["defaultReadyTimeoutSeconds"]`.
         """
-    async def launch_async(self, /, *, image_identifier: str, execution_role_arn: str |None = None, agent_token: str |None = None, client_token: str |None = None, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None, image_version: str |None = None, egress_network_connectors: Sequence[str] |None = None, log_group: str |None = None, log_stream: str |None = None, disable_logging: bool = False, launch_env: dict[str, str] |None = None, shell: bool = False, ready_timeout: float |None = None) -> Session:
+    async def launch_async(self, /, *, image_identifier: str, execution_role_arn: str |None = None, agent_token: str |None = None, client_token: str |None = None, max_idle_sec: SupportsIndex |None = None, suspended_sec: SupportsIndex |None = None, auto_resume: bool = False, max_duration_sec: SupportsIndex |None = None, image_version: str |None = None, egress_network_connectors: SupportsGetItem[int, str] |None = None, log_group: str |None = None, log_stream: str |None = None, disable_logging: bool = False, launch_env: dict[str, str] |None = None, shell: bool = False, ready_timeout: SupportsFloat |SupportsIndex |None = None) -> Session:
         """
         The awaitable twin of `launch`, with its keywords. A lifecycle transition: cancelling
         the awaitable leaves the launch running to completion, so the VM it starts is still
         this object's to terminate.
         """
-    def prompt(self, /, agent: str, task: str, *, timeout_sec: float |None = None, exec_id: str |None = None, permission_mode: str = "agent-default", reap_group_on_exit: bool = False) -> ExecHandle:
+    def prompt(self, /, agent: str, task: str, *, timeout_sec: SupportsFloat |SupportsIndex |None = None, exec_id: str |None = None, permission_mode: str = "agent-default", reap_group_on_exit: bool = False) -> ExecHandle:
         """
         Starts one task for `agent` and returns its handle. Does not wait.
         """
-    async def prompt_async(self, /, agent: str, task: str, *, timeout_sec: float |None = None, exec_id: str |None = None, permission_mode: str = "agent-default", reap_group_on_exit: bool = False) -> ExecHandle:
+    async def prompt_async(self, /, agent: str, task: str, *, timeout_sec: SupportsFloat |SupportsIndex |None = None, exec_id: str |None = None, permission_mode: str = "agent-default", reap_group_on_exit: bool = False) -> ExecHandle:
         """
         The awaitable twin of `prompt`. Cancelling it before the daemon answers may leave the
         task started; pass an `exec_id` to reach it with `session.exec(exec_id)`.
         """
-    def prompt_sync(self, /, agent: str, task: str, *, timeout: float = ..., exec_id: str |None = None, permission_mode: str = "agent-default", reap_group_on_exit: bool = False) -> ExecResult:
+    def prompt_sync(self, /, agent: str, task: str, *, timeout: SupportsFloat |SupportsIndex = ..., exec_id: str |None = None, permission_mode: str = "agent-default", reap_group_on_exit: bool = False) -> ExecResult:
         """
         Start, wait, ack: one task's whole result. `timeout` defaults to 900 seconds,
         because agent tasks run minutes, and is also the daemon-side budget.
         """
-    async def prompt_sync_async(self, /, agent: str, task: str, *, timeout: float = ..., exec_id: str |None = None, permission_mode: str = "agent-default", reap_group_on_exit: bool = False) -> ExecResult:
+    async def prompt_sync_async(self, /, agent: str, task: str, *, timeout: SupportsFloat |SupportsIndex = ..., exec_id: str |None = None, permission_mode: str = "agent-default", reap_group_on_exit: bool = False) -> ExecResult:
         """
         The awaitable twin of `prompt_sync`. Cancelling it stops the wait; the task keeps
         running in the VM until its own timeout.
@@ -242,11 +243,11 @@ class AgentVm:
         """
         The session, once `launch` has run.
         """
-    def terminate(self, /, *, delete_image: bool = False, delete_log_group: bool = False, delete_attempts: int |None = None, delete_backoff: float |None = None, wait_for_terminated: bool |float = ...) -> TeardownReport:
+    def terminate(self, /, *, delete_image: bool = False, delete_log_group: bool = False, delete_attempts: SupportsIndex |None = None, delete_backoff: SupportsFloat |SupportsIndex |None = None, wait_for_terminated: bool |SupportsFloat |SupportsIndex = ...) -> TeardownReport:
         """
         Tears down, best-effort, never raising; see `Sandbox.terminate`.
         """
-    async def terminate_async(self, /, *, delete_image: bool = False, delete_log_group: bool = False, delete_attempts: int |None = None, delete_backoff: float |None = None, wait_for_terminated: bool |float = ...) -> TeardownReport:
+    async def terminate_async(self, /, *, delete_image: bool = False, delete_log_group: bool = False, delete_attempts: SupportsIndex |None = None, delete_backoff: SupportsFloat |SupportsIndex |None = None, wait_for_terminated: bool |SupportsFloat |SupportsIndex = ...) -> TeardownReport:
         """
         The awaitable twin of `terminate`; see `Sandbox.terminate_async`.
         """
@@ -429,7 +430,7 @@ class BuildHookTimeout:
     """
     The service ceiling for this family: 3600.
     """
-    def __new__(cls, /, seconds: int) -> BuildHookTimeout:
+    def __new__(cls, /, seconds: SupportsIndex) -> BuildHookTimeout:
         """
         A build-family timeout, or a refusal naming both ceilings.
         """
@@ -502,17 +503,17 @@ class ControlPlane:
     suspend of a SUSPENDED VM is the service's to refuse. Use it when a process has only an
     identifier, such as a durable workflow step in a fresh process.
     """
-    def __new__(cls, /, region: Region, *, retry: tuple[int, float] |None = None) -> ControlPlane:
+    def __new__(cls, /, region: Region, *, retry: tuple[SupportsIndex, SupportsFloat |SupportsIndex] |None = None) -> ControlPlane:
         """
         Resolves credentials for `region` from the default chain.
         """
     def __repr__(self, /) -> str: ...
     @staticmethod
-    async def create_async(region: Region, *, retry: tuple[int, float] |None = None) -> ControlPlane:
+    async def create_async(region: Region, *, retry: tuple[SupportsIndex, SupportsFloat |SupportsIndex] |None = None) -> ControlPlane:
         """
         The awaitable twin of `ControlPlane(region)`.
         """
-    def delete_image(self, /, identifier: str, *, attempts: int |None = None, backoff: float |None = None) -> bool:
+    def delete_image(self, /, identifier: str, *, attempts: SupportsIndex |None = None, backoff: SupportsFloat |SupportsIndex |None = None) -> bool:
         """
         Deletes the image, its extra versions first, retrying while it refuses (an image still
         `CREATING`, or one a terminating VM holds).
@@ -521,7 +522,7 @@ class ControlPlane:
         or `identifier` is not one the service accepts. It doesn't raise, as a teardown's delete
         shouldn't. `attempts` and `backoff` (seconds) default to the core's teardown figures.
         """
-    async def delete_image_async(self, /, identifier: str, *, attempts: int |None = None, backoff: float |None = None) -> bool:
+    async def delete_image_async(self, /, identifier: str, *, attempts: SupportsIndex |None = None, backoff: SupportsFloat |SupportsIndex |None = None) -> bool:
         """
         The awaitable twin of `delete_image`. A lifecycle call: cancelling the awaitable leaves
         the deletion and its retries running to their answer.
@@ -612,12 +613,12 @@ class ControlPlane:
         The awaitable twin of `suspend`. A lifecycle call: cancelling the awaitable leaves the
         request running to its answer.
         """
-    def sweep(self, /, prefix: str, *, keep: Sequence[str] |None = None, dry_run: bool |None = None) -> SweepReport:
+    def sweep(self, /, prefix: str, *, keep: SupportsGetItem[int, str] |None = None, dry_run: bool |None = None) -> SweepReport:
         """
         Discover prefix-matched images and VMs. Set dry_run=False to clean them up.
         Keep entries preserve exact image names or ARNs and every VM using them.
         """
-    async def sweep_async(self, /, prefix: str, *, keep: Sequence[str] |None = None, dry_run: bool |None = None) -> SweepReport:
+    async def sweep_async(self, /, prefix: str, *, keep: SupportsGetItem[int, str] |None = None, dry_run: bool |None = None) -> SweepReport:
         """
         The awaitable twin of sweep. Once cleanup starts, cancellation leaves it running.
         """
@@ -629,14 +630,14 @@ class ControlPlane:
         """
         The awaitable twin of `terminate`. A lifecycle call, as `suspend_async` is.
         """
-    def wait_for_state(self, /, microvm_id: str, wanted: Sequence[str], *, fail_on: Sequence[str] |None = None, timeout: float = 300.0, poll_interval: float = 5.0) -> Microvm:
+    def wait_for_state(self, /, microvm_id: str, wanted: SupportsGetItem[int, str], *, fail_on: SupportsGetItem[int, str] |None = None, timeout: SupportsFloat |SupportsIndex = 300.0, poll_interval: SupportsFloat |SupportsIndex = 5.0) -> Microvm:
         """
         Polls `GetMicrovm` until the state is one of `wanted`.
         
         Reaching one of `fail_on` first raises `LaunchDiedError` naming the state and
         `stateReason`; running past `timeout` raises `TimeoutError`.
         """
-    async def wait_for_state_async(self, /, microvm_id: str, wanted: Sequence[str], *, fail_on: Sequence[str] |None = None, timeout: float = 300.0, poll_interval: float = 5.0) -> Microvm:
+    async def wait_for_state_async(self, /, microvm_id: str, wanted: SupportsGetItem[int, str], *, fail_on: SupportsGetItem[int, str] |None = None, timeout: SupportsFloat |SupportsIndex = 300.0, poll_interval: SupportsFloat |SupportsIndex = 5.0) -> Microvm:
         """
         The awaitable twin of `wait_for_state`. Cancelling it stops the polling and touches no
         VM.
@@ -793,7 +794,7 @@ class Duration:
         True only for a timed span. What `CostReport.fully_measured` reads.
         """
     @staticmethod
-    def measured(seconds: float) -> Duration:
+    def measured(seconds: SupportsFloat |SupportsIndex) -> Duration:
         """
         A timed phase: a clock ran and this is what it read.
         
@@ -801,7 +802,7 @@ class Duration:
         a duration, and the refusal is the core's `duration_of_secs_f64`.
         """
     @staticmethod
-    def projected(seconds: float) -> Duration:
+    def projected(seconds: SupportsFloat |SupportsIndex) -> Duration:
         """
         A hypothetical phase: an estimate's input, or a documented minimum nobody timed.
         """
@@ -941,7 +942,7 @@ class ExecHandle:
         """
         The awaitable twin of `poll`.
         """
-    def stream(self, /, *, offset: int = 0, reconnect: bool = True, max_reconnects: int |None = None, error_on_gap: bool = False, idle_timeout: float |None = None) -> ExecStream:
+    def stream(self, /, *, offset: SupportsIndex = 0, reconnect: bool = True, max_reconnects: SupportsIndex |None = None, error_on_gap: bool = False, idle_timeout: SupportsFloat |SupportsIndex |None = None) -> ExecStream:
         """
         An iterator over output as it arrives, reconnecting at the last good offset.
         
@@ -950,14 +951,14 @@ class ExecHandle:
         `reconnect=False` ends the iterator at a cut instead, for a caller doing its own
         reconnection.
         """
-    def wait(self, /, timeout: float = ...) -> ExecResult:
+    def wait(self, /, timeout: SupportsFloat |SupportsIndex = ...) -> ExecResult:
         """
         Polls until the exec is done, or raises `TimeoutError`.
         
         A timeout has not touched the exec — polling is read-only and output lives until
         it is acked — so a caller that gives up can come back and poll again.
         """
-    def wait_and_ack(self, /, timeout: float = ...) -> ExecResult:
+    def wait_and_ack(self, /, timeout: SupportsFloat |SupportsIndex = ...) -> ExecResult:
         """
         Wait, then ack, returning the result that carries the output.
         
@@ -965,12 +966,12 @@ class ExecHandle:
         a poll issued after the ack reports `acked` with none, so returning the wrong one
         is a silent empty-output bug. The core sequences it.
         """
-    async def wait_and_ack_async(self, /, timeout: float = ...) -> ExecResult:
+    async def wait_and_ack_async(self, /, timeout: SupportsFloat |SupportsIndex = ...) -> ExecResult:
         """
         The awaitable twin of `wait_and_ack`. Cancelled during the wait it leaves the exec
         untouched; cancelled during the ack, the ack may have landed.
         """
-    async def wait_async(self, /, timeout: float = ...) -> ExecResult:
+    async def wait_async(self, /, timeout: SupportsFloat |SupportsIndex = ...) -> ExecResult:
         """
         The awaitable twin of `wait`. Cancelling it is giving up as a timeout does: the exec
         is untouched.
@@ -1031,7 +1032,7 @@ class ExecProcess:
         The child's standard output. The same iterator every time, since two over one side
         would split its bytes between them.
         """
-    def wait(self, /, timeout: float |None = None) -> ExecResult:
+    def wait(self, /, timeout: SupportsFloat |SupportsIndex |None = None) -> ExecResult:
         """
         Polls the daemon's exec record until the command is done, or raises `TimeoutError`.
         
@@ -1039,7 +1040,7 @@ class ExecProcess:
         is the same observation for a cut connection and a finished command. A timeout hasn't
         touched the exec, so a caller can wait again. `timeout` defaults to `ExecHandle.wait`'s.
         """
-    async def wait_async(self, /, timeout: float |None = None) -> ExecResult:
+    async def wait_async(self, /, timeout: SupportsFloat |SupportsIndex |None = None) -> ExecResult:
         """
         The awaitable twin of `wait`. Cancelling it leaves the exec untouched.
         """
@@ -1633,13 +1634,13 @@ class KeepAwake:
         The awaitable twin of `stop`. The stop is asked for before the first await, so
         cancelling this still stops the keepalive; only the wait for its report is given up.
         """
-    def wait(self, /, timeout: float |None = None) -> KeepAwakeReport |None:
+    def wait(self, /, timeout: SupportsFloat |SupportsIndex |None = None) -> KeepAwakeReport |None:
         """
         Waits for the keepalive to end on its own (`while_busy` or `max_duration`).
         
         Returns `None` if it is still running when `timeout` seconds pass.
         """
-    async def wait_async(self, /, timeout: float |None = None) -> KeepAwakeReport |None:
+    async def wait_async(self, /, timeout: SupportsFloat |SupportsIndex |None = None) -> KeepAwakeReport |None:
         """
         The awaitable twin of `wait`.
         """
@@ -2027,7 +2028,7 @@ class PortForward:
         """
         Whether the forward is still serving.
         """
-    def stop(self, /, timeout: float |None = None) -> PortForwardReport:
+    def stop(self, /, timeout: SupportsFloat |SupportsIndex |None = None) -> PortForwardReport:
         """
         Stops accepting, waits for the connections still open to end, and returns the report.
         
@@ -2035,7 +2036,7 @@ class PortForward:
         `"failed"`. Without it, a client that keeps its connection open keeps this waiting.
         Callable again, with the same report.
         """
-    async def stop_async(self, /, timeout: float |None = None) -> PortForwardReport:
+    async def stop_async(self, /, timeout: SupportsFloat |SupportsIndex |None = None) -> PortForwardReport:
         """
         The awaitable twin of `stop`.
         """
@@ -2425,7 +2426,7 @@ class RunHookTimeout:
     """
     The service ceiling for this family: 60.
     """
-    def __new__(cls, /, seconds: int) -> RunHookTimeout:
+    def __new__(cls, /, seconds: SupportsIndex) -> RunHookTimeout:
         """
         A run-family timeout, or a refusal naming **both** ceilings.
         
@@ -2468,7 +2469,7 @@ class Sandbox:
         what has to happen, not what has to be reported. Any leak is on the report the
         caller can also get by calling `terminate()` themselves.
         """
-    def __new__(cls, /, region: Region, *, retry: tuple[int, float] |None = None) -> Sandbox:
+    def __new__(cls, /, region: Region, *, retry: tuple[SupportsIndex, SupportsFloat |SupportsIndex] |None = None) -> Sandbox:
         """
         Resolves credentials for `region` and returns a sandbox with nothing launched.
         
@@ -2478,7 +2479,7 @@ class Sandbox:
         """
     def __repr__(self, /) -> str: ...
     @staticmethod
-    def adopt(region: Region, microvm_id: str, endpoint: str, agent_token: str, *, port: int |None = None) -> Sandbox:
+    def adopt(region: Region, microvm_id: str, endpoint: str, agent_token: str, *, port: SupportsIndex |None = None) -> Sandbox:
         """
         A sandbox for a VM another process launched, from its private record.
         
@@ -2488,7 +2489,7 @@ class Sandbox:
         in private encrypted storage; it never appears in repr or an error.
         """
     @staticmethod
-    async def adopt_async(region: Region, microvm_id: str, endpoint: str, agent_token: str, *, port: int |None = None) -> Sandbox:
+    async def adopt_async(region: Region, microvm_id: str, endpoint: str, agent_token: str, *, port: SupportsIndex |None = None) -> Sandbox:
         """
         The awaitable twin of `Sandbox.adopt`.
         """
@@ -2502,7 +2503,7 @@ class Sandbox:
         """
         How many times the token has been installed. Never above one (STATE-3).
         """
-    def build_artifact(self, /, *, name: str, binary: Sequence[int], code_artifact_uri: str, build_role_arn: str, base_image: BaseImage |None = None, dockerfile: str |None = None, project_dir: str |PathLike[str] |None = None, inherit_workdir: bool = False) -> bytes:
+    def build_artifact(self, /, *, name: str, binary: SupportsGetItem[int, SupportsIndex], code_artifact_uri: str, build_role_arn: str, base_image: BaseImage |None = None, dockerfile: str |None = None, project_dir: str |PathLike[str] |None = None, inherit_workdir: bool = False) -> bytes:
         """
         The artifact bytes to upload to `code_artifact_uri`.
         
@@ -2510,7 +2511,7 @@ class Sandbox:
         as [`Self::build_image`] so the bytes a caller puts in the bucket are the bytes the
         build will receive.
         """
-    def build_image(self, /, *, name: str, binary: Sequence[int], code_artifact_uri: str, build_role_arn: str, size: SizeClass |None = None, base_image: BaseImage |None = None, base_image_version: str |None = None, dockerfile: str |None = None, project_dir: str |PathLike[str] |None = None, repair_guest_identity: bool = False, inherit_workdir: bool = False, run_hook_timeout: RunHookTimeout |None = None, build_hook_timeout: BuildHookTimeout |None = None, tags: dict[str, str] |None = None, log_group: str |None = None, log_stream: str |None = None, token_scope: str |None = None) -> Image:
+    def build_image(self, /, *, name: str, binary: SupportsGetItem[int, SupportsIndex], code_artifact_uri: str, build_role_arn: str, size: SizeClass |None = None, base_image: BaseImage |None = None, base_image_version: str |None = None, dockerfile: str |None = None, project_dir: str |PathLike[str] |None = None, repair_guest_identity: bool = False, inherit_workdir: bool = False, run_hook_timeout: RunHookTimeout |None = None, build_hook_timeout: BuildHookTimeout |None = None, tags: dict[str, str] |None = None, log_group: str |None = None, log_stream: str |None = None, token_scope: str |None = None) -> Image:
         """
         Builds an image and waits for it to become usable.
         
@@ -2544,13 +2545,13 @@ class Sandbox:
         of fresh randomness per build attempt, and the resolved exact name comes back on
         `Image.log_stream`. `log_stream` requires `log_group`.
         """
-    async def build_image_async(self, /, *, name: str, binary: Sequence[int], code_artifact_uri: str, build_role_arn: str, size: SizeClass |None = None, base_image: BaseImage |None = None, base_image_version: str |None = None, dockerfile: str |None = None, project_dir: str |PathLike[str] |None = None, repair_guest_identity: bool = False, inherit_workdir: bool = False, run_hook_timeout: RunHookTimeout |None = None, build_hook_timeout: BuildHookTimeout |None = None, tags: dict[str, str] |None = None, log_group: str |None = None, log_stream: str |None = None, token_scope: str |None = None) -> Image:
+    async def build_image_async(self, /, *, name: str, binary: SupportsGetItem[int, SupportsIndex], code_artifact_uri: str, build_role_arn: str, size: SizeClass |None = None, base_image: BaseImage |None = None, base_image_version: str |None = None, dockerfile: str |None = None, project_dir: str |PathLike[str] |None = None, repair_guest_identity: bool = False, inherit_workdir: bool = False, run_hook_timeout: RunHookTimeout |None = None, build_hook_timeout: BuildHookTimeout |None = None, tags: dict[str, str] |None = None, log_group: str |None = None, log_stream: str |None = None, token_scope: str |None = None) -> Image:
         """
         The awaitable twin of `build_image`, with its keywords. A lifecycle transition:
         cancelling the awaitable leaves the build running to completion on this sandbox.
         """
     @staticmethod
-    async def create_async(region: Region, *, retry: tuple[int, float] |None = None) -> Sandbox:
+    async def create_async(region: Region, *, retry: tuple[SupportsIndex, SupportsFloat |SupportsIndex] |None = None) -> Sandbox:
         """
         The awaitable twin of `Sandbox(region)`: resolves credentials on the shared runtime.
         """
@@ -2570,7 +2571,7 @@ class Sandbox:
         """
         The proxy endpoint, once launched.
         """
-    def ensure_image(self, /, *, name_prefix: str, binary: Sequence[int], dockerfile: str, s3_bucket: str, build_role_arn: str, context_dir: str |PathLike[str] |None = None, s3_key_prefix: str |None = None, size: SizeClass |None = None, base_image: BaseImage |None = None, base_image_version: str |None = None, project_dir: str |PathLike[str] |None = None, force: bool = False, repair_guest_identity: bool = False, tags: dict[str, str] |None = None, wait_timeout: float |None = None) -> EnsuredImage:
+    def ensure_image(self, /, *, name_prefix: str, binary: SupportsGetItem[int, SupportsIndex], dockerfile: str, s3_bucket: str, build_role_arn: str, context_dir: str |PathLike[str] |None = None, s3_key_prefix: str |None = None, size: SizeClass |None = None, base_image: BaseImage |None = None, base_image_version: str |None = None, project_dir: str |PathLike[str] |None = None, force: bool = False, repair_guest_identity: bool = False, tags: dict[str, str] |None = None, wait_timeout: SupportsFloat |SupportsIndex |None = None) -> EnsuredImage:
         """
         Builds or reuses the content-addressed image for a task: one call from build inputs
         to a ready image.
@@ -2599,21 +2600,21 @@ class Sandbox:
         joins the name's hash. Every local check runs before
         the first AWS call.
         """
-    async def ensure_image_async(self, /, *, name_prefix: str, binary: Sequence[int], dockerfile: str, s3_bucket: str, build_role_arn: str, context_dir: str |PathLike[str] |None = None, s3_key_prefix: str |None = None, size: SizeClass |None = None, base_image: BaseImage |None = None, base_image_version: str |None = None, project_dir: str |PathLike[str] |None = None, force: bool = False, repair_guest_identity: bool = False, tags: dict[str, str] |None = None, wait_timeout: float |None = None) -> EnsuredImage:
+    async def ensure_image_async(self, /, *, name_prefix: str, binary: SupportsGetItem[int, SupportsIndex], dockerfile: str, s3_bucket: str, build_role_arn: str, context_dir: str |PathLike[str] |None = None, s3_key_prefix: str |None = None, size: SizeClass |None = None, base_image: BaseImage |None = None, base_image_version: str |None = None, project_dir: str |PathLike[str] |None = None, force: bool = False, repair_guest_identity: bool = False, tags: dict[str, str] |None = None, wait_timeout: SupportsFloat |SupportsIndex |None = None) -> EnsuredImage:
         """
         The awaitable twin of `ensure_image`, with its keywords. Cancellation stops the
         local wait and releases this sandbox without recording an image. A build already
         accepted by the service keeps running; ensure the same inputs again to join it.
         """
     @staticmethod
-    def from_name(region: Region, name: str, registry: NameRegistry, *, port: int |None = None) -> Sandbox:
+    def from_name(region: Region, name: str, registry: NameRegistry, *, port: SupportsIndex |None = None) -> Sandbox:
         """
         Adopts the VM registered as `name` in `registry`; see `Sandbox.adopt`.
         
         `region` must match the record's: an id from another region addresses nothing here.
         """
     @staticmethod
-    async def from_name_async(region: Region, name: str, registry: NameRegistry, *, port: int |None = None) -> Sandbox:
+    async def from_name_async(region: Region, name: str, registry: NameRegistry, *, port: SupportsIndex |None = None) -> Sandbox:
         """
         The awaitable twin of `Sandbox.from_name`.
         """
@@ -2667,7 +2668,7 @@ class Sandbox:
         """
         The VM id, once launched.
         """
-    def preflight(self, /, *, name: str, binary: Sequence[int], code_artifact_uri: str, build_role_arn: str, size: SizeClass |None = None, base_image: BaseImage |None = None, base_image_version: str |None = None, dockerfile: str |None = None, project_dir: str |PathLike[str] |None = None, repair_guest_identity: bool = False, inherit_workdir: bool = False, run_hook_timeout: RunHookTimeout |None = None, build_hook_timeout: BuildHookTimeout |None = None, tags: dict[str, str] |None = None, log_group: str |None = None, log_stream: str |None = None, token_scope: str |None = None) -> None:
+    def preflight(self, /, *, name: str, binary: SupportsGetItem[int, SupportsIndex], code_artifact_uri: str, build_role_arn: str, size: SizeClass |None = None, base_image: BaseImage |None = None, base_image_version: str |None = None, dockerfile: str |None = None, project_dir: str |PathLike[str] |None = None, repair_guest_identity: bool = False, inherit_workdir: bool = False, run_hook_timeout: RunHookTimeout |None = None, build_hook_timeout: BuildHookTimeout |None = None, tags: dict[str, str] |None = None, log_group: str |None = None, log_stream: str |None = None, token_scope: str |None = None) -> None:
         """
         Every local guard `build_image` runs, with zero calls: raises the refusal `build_image`
         would, so a caller who uploads its own artifact checks the request before paying for
@@ -2705,7 +2706,7 @@ class Sandbox:
         The awaitable twin of `resume`. A lifecycle transition: cancelling the awaitable leaves
         the resume running to completion.
         """
-    def run(self, /, *, image_identifier: str |None = None, image_version: str |None = None, execution_role_arn: str |None = None, agent_token: str |None = None, client_token: str |None = None, launch_env: dict[str, str] |None = None, identity: bool = False, egress: bool = False, egress_network_connectors: Sequence[str] |None = None, deny_egress: bool = False, shell: bool = False, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None, ready_timeout: float |None = None, token_scope: str |None = None, wait: bool = True, log_group: str |None = None, log_stream: str |None = None, disable_logging: bool = False) -> Session:
+    def run(self, /, *, image_identifier: str |None = None, image_version: str |None = None, execution_role_arn: str |None = None, agent_token: str |None = None, client_token: str |None = None, launch_env: dict[str, str] |None = None, identity: bool = False, egress: bool = False, egress_network_connectors: SupportsGetItem[int, str] |None = None, deny_egress: bool = False, shell: bool = False, max_idle_sec: SupportsIndex |None = None, suspended_sec: SupportsIndex |None = None, auto_resume: bool = False, max_duration_sec: SupportsIndex |None = None, ready_timeout: SupportsFloat |SupportsIndex |None = None, token_scope: str |None = None, wait: bool = True, log_group: str |None = None, log_stream: str |None = None, disable_logging: bool = False) -> Session:
         """
         Launches a MicroVM and returns its session. By default it waits for RUNNING
         and for the daemon to answer; `wait=False` skips those readiness waits.
@@ -2740,7 +2741,7 @@ class Sandbox:
         reuse the first attempt's — passes it. It rides in `runHookPayload`, which is what
         keeps it out of the shared image snapshot.
         """
-    async def run_async(self, /, *, image_identifier: str |None = None, image_version: str |None = None, execution_role_arn: str |None = None, agent_token: str |None = None, client_token: str |None = None, launch_env: dict[str, str] |None = None, identity: bool = False, egress: bool = False, egress_network_connectors: Sequence[str] |None = None, deny_egress: bool = False, shell: bool = False, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None, ready_timeout: float |None = None, token_scope: str |None = None, wait: bool = True, log_group: str |None = None, log_stream: str |None = None, disable_logging: bool = False) -> Session:
+    async def run_async(self, /, *, image_identifier: str |None = None, image_version: str |None = None, execution_role_arn: str |None = None, agent_token: str |None = None, client_token: str |None = None, launch_env: dict[str, str] |None = None, identity: bool = False, egress: bool = False, egress_network_connectors: SupportsGetItem[int, str] |None = None, deny_egress: bool = False, shell: bool = False, max_idle_sec: SupportsIndex |None = None, suspended_sec: SupportsIndex |None = None, auto_resume: bool = False, max_duration_sec: SupportsIndex |None = None, ready_timeout: SupportsFloat |SupportsIndex |None = None, token_scope: str |None = None, wait: bool = True, log_group: str |None = None, log_stream: str |None = None, disable_logging: bool = False) -> Session:
         """
         The awaitable twin of `run`, with its keywords. A lifecycle transition: cancelling the
         awaitable stops pending retries. An in-flight request finishes so an accepted VM
@@ -2792,7 +2793,7 @@ class Sandbox:
         `None` before this sandbox launches a VM. This accessor reports the requested
         window; `GetMicrovm` also returns the service's idle policy.
         """
-    def terminate(self, /, *, delete_image: bool = False, delete_log_group: bool = False, delete_attempts: int |None = None, delete_backoff: float |None = None, wait_for_terminated: bool |float = ...) -> TeardownReport:
+    def terminate(self, /, *, delete_image: bool = False, delete_log_group: bool = False, delete_attempts: SupportsIndex |None = None, delete_backoff: SupportsFloat |SupportsIndex |None = None, wait_for_terminated: bool |SupportsFloat |SupportsIndex = ...) -> TeardownReport:
         """
         Tears down, best-effort, **never raising**.
         
@@ -2810,7 +2811,7 @@ class Sandbox:
         report then honestly ends in `"TERMINATING"`. `True` waits for TERMINATED up to the
         core's lifecycle default; a number of seconds waits up to that instead.
         """
-    async def terminate_async(self, /, *, delete_image: bool = False, delete_log_group: bool = False, delete_attempts: int |None = None, delete_backoff: float |None = None, wait_for_terminated: bool |float = ...) -> TeardownReport:
+    async def terminate_async(self, /, *, delete_image: bool = False, delete_log_group: bool = False, delete_attempts: SupportsIndex |None = None, delete_backoff: SupportsFloat |SupportsIndex |None = None, wait_for_terminated: bool |SupportsFloat |SupportsIndex = ...) -> TeardownReport:
         """
         The awaitable twin of `terminate`, with its keywords; it never raises either. A
         lifecycle transition: cancelling the awaitable leaves the teardown running to
@@ -2833,7 +2834,7 @@ class Sandbox:
         Holds the host's secret half: pass it to `Session.tunnel(verify_identity=...)`, and
         store it only where the agent token goes.
         """
-    def wait_until_running(self, /, *, timeout: float |None = None) -> Session:
+    def wait_until_running(self, /, *, timeout: SupportsFloat |SupportsIndex |None = None) -> Session:
         """
         Finishes a `run(wait=False)`: waits for RUNNING and for the daemon to answer, and
         returns the session. `timeout` bounds the wait for RUNNING, as `ready_timeout` does.
@@ -2842,7 +2843,7 @@ class Sandbox:
         a fresh launch that reaches a terminal state first raises `LaunchDiedError` with
         the service's `stateReason`. Refused unless the launch is still PENDING.
         """
-    async def wait_until_running_async(self, /, *, timeout: float |None = None) -> Session:
+    async def wait_until_running_async(self, /, *, timeout: SupportsFloat |SupportsIndex |None = None) -> Session:
         """
         The awaitable twin of `wait_until_running`. Cancelling it stops the wait, not the
         launch: the VM keeps starting, and a later `wait_until_running` picks it up.
@@ -2866,7 +2867,7 @@ class Session:
         It is never included in repr or ordinary status output.
         """
     @staticmethod
-    def attach(region: Region, microvm_id: str, endpoint: str, agent_token: str, *, port: int |None = None, request_timeout: float |None = None) -> Session:
+    def attach(region: Region, microvm_id: str, endpoint: str, agent_token: str, *, port: SupportsIndex |None = None, request_timeout: SupportsFloat |SupportsIndex |None = None) -> Session:
         """
         Reattach using a private control record, without bootstrapping again.
         AWS credentials mint fresh proxy tokens. This session owns its transport and
@@ -2874,11 +2875,11 @@ class Session:
         with a short `request_timeout`. Never publish or log `agent_token`.
         """
     @staticmethod
-    async def attach_async(region: Region, microvm_id: str, endpoint: str, agent_token: str, *, port: int |None = None, request_timeout: float |None = None) -> Session:
+    async def attach_async(region: Region, microvm_id: str, endpoint: str, agent_token: str, *, port: SupportsIndex |None = None, request_timeout: SupportsFloat |SupportsIndex |None = None) -> Session:
         """
         The awaitable twin of `Session.attach`.
         """
-    def connect_headers(self, /, port: int) -> dict[str, str]:
+    def connect_headers(self, /, port: SupportsIndex) -> dict[str, str]:
         """
         Both proxy headers for `port`, so a caller can open its **own** connection.
         
@@ -2894,11 +2895,11 @@ class Session:
         stores it, and no method *takes* a header map — so a caller cannot feed a forged or
         expired one back in.
         """
-    async def connect_headers_async(self, /, port: int) -> dict[str, str]:
+    async def connect_headers_async(self, /, port: SupportsIndex) -> dict[str, str]:
         """
         The awaitable twin of `connect_headers`.
         """
-    def connect_subprotocols(self, /, port: int) -> list[str] |None:
+    def connect_subprotocols(self, /, port: SupportsIndex) -> list[str] |None:
         """
         The three WebSocket subprotocols for `port`, in the order a handshake offers them.
         
@@ -2914,7 +2915,7 @@ class Session:
         
         The middle string carries the credential. Same rule as `connect_headers`.
         """
-    async def connect_subprotocols_async(self, /, port: int) -> list[str] |None:
+    async def connect_subprotocols_async(self, /, port: SupportsIndex) -> list[str] |None:
         """
         The awaitable twin of `connect_subprotocols`.
         """
@@ -2936,7 +2937,7 @@ class Session:
         """
         The awaitable twin of `discovery`.
         """
-    def download_dir(self, /, remote: str, local_dir: str |PathLike[str], globs: Sequence[str]) -> list[DownloadedFile]:
+    def download_dir(self, /, remote: str, local_dir: str |PathLike[str], globs: SupportsGetItem[int, str]) -> list[DownloadedFile]:
         """
         Brings the files of a directory in the VM back under `local_dir`: the regular files
         `globs` select, and nothing else.
@@ -2948,12 +2949,12 @@ class Session:
         Returns what was written. A local directory that can't be written to raises
         `InvalidArgError`.
         """
-    async def download_dir_async(self, /, remote: str, local_dir: str |PathLike[str], globs: Sequence[str]) -> list[DownloadedFile]:
+    async def download_dir_async(self, /, remote: str, local_dir: str |PathLike[str], globs: SupportsGetItem[int, str]) -> list[DownloadedFile]:
         """
         The awaitable twin of `download_dir`. The local writes run on the shared runtime, not
         on the event loop.
         """
-    def download_file(self, /, path: str, *, start_line: int |None = None, end_line: int |None = None) -> bytes:
+    def download_file(self, /, path: str, *, start_line: SupportsIndex |None = None, end_line: SupportsIndex |None = None) -> bytes:
         """
         Reads one file, or lines `start_line` through `end_line` of it.
         
@@ -2962,7 +2963,7 @@ class Session:
         through EOF), and an `end_line` past the last line reads through EOF. Line 0 and an end
         before the start raise `InvalidArgError` before any request.
         """
-    async def download_file_async(self, /, path: str, *, start_line: int |None = None, end_line: int |None = None) -> bytes:
+    async def download_file_async(self, /, path: str, *, start_line: SupportsIndex |None = None, end_line: SupportsIndex |None = None) -> bytes:
         """
         The awaitable twin of `download_file`.
         """
@@ -3015,7 +3016,7 @@ class Session:
         """
         The awaitable twin of `health`.
         """
-    def keep_awake(self, /, interval: float |None = None, *, while_busy: bool = False, max_duration: float |None = None, idle_window: float |None = None, tolerated_errors: int |None = None) -> KeepAwake:
+    def keep_awake(self, /, interval: SupportsFloat |SupportsIndex |None = None, *, while_busy: bool = False, max_duration: SupportsFloat |SupportsIndex |None = None, idle_window: SupportsFloat |SupportsIndex |None = None, tolerated_errors: SupportsIndex |None = None) -> KeepAwake:
         """
         Keeps the VM awake by polling health from this process until stopped.
         
@@ -3052,7 +3053,7 @@ class Session:
         """
         The port the proxy token is scoped to.
         """
-    def port_forward(self, /, guest_port: int, *, bind: str |None = None, max_connections: int |None = None) -> PortForward:
+    def port_forward(self, /, guest_port: SupportsIndex, *, bind: str |None = None, max_connections: SupportsIndex |None = None) -> PortForward:
         """
         Serves a local port as an HTTP and WebSocket forward to `guest_port` in the VM, on a
         background task, and returns its handle at once: `microvm port-forward`'s loop.
@@ -3062,7 +3063,7 @@ class Session:
         with its status while the forward keeps serving. `bind` and `max_connections` are
         `tunnel`'s. Dropping the handle stops the forward.
         """
-    async def port_forward_async(self, /, guest_port: int, *, bind: str |None = None, max_connections: int |None = None) -> PortForward:
+    async def port_forward_async(self, /, guest_port: SupportsIndex, *, bind: str |None = None, max_connections: SupportsIndex |None = None) -> PortForward:
         """
         The awaitable twin of `port_forward`, for `tunnel_async`'s reason.
         """
@@ -3090,7 +3091,7 @@ class Session:
         and no `Deref`, so "treat `authToken` as a string" is as inexpressible here as it
         is there (TRAP-7).
         """
-    def run(self, /, command: Sequence[str] |str, *, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, poweroff_on_exit: bool = False, inherit_image_env: bool = False) -> ExecHandle:
+    def run(self, /, command: SupportsGetItem[int, str] |str, *, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: SupportsIndex |str |None = None, group: SupportsIndex |str |None = None, timeout_sec: SupportsFloat |SupportsIndex |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, poweroff_on_exit: bool = False, inherit_image_env: bool = False) -> ExecHandle:
         """
         Starts a command and returns its handle. Does not wait.
         
@@ -3115,22 +3116,22 @@ class Session:
         the original process group has no live members. Other work ends too, and the
         start acknowledgment or result can be lost. It does not keep an idle VM awake.
         """
-    async def run_async(self, /, command: Sequence[str] |str, *, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, poweroff_on_exit: bool = False, inherit_image_env: bool = False) -> ExecHandle:
+    async def run_async(self, /, command: SupportsGetItem[int, str] |str, *, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: SupportsIndex |str |None = None, group: SupportsIndex |str |None = None, timeout_sec: SupportsFloat |SupportsIndex |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, poweroff_on_exit: bool = False, inherit_image_env: bool = False) -> ExecHandle:
         """
         The awaitable twin of `run`, with its keywords. Cancelling it before the daemon
         answers may leave the exec started, under the `exec_id` the call was given or minted;
         `Session.exec(exec_id)` reaches it, which is why a caller that cancels passes one.
         """
-    def run_sync(self, /, command: Sequence[str] |str, *, timeout: float = ..., shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, poweroff_on_exit: bool = False, inherit_image_env: bool = False) -> ExecResult:
+    def run_sync(self, /, command: SupportsGetItem[int, str] |str, *, timeout: SupportsFloat |SupportsIndex = ..., shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: SupportsIndex |str |None = None, group: SupportsIndex |str |None = None, timeout_sec: SupportsFloat |SupportsIndex |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, poweroff_on_exit: bool = False, inherit_image_env: bool = False) -> ExecResult:
         """
         Start, wait, ack. The one-shot shape, for when output is all you want.
         """
-    async def run_sync_async(self, /, command: Sequence[str] |str, *, timeout: float = ..., shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, poweroff_on_exit: bool = False, inherit_image_env: bool = False) -> ExecResult:
+    async def run_sync_async(self, /, command: SupportsGetItem[int, str] |str, *, timeout: SupportsFloat |SupportsIndex = ..., shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: SupportsIndex |str |None = None, group: SupportsIndex |str |None = None, timeout_sec: SupportsFloat |SupportsIndex |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, poweroff_on_exit: bool = False, inherit_image_env: bool = False) -> ExecResult:
         """
         The awaitable twin of `run_sync`, with its keywords. Cancelling it stops the wait,
         as a `timeout` would: the exec keeps running and its output stays until acked.
         """
-    def run_to_completion(self, /, command: Sequence[str] |str, *, on_output: Any |None = None, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, exec_id: str |None = None, reap_group_on_exit: bool = False, poweroff_on_exit: bool = False, inherit_image_env: bool = False, client_grace_sec: float = ...) -> ExecResult:
+    def run_to_completion(self, /, command: SupportsGetItem[int, str] |str, *, on_output: Any |None = None, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: SupportsIndex |str |None = None, group: SupportsIndex |str |None = None, timeout_sec: SupportsFloat |SupportsIndex |None = None, exec_id: str |None = None, reap_group_on_exit: bool = False, poweroff_on_exit: bool = False, inherit_image_env: bool = False, client_grace_sec: SupportsFloat |SupportsIndex = ...) -> ExecResult:
         """
         Start, stream, and collect one command: exactly one `ExecResult` back (BIND-6..10).
         
@@ -3148,7 +3149,7 @@ class Session:
         `shell="bash"` with a script string runs it under bash, which dash-based images need for
         `pipefail`.
         """
-    async def run_to_completion_async(self, /, command: Sequence[str] |str, *, on_output: Any |None = None, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, exec_id: str |None = None, reap_group_on_exit: bool = False, poweroff_on_exit: bool = False, inherit_image_env: bool = False, client_grace_sec: float = ...) -> ExecResult:
+    async def run_to_completion_async(self, /, command: SupportsGetItem[int, str] |str, *, on_output: Any |None = None, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: SupportsIndex |str |None = None, group: SupportsIndex |str |None = None, timeout_sec: SupportsFloat |SupportsIndex |None = None, exec_id: str |None = None, reap_group_on_exit: bool = False, poweroff_on_exit: bool = False, inherit_image_env: bool = False, client_grace_sec: SupportsFloat |SupportsIndex = ...) -> ExecResult:
         """
         The awaitable twin of `run_to_completion`, with its keywords.
         
@@ -3159,7 +3160,7 @@ class Session:
         waited for and acked, as in `run_to_completion`. Cancelling the call stops the drive and
         leaves the exec running in the VM.
         """
-    def spawn(self, /, command: Sequence[str] |str, *, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, poweroff_on_exit: bool = False, inherit_image_env: bool = False, offset: int = 0, reconnect: bool = True, max_reconnects: int |None = None, idle_timeout: float |None = None, gap_policy: str |None = None) -> ExecProcess:
+    def spawn(self, /, command: SupportsGetItem[int, str] |str, *, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: SupportsIndex |str |None = None, group: SupportsIndex |str |None = None, timeout_sec: SupportsFloat |SupportsIndex |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, poweroff_on_exit: bool = False, inherit_image_env: bool = False, offset: SupportsIndex = 0, reconnect: bool = True, max_reconnects: SupportsIndex |None = None, idle_timeout: SupportsFloat |SupportsIndex |None = None, gap_policy: str |None = None) -> ExecProcess:
         """
         Starts a command and returns it as two byte iterators, a `wait()`, and a `kill()`.
         
@@ -3176,12 +3177,12 @@ class Session:
         `proc.gaps` and keeps both going. `offset`, `reconnect`, `max_reconnects` and
         `idle_timeout` are `ExecHandle.stream()`'s.
         """
-    async def spawn_async(self, /, command: Sequence[str] |str, *, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, poweroff_on_exit: bool = False, inherit_image_env: bool = False, offset: int = 0, reconnect: bool = True, max_reconnects: int |None = None, idle_timeout: float |None = None, gap_policy: str |None = None) -> ExecProcess:
+    async def spawn_async(self, /, command: SupportsGetItem[int, str] |str, *, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: SupportsIndex |str |None = None, group: SupportsIndex |str |None = None, timeout_sec: SupportsFloat |SupportsIndex |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, poweroff_on_exit: bool = False, inherit_image_env: bool = False, offset: SupportsIndex = 0, reconnect: bool = True, max_reconnects: SupportsIndex |None = None, idle_timeout: SupportsFloat |SupportsIndex |None = None, gap_policy: str |None = None) -> ExecProcess:
         """
         The awaitable twin of `spawn`, with its keywords. The process it answers iterates
         with `async for` as well as `for`; cancelling the call is `run_async`'s.
         """
-    def sync_dir(self, /, local_dir: str |PathLike[str], *, full: bool = False, delete_timeout: float |None = None) -> SyncReport:
+    def sync_dir(self, /, local_dir: str |PathLike[str], *, full: bool = False, delete_timeout: SupportsFloat |SupportsIndex |None = None) -> SyncReport:
         """
         Syncs `local_dir` into the VM's `/workspace` once, uploading only what changed.
         
@@ -3193,12 +3194,12 @@ class Session:
         `.venv` never travel. A tree over the daemon's budgets raises `InvalidArgError` before
         anything is sent.
         """
-    async def sync_dir_async(self, /, local_dir: str |PathLike[str], *, full: bool = False, delete_timeout: float |None = None) -> SyncReport:
+    async def sync_dir_async(self, /, local_dir: str |PathLike[str], *, full: bool = False, delete_timeout: SupportsFloat |SupportsIndex |None = None) -> SyncReport:
         """
         The awaitable twin of `sync_dir`. The hashing and the local reads run on the shared
         runtime, not on the event loop.
         """
-    def tunnel(self, /, guest_port: int, *, bind: str |None = None, verify_identity: TunnelIdentity |None = None, max_connections: int |None = None) -> Tunnel:
+    def tunnel(self, /, guest_port: SupportsIndex, *, bind: str |None = None, verify_identity: TunnelIdentity |None = None, max_connections: SupportsIndex |None = None) -> Tunnel:
         """
         Serves a local TCP port as a tunnel to `guest_port` in the VM, on a background task,
         and returns its handle at once: `microvm tunnel`'s loop.
@@ -3214,7 +3215,7 @@ class Session:
         The tunnel carries this session's credentials to whoever connects, so bind beyond
         loopback only on a network you trust. Dropping the handle stops the tunnel.
         """
-    async def tunnel_async(self, /, guest_port: int, *, bind: str |None = None, verify_identity: TunnelIdentity |None = None, max_connections: int |None = None) -> Tunnel:
+    async def tunnel_async(self, /, guest_port: SupportsIndex, *, bind: str |None = None, verify_identity: TunnelIdentity |None = None, max_connections: SupportsIndex |None = None) -> Tunnel:
         """
         The awaitable twin of `tunnel`: binds the listener on the shared runtime and answers
         the same handle, whose loop runs there either way.
@@ -3240,7 +3241,7 @@ class Session:
         """
         The awaitable twin of `upload_tar`.
         """
-    def wait_until_ready(self, /, timeout: float = ...) -> Health:
+    def wait_until_ready(self, /, timeout: SupportsFloat |SupportsIndex = ...) -> Health:
         """
         Polls health until the daemon reports bootstrapped.
         
@@ -3249,7 +3250,7 @@ class Session:
         wired up. A *fatal* error ends the wait at once, because retrying a 401 until the
         deadline is the mistake the retryable split exists to prevent.
         """
-    async def wait_until_ready_async(self, /, timeout: float = ...) -> Health:
+    async def wait_until_ready_async(self, /, timeout: SupportsFloat |SupportsIndex = ...) -> Health:
         """
         The awaitable twin of `wait_until_ready`.
         """
@@ -3292,7 +3293,7 @@ class SizeClass:
         One line naming both numbers. `cli.py` calls this `describe()`.
         """
     @staticmethod
-    def from_baseline_mib(mib: int) -> SizeClass:
+    def from_baseline_mib(mib: SupportsIndex) -> SizeClass:
         """
         The class `minimumMemoryInMiB = mib` selects, or a refusal (TRAP-10).
         
@@ -3300,7 +3301,7 @@ class SizeClass:
         plausible readings differ in both memory and rate, and neither has been measured.
         """
     @staticmethod
-    def from_request(cpus: float |None = None, memory_mib: int |None = None) -> SizeClass:
+    def from_request(cpus: SupportsFloat |SupportsIndex |None = None, memory_mib: SupportsIndex |None = None) -> SizeClass:
         """
         The smallest class whose baseline covers a resource request (BIND-14).
         
@@ -3523,7 +3524,7 @@ class Tunnel:
         """
         Whether the tunnel is still serving.
         """
-    def stop(self, /, timeout: float |None = None) -> TunnelReport:
+    def stop(self, /, timeout: SupportsFloat |SupportsIndex |None = None) -> TunnelReport:
         """
         Stops accepting, waits for the connections still open to end, and returns the report.
         
@@ -3531,7 +3532,7 @@ class Tunnel:
         `"failed"`. Without it, a client that keeps its connection open keeps this waiting.
         Callable again, with the same report.
         """
-    async def stop_async(self, /, timeout: float |None = None) -> TunnelReport:
+    async def stop_async(self, /, timeout: SupportsFloat |SupportsIndex |None = None) -> TunnelReport:
         """
         The awaitable twin of `stop`.
         """
@@ -3642,7 +3643,7 @@ def check_budget(report: CostReport, max_usd: str, on_breach: str) -> BudgetVerd
     Core's `Budget::check`, the gate `microvm cost --max-cost` applies.
     """
 
-def compare_residency(size: SizeClass, hold_seconds: float, cycles: int = ..., *, rates: RateTable |None = None) -> ResidencyComparison:
+def compare_residency(size: SizeClass, hold_seconds: SupportsFloat |SupportsIndex, cycles: SupportsIndex = ..., *, rates: RateTable |None = None) -> ResidencyComparison:
     """
     The warm-pool argument, with its own counter-argument attached.
     
@@ -3669,7 +3670,7 @@ def cost_constants() -> dict:
     caller can enumerate the closed sets rather than hardcoding spellings.
     """
 
-def egress_posture_for(egress: bool = False, connectors: Sequence[str] |None = None, deny_egress: bool = False, *, region: Region |None = None) -> str:
+def egress_posture_for(egress: bool = False, connectors: SupportsGetItem[int, str] |None = None, deny_egress: bool = False, *, region: Region |None = None) -> str:
     """
     The egress posture `Sandbox.run` with these options would report, without launching.
     
@@ -3684,7 +3685,7 @@ def egress_posture_for(egress: bool = False, connectors: Sequence[str] |None = N
     `region`, each connector ARN is checked against the region it names.
     """
 
-def estimate_run(size: SizeClass, *, running_seconds: float = 0.0, suspended_seconds: float = 0.0, image_gb: float |None = None, image_retained_seconds: float |None = None, suspend_resume_cycles: int = ..., snapshot_gb: float |None = None, launched: bool |None = None, label: str |None = None, rates: RateTable |None = None) -> CostReport:
+def estimate_run(size: SizeClass, *, running_seconds: SupportsFloat |SupportsIndex = 0.0, suspended_seconds: SupportsFloat |SupportsIndex = 0.0, image_gb: SupportsFloat |SupportsIndex |None = None, image_retained_seconds: SupportsFloat |SupportsIndex |None = None, suspend_resume_cycles: SupportsIndex = ..., snapshot_gb: SupportsFloat |SupportsIndex |None = None, launched: bool |None = None, label: str |None = None, rates: RateTable |None = None) -> CostReport:
     """
     What a plan will cost, before spending anything (COST-10).
     
@@ -3699,7 +3700,7 @@ def estimate_run(size: SizeClass, *, running_seconds: float = 0.0, suspended_sec
     `suspend_resume_cycles` out and the plan counts none, as `microvm cost --estimate` does.
     """
 
-def install_agent_access(session: Session, agents: Sequence[AgentSpec], token: BearerToken) -> None:
+def install_agent_access(session: Session, agents: SupportsGetItem[int, AgentSpec], token: BearerToken) -> None:
     """
     Installs Bedrock access for `agents` into a running VM over `session`.
     
@@ -3708,7 +3709,7 @@ def install_agent_access(session: Session, agents: Sequence[AgentSpec], token: B
     token overwrites the same files, which is how a twelve-hour token is refreshed.
     """
 
-async def install_agent_access_async(session: Session, agents: Sequence[AgentSpec], token: BearerToken) -> None:
+async def install_agent_access_async(session: Session, agents: SupportsGetItem[int, AgentSpec], token: BearerToken) -> None:
     """
     The awaitable twin of `install_agent_access`.
     """
@@ -3727,7 +3728,7 @@ async def installed_agents_async(session: Session) -> list[AgentSpec]:
     The awaitable twin of `installed_agents`.
     """
 
-def mint_bedrock_token(region: Region, *, ttl_seconds: float |None = None) -> BearerToken:
+def mint_bedrock_token(region: Region, *, ttl_seconds: SupportsFloat |SupportsIndex |None = None) -> BearerToken:
     """
     Mints a Bedrock bearer token from the default credential chain.
     
@@ -3736,12 +3737,12 @@ def mint_bedrock_token(region: Region, *, ttl_seconds: float |None = None) -> Be
     `ttl_seconds` defaults to the ceiling, twelve hours; more is refused by the core.
     """
 
-async def mint_bedrock_token_async(region: Region, *, ttl_seconds: float |None = None) -> BearerToken:
+async def mint_bedrock_token_async(region: Region, *, ttl_seconds: SupportsFloat |SupportsIndex |None = None) -> BearerToken:
     """
     The awaitable twin of `mint_bedrock_token`.
     """
 
-def mint_bedrock_token_with_credentials(region: Region, *, access_key_id: str, secret_access_key: str, session_token: str |None = None, credentials_expires_at: float, ttl_seconds: float |None = None) -> BearerToken:
+def mint_bedrock_token_with_credentials(region: Region, *, access_key_id: str, secret_access_key: str, session_token: str |None = None, credentials_expires_at: SupportsFloat |SupportsIndex, ttl_seconds: SupportsFloat |SupportsIndex |None = None) -> BearerToken:
     """
     Mint with explicit STS credentials and their expiry without changing process env.
     `credentials_expires_at` is Unix seconds from STS Expiration. Secrets never enter repr.
@@ -3766,7 +3767,7 @@ async def preflight_async(region: Region |None = None) -> PreflightReport:
     The awaitable twin of `preflight`. Never raises either; read `report.ok`.
     """
 
-def prompt_agent(session: Session, agent: AgentSpec, task: str, *, timeout_sec: float |None = None, exec_id: str |None = None, permission_mode: str = "agent-default", reap_group_on_exit: bool = False) -> ExecHandle:
+def prompt_agent(session: Session, agent: AgentSpec, task: str, *, timeout_sec: SupportsFloat |SupportsIndex |None = None, exec_id: str |None = None, permission_mode: str = "agent-default", reap_group_on_exit: bool = False) -> ExecHandle:
     """
     Starts one task for `agent` over `session` and returns its handle. Does not wait.
     
@@ -3777,7 +3778,7 @@ def prompt_agent(session: Session, agent: AgentSpec, task: str, *, timeout_sec: 
     residual children after the main agent exits. Neither option grants guest root.
     """
 
-async def prompt_agent_async(session: Session, agent: AgentSpec, task: str, *, timeout_sec: float |None = None, exec_id: str |None = None, permission_mode: str = "agent-default", reap_group_on_exit: bool = False) -> ExecHandle:
+async def prompt_agent_async(session: Session, agent: AgentSpec, task: str, *, timeout_sec: SupportsFloat |SupportsIndex |None = None, exec_id: str |None = None, permission_mode: str = "agent-default", reap_group_on_exit: bool = False) -> ExecHandle:
     """
     The awaitable twin of `prompt_agent`.
     """
@@ -3812,7 +3813,7 @@ async def provision_agentd_report_async(version: str |None = None, state_dir: st
     The awaitable twin of `provision_agentd_report`.
     """
 
-def run_report(size: SizeClass, *, running: Duration |None = None, suspended: Duration |None = None, image_build: Duration |None = None, image_gb: float |None = None, image_retained: Duration |None = None, suspend_resume_cycles: int = ..., snapshot_gb: float |None = None, launched: bool |None = None, label: str |None = None, rates: RateTable |None = None) -> CostReport:
+def run_report(size: SizeClass, *, running: Duration |None = None, suspended: Duration |None = None, image_build: Duration |None = None, image_gb: SupportsFloat |SupportsIndex |None = None, image_retained: Duration |None = None, suspend_resume_cycles: SupportsIndex = ..., snapshot_gb: SupportsFloat |SupportsIndex |None = None, launched: bool |None = None, label: str |None = None, rates: RateTable |None = None) -> CostReport:
     """
     Per-phase attribution for one sandbox's lifecycle.
     
@@ -3837,7 +3838,7 @@ def session_constants() -> dict:
     The daemon's protocol constants, for a caller asserting against the wire contract.
     """
 
-def wrap_dockerfile(task_dockerfile: str, *, port: int |None = None, workdir: str |None = None, inherit_workdir: bool = False) -> str:
+def wrap_dockerfile(task_dockerfile: str, *, port: SupportsIndex |None = None, workdir: str |None = None, inherit_workdir: bool = False) -> str:
     """
     A task Dockerfile with the agentd stanza appended, ready for `build_image`.
     
@@ -3856,7 +3857,7 @@ def wrap_dockerfile(task_dockerfile: str, *, port: int |None = None, workdir: st
     `inherit_workdir` with nothing to inherit.
     """
 
-def wrap_dockerfile_preserving_user(task_dockerfile: str, *, port: int |None = None, workdir: str |None = None, inherit_workdir: bool = False) -> str:
+def wrap_dockerfile_preserving_user(task_dockerfile: str, *, port: SupportsIndex |None = None, workdir: str |None = None, inherit_workdir: bool = False) -> str:
     """
     Preserve the final Dockerfile USER's uid and primary gid as the workload default.
     The builder resolves stage inheritance, variables and names. Explicit image

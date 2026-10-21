@@ -270,6 +270,23 @@ def wrap_doc(doc: str, width: int = 86) -> list[str]:
     return out
 
 
+TYPESHED_IMPORT = "from _typeshed import "
+
+
+def without_typeshed_incomplete(line: str) -> str | None:
+    """The line with `Incomplete` dropped from a `_typeshed` import, or None when nothing is left.
+
+    Any other line comes back unchanged.
+    """
+    if not line.startswith(TYPESHED_IMPORT):
+        return line
+    names = [name.strip() for name in line[len(TYPESHED_IMPORT) :].split(",")]
+    kept = [name for name in names if name != "Incomplete"]
+    if not kept:
+        return None
+    return TYPESHED_IMPORT + ", ".join(kept)
+
+
 def render() -> str:
     """The whole artifact: maturin's stub, de-escaped, with the exceptions appended."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -295,11 +312,17 @@ def render() -> str:
         )
 
     # `Incomplete` was imported solely for that hatch. An unused import in a stub is not
-    # merely untidy: ruff's own rules flag it, and this file is linted.
+    # merely untidy: ruff's own rules flag it, and this file is linted. Since pyo3 0.30 the
+    # stub also imports `SupportsGetItem` from `_typeshed`, on the same line, so the name is
+    # dropped from the line and the line goes only when no other name is left on it.
     if not any(
-        "Incomplete" in line for line in lines if not line.startswith("from _typeshed")
+        "Incomplete" in line for line in lines if not line.startswith(TYPESHED_IMPORT)
     ):
-        lines = [line for line in lines if line != "from _typeshed import Incomplete"]
+        lines = [
+            kept
+            for line in lines
+            if (kept := without_typeshed_incomplete(line)) is not None
+        ]
 
     body = "\n".join(lines).rstrip("\n")
     banner = (

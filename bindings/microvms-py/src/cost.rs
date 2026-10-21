@@ -36,22 +36,21 @@
 //!
 //! # Extraction is opt-in, per type, and the split is the input/output split
 //!
-//! PyO3 0.29 is phasing out the blanket `FromPyObject` for `Clone` pyclasses, and the
-//! opt-ins are `from_py_object` and `skip_from_py_object`. That is not a deprecation to
-//! silence — it is the lever that decides whether a type can be *passed in* by value, and
-//! this module takes a position on each one rather than letting a default answer:
+//! Since PyO3 0.30 a `#[pyclass]` gets no `FromPyObject` unless it opts in with
+//! `from_py_object`. That opt-in is the lever that decides whether a type can be *passed
+//! in* by value, and this module takes a position on each type:
 //!
 //! * `from_py_object` on [`PyDuration`], [`PySizeClass`], [`PyRateTable`] — the three
 //!   types that really are inputs. A report builder takes them, so extraction has to
 //!   exist. It stays safe because the *only* way a caller obtains one is a constructor
 //!   this module wrote, and none of those accepts a bare number where a labelled value
 //!   belongs.
-//! * `skip_from_py_object` on [`PyEstimatedUsd`], [`PyUnpriced`], [`PyAmount`],
-//!   [`PyLineItem`], [`PyTotal`], [`PyCostReport`] — the six that are only ever *results*.
-//!   No function here takes a dollar figure, and refusing extraction says so in the type
-//!   rather than in a docstring: a future signature that tried to accept an `EstimatedUsd`
-//!   by value would not compile, which is the closest thing to "the core has no
-//!   constructor for a bill" that a binding can hold.
+//! * No opt-in on [`PyEstimatedUsd`], [`PyUnpriced`], [`PyAmount`], [`PyLineItem`],
+//!   [`PyTotal`], [`PyCostReport`] — the six that are only ever *results*. No function
+//!   here takes a dollar figure, and the missing extraction says so in the type rather
+//!   than in a docstring: a future signature that tried to accept an `EstimatedUsd` by
+//!   value would not compile, which is the closest thing to "the core has no constructor
+//!   for a bill" that a binding can hold.
 //!
 //! # The JSON shape is core's
 //!
@@ -167,12 +166,7 @@ impl PyDuration {
 ///
 /// A caller who genuinely needs arithmetic writes `Decimal(usd.amount)`, which is one
 /// visible step, keeps the type name at the call site, and is a decision a reviewer sees.
-#[pyclass(
-    frozen,
-    skip_from_py_object,
-    name = "EstimatedUsd",
-    module = "microvms"
-)]
+#[pyclass(frozen, name = "EstimatedUsd", module = "microvms")]
 #[derive(Clone, Copy)]
 pub struct PyEstimatedUsd {
     inner: CoreUsd,
@@ -225,7 +219,7 @@ impl PyEstimatedUsd {
 /// A distinct class rather than `EstimatedUsd("0")`, and the distinction is not cosmetic:
 /// zero is a claim about the bill, unpriced is a claim about the documentation. `reason`
 /// is required and not optional, so a line item can say *why*.
-#[pyclass(frozen, skip_from_py_object, name = "Unpriced", module = "microvms")]
+#[pyclass(frozen, name = "Unpriced", module = "microvms")]
 #[derive(Clone)]
 pub struct PyUnpriced {
     reason: String,
@@ -254,7 +248,7 @@ impl PyUnpriced {
 /// (`"estimated-usd"` / `"unpriced"`), `usd` is `None` for the unpriced case, and
 /// `unpriced` is `None` for the priced one — so exactly one of the two is present and a
 /// reader who checks either has handled both.
-#[pyclass(frozen, skip_from_py_object, name = "Amount", module = "microvms")]
+#[pyclass(frozen, name = "Amount", module = "microvms")]
 #[derive(Clone)]
 pub struct PyAmount {
     inner: Amount,
@@ -309,7 +303,7 @@ impl PyAmount {
 /// hours yields 28 significant digits and the exact figure is what lets a reader check
 /// the arithmetic against the rate table, which is the only defence against a rate that
 /// drifts without anyone noticing.
-#[pyclass(frozen, skip_from_py_object, name = "LineItem", module = "microvms")]
+#[pyclass(frozen, name = "LineItem", module = "microvms")]
 #[derive(Clone)]
 pub struct PyLineItem {
     inner: CoreLineItem,
@@ -408,7 +402,7 @@ fn json_to_dict<'py>(py: Python<'py>, value: &serde_json::Value) -> PyResult<Bou
 /// to lean on, so the port keeps the floor under a name that says what it is:
 /// [`Self::floor`], never `total`. A caller reading a field called `total` would have no
 /// reason to check `is_lower_bound`.
-#[pyclass(frozen, skip_from_py_object, name = "Total", module = "microvms")]
+#[pyclass(frozen, name = "Total", module = "microvms")]
 #[derive(Clone)]
 pub struct PyTotal {
     inner: CoreTotal,
@@ -682,7 +676,7 @@ impl PyRateTable {
 // ── CostReport ───────────────────────────────────────────────────────────────
 
 /// Per-phase attribution for one sandbox, measured or projected.
-#[pyclass(frozen, skip_from_py_object, name = "CostReport", module = "microvms")]
+#[pyclass(frozen, name = "CostReport", module = "microvms")]
 #[derive(Clone)]
 pub struct PyCostReport {
     inner: CoreReport,

@@ -14,12 +14,7 @@ use pyo3::types::PyBytes;
 use crate::errors::{CoreError, PyCoreResult};
 
 /// A provisioned `agentd` binary and how it got here: `provision_agentd_report()`'s answer.
-#[pyclass(
-    frozen,
-    skip_from_py_object,
-    name = "ProvisionedAgentd",
-    module = "microvms"
-)]
+#[pyclass(frozen, name = "ProvisionedAgentd", module = "microvms")]
 pub struct PyProvisionedAgentd {
     inner: Provisioned,
 }
