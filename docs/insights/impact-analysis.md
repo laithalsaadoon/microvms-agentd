@@ -159,7 +159,7 @@ Defined at: `crates/microvms-domain/src/sizing.rs:74-125`.
 | CLI memory variants and conversions | direct import | yes | `crates/microvms-cli/src/cli.rs:448-498` |
 | CLI resource-request resolution | direct import | likely | `crates/microvms-cli/src/cli.rs:503-534` |
 | Control-plane run and image data | direct import | likely | `crates/microvms-app/src/control/mod.rs:368`, `crates/microvms-app/src/control/image.rs:72` |
-| Python size factories | direct import | likely | `bindings/microvms-py/src/cost.rs:463-491` |
+| Python size factories | direct import | likely | `bindings/microvms-py/src/cost.rs:457-485` |
 | Node size factories | direct import | likely | `bindings/microvms-js/src/cost.rs:363-401` |
 | Published client defaults | indirect | likely | `crates/microvms-app/src/defaults.rs:51-52`, `crates/microvms-app/src/defaults.rs:159` |
 | Agent recipe sizes | direct import | likely | `crates/microvms-app/src/agents/mod.rs:44-52` |
@@ -224,7 +224,7 @@ Defined at: `crates/microvms-domain/src/cost.rs:1007-1021`.
 | --- | --- | --- | --- |
 | Independent rate literals and source parser | runtime dispatch | yes | `tools/check-live-rates.py:119-142`, `tools/check-live-rates.py:169-210` |
 | CLI cost command | direct import | likely | `crates/microvms-cli/src/commands/cost.rs:18`, `crates/microvms-cli/src/commands/cost.rs:33-34` |
-| Python rate factory and report defaults | direct import | likely | `bindings/microvms-py/src/cost.rs:583`, `bindings/microvms-py/src/cost.rs:954` |
+| Python rate factory and report defaults | direct import | likely | `bindings/microvms-py/src/cost.rs:577`, `bindings/microvms-py/src/cost.rs:948` |
 | Node rate factory and report defaults | direct import | likely | `bindings/microvms-js/src/cost.rs:482`, `bindings/microvms-js/src/cost.rs:837` |
 | Completed-run cost attachment | direct import | likely | `crates/microvms-cli/src/commands/lifecycle.rs:1363-1396` |
 | Shared cost case runner | test | likely | `crates/microvms-core/tests/parity_cases.rs:224-233` |
