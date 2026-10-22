@@ -361,12 +361,12 @@
       "priority": "critical",
       "refines": [],
       "satisfies": [],
-      "sentence": "If the handshake of an identity-verified tunnel is not made with the host key the run hook pinned, then the agentd shall close the tunnel with close code 4403.",
+      "sentence": "If the handshake of an identity-verified tunnel is not made with the host key the run hook pinned, then the agentd shall close the tunnel with the IDENTITY_REFUSED close code.",
       "status": "draft",
       "systemName": "agentd",
-      "systemResponse": "close the tunnel with close code 4403",
+      "systemResponse": "close the tunnel with the IDENTITY_REFUSED close code",
       "trigger": "the handshake of an identity-verified tunnel is not made with the host key the run hook pinned",
-      "updatedAt": "2026-09-29T05:00:00.000Z",
+      "updatedAt": "2026-10-17T00:00:00.000Z",
       "verificationMethod": "test",
       "verifies": []
     },
@@ -507,11 +507,5 @@
     "variables": []
   },
   "terms": [],
-  "waivers": [
-    {
-      "code": "GTWR_R6_MISSING_UNITS",
-      "reason": "4403 is a WebSocket close code (protocol::tunnel::close::IDENTITY_REFUSED), which carries no unit",
-      "requirementId": "b7cd0126-e1fc-4a4d-8fc1-23479866e19d"
-    }
-  ]
+  "waivers": []
 }

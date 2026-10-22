@@ -2,7 +2,7 @@
 //! A checked model of `Sandbox::ensure_image`: two concurrent callers building or reusing one
 //! content-addressed image name, against a platform that moves the image through its states.
 //!
-//! It specifies IMAGE-8 through IMAGE-11 in `verify/spec/core.symspec.json`, which issue #221 asked
+//! It specifies IMAGE-8 through IMAGE-11 and IMAGE-13 in `verify/spec/core.symspec.json`, which issue #221 asked
 //! for. A Harbor provider runs many trials of one task at once, every trial derives the same
 //! image name from the same inputs, and each one has to come back with a usable image: the
 //! one already built, the one a sibling is building, or the one it builds itself.
@@ -19,7 +19,7 @@
 //! Each caller runs [`plan`], the decision table `microvms-core` implements as
 //! `control::ensure::plan`: what to do with what a describe found, and whether the caller
 //! asked to force a rebuild. The Rust tests mirror the table (`the_plan_table`). Each caller
-//! also resolves its account once, for the image ARN every describe needs (IMAGE-8).
+//! also resolves its account once, for the image ARN every describe needs (IMAGE-13).
 //!
 //! # The specification and the policies it rejects
 //!
@@ -430,11 +430,20 @@ impl Model for EnsureModel {
         vec![
             // ── IMAGE-8 ───────────────────────────────────────────────────────
             Property::<Self>::always(
-                "IMAGE-8 a caller resolves its account once however often it describes",
+                "IMAGE-8 every observed create attempt has an artifact upload",
+                |_, s| {
+                    s.callers
+                        .iter()
+                        .all(|c| !(c.created || c.lost_race) || c.uploaded)
+                },
+            ),
+            // ── IMAGE-13 ──────────────────────────────────────────────────────
+            Property::<Self>::always(
+                "IMAGE-13 a caller resolves its account once however often it describes",
                 |_, s| s.callers.iter().all(|c| c.account_calls <= 1),
             ),
             Property::<Self>::sometimes(
-                "IMAGE-8 witness: a caller describes twice on one account lookup",
+                "IMAGE-13 witness: a caller describes twice on one account lookup",
                 |_, s| {
                     s.callers
                         .iter()
