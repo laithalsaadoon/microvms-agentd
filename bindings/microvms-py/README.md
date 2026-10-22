@@ -146,7 +146,8 @@ Each method that calls AWS or the VM blocks, and has an awaitable twin with the
 same arguments and an `_async` suffix for asyncio code (see below). `run_sync`
 starts a command, waits, and acknowledges its saved output. A nonzero exit is a result, so check `result.ok` or
 `result.exit_code`. Use `shell=True` when passing a shell script string.
-Library exceptions expose `code`, `kind`, `wire_kind`, and `retryable`.
+Library exceptions expose `code`, `kind`, `wire_kind`, `retryable`, `throttled`,
+`attempt_count`, and `backoff_seconds`.
 
 Omitting `egress` does not block outbound traffic. For no egress, use
 `egress_network_connectors=[vpc_connector_arn]` with a VPC without an internet
@@ -190,13 +191,15 @@ asyncio.run(main())
 ```
 
 `async with` terminates the VM on the way out, as `with` does. Canceling a
-read, wait, transfer or command start stops it. Canceling `run_async`,
-`build_image_async`, `ensure_image_async`, `suspend_async`, `resume_async` or
-`terminate_async` lets the call finish, so a VM a canceled launch started is
-still the sandbox's to terminate. Calls through the sandbox's own session take
-turns on the sandbox, as the blocking methods do, so a lifecycle call never
-interleaves with them; `Session.attach_async` gives a session whose calls run at
-once. A property such as `vm.lifecycle` waits for a transition
+read, wait, transfer, command start or `ensure_image_async` stops it, and an
+image build the service already accepted keeps running, so ensuring the same
+inputs again joins it. Canceling `build_image_async`, `suspend_async`,
+`resume_async` or `terminate_async` lets the call finish. Canceling `run_async`
+stops its pending retries and lets a request already sent finish, so a VM a
+canceled launch started is still the sandbox's to terminate. Calls through the
+sandbox's own session take turns on the sandbox, as the blocking methods do, so a
+lifecycle call never interleaves with them; `Session.attach_async` gives a
+session whose calls run at once. A property such as `vm.lifecycle` waits for a transition
 in flight, so read it before or after awaiting one.
 
 [SDK tutorial](https://laithalsaadoon.github.io/microvms-agentd/learn/tutorial/from-code/)
