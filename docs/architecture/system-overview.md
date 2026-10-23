@@ -32,7 +32,7 @@ The workspace also contains `agentd-model` for state exploration and `model-conf
 | Wire schema | `schemars` with `version = "1.2.2"` and `["derive", "std"]` | `crates/protocol/Cargo.toml:24` |
 | CLI parsing | `clap = { version = "4.6.6", features = ["derive"] }` | `crates/microvms-cli/Cargo.toml:46` |
 | Python extension | `pyo3` with `version = "0.30"` and `["abi3-py311", "experimental-async"]` | `bindings/microvms-py/Cargo.toml:45` |
-| Node extension | `napi` with `version = "3"` and `"napi8"`, `"async"`, `"web_stream"` | `bindings/microvms-js/Cargo.toml:43` |
+| Node extension | `napi` with `version = "3"` and `"napi8"`, `"async"`, `"web_stream"` | `bindings/microvms-js/Cargo.toml:39` |
 | State exploration | `stateright = "0.31"` | `crates/model/Cargo.toml:14` |
 
 ## Module map

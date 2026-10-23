@@ -172,10 +172,10 @@ with its diff: write the assertion that fails with it in. One no test could tell
 original takes a no-mutate pragma on its line, with the reason in parentheses after it, which
 the script requires. The job runs in four shards, each with its share of the changed functions
 and their base, and each within a budget under the job's timeout; a function a shard's budget
-leaves undecided passes, and the log names it. `mise run mutmut` takes the same `--shard` and
-`--budget` arguments the job hands `ci:mutmut`. The `mutation testing the gate scripts` check
-is the shards' combined result, as `mutation testing` is for `mutants`, and main's ruleset
-requires it by that name once it lists it.
+leaves undecided passes, and the log names it. `mise run mutmut` takes the same `--base` and
+`--shard` arguments the job hands `ci:mutmut`, and the `--budget` that `ci:mutmut` sets. The
+`mutation testing the gate scripts` check is the shards' combined result, as `mutation testing`
+is for `mutants`, and main's ruleset requires it by that name once it lists it.
 
 Two kinds of code take `#[cfg_attr(test, mutants::skip)]` rather than an
 exclusion: a new test double behind `cfg(any(test, feature = "test-support"))`
@@ -522,7 +522,9 @@ published crate's `Cargo.toml`, in `crates/agentd/Cargo.toml`, in
 `bindings/microvms-py/pyproject.toml` and in `bindings/microvms-js/package.json`.
 The daemon isn't on a registry, and it still takes the number, because it reports
 its version in health and `/v1/schema` (#592). The pull request regenerates the
-Python stub, `docs/schema.json` and `crates/agentd/fuzz/Cargo.lock`, and runs
+Python stub, `docs/schema.json`, `docs/manifest.json`,
+`verify/parity/core-api.json` and `crates/agentd/fuzz/Cargo.lock`, sets the new
+number for `microvms_core::VERSION` in `verify/parity/inventory.json`, and runs
 `mise run release:prepare X.Y.Z`. That task runs
 `towncrier build --version X.Y.Z --yes`, which writes the fragments into
 CHANGELOG.md as that version, below `## Unreleased`, removes them, and stages
