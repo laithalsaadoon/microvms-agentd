@@ -13,6 +13,43 @@ CONTRIBUTING.md, "Changelog", says how to write one.
 
 <!-- towncrier release notes start -->
 
+## [1.2.1] - 2026-10-23
+
+### Changed
+
+- **The Python package builds with PyO3 0.30 (#722).** `microvms.pyi` now types integer
+  parameters as `SupportsIndex`, float parameters as `SupportsFloat | SupportsIndex`, and list
+  parameters as `SupportsGetItem`, so a type checker accepts any argument with `__index__` or
+  `__float__` that the package already took at runtime. Every call the earlier stub accepted
+  still checks, and no return type changed. Module-level functions report their native
+  module, `microvms.microvms`, as `__self__`, where they reported `None`.
+- **`SigstoreVerifier` checks the daemon release with `sigstore-verify` 0.15.0 (#723).**
+  `sigstore-verify`, `sigstore-trust-root` and `sigstore-types` move from 0.14.0 to 0.15.0
+  together, since 0.15.0 is a breaking release of each and the verifier takes the other two's
+  types. The check is the same: the certificate chain to Fulcio, the SCT, the Rekor inclusion
+  proof, checkpoint and SET, the release workflow's identity and issuer matched exactly, and the
+  SLSA provenance predicate, offline against the embedded public-good trusted root, which 0.15.0
+  carries unchanged from 0.14.0. The crypto backend is now a feature of `sigstore-crypto`, so the
+  manifest names `aws-lc-rs`, the backend 0.14.0 built in.
+
+### Fixed
+
+- **Concurrent daemon provisioning on Windows keeps both callers' installs (#717).** Two callers
+  installing the same daemon version at once rename their verified bytes onto the same cached
+  path, and Windows can refuse the second rename with `Access is denied` while the first one
+  replaces the file. A caller whose rename is refused now uses the cached binary, or its record,
+  when the file already holds exactly the bytes it verified; any other content keeps the error.
+
+### Security
+
+- **TLS certificate paths through the distrusted emSign intermediates are rejected (#728).** The
+  CLI and both bindings verify AWS endpoints and a VM's tunnel through rustls-webpki, which
+  0.103.15 left open to RUSTSEC-2026-0382 (CVE-2026-111943): the private keys of several emSign
+  intermediate CAs are public, and a certificate path through one of them was accepted whenever
+  the configured trust anchors allowed it. rustls-webpki 0.103.16 rejects a path that carries
+  those keys whatever the anchors. The bundled root store, webpki-roots 1.0.10, had already
+  dropped the emSign ECC Root CA - G3 in the 2026-10-20 dependency rollup (#726).
+
 ## [1.2.0] - 2026-10-18
 
 ### Added
