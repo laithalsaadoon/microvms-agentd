@@ -2,10 +2,11 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://github.com/laithalsaadoon/microvms-agentd/blob/main/.vex/microvms-agentd.openvex.json",
   "author": "laithalsaadoon/microvms-agentd maintainers",
-  "timestamp": "2026-10-10T17:03:27Z",
-  "version": 6,
+  "timestamp": "2026-10-24T04:12:56Z",
+  "version": 7,
   "statements": [
     {
+      "timestamp": "2026-10-10T17:03:27Z",
       "vulnerability": {
         "name": "GHSA-vfj7-8cjw-p6xm",
         "description": "braces: stack-exhaustion denial of service through deeply nested brace patterns",
@@ -20,7 +21,8 @@
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
-      "impact_statement": "braces is in site/pnpm-lock.yaml only, the docs site's build tooling, through micromatch 4.0.8, which only starlight-llms-txt 0.11.0 depends on (its generator.ts matches page ids against the include, exclude, promote and demote patterns). Those patterns are the ones site/astro.config.ts sets, so the nested patterns the advisory needs would have to be committed to this repository, and the worst they do is crash a docs build. Nothing in site/ ships in a crate, wheel or npm package. Re-check if the site starts taking glob patterns from anything other than its own config, or when braces publishes a fixed release."
+      "impact_statement": "braces is in site/pnpm-lock.yaml only, the docs site's build tooling, through micromatch 4.0.8, which only starlight-llms-txt 0.11.0 depends on (its generator.ts matches page ids against the include, exclude, promote and demote patterns). Those patterns are the ones site/astro.config.ts sets, so the nested patterns the advisory needs would have to be committed to this repository, and the worst they do is crash a docs build. Nothing in site/ ships in a crate, wheel or npm package. Re-check if the site starts taking glob patterns from anything other than its own config, or when braces publishes a fixed release.",
+      "status_notes": "GitHub withdrew GHSA-vfj7-8cjw-p6xm (CVE-2026-93687) at 2026-10-23T12:53:02Z, and osv.dev marks it withdrawn, so no scanner reports it and site/osv-scanner.toml no longer ignores it. The statement stays as the record of the 2026-10-10 decision, because an OpenVEX document holds one or more statements; drop it when the next accepted finding is added."
     }
   ]
 }
