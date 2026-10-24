@@ -176,7 +176,7 @@ def drive_preflight(cli: Cli, results: Results) -> None:
 
     Three runs of core's `preflight`, none of which launches or builds anything. In the suite's
     region every check passes and the account's VM and image listings are the same after as
-    before. In ca-central-1, a region without MicroVMs, the region line is advisory and the
+    before. In us-west-1, a region without MicroVMs, the region line is advisory and the
     service check fails. With every credential source removed from the environment, the
     report stops at the credentials line and never sends the listing.
     """
