@@ -73,10 +73,25 @@ permitted to create the image but lacking `lambda:TagResource` received HTTP
 and CloudTrail event recorded in [issue #673](https://github.com/laithalsaadoon/microvms-agentd/issues/673).
 
 A null message alone does not distinguish this IAM denial from a region
-without MicroVMs. `ListMicrovms` measurements on 2026-08-07 succeeded in
-`us-east-1`, `us-east-2`, `us-west-2`, `eu-west-1`, and `ap-northeast-1`;
-`eu-central-1`, `ap-southeast-2`, and `sa-east-1` returned the same null-message
-`AccessDeniedException`.
+without MicroVMs. Measured 2026-10-24 at about 01:05Z, API version
+`2025-09-09`, with `aws lambda-microvms list-microvms --max-results 1` in each
+region the test account has enabled: `ListMicrovms` answered in `us-east-1`,
+`us-east-2`, `us-west-2`, `ca-central-1`, `sa-east-1`, `eu-west-1`,
+`eu-west-2`, `eu-west-3`, `eu-central-1`, `eu-north-1`, `ap-south-1`,
+`ap-southeast-1`, `ap-southeast-2`, `ap-northeast-1`, and `ap-northeast-2`.
+`us-west-1` and `ap-northeast-3` returned the null-message
+`AccessDeniedException`. AWS hasn't launched MicroVMs in `ca-central-1`,
+`sa-east-1`, `eu-west-2`, `eu-west-3`, or `ap-northeast-2`, even though they
+answered: no AWS launch post names them, the Pricing API prices nothing there,
+and AWS's regional availability data lists the service as planned there, as it
+does for `us-west-1` and `ap-northeast-3`. The Pricing API and AWS's launch
+posts list the same regions: `us-east-1`, `us-east-2`, `us-west-2`,
+`eu-west-1`, `ap-northeast-1`, `ap-south-1`, `ap-southeast-1`,
+`ap-southeast-2`, `eu-central-1`, `eu-north-1`, `ap-east-1`, `ap-southeast-5`,
+`ap-southeast-7`, and `eu-south-2`. A listing that answers doesn't prove that
+a region runs MicroVMs. Evidence: the listing responses, Pricing API query,
+launch posts, and availability data summarized in
+[issue #743](https://github.com/laithalsaadoon/microvms-agentd/issues/743).
 
 In a known supported region, check the policy, including implied actions for
 tags. Retrieve recent events in that region with:
@@ -283,8 +298,9 @@ requested baseline. Swap was absent.
 
 ## What actually costs money
 
-Queried 2026-08-07 from AWS Pricing in us-east-1, `ServiceCode="AWSLambda"`.
-The following dated USD rates support estimates:
+Queried 2026-08-07 and again 2026-10-24 from AWS Pricing in us-east-1, API
+version `2017-10-15`, `ServiceCode="AWSLambda"`. Both queries returned the same us-east-1 USD rates,
+which support estimates:
 
 | Usage | Rate |
 |---|---|
@@ -295,9 +311,16 @@ The following dated USD rates support estimates:
 | Snapshot storage GiB-hour | 0.0001111111 |
 
 The API also returned non-ARM compute rates; MicroVMs support `ARM_64` only.
-Rates existed in five regions. us-east-2/us-west-2 matched us-east-1; eu-west-1
-and ap-northeast-1 were higher. Regional usage types have prefixes that must
-be removed before comparing the same dimension.
+On 2026-10-24 it returned MicroVM rates for each region that
+[the null-message section](#a-null-message-accessdeniedexception-can-mean-region-availability-or-iam)
+names as priced. `us-east-2` and `us-west-2` match `us-east-1` on every line.
+`ap-south-1` and `eu-south-2` match its compute rates to within rounding. They
+charge 10% to 14% more for snapshot storage and 4.9% to 9.6% more for snapshot
+reads and writes. Every other region charges more on every line. Compute costs
+from under 0.1% more in `eu-north-1` to 47.8% more in `ap-east-1`. Snapshot
+lines cost from 4.5% more (storage in `eu-north-1`) to 59.8% more (writes in
+`ap-east-1`). Regional usage types have prefixes that must be removed before
+comparing the same dimension.
 
 Image storage has a one-week minimum. Running idle VMs still incur baseline
 charges; suspended VMs incur snapshot storage and transitions incur reads and

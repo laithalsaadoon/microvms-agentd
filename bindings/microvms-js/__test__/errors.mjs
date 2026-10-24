@@ -132,7 +132,7 @@ test('a local refusal carries the core’s own message rather than a reworded on
   // The core's messages name the `docs/PLATFORM.md` finding that measured the behaviour, and a
   // binding that shortened them would discard the point of the closure. The region refusal has two
   // halves that only mean something together: "AccessDeniedException" alone reads as an IAM
-  // problem, and it is the word *null* that says otherwise.
+  // problem, and the word *null* is what says the region may be the cause instead.
   assert.throws(
     () => Region.parse('eu-central-1'),
     (error) => {

@@ -13,8 +13,10 @@
 //!    cache, run a credential process, or ask the instance metadata service.
 //! 3. **service**: one `ListManagedMicrovmImages` page in that region
 //!    ([`ControlPlane::answers_listing`]): the endpoint resolves, the signature and the IAM
-//!    permission are accepted, and the region runs MicroVMs. An unsupported region answers
-//!    `AccessDeniedException` with a null message (TRAP-6).
+//!    permission are accepted, and the region answers the listing. A region without
+//!    MicroVMs can answer `AccessDeniedException` with a null message (TRAP-6). A pass does
+//!    not prove the region runs MicroVMs: measured 2026-10-24, `ca-central-1`, which AWS
+//!    lists as planned, answered the listing.
 //!
 //! A check whose precondition failed is reported as not run ([`Check::ran`] false), fatal, and
 //! makes no call. [`PreflightReport::ok`] is true exactly when no fatal check failed or was

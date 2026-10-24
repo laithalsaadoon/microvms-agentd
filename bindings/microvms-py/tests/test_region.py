@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The region surface: `src/region.rs`.
 
-TRAP-6 is the whole subject. A region that does not carry MicroVMs answers
+TRAP-6 is the whole subject. A region that does not run MicroVMs can answer
 `AccessDeniedException` with the message field **null**, which is indistinguishable from a genuine
 IAM denial — so the only warning anyone gets is the one this client refuses with, before the call.
 
@@ -79,7 +79,7 @@ def test_parse_accepts_every_supported_name_and_round_trips_it(name: str) -> Non
 @pytest.mark.parametrize(
     "name",
     [
-        "eu-central-1",  # the specific region that was on the list until 2026-08-07
+        "eu-central-1",  # AWS runs MicroVMs here (2026-08-19); this client doesn't list it
         "us-east-3",  # a plausible-looking region that does not exist
         "US-EAST-1",  # right region, wrong case
         "us-east-1 ",  # a trailing space from a config file
@@ -110,9 +110,9 @@ def test_the_refusal_names_the_null_message_trap_and_offers_the_supported_set() 
     """Both halves of the message, and the way out.
 
     "AccessDeniedException" alone reads as an IAM problem — someone would spend an hour reading a
-    policy that is correct — and it is the word *null* that says otherwise. The five names have
-    to be in there too, or the refusal tells a caller they are wrong without telling them what is
-    right.
+    policy that is correct — and the word *null* is what says the region may be the cause. The
+    five names have to be in there too, or the refusal tells a caller they are wrong without
+    telling them what is right.
     """
     with pytest.raises(microvms.InvalidArgError) as raised:
         microvms.Region.parse("eu-central-1")

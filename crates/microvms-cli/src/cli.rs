@@ -7,7 +7,7 @@
 //! easily downgraded: `--memory 1500` typed as `u32` compiles, parses, and fails at a
 //! library boundary a whole build cycle later. So every parameter whose library counterpart
 //! is a closed type is a [`clap::ValueEnum`] here — [`MemoryMib`] over the five documented
-//! baselines, [`RegionArg`] over the five measured regions — and clap refuses the rest
+//! baselines, [`RegionArg`] over the five listed regions — and clap refuses the rest
 //! before any handler runs.
 //!
 //! The domains are **spelled out** rather than generated from
@@ -535,10 +535,11 @@ impl SizeRequestFlags {
     }
 }
 
-/// The five regions measured to carry MicroVMs.
+/// The five regions this client lists. AWS runs MicroVMs in more, which
+/// `--unlisted-region` reaches.
 ///
-/// An unsupported region answers `AccessDeniedException` with a **null message**, which is
-/// indistinguishable from a genuine IAM denial — so the last point where the diagnostic
+/// A region without MicroVMs can answer `AccessDeniedException` with a **null message**, which
+/// is indistinguishable from a genuine IAM denial — so the last point where the diagnostic
 /// survives is before the first call, and for a CLI that means the parser. `--unlisted-region`
 /// is the named way out.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -597,8 +598,8 @@ pub struct RegionFlags {
 
     /// Use a region this client has not seen carry MicroVMs. Costs you the diagnostic.
     ///
-    /// An unsupported region answers AccessDeniedException with a null message, which reads
-    /// as an IAM denial. Use this when AWS has launched MicroVMs somewhere new.
+    /// A region without MicroVMs can answer AccessDeniedException with a null message, which
+    /// reads as an IAM denial. Use this when AWS has launched MicroVMs somewhere new.
     #[arg(long, value_name = "NAME", conflicts_with = "region")]
     pub unlisted_region: Option<String>,
 }
@@ -2811,11 +2812,12 @@ mod tests {
         assert_eq!(spellings, ["512", "1024", "2048", "4096", "8192"]);
     }
 
-    /// The `--region` domain is exactly the five measured regions.
+    /// The `--region` domain is exactly the five regions this client lists.
     ///
-    /// `eu-central-1` is the specific value worth naming: the Python's CLI copy of the list
-    /// had drifted to include it, and measurement shows it does *not* carry MicroVMs — it
-    /// was one of the three that answered the null-message denial.
+    /// `eu-central-1` is the specific value worth naming: AWS runs MicroVMs there (launched
+    /// 2026-08-19), and it is outside this client's list, so it is the name a `--region`
+    /// domain grown without its own decision (#743) would most plausibly gain. A caller
+    /// reaches it through `--unlisted-region`.
     #[test]
     fn the_region_domain_is_exactly_the_five_measured_regions_and_excludes_eu_central_one() {
         let from_flag: Vec<String> = RegionArg::value_variants()

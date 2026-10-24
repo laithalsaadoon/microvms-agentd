@@ -432,8 +432,9 @@ pub fn classify(error: &Error) -> CliError {
         ],
         (Exit::Credentials, _) => &[
             "`microvm doctor` reports which credential the SDK could not resolve",
-            "an AccessDeniedException with a null message is the unsupported-region \
-             signature, not an IAM problem — check --region first",
+            "an AccessDeniedException with a null message can mean a region without \
+             MicroVMs or an IAM denial of an implied action such as lambda:TagResource — check \
+             --region first, then the policy",
         ],
         (Exit::Retryable, Some(WireKind::AuthTokenMint)) => {
             &["minting happens inside the request path, so the identical command may succeed"]

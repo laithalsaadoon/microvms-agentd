@@ -279,10 +279,10 @@ def test_the_report_json_shape_is_the_python_clients() -> None:
 def test_eu_central_one_is_refused_naming_the_null_message_trap() -> None:
     """TRAP-6, with the core's own message.
 
-    `eu-central-1` is the specific region that was on the supported list until 2026-08-07 and
-    does not carry MicroVMs, so it is the one a regression would most plausibly re-add. Both
-    halves of the message matter: "AccessDeniedException" alone reads as an IAM problem, and it
-    is the word *null* that says otherwise.
+    AWS runs MicroVMs in `eu-central-1` (launched 2026-08-19) and it is outside this client's
+    list, so it is the name a list grown without its own decision (#743) would most plausibly
+    gain. Both halves of the message matter: "AccessDeniedException" alone reads as an IAM
+    problem, and the word *null* is what says the region may be the cause instead.
     """
     with pytest.raises(microvms.InvalidArgError) as raised:
         microvms.Region.parse("eu-central-1")

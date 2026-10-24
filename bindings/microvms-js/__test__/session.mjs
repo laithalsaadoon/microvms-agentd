@@ -322,7 +322,7 @@ test('parse refuses everything outside the five without normalising', () => {
   // the point: the whole value of this refusal is that it is the *only* warning before the
   // null-message denial, and a normalising parse quietly widens the set it guards.
   const spellings = [
-    'eu-central-1', // on the list until 2026-08-07, and does not carry MicroVMs
+    'eu-central-1', // AWS runs MicroVMs here (2026-08-19); this client doesn't list it
     'us-east-3',
     'US-EAST-1',
     'us-east-1 ',
@@ -347,8 +347,9 @@ test('parse refuses everything outside the five without normalising', () => {
 
 test('the refusal names the null-message trap and offers the supported set', () => {
   // "AccessDeniedException" alone reads as an IAM problem — someone would spend an hour reading a
-  // policy that is correct — and it is the word *null* that says otherwise. The five names have to
-  // be there too, or the refusal tells a caller they are wrong without telling them what is right.
+  // policy that is correct — and the word *null* is what says the region may be the cause. The
+  // five names have to be there too, or the refusal tells a caller they are wrong without telling
+  // them what is right.
   assert.throws(
     () => Region.parse('eu-central-1'),
     (error) => {

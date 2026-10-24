@@ -10,7 +10,7 @@ The rate table `microvms-core` ships is pinned by hand, and a 90-day staleness
 warning was the only thing standing between a caller and a silently stale price.
 That warning cannot tell you *whether* a rate moved — only that nobody has looked.
 This script looks, because the Pricing API carries the MicroVM line items directly:
-seven of them, in five regions, queryable for free.
+seven of them, in every region AWS runs MicroVMs in, queryable for free.
 
 Three things about that catalog decide the shape of everything below.
 
@@ -70,12 +70,13 @@ SERVICE_CODE = "AWSLambda"
 #: ap-northeast-1 is the normal case, not a mistake.
 PRICING_API_REGION = "us-east-1"
 
-#: Pricing coverage and service availability coincide, measured 2026-08-07: the same
-#: five regions that price MicroVMs are the five that answer `ListMicrovms`, and the
-#: unpriced ones answer `AccessDeniedException` with a *null* message field that is
-#: indistinguishable from a genuine IAM denial. So the list this script needs for
-#: explaining an empty catalog is the same list `microvms-core` keeps for refusing a
-#: launch.
+#: The regions `microvms-core` lists, which this script names when it explains an empty
+#: catalog. AWS prices and runs MicroVMs in more regions than these: measured 2026-10-24,
+#: the regions the Pricing API prices are the ones AWS's launch posts and regional
+#: availability data name. A `ListMicrovms` that answers is not that evidence, since
+#: regions AWS lists as planned answer it too. An unpriced region such as us-west-1 answers
+#: `AccessDeniedException` with a *null* message field, which a denied implied IAM action
+#: also produces.
 #:
 #: A literal here rather than a read of the Rust constant, because it is only ever
 #: used to *write* the error and never to refuse: the fetch runs first and this is
@@ -223,7 +224,8 @@ class PricingError(Exception):
 class RegionNotPriced(PricingError):
     """The Pricing API has no MicroVM line items for this region.
 
-    Which, measured, also means the region does not run MicroVMs at all — see
+    Measured 2026-10-24, the regions the Pricing API prices are the regions AWS runs
+    MicroVMs in, so this also means AWS does not run MicroVMs there yet — see
     `MICROVM_REGIONS`. Raised rather than returning a partial table, because a table
     with holes prices a run at less than it costs.
     """
@@ -326,7 +328,7 @@ def products(client: Any, region: str, group: str) -> list[dict[str, Any]]:
     """Every product for one group in one region. Normally exactly one.
 
     Filtering on `group` *and* `regionCode` is what keeps this cheap: five single-item
-    calls instead of paging 10,471 Lambda products to find 35 MicroVM ones. The token
+    calls instead of paging every Lambda product to find the MicroVM ones. The token
     loop stays anyway — the filters are applied server-side, so an empty first page
     with a `NextToken` would otherwise read as "this region does not price MicroVMs".
     """
@@ -473,14 +475,14 @@ def fetch_rates(region: str, *, client: Any = None) -> dict[str, Decimal]:
         # Every line missing is the region, not the catalog. See MICROVM_REGIONS for
         # why this message carries the IAM caveat.
         raise RegionNotPriced(
-            f"the pricing api has no MicroVM line items for {region!r}. MicroVMs are priced "
-            f"in {', '.join(MICROVM_REGIONS)} and, measured 2026-08-07, only those regions "
-            "run MicroVMs at all — an unsupported region answers lambda-microvms with "
-            "AccessDeniedException and a null message, which reads exactly like an IAM "
-            "problem it is not. Check the region before auditing a policy. If AWS has added "
-            "a region since, the list in MICROVM_REGIONS here and in microvms-core is what "
-            "needs updating; this call attempts the fetch regardless of it, so a genuinely "
-            "new region will already have returned rates rather than reaching this error."
+            f"the pricing api has no MicroVM line items for {region!r}. Measured 2026-10-24, "
+            "the regions the Pricing API prices are the regions AWS runs MicroVMs in, so AWS "
+            "does not run them there yet. A lambda-microvms call there may answer, or may "
+            "answer AccessDeniedException with a null message, which a denied implied IAM "
+            "action also produces. Check the region before auditing a policy. microvms-core "
+            f"lists {', '.join(MICROVM_REGIONS)}; this call attempts the fetch regardless of "
+            "that list, so a region AWS has launched in returns rates rather than reaching "
+            "this error."
         )
     if failures:
         raise failures[0]

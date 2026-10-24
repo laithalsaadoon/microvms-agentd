@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! The five regions that carry MicroVMs, as a closed enum (TRAP-6).
+//! The five regions this client lists, as a closed enum (TRAP-6).
 //!
 //! The Python client checks a region against a frozenset at construction time
 //! (`sandbox.py:314` `require_supported_region`) — strength S2 on the spec's
@@ -10,8 +10,8 @@
 //!
 //! # Why refusing matters more than it looks
 //!
-//! Measured 2026-08-07: a region that does not carry MicroVMs answers
-//! `AccessDeniedException` with the message field **null**. A denied implied IAM action,
+//! Measured 2026-08-07 and again 2026-10-24 (in `us-west-1`): a region that does not
+//! run MicroVMs can answer `AccessDeniedException` with the message field **null**. A denied implied IAM action,
 //! such as tagging an image on creation, can return the same response (measured
 //! 2026-10-17, us-east-1, API 2025-09-09; docs/PLATFORM.md). Nothing between the
 //! caller and that answer objects to an unsupported region —
@@ -19,7 +19,7 @@
 //! region and a client constructs happily. The first API call is the only reporter
 //! and its missing detail cannot distinguish availability from a policy denial.
 //!
-//! No API answers the question either, and the two that look like they might
+//! No SDK call answers the question either, and the two that look like they might
 //! disagree with each other: `get_available_endpoints` returns an empty list while
 //! `get_available_regions` returns all 34 Lambda regions. So the list is kept by
 //! hand, and keeping it right is the whole correctness condition — in both
@@ -28,15 +28,19 @@
 //! *extra* region is worse, because it re-opens the null-message trap for a name
 //! nothing will reject.
 //!
-//! `eu-central-1` was on this list until 2026-08-07 and does **not** carry MicroVMs:
-//! it was one of three regions measured returning the null-message denial.
+//! AWS runs MicroVMs in more regions than these five, `eu-central-1` among them: on
+//! 2026-10-24 the Pricing API, AWS's launch posts and its regional availability data
+//! agreed on that wider set. A caller reaches one of those regions through
+//! [`Region::unlisted`]. A `ListMicrovms` that answers is not evidence that a region runs
+//! MicroVMs: the same day, regions AWS lists as planned, such as `ca-central-1`, answered
+//! it, while `us-west-1` and `ap-northeast-3` returned the null-message denial.
 
 use std::fmt;
 use std::str::FromStr;
 
 use crate::error::Error;
 
-/// An AWS region, closed over the five that run MicroVMs plus a named escape hatch.
+/// An AWS region, closed over the five this client lists plus a named escape hatch.
 ///
 /// See the module docs for why the five are an enum. [`Region::Unlisted`] is
 /// deliberately a variant rather than a hidden flag: a reader of a call site can
@@ -94,7 +98,7 @@ impl Region {
     /// Opts into a region this client has not seen carry MicroVMs.
     ///
     /// **This is the escape hatch, and it costs you the diagnostic.** If the region
-    /// does not run MicroVMs, the first control-plane call answers
+    /// does not run MicroVMs, the first control-plane call can answer
     /// `AccessDeniedException` with a null message field, which can also mean an
     /// IAM denial (`docs/PLATFORM.md`, "A null-message AccessDeniedException can mean
     /// region availability or IAM"). Use it when AWS has launched
@@ -176,9 +180,9 @@ impl FromStr for Region {
             .join(", ");
         Err(Error::invalid_arg(format!(
             "region {name:?} is not one this client has seen carry MicroVMs ({offered}). \
-             Refused here because the first API call is where the evidence disappears: an \
-             unsupported region answers AccessDeniedException with a null message, which is \
-             indistinguishable from a real IAM denial (docs/PLATFORM.md, 'A null-message AccessDeniedException can mean region availability or IAM'). If AWS has since \
+             Refused here because the first API call is where the evidence disappears: a \
+             region without MicroVMs can answer AccessDeniedException with a null message, \
+             which is indistinguishable from a real IAM denial (docs/PLATFORM.md, 'A null-message AccessDeniedException can mean region availability or IAM'). If AWS has since \
              launched MicroVMs here, use Region::unlisted({name:?}) and add the region to \
              MICROVM_REGIONS."
         )))
@@ -208,16 +212,16 @@ mod tests {
         );
     }
 
-    /// TRAP-6, the falsification case. `eu-central-1` is the specific region that
-    /// was on this list and does not carry MicroVMs, so it is the one a regression
-    /// would most plausibly re-add. The message must name the trap — both halves,
-    /// because "AccessDeniedException" alone reads as an IAM problem and it is the
-    /// word *null* that says otherwise.
+    /// TRAP-6, the falsification case. AWS runs MicroVMs in `eu-central-1` (launched
+    /// 2026-08-19) and it is outside this client's list, so it is the name a list
+    /// grown without its own decision (#743) would most plausibly gain. The message must
+    /// name the trap — both halves, because "AccessDeniedException" alone reads as an IAM
+    /// problem, and the word *null* is what says the region may be the cause instead.
     #[test]
     fn eu_central_one_is_refused_naming_the_null_message_trap() {
         let err = "eu-central-1"
             .parse::<Region>()
-            .expect_err("eu-central-1 does not carry MicroVMs");
+            .expect_err("eu-central-1 is outside this client's list");
         assert_eq!(err.kind(), ErrorKind::InvalidArg);
         let message = err.to_string();
         assert!(
@@ -267,8 +271,9 @@ mod tests {
     }
 
     /// Nothing plausible-looking sneaks through. These are the shapes a typo takes:
-    /// a real AWS region that lacks MicroVMs, a near-miss on a supported name, a
-    /// case change, and the empty string.
+    /// real AWS regions outside this client's list (AWS runs MicroVMs in `eu-central-1`
+    /// and `ap-southeast-2`, and not in `sa-east-1` or `us-west-1`, as of 2026-10-24), a
+    /// near-miss on a supported name, a case change, and the empty string.
     #[test]
     fn near_misses_and_other_aws_regions_are_all_refused() {
         for name in [
@@ -283,7 +288,7 @@ mod tests {
         ] {
             let err = name
                 .parse::<Region>()
-                .expect_err("only the five measured regions parse");
+                .expect_err("only the five listed regions parse");
             assert_eq!(err.kind(), ErrorKind::InvalidArg, "{name}");
         }
     }

@@ -2311,7 +2311,9 @@ class RateTable:
 @final
 class Region:
     """
-    An AWS region, closed over the five that run MicroVMs plus a named escape hatch.
+    An AWS region, closed over the five this client lists plus a named escape hatch.
+    
+    AWS runs MicroVMs in more regions than these five; `Region.unlisted` reaches them.
     """
     def __eq__(self, other: object, /) -> bool: ...
     def __hash__(self, /) -> int: ...
@@ -2351,7 +2353,7 @@ class Region:
         Opts into a region this client has not seen carry MicroVMs.
         
         **This costs you the diagnostic.** If the region does not run MicroVMs, the first
-        control-plane call answers `AccessDeniedException` with a null message, and you
+        control-plane call can answer `AccessDeniedException` with a null message, and you
         will spend the next hour reading an IAM policy that is correct. Named rather than a
         flag so a reader of the call site can see the opt-in.
         

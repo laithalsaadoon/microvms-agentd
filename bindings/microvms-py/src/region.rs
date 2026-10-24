@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! The five regions that carry MicroVMs, and the one named way past them (TRAP-6).
+//! The five regions this client lists, and the one named way past them (TRAP-6).
 //!
 //! # Why this is a class with named constructors rather than a string parameter
 //!
@@ -12,12 +12,14 @@
 //!
 //! # What the refusal is worth
 //!
-//! Measured 2026-08-07: a region that does not carry MicroVMs answers
-//! `AccessDeniedException` with the message field **null**, which is indistinguishable
+//! Measured 2026-08-07 and again 2026-10-24 (in `us-west-1`): a region that does not run
+//! MicroVMs can answer `AccessDeniedException` with the message field **null**, which is
+//! indistinguishable
 //! from a genuine IAM denial. Nothing between the caller and that answer objects — the
 //! service model's `endpointPrefix` is `lambda`, so an endpoint resolves for any region.
-//! The first API call is the only reporter and it reports the wrong cause. `eu-central-1`
-//! was on the supported list until 2026-08-07 and does not carry MicroVMs.
+//! The first API call is the only reporter, and its missing detail cannot say which cause
+//! it was. AWS runs MicroVMs in more regions than these five (`eu-central-1` among them,
+//! measured 2026-10-24); [`PyRegion::unlisted`] reaches them.
 
 use std::str::FromStr;
 
@@ -26,7 +28,9 @@ use pyo3::prelude::*;
 
 use crate::errors::PyCoreResult;
 
-/// An AWS region, closed over the five that run MicroVMs plus a named escape hatch.
+/// An AWS region, closed over the five this client lists plus a named escape hatch.
+///
+/// AWS runs MicroVMs in more regions than these five; `Region.unlisted` reaches them.
 #[pyclass(frozen, from_py_object, name = "Region", module = "microvms")]
 #[derive(Clone)]
 pub struct PyRegion {
@@ -85,7 +89,7 @@ impl PyRegion {
     /// Opts into a region this client has not seen carry MicroVMs.
     ///
     /// **This costs you the diagnostic.** If the region does not run MicroVMs, the first
-    /// control-plane call answers `AccessDeniedException` with a null message, and you
+    /// control-plane call can answer `AccessDeniedException` with a null message, and you
     /// will spend the next hour reading an IAM policy that is correct. Named rather than a
     /// flag so a reader of the call site can see the opt-in.
     ///

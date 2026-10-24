@@ -1406,14 +1406,14 @@
       "priority": "high",
       "refines": [],
       "satisfies": [],
-      "sentence": "If the requested region is outside the five regions that run MicroVMs, then the microvms-core shall reject the operation locally before the first control-plane call, naming the null-message AccessDeniedException trap.",
+      "sentence": "If the requested region is outside the five regions this client lists, then the microvms-core shall reject the operation locally before the first control-plane call, naming the null-message AccessDeniedException trap.",
       "status": "approved",
       "systemName": "microvms-core",
       "systemResponse": "reject the operation locally before the first control-plane call, naming the null-message AccessDeniedException trap",
-      "trigger": "the requested region is outside the five regions that run MicroVMs",
-      "updatedAt": "2026-08-08T02:10:17.186Z",
+      "trigger": "the requested region is outside the five regions this client lists",
+      "updatedAt": "2026-10-24T04:58:42.000Z",
       "verificationMethod": "test",
-      "verificationNote": "PLATFORM.md: unpriced regions answer AccessDeniedException with a null message, indistinguishable from an IAM denial",
+      "verificationNote": "PLATFORM.md: a region AWS does not run MicroVMs in, such as us-west-1 (measured 2026-10-24), can answer AccessDeniedException with a null message, indistinguishable from an IAM denial; a region outside this client's list is reached through Region::unlisted",
       "verifies": []
     },
     "c3393818-64b9-415b-941b-1ab6b2a896cf": {

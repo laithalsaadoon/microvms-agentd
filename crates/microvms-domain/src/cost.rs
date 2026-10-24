@@ -1267,10 +1267,11 @@ fn missing_line_error(region: &Region, line: CatalogLine, catalog: &RateCatalog)
     if catalog.is_empty() {
         return Error::invalid_arg(format!(
             "the rate catalog has no MicroVM line items for {region} at all, so {} cannot be \
-             filled. Measured 2026-08-07, pricing coverage and service availability coincide: a \
-             region that does not price MicroVMs does not run them either, and answers \
-             lambda-microvms with AccessDeniedException and a null message that reads exactly \
-             like an IAM problem it is not. Check the region before auditing a policy",
+             filled. Measured 2026-10-24, the regions that price MicroVMs are the regions AWS \
+             lists the service as available in, so a region without line items is one AWS does \
+             not run MicroVMs in yet. A lambda-microvms call there may answer, or may answer \
+             AccessDeniedException with a null message, which an IAM denial of an implied \
+             action also produces. Check the region before auditing a policy",
             line.field(),
         ));
     }
@@ -3938,13 +3939,14 @@ mod tests {
     }
 
     /// An empty catalog is the *region*, not the catalog, and it is a different repair:
-    /// check the region versus work out what AWS renamed. Measured, an unpriced region
-    /// answers `AccessDeniedException` with a null message, which is why this message
-    /// carries the IAM caveat.
+    /// check the region versus work out what AWS renamed. `us-west-1` is a real unpriced
+    /// region: measured 2026-10-24, it has no line items and answers `ListMicrovms` with
+    /// `AccessDeniedException` and a null message, which an IAM denial can also produce.
+    /// That is why this message carries the IAM caveat.
     #[test]
     fn an_empty_catalog_reads_as_an_unpriced_region_not_a_renamed_line() {
         let err = RateTable::from_catalog(
-            Region::unlisted("eu-central-1"),
+            Region::unlisted("us-west-1"),
             "aws pricing api",
             CalendarDate::from_ymd(2026, 8, 7),
             &RateCatalog::new(),

@@ -978,9 +978,10 @@ impl ControlPlane {
     /// bases the page carried.
     ///
     /// One operation, never the whole listing, so a preflight makes one AWS operation at most
-    /// (BIND-16); `send_with_retry` may repeat it on a throttle. An unsupported region answers
-    /// `AccessDeniedException` with a null message (TRAP-6), which this surfaces as the error
-    /// it is.
+    /// (BIND-16); `send_with_retry` may repeat it on a throttle. A region without MicroVMs can
+    /// answer `AccessDeniedException` with a null message (TRAP-6), which this surfaces as the
+    /// error it is. A region AWS lists as planned can answer the listing instead
+    /// (`ca-central-1`, measured 2026-10-24).
     pub async fn answers_listing(&self) -> Result<usize, Error> {
         let call = Call::get(
             "ListManagedMicrovmImages",

@@ -18,9 +18,11 @@
 //!    `Region::unlisted` opted in at the call site).
 //! 2. **credentials**: the chain resolves credentials. No AWS API call; resolving may reach
 //!    an SSO or metadata endpoint, which is free.
-//! 3. **service**: one `ListManagedMicrovmImages`, free and read-only, in that region. An
-//!    unsupported region answers `AccessDeniedException` with a null message, which is the
-//!    check that catches an unlisted region that does not run MicroVMs.
+//! 3. **service**: one `ListManagedMicrovmImages`, free and read-only, in that region. A
+//!    region without MicroVMs can answer `AccessDeniedException` with a null message, which
+//!    is how this check catches an unlisted region that does not run MicroVMs. A pass does
+//!    not prove the region runs them: measured 2026-10-24, `ca-central-1`, which AWS lists
+//!    as planned, answered the listing.
 //!
 //! A check whose precondition failed is reported as not run, never skipped silently, and not
 //! run means no call. [`specified`] is the procedure; the rejected ones are:
