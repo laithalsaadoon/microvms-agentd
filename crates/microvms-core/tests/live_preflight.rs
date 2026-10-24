@@ -57,12 +57,14 @@ async fn preflight_passes_in_the_suites_region_and_changes_nothing() {
 }
 
 /// **BIND-15: an unlisted region that does not run MicroVMs fails the service check**, while
-/// its region line is only advisory. ca-central-1 was not among the regions that answered
-/// `ListMicrovms` when `MICROVM_REGIONS` was measured.
+/// its region line is only advisory. us-west-1 answered the service check's listing,
+/// `ListManagedMicrovmImages`, with an `AccessDeniedException` and no message when last
+/// measured (2026-10-23). AWS lists the service as planned there, so when the service line
+/// reads `ok`, pick a region that still refuses the listing.
 #[tokio::test]
-#[ignore = "needs AWS credentials; makes one free read-only call in ca-central-1"]
+#[ignore = "needs AWS credentials; makes one free read-only call in us-west-1"]
 async fn preflight_in_a_region_without_microvms_fails_its_service_check() {
-    let report = preflight(Some(Region::unlisted("ca-central-1"))).await;
+    let report = preflight(Some(Region::unlisted("us-west-1"))).await;
     print("elsewhere", &report);
     let region = report.check("region").expect("a region line");
     assert!(!region.ok && !region.fatal, "{region:?}");
