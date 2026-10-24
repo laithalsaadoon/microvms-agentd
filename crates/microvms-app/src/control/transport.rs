@@ -1173,10 +1173,11 @@ mod tests {
             endpoint_for(&Region::ApNortheast1),
             "https://lambda.ap-northeast-1.amazonaws.com"
         );
-        // Including one that does not carry MicroVMs, which is the point.
+        // Including one AWS does not run MicroVMs in, which is the point: us-west-1 answered
+        // `ListMicrovms` with the null-message denial when measured (2026-10-24).
         assert_eq!(
-            endpoint_for(&Region::unlisted("eu-central-1")),
-            "https://lambda.eu-central-1.amazonaws.com"
+            endpoint_for(&Region::unlisted("us-west-1")),
+            "https://lambda.us-west-1.amazonaws.com"
         );
     }
 

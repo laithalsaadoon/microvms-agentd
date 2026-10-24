@@ -722,7 +722,11 @@ export declare class RateTable {
   staleness(): string | null
 }
 
-/** An AWS region, closed over the five that run MicroVMs plus a named escape hatch. */
+/**
+ * An AWS region, closed over the five this client lists plus a named escape hatch.
+ *
+ * AWS runs MicroVMs in more regions than these five; `Region.unlisted` reaches them.
+ */
 export declare class Region {
   static usEast1(): Region
   static usEast2(): Region
@@ -741,7 +745,7 @@ export declare class Region {
    * Opts into a region this client has not seen carry MicroVMs.
    *
    * **This costs you the diagnostic.** If the region does not run MicroVMs, the first
-   * control-plane call answers `AccessDeniedException` with a null message, and you will
+   * control-plane call can answer `AccessDeniedException` with a null message, and you will
    * spend the next hour reading an IAM policy that is correct. Named rather than a flag so
    * a reader of the call site can see the opt-in.
    *

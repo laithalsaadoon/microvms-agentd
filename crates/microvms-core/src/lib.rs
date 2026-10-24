@@ -19,7 +19,7 @@
 //! The spec ranks each closure, strongest first:
 //!
 //! * **S1, inexpressible** — the mistake cannot be written down. [`region::Region`] is
-//!   an enum over the supported regions that carry MicroVMs, so a typo'd region is a
+//!   an enum over the regions this client lists, so a typo'd region is a
 //!   compile error rather than a runtime check; [`sizing::SizeClass`] is closed over
 //!   the documented baselines; [`hooks::RunHookTimeout`] and
 //!   [`hooks::BuildHookTimeout`] are separate types with no conversion between them,

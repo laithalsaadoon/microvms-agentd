@@ -197,7 +197,9 @@ UNORDERED_NAMES = frozenset(
 # it is the intended one; this repo's harbor-harvest sibling makes the same trade for
 # its tool/library twins.
 
-#: Measured 2026-08-07, and `microvms-core`'s `MICROVM_REGIONS` must equal this.
+#: The regions this client lists, measured answering `ListMicrovms` 2026-08-07, and
+#: `microvms-core`'s `MICROVM_REGIONS` must equal this. AWS runs MicroVMs in more regions
+#: (the Pricing API and AWS's launch posts, 2026-10-24); growing this list is #743's call.
 PINNED_REGIONS = (
     "ap-northeast-1",
     "eu-west-1",
@@ -950,7 +952,7 @@ def check(src: Source, model: dict[str, Any]) -> Checker:
     # point. The model states no region list, and the two botocore calls that look like
     # they might substitute for one disagree: get_available_endpoints returns an empty
     # list while get_available_regions returns all 34 Lambda regions, since
-    # `endpointPrefix` is `lambda`. Neither is the five-region truth.
+    # `endpointPrefix` is `lambda`. Neither says which regions run MicroVMs.
     #
     # So this compares the client against `PINNED_REGIONS` — a literal in this file. It
     # was the Python-vs-Rust cross-comparison until that client was deleted, and what is

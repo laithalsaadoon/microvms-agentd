@@ -1326,7 +1326,7 @@ If a run-hook payload exceeds the ceiling of 4096 bytes that the service model d
 
 ## TRAP-6
 
-If the requested region is outside the five regions that run MicroVMs, then the microvms-core shall reject the operation locally before the first control-plane call, naming the null-message AccessDeniedException trap.
+If the requested region is outside the five regions this client lists, then the microvms-core shall reject the operation locally before the first control-plane call, naming the null-message AccessDeniedException trap.
 
 - **model:** waived: a membership check over a closed set of five regions, not a state
 - **gherkin:** `crates/microvms-core/tests/features/request_and_preflight.feature`

@@ -59,7 +59,7 @@ async fn preflight_passes_in_the_suites_region_and_changes_nothing() {
 /// **BIND-15: an unlisted region that does not run MicroVMs fails the service check**, while
 /// its region line is only advisory. us-west-1 answered the service check's listing,
 /// `ListManagedMicrovmImages`, with an `AccessDeniedException` and no message when last
-/// measured (2026-10-23). AWS lists the service as planned there, so when the service line
+/// measured (2026-10-24, about 01:05Z). AWS lists the service as planned there, so when the service line
 /// reads `ok`, pick a region that still refuses the listing.
 #[tokio::test]
 #[ignore = "needs AWS credentials; makes one free read-only call in us-west-1"]

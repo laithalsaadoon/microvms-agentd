@@ -248,8 +248,8 @@ test('eu-central-1 is refused naming the null-message trap', () => {
     () => Region.parse('eu-central-1'),
     (error) => {
       assert.equal(codeOf(error), 'ERR_INVALID_ARG');
-      // Both halves: "AccessDeniedException" alone reads as an IAM problem, and it is the
-      // word *null* that says otherwise.
+      // Both halves: "AccessDeniedException" alone reads as an IAM problem, and the word
+      // *null* is what says the region may be the cause instead.
       assert.match(error.message, /AccessDeniedException/);
       assert.match(error.message, /null/);
       // A local reject reached no daemon, so there is no wire kind to report.

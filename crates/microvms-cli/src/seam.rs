@@ -401,7 +401,7 @@ mod tests {
     #[test]
     fn an_unsupported_region_from_the_environment_is_refused_naming_the_escape_hatch() {
         let env = env_of(&[("AWS_REGION", "eu-central-1")]);
-        let error = resolve_region(None, None, &env).expect_err("eu-central-1 carries no MicroVMs");
+        let error = resolve_region(None, None, &env).expect_err("eu-central-1 is unlisted");
         assert_eq!(error.kind(), ErrorKind::InvalidArg);
         let message = error.to_string();
         assert!(message.contains("null message"), "{message}");

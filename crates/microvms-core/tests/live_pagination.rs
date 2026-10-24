@@ -60,7 +60,7 @@ use microvms_core::region::Region;
 
 /// The region every check below runs in. `us-east-1` rather than read from the
 /// environment, because these assertions are about a signed request's shape and a region
-/// that does not carry MicroVMs answers `AccessDeniedException` with a null message —
+/// that does not run MicroVMs can answer `AccessDeniedException` with a null message —
 /// which would read as this test's failure rather than as the wrong region.
 const REGION: Region = Region::UsEast1;
 
