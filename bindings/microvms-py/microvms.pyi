@@ -3881,7 +3881,7 @@ def wrap_dockerfile_preserving_user(task_dockerfile: str, *, port: SupportsIndex
 # `microvms_core::VERSION`, added by the module's `#[pymodule_init]`. The **core's**
 # version and not this crate's: what a caller needs to know is which client they are
 # talking through.
-__version__: Final[str] = "1.2.1"
+__version__: Final[str] = "1.3.0"
 
 class MicrovmError(Exception):
     """
