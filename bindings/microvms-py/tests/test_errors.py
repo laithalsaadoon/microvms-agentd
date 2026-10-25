@@ -106,7 +106,7 @@ def test_the_library_exceptions_do_not_shadow_the_builtins_they_are_named_after(
 def raise_invalid_arg() -> microvms.MicrovmError:
     """A locally-refused call, which is the shortest path to a real raised exception."""
     with pytest.raises(microvms.MicrovmError) as raised:
-        microvms.Region.parse("nope-1")
+        microvms.Region.parse("nope")
     return raised.value
 
 
@@ -149,7 +149,7 @@ def test_a_local_refusal_reports_no_wire_kind_because_nothing_reached_the_daemon
     counting daemon errors would count client-side typos among them.
     """
     for call in (
-        lambda: microvms.Region.parse("eu-central-1"),
+        lambda: microvms.Region.parse("EU-CENTRAL-1"),
         lambda: microvms.SizeClass.from_baseline_mib(1500),
         lambda: microvms.Duration.measured(-1.0),
         lambda: microvms.RunHookTimeout(3600),
@@ -163,18 +163,16 @@ def test_a_local_refusal_reports_no_wire_kind_because_nothing_reached_the_daemon
 def test_the_message_is_the_cores_own_and_survives_the_crossing_intact() -> None:
     """Not reworded here.
 
-    The core's messages are the ones naming the `docs/PLATFORM.md` finding that measured the
-    behaviour, and a binding that shortened them would discard the whole point of the closure.
-    Checked on the region refusal, whose message has two halves that only mean something
-    together.
+    The core's messages are the ones naming the rule a value broke, and a binding that shortened
+    them would discard the half that says how to fix it. Checked on the region refusal, whose
+    message names the rejected value and then the shape a region name has.
     """
     with pytest.raises(microvms.InvalidArgError) as raised:
-        microvms.Region.parse("eu-central-1")
+        microvms.Region.parse("EU-CENTRAL-1")
     message = str(raised.value)
-    # "AccessDeniedException" alone reads as an IAM problem; the word *null* is what says
-    # otherwise. Both halves crossed the boundary.
-    assert "AccessDeniedException" in message
-    assert "null" in message
+    # The value, and the remedy after it: both crossed the boundary.
+    assert "EU-CENTRAL-1" in message
+    assert "such as us-east-1" in message
     assert len(message) > 80, f"the message was truncated on the way out: {message!r}"
 
 
@@ -194,13 +192,13 @@ def test_an_invalid_arg_is_not_retryable_because_repeating_it_changes_nothing() 
 def test_a_specific_except_clause_catches_only_its_own_kind() -> None:
     """The point of the hierarchy, exercised as a caller writes it."""
     with pytest.raises(microvms.InvalidArgError):
-        microvms.Region.parse("nope-1")
+        microvms.Region.parse("nope")
 
     # And a sibling clause does not catch it, which is what makes the specific catch worth
     # writing. `pytest.raises` around the wrong class would swallow the real exception, so this
     # is spelled as an explicit try.
     try:
-        microvms.Region.parse("nope-1")
+        microvms.Region.parse("nope")
     except microvms.WindowClosedError:  # pragma: no cover — the failure path
         pytest.fail("a region typo was caught as a closed suspension window")
     except microvms.InvalidArgError as error:
@@ -210,7 +208,7 @@ def test_a_specific_except_clause_catches_only_its_own_kind() -> None:
 def test_the_base_catches_everything_this_library_raises() -> None:
     """`except MicrovmError` is the one broad catch, and it has to be total."""
     for call in (
-        lambda: microvms.Region.parse("nope-1"),
+        lambda: microvms.Region.parse("nope"),
         lambda: microvms.SizeClass.from_baseline_mib(7),
         lambda: microvms.Duration.projected(float("nan")),
         lambda: microvms.BuildHookTimeout(0),
@@ -229,7 +227,7 @@ def test_an_exception_instance_carries_its_attributes_after_being_re_raised() ->
     caught: microvms.MicrovmError | None = None
     try:
         try:
-            microvms.Region.parse("nope-1")
+            microvms.Region.parse("nope")
         except microvms.MicrovmError as inner:
             raise RuntimeError("wrapped") from inner
     except RuntimeError as outer:

@@ -95,7 +95,7 @@ fn launch(
         );
     let plane = crate::testing::control_plane(
         Arc::clone(&recorder) as Arc<dyn crate::control::transport::Transport>,
-        Region::UsEast1,
+        Region::US_EAST_1,
         Arc::new(TestClock::new()) as Arc<dyn crate::control::Clock>,
     );
     let mut sandbox = Sandbox::with_control_plane(plane)
@@ -129,7 +129,7 @@ fn posture_matches_the_launch() {
     bolero::check!()
         .with_type::<(bool, bool, Vec<(u8, u8)>, Vec<u8>)>()
         .for_each(|(egress, deny, kinds, junk)| {
-            let region = Region::UsEast1;
+            let region = Region::US_EAST_1;
             let connectors: Vec<String> = kinds
                 .iter()
                 .take(16)

@@ -186,35 +186,42 @@ Defined at: `crates/microvms-domain/src/sizing.rs:74-125`.
 
 ## Region values
 
-Defined at: `crates/microvms-domain/src/region.rs:46-79`.
+Defined at: `crates/microvms-domain/src/region.rs:56-281`.
 
 | Downstream | Type | Touch on change | Citation |
 | --- | --- | --- | --- |
-| CLI region variants and conversion | direct import | yes | `crates/microvms-cli/src/cli.rs:545-583` |
-| Python named factories and parser | direct import | yes | `bindings/microvms-py/src/region.rs:32-82` |
-| Node named factories and parser | direct import | yes | `bindings/microvms-js/src/region.rs:35-84` |
+| CLI region flag parser and deprecation warning | direct import | yes | `crates/microvms-cli/src/cli.rs:540-592`, `crates/microvms-cli/src/main.rs:97-153` |
+| CLI region resolution | direct import | likely | `crates/microvms-cli/src/seam.rs:231-243` |
+| Python named factories, parser, and lists | direct import | yes | `bindings/microvms-py/src/region.rs:40-190` |
+| Node named factories, parser, and lists | direct import | yes | `bindings/microvms-js/src/region.rs:40-160` |
 | Signed transport configuration | direct import | likely | `crates/microvms-edges/src/control/transport.rs:48-81` |
+| Null-message denial diagnosis | direct import | yes | `crates/microvms-app/src/control/transport.rs:622-645` |
 | Control-plane identity | direct import | no | `crates/microvms-app/src/control/mod.rs:154`, `crates/microvms-app/src/control/mod.rs:268-270` |
-| Constant emission and independent region list | config | yes | `crates/microvms-domain/src/constants.rs:718-725`, `tools/check-model-drift.py:201-207` |
+| Constant emission and independent region lists | config | yes | `crates/microvms-domain/src/constants.rs:629-636`, `crates/microvms-domain/src/constants.rs:729-730`, `tools/check-model-drift.py:201-232`, `tools/check-live-rates.py:87-102` |
 | Preflight and registered-name resolution | direct import | likely | `crates/microvms-app/src/preflight.rs:40-47`, `crates/microvms-app/src/names.rs:55-63` |
 | Agent recipe region | direct import | likely | `crates/microvms-app/src/agents/mod.rs:49` |
 | Pinned rate-table region | indirect | likely | `crates/microvms-domain/src/cost.rs:1007-1011` |
-| Region parsing and round-trip tests | test | yes | `crates/microvms-domain/src/region.rs:197-207`, `crates/microvms-domain/src/region.rs:240-254` |
-| Binding region-list tests | test | yes | `bindings/microvms-py/tests/test_smoke.py:296-316`, `bindings/microvms-js/__test__/smoke.mjs:262-277` |
+| Region parsing and round-trip tests | test | yes | `crates/microvms-domain/src/region.rs:284-408` |
+| Binding region tests | test | yes | `bindings/microvms-py/tests/test_region.py`, `bindings/microvms-js/__test__/session.mjs:284-420` |
 
 ### Blast-radius notes
 
-- The supported region list is a measured client policy, separate from the service-model
-  enum. Updating it needs new platform evidence as well as a matching independent
-  literal in the comparison script.
-  `crates/microvms-domain/src/region.rs:65-73`, `tools/check-model-drift.py:949-965`
-- `Region::unlisted` normalizes a supported name to its named variant. Preserve
-  that equality when changing factories or parsing.
-  `crates/microvms-domain/src/region.rs:104-122`
+- The measured region list is client data, separate from the service-model enum, and
+  parsing does not read it. Growing it needs new platform evidence and the same change
+  to the two script literals that check it.
+  `crates/microvms-domain/src/region.rs:121-136`, `tools/check-model-drift.py:977-997`
+- A parsed name equals its constant, so code compares regions by value. `Region::named`
+  is the one place a name becomes a value; preserve that when changing the constants or
+  parsing.
+  `crates/microvms-domain/src/region.rs:215-223`
+- 1.3.0 deprecates the variants, `unlisted`, `is_supported`, and `MICROVM_REGIONS`,
+  which keep their 1.2 behavior. `docs/STABILITY.md` lets 2.0.0 remove them no earlier
+  than six months and two minor releases after 1.3.0.
+  `crates/microvms-domain/src/region.rs:56-151`
 - Environment resolution tries `AWS_REGION`, then `AWS_DEFAULT_REGION`, and
   applies the same parser. A change to parsing reaches default construction as
   well as explicit CLI and binding arguments.
-  `crates/microvms-domain/src/region.rs:130-146`
+  `crates/microvms-domain/src/region.rs:232-241`
 
 ## Pinned cost rates
 

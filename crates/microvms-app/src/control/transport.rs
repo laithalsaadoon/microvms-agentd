@@ -186,7 +186,7 @@ const API_PATH_VERSION: &str = crate::constants::MODEL_API_VERSION;
 ///
 /// `lambda`, not `lambda-microvms`. The `endpointPrefix` is also `lambda`, which is why
 /// an endpoint resolves for every AWS region and a client constructs happily for a region
-/// that does not carry MicroVMs (TRAP-6, `crate::region`).
+/// that does not run MicroVMs (TRAP-6, `crate::region`).
 pub const SIGNING_NAME: &str = "lambda";
 
 /// One control-plane call: method, path, optional JSON body.
@@ -526,9 +526,10 @@ pub async fn send_accepting(
 ///
 /// # 403 and the null message
 ///
-/// A 403 whose `message` is null is ambiguous (TRAP-6): both unsupported regions and
-/// denied implied actions can produce it. The diagnostic names both and points to
-/// CloudTrail for the service's full denial.
+/// A 403 whose `message` is null is ambiguous (TRAP-6): both a region without MicroVMs and
+/// a denied implied action can produce it. The diagnostic leads with the region when it is
+/// outside [`crate::region::MEASURED_REGIONS`], names both causes, and points to CloudTrail
+/// for the service's full denial.
 pub fn classify_failure(operation: &str, reply: &Reply) -> Error {
     classify_failure_in_region(operation, reply, None)
 }
@@ -620,7 +621,7 @@ fn classify_failure_in_region(operation: &str, reply: &Reply, region: Option<&Re
 /// The service can omit its denial detail for both regional availability and IAM errors.
 fn null_message_denial(operation: &str, region: Option<&Region>) -> String {
     let availability = match region {
-        Some(region) if region.is_supported() => format!(
+        Some(region) if region.is_measured() => format!(
             "{} carries MicroVMs; an IAM policy is the likely cause.",
             region.as_str()
         ),
@@ -1166,17 +1167,17 @@ mod tests {
     #[test]
     fn the_endpoint_uses_the_models_lambda_prefix_for_every_region() {
         assert_eq!(
-            endpoint_for(&Region::UsEast1),
+            endpoint_for(&Region::US_EAST_1),
             "https://lambda.us-east-1.amazonaws.com"
         );
         assert_eq!(
-            endpoint_for(&Region::ApNortheast1),
+            endpoint_for(&Region::AP_NORTHEAST_1),
             "https://lambda.ap-northeast-1.amazonaws.com"
         );
         // Including one AWS does not run MicroVMs in, which is the point: us-west-1 answered
         // `ListMicrovms` with the null-message denial when measured (2026-10-24).
         assert_eq!(
-            endpoint_for(&Region::unlisted("us-west-1")),
+            endpoint_for(&"us-west-1".parse().expect("a region name")),
             "https://lambda.us-west-1.amazonaws.com"
         );
     }
@@ -1507,7 +1508,7 @@ mod tests {
     #[tokio::test]
     async fn supported_region_null_denials_point_to_iam_in_both_send_paths() {
         use crate::control::fake::{Answer, FakeControlPlane};
-        let transport = FakeControlPlane::in_region(Region::UsEast1);
+        let transport = FakeControlPlane::in_region(Region::US_EAST_1);
         transport.answer(
             "CreateMicrovmImage",
             Answer {
@@ -1541,7 +1542,8 @@ mod tests {
         assert_eq!(transport.call_count("CreateMicrovmImage"), 2);
     }
 
-    /// TRAP-6: an explicit unlisted region does not rule out an IAM denial.
+    /// TRAP-6: a region outside the measured list leads with service availability and does
+    /// not rule out an IAM denial.
     #[test]
     fn unlisted_region_null_denials_keep_both_causes_visible() {
         let reply = Reply {
@@ -1552,11 +1554,11 @@ mod tests {
         let error = classify_failure_in_region(
             "ListMicrovms",
             &reply,
-            Some(&Region::unlisted("eu-central-1")),
+            Some(&"us-west-1".parse().expect("a region name")),
         );
         let message = error.to_string();
         assert!(message.contains("verify service availability as well as the IAM policy"));
-        assert!(message.contains("--region eu-central-1"));
+        assert!(message.contains("--region us-west-1"));
         assert!(!message.contains("policy is the likely cause"));
     }
 

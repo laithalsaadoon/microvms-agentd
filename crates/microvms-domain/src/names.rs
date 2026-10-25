@@ -190,10 +190,9 @@ impl NameRecord {
         self.identity_vm_public_key = identity.map(TunnelIdentity::vm_public_key_base64);
     }
 
-    /// The region the VM runs in. A record's region is one this client wrote, so a name it
-    /// no longer lists is taken as written rather than refused.
+    /// The region the VM runs in, as this client wrote it into the record.
     pub fn region(&self) -> Region {
-        Region::unlisted(self.region.as_str())
+        Region::as_written(&self.region)
     }
 
     fn check(&self) -> Result<(), Error> {
@@ -391,13 +390,13 @@ mod tests {
         assert!(missing.to_string().contains("/state/names"), "{missing}");
         let found = || Some(record("ci", "microvm-a"));
         assert_eq!(
-            resolve_record("ci", found(), "s", Some(&Region::UsEast1))
+            resolve_record("ci", found(), "s", Some(&Region::US_EAST_1))
                 .expect("same region")
                 .microvm_id,
             "microvm-a"
         );
         let foreign =
-            resolve_record("ci", found(), "s", Some(&Region::UsWest2)).expect_err("other region");
+            resolve_record("ci", found(), "s", Some(&Region::US_WEST_2)).expect_err("other region");
         assert_eq!(foreign.kind(), ErrorKind::InvalidArg);
         assert!(!foreign.to_string().contains("secret-token"), "{foreign}");
     }

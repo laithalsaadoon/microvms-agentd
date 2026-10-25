@@ -417,12 +417,12 @@ mod tests {
         assert!(missing.to_string().contains("names"), "{missing}");
         store.put(&record("ci", "microvm-a")).expect("put");
         assert_eq!(
-            resolve(&store, "ci", Some(&Region::UsEast1))
+            resolve(&store, "ci", Some(&Region::US_EAST_1))
                 .expect("same region")
                 .microvm_id,
             "microvm-a"
         );
-        let foreign = resolve(&store, "ci", Some(&Region::UsWest2)).expect_err("other region");
+        let foreign = resolve(&store, "ci", Some(&Region::US_WEST_2)).expect_err("other region");
         assert_eq!(foreign.kind(), ErrorKind::InvalidArg);
         assert!(!foreign.to_string().contains("secret-token"), "{foreign}");
     }

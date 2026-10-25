@@ -9,7 +9,7 @@
 //! BIND-16).
 
 use crate::error::Error;
-use crate::region::{MICROVM_REGIONS, Region};
+use crate::region::{MEASURED_REGIONS, Region};
 
 /// One line of a preflight or `doctor` report.
 #[derive(Clone, Debug, PartialEq)]
@@ -98,26 +98,24 @@ impl PreflightReport {
 }
 
 fn known_regions() -> String {
-    MICROVM_REGIONS
-        .iter()
-        .map(Region::as_str)
-        .collect::<Vec<_>>()
-        .join(", ")
+    MEASURED_REGIONS.join(", ")
 }
 
-/// The region line: pass for a supported region, advisory for an unlisted one, fatal when
-/// none resolved. `doctor` marks the last advisory too, because it must run in a broken
-/// environment and report everything else.
+/// The region line: pass for a region AWS was measured running MicroVMs in, advisory for any
+/// other, fatal when none resolved. `doctor` marks the last advisory too, because it must run
+/// in a broken environment and report everything else.
 pub fn region_check(resolved: &Result<Region, Error>) -> Check {
     match resolved {
-        Ok(region) if region.is_supported() => {
+        Ok(region) if region.is_measured() => {
             Check::pass("region", format!("{region} is a known MicroVMs region"))
         }
         Ok(region) => Check::fail(
             "region",
-            format!("{region} is not in this client's list of MicroVMs regions"),
+            format!("{region} is not a region AWS was measured running MicroVMs in"),
             format!(
-                "known: {}; the service check below says whether it runs MicroVMs",
+                "known: {} (measured 2026-10-24). If AWS has not launched MicroVMs here, a call \
+                 can fail with an AccessDeniedException and a null message, and the service \
+                 check below can still pass",
                 known_regions()
             ),
         )
@@ -146,9 +144,10 @@ mod tests {
     }
 
     #[test]
-    fn the_region_line_passes_a_listed_region_and_advises_on_an_unlisted_one() {
-        assert!(region_check(&Ok(Region::UsEast1)).ok);
-        let unlisted = region_check(&Ok(Region::unlisted("xx-new-1")));
+    fn the_region_line_passes_a_measured_region_and_advises_on_any_other() {
+        assert!(region_check(&Ok(Region::US_EAST_1)).ok);
+        assert!(region_check(&Ok("eu-central-1".parse().unwrap())).ok);
+        let unlisted = region_check(&Ok("xx-new-1".parse().unwrap()));
         assert!(!unlisted.ok && !unlisted.fatal, "{unlisted:?}");
         let refused = region_check(&Err(Error::invalid_arg("no region")));
         assert!(!refused.ok && refused.fatal, "{refused:?}");

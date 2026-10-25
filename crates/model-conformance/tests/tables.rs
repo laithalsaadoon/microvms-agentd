@@ -216,7 +216,7 @@ fn posture_refusal_words(refusal: posture::Refusal) -> &'static str {
 /// reports `BestEffort`; `cargo test -p agentd-model` stays green. Restored.
 #[test]
 fn egress_posture_for_answers_every_row_of_the_posture_model() {
-    let region = Region::UsEast1;
+    let region = Region::US_EAST_1;
     let rows = floor("posture", 92, posture::rows());
     for row in posture::TABLE {
         assert!(
@@ -287,8 +287,8 @@ fn line_of(check: &Check) -> preflight::Line {
 async fn preflight_reports_every_row_of_the_preflight_model() {
     for row in floor("preflight", 18, preflight::rows()) {
         let resolved = match row.region {
-            preflight::RegionWorld::Supported => Ok(Region::UsEast1),
-            preflight::RegionWorld::Unlisted => Ok(Region::unlisted("ap-south-1")),
+            preflight::RegionWorld::Supported => Ok(Region::US_EAST_1),
+            preflight::RegionWorld::Unlisted => Ok("us-west-1".parse().expect("a region name")),
             preflight::RegionWorld::Unresolvable => Err(Error::invalid_arg(
                 "AWS_REGION names a region this client can't parse",
             )),

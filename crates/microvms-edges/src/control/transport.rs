@@ -341,9 +341,9 @@ mod tests {
             aws_credential_types::Credentials::new("AKIDEXAMPLE", "secret", None, None, "test"),
         );
         for region in [
-            Region::UsEast1,
-            Region::EuWest1,
-            Region::unlisted("eu-central-1"),
+            Region::US_EAST_1,
+            Region::EU_WEST_1,
+            "us-west-1".parse().expect("a region name"),
         ] {
             let transport = SignedTransport {
                 endpoint: endpoint_for(&region),
@@ -398,8 +398,8 @@ mod tests {
         let provider =
             aws_credential_types::provider::SharedCredentialsProvider::new(BrokenCredentials);
         let transport = SignedTransport {
-            region: Region::UsEast1,
-            endpoint: endpoint_for(&Region::UsEast1),
+            region: Region::US_EAST_1,
+            endpoint: endpoint_for(&Region::US_EAST_1),
             credentials: provider.clone(),
             http: http_client(std::time::Duration::from_secs(1)).unwrap(),
         };
@@ -436,7 +436,7 @@ mod tests {
     /// IMDS is the only endpoint this can touch: link-local, free, and fast.
     #[tokio::test]
     async fn constructing_the_real_transport_returns_a_result_rather_than_panicking() {
-        let _ = SignedTransport::new(Region::UsEast1).await;
+        let _ = SignedTransport::new(Region::US_EAST_1).await;
     }
 
     /// Signing puts an `authorization` header on the request naming the region and the
@@ -460,7 +460,7 @@ mod tests {
             .body(b"{}".to_vec())
             .expect("builds");
 
-        sign_in_place(&mut request, &credentials, &Region::EuWest1).expect("signs");
+        sign_in_place(&mut request, &credentials, &Region::EU_WEST_1).expect("signs");
 
         let headers = request.headers();
         let authorization = headers
@@ -500,7 +500,7 @@ mod tests {
             .body(Vec::new())
             .expect("builds");
 
-        sign_in_place(&mut request, &credentials, &Region::UsEast1).expect("signs");
+        sign_in_place(&mut request, &credentials, &Region::US_EAST_1).expect("signs");
         assert!(request.headers().contains_key("authorization"));
         assert!(
             !request.headers().contains_key("x-amz-security-token"),
@@ -527,7 +527,7 @@ mod tests {
             .body(br#"{"status":"INACTIVE"}"#.to_vec())
             .expect("builds");
 
-        sign_in_place(&mut request, &credentials, &Region::UsEast1).expect("signs");
+        sign_in_place(&mut request, &credentials, &Region::US_EAST_1).expect("signs");
         assert_eq!(request.method().as_str(), "PATCH");
         assert!(request.headers().contains_key("authorization"));
     }

@@ -15,7 +15,7 @@ pub struct PreflightCheck {
     /// `"region"`, `"credentials"`, or `"service"`.
     pub name: String,
     pub ok: bool,
-    /// Whether a failure decides the report's `ok`. An unlisted region's line is advisory.
+    /// Whether a failure decides the report's `ok`. The region line is advisory for a region outside `Region.measured()`.
     pub fatal: bool,
     /// False when an earlier check's failure kept this one from running (and calling AWS).
     pub ran: bool,
@@ -60,7 +60,7 @@ fn report(report: &CoreReport) -> PreflightReport {
 /// Whether a harness can launch in `region` (default: `$AWS_REGION`, `$AWS_DEFAULT_REGION`,
 /// then us-east-1), checked before it queues work.
 ///
-/// Three checks: the region resolves (advisory when `Region.unlisted`), the credential chain
+/// Three checks: the region resolves (advisory outside `Region.measured()`), the credential chain
 /// resolves credentials (no AWS call), and one `ListManagedMicrovmImages` page answers in that
 /// region, the only AWS operation, free and read-only. A check after a failure is reported
 /// with `ran: false` and makes no call. Nothing billable, nothing mutating. It does not check

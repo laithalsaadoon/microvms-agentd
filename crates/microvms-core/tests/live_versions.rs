@@ -40,7 +40,7 @@ use microvms_core::region::Region;
 /// The region every check runs in, for the reason `live_pagination.rs` gives: these assertions
 /// are about a signed request's shape, and a region that does not run MicroVMs can answer a
 /// null-message denial that would read as this test's failure.
-const REGION: Region = Region::UsEast1;
+const REGION: Region = Region::US_EAST_1;
 
 /// **`GetMicrovmImageBuild` answers snapshot sizes no other operation reports.**
 ///

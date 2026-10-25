@@ -45,7 +45,7 @@ Most field names match their flags; the repeatable connector flag uses the plura
 | `binary`           | `run [BINARY]`         | The daemon binary to bake in. A relative path resolves against the config file's directory, never the process cwd.                              |
 | `exec`             | `run --exec`           | The shell command to run in the VM.                                                                                                              |
 | `memory`           | `run --memory`         | Baseline MiB. Validated against the same closed set as the flag: `512`, `1024`, `2048`, `4096`, `8192`.                                          |
-| `region`           | `run --region`         | An unlisted region is refused at load with the remedy named: pass `--unlisted-region` on the command line.                                       |
+| `region`           | `run --region`         | Any region name. A malformed name, such as one in capitals, is refused at load.                                                                 |
 | `egress`           | `run --egress`         | Request the managed internet connector; false does not isolate networking.                                                                                                                    |
 | `egress-network-connectors` | `run --egress-network-connector` | Existing VPC connector ARNs. Explicit flags replace the configured list; conflicts with `egress`. |
 | `deny-egress` | `run --deny-egress` | Set advisory proxy variables; does not isolate networking. |

@@ -78,11 +78,14 @@ from microvms import (
 
 
 def pick_region(configured: str | None) -> Region:
-    """A region from a config string, through the refusal rather than around it.
+    """A region from a config string, through the parse rather than around it.
 
     The parameter is `str | None` because that is what a config file hands you; the return
-    is a `Region` because that is the only thing the rest of this module accepts. The
-    narrowing happens in exactly one place, which is the point of TRAP-6 being a type.
+    is a `Region` because that is the only thing the rest of this module accepts.
+    `Region.parse` takes any well-formed name and refuses a malformed one, such as a case
+    change, so the narrowing happens in exactly one place. `Region.is_measured` then says
+    whether AWS was measured running MicroVMs there, which a null-message denial's
+    diagnosis reads (TRAP-6).
     """
     if configured is None:
         return Region.us_east_1()

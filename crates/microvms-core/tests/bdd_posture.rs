@@ -83,7 +83,7 @@ impl Harness {
     fn plane(&self) -> ControlPlane {
         ControlPlane::with_transport(
             Arc::clone(&self.transport) as Arc<dyn Transport>,
-            Region::UsEast1,
+            Region::US_EAST_1,
             Arc::new(SystemClock::default()),
         )
     }
@@ -129,7 +129,7 @@ fn ask(world: &mut Harness) {
 
 #[when(expr = "the harness asks for their egress posture in {word}")]
 fn ask_in(world: &mut Harness, region: String) {
-    world.region = Some(Region::unlisted(region));
+    world.region = Some(region.parse().expect("a region name"));
     ask(world);
 }
 

@@ -164,13 +164,13 @@ fn check_config(
     }
 }
 
-/// Whether the region is one this client has seen carry MicroVMs: core's preflight line.
+/// Whether the region is one AWS was measured running MicroVMs in: core's preflight line.
 ///
 /// **Advisory** here in every failing case, including a region the environment holds that the
 /// parser refuses: `doctor` must run with a broken environment and report everything else,
 /// and AWS adds regions faster than a constant is re-read. The bindings' `preflight` keeps the
 /// unresolved case fatal, because a harness cannot launch without a region. The remedy names
-/// the five, so the reader can tell "typo" from "genuinely new".
+/// the measured regions, so the reader can tell "typo" from "genuinely new".
 ///
 /// The line also says which layer chose the region, in the words a reader would change it
 /// with: the flag, the config file's path, the environment, or the built-in default. `run`
@@ -211,7 +211,7 @@ async fn check_credentials<O: std::io::Write, E: std::io::Write>(
         // The region line has reported the failure. The chain is still checked, on us-east-1
         // as before, so a machine with no identity keeps its fatal line. Resolving credentials
         // sends no MicroVMs request, unlike the managed-base reads, which skip this case.
-        Err(_) => Region::UsEast1,
+        Err(_) => Region::US_EAST_1,
     };
     let plane = ctx.seam.control_plane(region.clone()).await;
     let mut check = microvms_core::preflight::credentials_check(&plane, &region).await;
@@ -554,7 +554,7 @@ pub fn elf_machine(path: &std::path::Path) -> Option<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::{RegionArg, RegionFlags};
+    use crate::cli::RegionFlags;
 
     /// The region line for these flags and this environment, in a project with no config file.
     fn region_line(flags: RegionFlags, env: &dyn Fn(&str) -> Option<String>) -> Check {
@@ -672,26 +672,34 @@ mod tests {
         assert!(!healthy(&[check]));
     }
 
-    /// An unlisted region is advisory and the remedy names the five.
+    /// A region outside the measured list is advisory, and the remedy names the list.
     ///
     /// Advisory because AWS adds regions faster than this constant is re-read; the list is in
-    /// the remedy so a reader can tell a typo from something genuinely new.
+    /// the remedy so a reader can tell a typo from something genuinely new. The deprecated
+    /// `--unlisted-region` reports the same line as `--region`.
     #[test]
-    fn an_unlisted_region_is_advisory_and_the_remedy_names_the_five() {
+    fn an_unlisted_region_is_advisory_and_the_remedy_names_the_measured_regions() {
         let env = |_: &str| None;
-        let unlisted = RegionFlags {
-            region: None,
-            unlisted_region: Some("eu-central-1".to_string()),
-        };
-        let check = region_line(unlisted, &env);
-        assert!(!check.ok);
-        assert!(!check.fatal, "{check:?}");
-        assert!(check.remedy.contains("us-east-1"), "{check:?}");
-        assert!(check.remedy.contains("ap-northeast-1"), "{check:?}");
+        for unlisted in [
+            RegionFlags {
+                region: Some("us-west-1".parse().expect("a region name")),
+                unlisted_region: None,
+            },
+            RegionFlags {
+                region: None,
+                unlisted_region: Some("us-west-1".to_string()),
+            },
+        ] {
+            let check = region_line(unlisted, &env);
+            assert!(!check.ok);
+            assert!(!check.fatal, "{check:?}");
+            assert!(check.remedy.contains("us-east-1"), "{check:?}");
+            assert!(check.remedy.contains("eu-central-1"), "{check:?}");
+        }
 
         // And a listed one passes.
         let listed = RegionFlags {
-            region: Some(RegionArg::UsWest2),
+            region: Some(microvms_core::Region::US_WEST_2),
             unlisted_region: None,
         };
         let listed = region_line(listed, &env);

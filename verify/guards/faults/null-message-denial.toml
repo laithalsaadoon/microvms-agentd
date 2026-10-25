@@ -22,7 +22,7 @@ guard = "control::transport::tests::supported_region_null_denials_point_to_iam_i
 run = ["cargo", "test", "-p", "microvms-app", "--lib", "control::transport::tests::supported_region_null_denials_point_to_iam_in_both_send_paths", "--", "--exact"]
 expect = "test-failed"
 suite = "rust"
-transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "Some(region) if region.is_supported()", with = "Some(region) if !region.is_supported()" }
+transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "Some(region) if region.is_measured()", with = "Some(region) if !region.is_measured()" }
 
 [[fault]]
 id = "null-denial-parity-py"
@@ -30,7 +30,7 @@ guard = "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[control-pl
 run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml", "--features", "parity-fixtures"], ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[control-plane/null-message-denial]"]]
 expect = "test-failed"
 suite = "bindings"
-transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "Some(region) if region.is_supported()", with = "Some(region) if !region.is_supported()" }
+transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "Some(region) if region.is_measured()", with = "Some(region) if !region.is_measured()" }
 
 [[fault]]
 id = "null-denial-unlisted-region"
@@ -38,4 +38,4 @@ guard = "control::transport::tests::unlisted_region_null_denials_keep_both_cause
 run = ["cargo", "test", "-p", "microvms-app", "--lib", "control::transport::tests::unlisted_region_null_denials_keep_both_causes_visible", "--", "--exact"]
 expect = "test-failed"
 suite = "rust"
-transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "Some(region) if region.is_supported()", with = "Some(region) if !region.is_supported()" }
+transform = { file = "crates/microvms-app/src/control/transport.rs", replace = "Some(region) if region.is_measured()", with = "Some(region) if !region.is_measured()" }

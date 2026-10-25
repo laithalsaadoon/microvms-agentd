@@ -53,7 +53,7 @@ test('BIND-14: a request over the largest class names it', () => {
 
 test('BIND-15 and BIND-16: a refused environment region stops the preflight before any call', async () => {
   const saved = { region: process.env.AWS_REGION, fallback: process.env.AWS_DEFAULT_REGION };
-  process.env.AWS_REGION = 'eu-central-1';
+  process.env.AWS_REGION = 'EU-CENTRAL-1';
   delete process.env.AWS_DEFAULT_REGION;
   try {
     const report = await preflight();
@@ -66,7 +66,7 @@ test('BIND-15 and BIND-16: a refused environment region stops the preflight befo
     const [region, credentials, service] = report.checks;
     assert.equal(region.ok, false);
     assert.equal(region.ran, true);
-    assert.match(region.detail, /eu-central-1/);
+    assert.match(region.detail, /EU-CENTRAL-1/);
     for (const check of [credentials, service]) {
       assert.deepEqual([check.ok, check.fatal, check.ran], [false, true, false]);
     }

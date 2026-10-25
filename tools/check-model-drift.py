@@ -147,6 +147,7 @@ CONSTANT_NAMES = (
     "TOLERATED_IMAGE_READY_STATES",
     "TERMINAL_STATES",
     "DEAD_STATES",
+    "MEASURED_REGIONS",
     "MICROVM_REGIONS",
     "SIZE_CLASSES",
 )
@@ -166,6 +167,7 @@ UNORDERED_NAMES = frozenset(
         "TOLERATED_IMAGE_READY_STATES",
         "TERMINAL_STATES",
         "DEAD_STATES",
+        "MEASURED_REGIONS",
         "MICROVM_REGIONS",
         # The `MicrovmImageVersionStatus` enum. Sorted, because the code that reads it does a
         # membership test against a wire string — and the two values happen to be in the same
@@ -197,10 +199,29 @@ UNORDERED_NAMES = frozenset(
 # it is the intended one; this repo's harbor-harvest sibling makes the same trade for
 # its tool/library twins.
 
-#: The regions this client lists, measured answering `ListMicrovms` 2026-08-07, and
-#: `microvms-core`'s `MICROVM_REGIONS` must equal this. AWS runs MicroVMs in more regions
-#: (the Pricing API and AWS's launch posts, 2026-10-24); growing this list is #743's call.
+#: The regions AWS was measured running MicroVMs in: the 14 the Pricing API priced on
+#: 2026-10-24, which are the 14 AWS's launch posts name. `microvms-core`'s
+#: `MEASURED_REGIONS` must equal this, sorted.
 PINNED_REGIONS = (
+    "ap-east-1",
+    "ap-northeast-1",
+    "ap-south-1",
+    "ap-southeast-1",
+    "ap-southeast-2",
+    "ap-southeast-5",
+    "ap-southeast-7",
+    "eu-central-1",
+    "eu-north-1",
+    "eu-south-2",
+    "eu-west-1",
+    "us-east-1",
+    "us-east-2",
+    "us-west-2",
+)
+
+#: The five regions with constants, which `microvms-core`'s deprecated `MICROVM_REGIONS`
+#: holds through 1.x (#743): the regions of AWS's first launch, 2026-06-22.
+PINNED_FIRST_LAUNCH_REGIONS = (
     "ap-northeast-1",
     "eu-west-1",
     "us-east-1",
@@ -410,7 +431,7 @@ class Checker:
         """One comparison. `sides` names the two printed values on a failure.
 
         Defaulted to `("ours", "model")` because most comparisons here really are against
-        the model. The two that are not — `MICROVM_REGIONS` and `SIZE_CLASSES`, which the
+        the model. The ones that are not — the region lists and `SIZE_CLASSES`, which the
         model says nothing about — pass their own, so a disagreement does not name the
         model as the source of a value it never stated and send the reader to the wrong
         file to fix it.
@@ -948,7 +969,7 @@ def check(src: Source, model: dict[str, Any]) -> Checker:
     # drift dump for no gain. The check is a length bound, and the crate that owns the
     # minting is the right place to bound it.
 
-    # `MICROVM_REGIONS` cannot be checked against the model at all, and saying so is the
+    # `MEASURED_REGIONS` cannot be checked against the model at all, and saying so is the
     # point. The model states no region list, and the two botocore calls that look like
     # they might substitute for one disagree: get_available_endpoints returns an empty
     # list while get_available_regions returns all 34 Lambda regions, since
@@ -960,10 +981,18 @@ def check(src: Source, model: dict[str, Any]) -> Checker:
     # `len(src.get(...))` against itself, which was honest while the cross-check carried
     # the real assertion and is vacuous without it.
     c.record(
+        "MEASURED_REGIONS",
+        src.get("MEASURED_REGIONS"),
+        sorted(PINNED_REGIONS),
+        note="NOT model-backed: measured 2026-10-24, held against this script's literal",
+        sides=(src.label, "pinned here"),
+    )
+    # The deprecated five-region list, held to its 1.2 value until 2.0.0 removes it.
+    c.record(
         "MICROVM_REGIONS",
         src.get("MICROVM_REGIONS"),
-        sorted(PINNED_REGIONS),
-        note="NOT model-backed: measured 2026-08-07, held against this script's literal",
+        sorted(PINNED_FIRST_LAUNCH_REGIONS),
+        note="NOT model-backed: deprecated since 1.3.0, the five regions with constants",
         sides=(src.label, "pinned here"),
     )
     # Same status, same reason, same replacement: the five-row sizing table is read from

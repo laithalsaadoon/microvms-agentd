@@ -441,7 +441,7 @@ mod tests {
                 super::super::transport::sign_for(
                     &mut request,
                     &credentials,
-                    &Region::UsEast1,
+                    &Region::US_EAST_1,
                     "lambda",
                     aws_sigv4::http_request::SigningSettings::default(),
                 )
@@ -483,8 +483,9 @@ mod tests {
         let registry = RegionProviders::default();
         let loads = AtomicUsize::new(0);
         let provider = Provider::default();
+        let region = Region::US_EAST_1;
         let requests = (0..32).map(|_| {
-            get_or_load(&registry, &Region::UsEast1, async {
+            get_or_load(&registry, &region, async {
                 loads.fetch_add(1, Ordering::SeqCst);
                 tokio::task::yield_now().await;
                 cached(&config(provider.clone()))
@@ -494,13 +495,13 @@ mod tests {
             result.unwrap();
         }
         assert_eq!(loads.load(Ordering::SeqCst), 1);
-        get_or_load(&registry, &Region::EuWest1, async {
+        get_or_load(&registry, &Region::EU_WEST_1, async {
             loads.fetch_add(1, Ordering::SeqCst);
             Err(Error::new(ErrorKind::Credentials, "failed initialization"))
         })
         .await
         .unwrap_err();
-        get_or_load(&registry, &Region::EuWest1, async {
+        get_or_load(&registry, &Region::EU_WEST_1, async {
             loads.fetch_add(1, Ordering::SeqCst);
             cached(&config(provider))
         })

@@ -56,7 +56,7 @@ fn preflight(dockerfile: &str, base: BaseImage) -> Result<(), Error> {
     // A preflight makes no call, and the fake has none queued: one would panic naming it.
     let plane = ControlPlane::with_transport(
         Arc::new(FakeControlPlane::new()),
-        Region::UsEast1,
+        Region::US_EAST_1,
         Arc::new(SystemClock::new()),
     );
     let mut request = CreateImageRequest::new(

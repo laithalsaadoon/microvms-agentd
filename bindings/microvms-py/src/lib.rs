@@ -28,10 +28,10 @@
 //! * **An unlabelled duration.** [`cost::PyDuration`] has no `__new__` at all —
 //!   `Duration.measured(secs)` and `Duration.projected(secs)` are the only doors, so the
 //!   provenance cannot be omitted rather than merely defaulting wrong.
-//! * **A region that does not carry MicroVMs.** [`region::PyRegion`] is a class whose only
-//!   constructors are the five names, a `parse` that refuses everything else, and an
-//!   `unlisted` that says at the call site that someone opted into the null-message trap
-//!   (TRAP-6). No method on this surface takes a region string.
+//! * **A malformed region name.** [`region::PyRegion`] is a class whose doors are the five
+//!   named constructors and a `parse` that takes any well-formed region name and refuses a
+//!   malformed one; `supported()` lists the regions AWS was measured running MicroVMs in,
+//!   which TRAP-6's error reads. No method on this surface takes a region string.
 //! * **Two hook timeouts whose ceilings are 60x apart, transposed.**
 //!   [`hooks::PyRunHookTimeout`] and [`hooks::PyBuildHookTimeout`] are separate
 //!   `#[pyclass]`es, so passing one where the other is wanted is a `TypeError` from PyO3's

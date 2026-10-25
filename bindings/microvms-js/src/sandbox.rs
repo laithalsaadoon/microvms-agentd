@@ -760,7 +760,7 @@ impl Sandbox {
     ///
     /// A factory rather than a constructor because credential resolution is async, and a
     /// `#[napi(constructor)]` cannot be. `region` is a [`Region`] instance and not a string,
-    /// which is TRAP-6 at this boundary.
+    /// so a malformed region name never reaches this call.
     #[napi]
     pub fn create<'env>(
         env: &'env napi::Env,

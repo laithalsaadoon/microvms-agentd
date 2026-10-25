@@ -47,10 +47,10 @@
 //! * **An unlabelled duration.** [`cost::Duration`] has no `#[napi(constructor)]` —
 //!   `Duration.measured(s)` and `Duration.projected(s)` are the only doors, so
 //!   `new Duration(3600)` throws rather than producing an unlabelled span.
-//! * **A region that does not carry MicroVMs.** [`region::Region`] has factory methods for the
-//!   five names, a `parse` that refuses everything else, and an `unlisted` that says at the
-//!   call site that someone opted into the null-message trap (TRAP-6). No method takes a
-//!   region string.
+//! * **A malformed region name.** [`region::Region`] has factory methods for the five names and
+//!   a `parse` that takes any well-formed region name and refuses a malformed one;
+//!   `supported()` lists the regions AWS was measured running MicroVMs in, which TRAP-6's error
+//!   reads. No method takes a region string.
 //! * **Two hook timeouts whose ceilings are 60x apart, transposed.**
 //!   [`hooks::RunHookTimeout`] and [`hooks::BuildHookTimeout`] are separate classes, so
 //!   passing one where the other belongs is rejected by napi's conversion.

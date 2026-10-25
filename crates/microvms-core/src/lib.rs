@@ -18,10 +18,8 @@
 //!
 //! The spec ranks each closure, strongest first:
 //!
-//! * **S1, inexpressible** — the mistake cannot be written down. [`region::Region`] is
-//!   an enum over the regions this client lists, so a typo'd region is a
-//!   compile error rather than a runtime check; [`sizing::SizeClass`] is closed over
-//!   the documented baselines; [`hooks::RunHookTimeout`] and
+//! * **S1, inexpressible** — the mistake cannot be written down. [`sizing::SizeClass`]
+//!   is closed over the documented baselines; [`hooks::RunHookTimeout`] and
 //!   [`hooks::BuildHookTimeout`] are separate types with no conversion between them,
 //!   so a 3600-second build timeout cannot reach a field that caps at 60.
 //! * **S2, expressible but rejected** — the mistake can be written and the client
@@ -29,19 +27,24 @@
 //!   `docs/PLATFORM.md` finding. Weaker because the guard is code that can regress,
 //!   but it costs seconds rather than a build cycle. Every boundary where a bare
 //!   integer or string still has to be judged lands here:
-//!   [`sizing::SizeClass::from_baseline_mib`], `Region::from_str`.
+//!   [`sizing::SizeClass::from_baseline_mib`], and `Region::from_str`, which refuses a
+//!   malformed region name.
 //! * **S3, correct by default and overridable** — weakest, because it protects the
 //!   caller who does nothing and abandons the one who overrides. An S3 closure must
-//!   say what the override costs: [`region::Region::unlisted`] says it costs you the
-//!   diagnostic.
+//!   say what the override costs.
+//!
+//! A region is any well-formed name since 1.3.0 (#743): AWS adds MicroVMs regions faster
+//! than a release can follow, so TRAP-6 is a report rather than a refusal. A call that
+//! fails with the null-message `AccessDeniedException` in a region outside
+//! [`region::MEASURED_REGIONS`] names the region's availability as a cause to verify.
 //!
 //! # Every error message names its finding
 //!
 //! A local reject explains itself by naming the `docs/PLATFORM.md` section that
 //! measured the behavior, because the codes and the guards exist precisely so a
-//! reader can go to the measurement rather than to a constraint. "region
-//! 'eu-central-1' is invalid" sends someone to check their spelling; the message
-//! [`region::Region`] actually raises sends them to the null-message finding.
+//! reader can go to the measurement rather than to a constraint. "access denied" sends
+//! someone to their IAM policy; the message a null-message denial in an unmeasured region
+//! actually raises sends them to the region first, then to CloudTrail.
 //!
 //! # A guard that cannot fail is worse than no guard
 //!

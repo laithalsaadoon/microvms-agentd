@@ -2089,7 +2089,7 @@ class PreflightCheck:
     @property
     def fatal(self, /) -> bool:
         """
-        Whether a failure decides the report's `ok`. An unlisted region's line is advisory.
+        Whether a failure decides the report's `ok`. The region line is advisory for a region outside `Region.measured()`.
         """
     @property
     def name(self, /) -> str:
@@ -2311,9 +2311,10 @@ class RateTable:
 @final
 class Region:
     """
-    An AWS region, closed over the five this client lists plus a named escape hatch.
+    An AWS region, by its name.
     
-    AWS runs MicroVMs in more regions than these five; `Region.unlisted` reaches them.
+    `Region.parse` takes any well-formed region name; the five named constructors cover the
+    regions of AWS's first MicroVMs launch.
     """
     def __eq__(self, other: object, /) -> bool: ...
     def __hash__(self, /) -> int: ...
@@ -2324,9 +2325,22 @@ class Region:
     @staticmethod
     def eu_west_1() -> Region: ...
     @property
+    def is_measured(self, /) -> bool:
+        """
+        Whether AWS was measured running MicroVMs here: membership in `Region.measured()`.
+        """
+    @property
     def is_supported(self, /) -> bool:
         """
-        Whether this is one of the five rather than an opted-into unlisted name.
+        Deprecated since 1.3.0: use `is_measured`.
+        
+        Whether this is one of the five named regions, as in 1.2, and a `DeprecationWarning`.
+        """
+    @staticmethod
+    def measured() -> list[Region]:
+        """
+        The regions AWS was measured running MicroVMs in: the 14 the Pricing API priced on
+        2026-10-24.
         """
     @property
     def name(self, /) -> str:
@@ -2336,29 +2350,27 @@ class Region:
     @staticmethod
     def parse(name: str) -> Region:
         """
-        One of the five, or a refusal naming the null-message trap.
+        Any well-formed region name, or `InvalidArgError` for a malformed one.
         
         The boundary a region name arrives at from an environment variable or a config
-        file, where it is still a string. The refusal is the core's `FromStr`, message and
+        file, where it is still a string. The check is the core's `FromStr`, message and
         all — this is a call, not a check written here.
         """
     @staticmethod
     def supported() -> list[Region]:
         """
-        Every region this client has seen carry MicroVMs.
+        Deprecated since 1.3.0: AWS runs MicroVMs in more regions than these five; use
+        `Region.measured()`.
+        
+        The five named regions, as 1.2 returned, and a `DeprecationWarning`.
         """
     @staticmethod
     def unlisted(name: str) -> Region:
         """
-        Opts into a region this client has not seen carry MicroVMs.
+        Deprecated since 1.3.0: `Region.parse` takes any well-formed region name.
         
-        **This costs you the diagnostic.** If the region does not run MicroVMs, the first
-        control-plane call can answer `AccessDeniedException` with a null message, and you
-        will spend the next hour reading an IAM policy that is correct. Named rather than a
-        flag so a reader of the call site can see the opt-in.
-        
-        A supported name handed here comes back as its proper region, so
-        `Region.unlisted("us-east-1") == Region.us_east_1()`.
+        Builds the region without the shape check, as 1.2 did, and raises a
+        `DeprecationWarning`. `Region.unlisted("us-east-1") == Region.us_east_1()`.
         """
     @staticmethod
     def us_east_1() -> Region: ...
@@ -2475,9 +2487,8 @@ class Sandbox:
         """
         Resolves credentials for `region` and returns a sandbox with nothing launched.
         
-        `region` is a [`PyRegion`] and not a string, which is TRAP-6 at this boundary: the
-        five supported regions are named constructors and everything else goes through
-        `Region.parse` (refused) or `Region.unlisted` (opted into, at the call site).
+        `region` is a [`PyRegion`] and not a string, so a region name is parsed once, at
+        `Region.parse` or a named constructor, and a malformed one never reaches this call.
         """
     def __repr__(self, /) -> str: ...
     @staticmethod
@@ -3755,7 +3766,7 @@ def preflight(region: Region |None = None) -> PreflightReport:
     Whether a harness can launch in `region` (default: `$AWS_REGION`, `$AWS_DEFAULT_REGION`,
     then us-east-1), checked before it queues work.
     
-    Three checks: the region resolves (advisory when `Region.unlisted`), the credential chain
+    Three checks: the region resolves (advisory outside `Region.measured()`), the credential chain
     resolves credentials (no AWS call), and one `ListManagedMicrovmImages` page answers in that
     region, the only AWS operation, free and read-only. A check after a failure is reported
     with `ran=False` and makes no call. Nothing billable, nothing mutating. It does not check

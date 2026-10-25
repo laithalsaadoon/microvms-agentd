@@ -6,8 +6,8 @@
 //!
 //! 1. **region**: the region resolves, from the caller or from `$AWS_REGION` /
 //!    `$AWS_DEFAULT_REGION` ([`Region::from_env`]). Fatal when it does not resolve. Advisory
-//!    when it is [`Region::unlisted`]: AWS adds regions faster than a constant is re-read, and
-//!    a caller who wrote `unlisted` opted in at the call site; the service check below decides.
+//!    when it is outside [`crate::region::MEASURED_REGIONS`]: AWS adds regions faster than a
+//!    constant is re-read.
 //! 2. **credentials**: the default credential chain resolves credentials
 //!    ([`ControlPlane::resolve_credentials`]). No AWS API call; the chain may read an SSO
 //!    cache, run a credential process, or ask the instance metadata service.
@@ -155,14 +155,14 @@ mod tests {
     #[tokio::test]
     async fn the_outcome_is_the_models_table() {
         for (region, listing, ok) in [
-            (Region::UsEast1, Answer::ok(r#"{"items": []}"#), true),
+            (Region::US_EAST_1, Answer::ok(r#"{"items": []}"#), true),
             (
-                Region::unlisted("ap-south-1"),
+                "us-west-1".parse().expect("a region name"),
                 Answer::ok(r#"{"items": []}"#),
                 true,
             ),
             (
-                Region::unlisted("ap-south-1"),
+                "us-west-1".parse().expect("a region name"),
                 Answer::failure(403, "AccessDeniedException"),
                 false,
             ),
@@ -192,7 +192,7 @@ mod tests {
             "ListManagedMicrovmImages",
             Answer::failure(403, "AccessDeniedException"),
         );
-        let check = service_check(&plane(recorder, Region::UsEast1)).await;
+        let check = service_check(&plane(recorder, Region::US_EAST_1)).await;
         assert!(!check.ok && check.ran && check.fatal);
         assert!(
             check
@@ -211,8 +211,11 @@ mod tests {
     async fn failed_credentials_stop_the_preflight_before_any_call() {
         let transport = Arc::new(NoCredentials(Mutex::new(Vec::new())));
         let shared = Arc::clone(&transport) as Arc<dyn Transport>;
-        let report =
-            preflight_with(Ok(Region::UsEast1), |r| async move { Ok(plane(shared, r)) }).await;
+        let report = preflight_with(
+            Ok(Region::US_EAST_1),
+            |r| async move { Ok(plane(shared, r)) },
+        )
+        .await;
         assert!(!report.ok());
         let credentials = report.check("credentials").expect("reported");
         assert!(!credentials.ok && credentials.ran && credentials.fatal);
@@ -225,7 +228,7 @@ mod tests {
     #[tokio::test]
     async fn an_unresolved_region_builds_no_control_plane() {
         let refused =
-            Region::from_env(&|name| (name == "AWS_REGION").then(|| "eu-central-1".into()));
+            Region::from_env(&|name| (name == "AWS_REGION").then(|| "EU-CENTRAL-1".into()));
         let report = preflight_with(refused, |_| async {
             panic!("no control plane may be built without a region")
         })
@@ -246,7 +249,7 @@ mod tests {
     /// is not asked.
     #[tokio::test]
     async fn a_control_plane_that_fails_to_build_is_a_credentials_failure() {
-        let report = preflight_with(Ok(Region::UsEast1), |_| async {
+        let report = preflight_with(Ok(Region::US_EAST_1), |_| async {
             Err(Error::new(ErrorKind::Credentials, "no provider"))
         })
         .await;
@@ -262,8 +265,8 @@ mod tests {
     /// The region line's three cases, which `doctor` shares.
     #[test]
     fn the_region_line_is_pass_advisory_or_fatal() {
-        assert!(region_check(&Ok(Region::UsEast1)).ok);
-        let unlisted = region_check(&Ok(Region::unlisted("ap-south-1")));
+        assert!(region_check(&Ok(Region::US_EAST_1)).ok);
+        let unlisted = region_check(&Ok("us-west-1".parse().expect("a region name")));
         assert!(!unlisted.ok && !unlisted.fatal);
         let refused = region_check(&Err(Error::invalid_arg("nope")));
         assert!(!refused.ok && refused.fatal);

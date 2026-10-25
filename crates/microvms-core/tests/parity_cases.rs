@@ -161,7 +161,7 @@ fn refusal(error: &Error) -> Value {
 fn offline_plane() -> ControlPlane {
     ControlPlane::with_transport(
         Arc::new(FakeControlPlane::new()),
-        Region::UsEast1,
+        Region::US_EAST_1,
         Arc::new(SystemClock::new()),
     )
 }

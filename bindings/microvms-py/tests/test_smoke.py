@@ -273,55 +273,62 @@ def test_the_report_json_shape_is_the_python_clients() -> None:
     assert isinstance(rendered["items"][0]["quantity"], str)
 
 
-# -- BIND-2 / TRAP-6: the region set is closed --------------------------------
+# -- BIND-2 / TRAP-6: a region is any well-formed name -------------------------
 
 
-def test_eu_central_one_is_refused_naming_the_null_message_trap() -> None:
-    """TRAP-6, with the core's own message.
+def test_a_malformed_region_is_refused_and_an_unmeasured_one_parses() -> None:
+    """`parse` refuses a malformed name before any call, with the core's own message.
 
-    AWS runs MicroVMs in `eu-central-1` (launched 2026-08-19) and it is outside this client's
-    list, so it is the name a list grown without its own decision (#743) would most plausibly
-    gain. Both halves of the message matter: "AccessDeniedException" alone reads as an IAM
-    problem, and the word *null* is what says the region may be the cause instead.
+    A well-formed region AWS was not measured running MicroVMs in still parses: since 1.3.0 the
+    error a call there produces names the region (TRAP-6), and `is_measured` says so up front.
     """
     with pytest.raises(microvms.InvalidArgError) as raised:
-        microvms.Region.parse("eu-central-1")
-    message = str(raised.value)
-    assert "AccessDeniedException" in message
-    assert "null" in message
+        microvms.Region.parse("eu central 1")
+    assert "not a region name" in str(raised.value)
     assert raised.value.code == "ERR_INVALID_ARG"
     assert raised.value.wire_kind is None, "nothing reached the daemon"
+    unmeasured = microvms.Region.parse("us-west-1")
+    assert unmeasured.name == "us-west-1"
+    assert not unmeasured.is_measured
 
 
-def test_the_five_supported_regions_are_the_measured_ones() -> None:
-    names = [region.name for region in microvms.Region.supported()]
+def test_the_measured_regions_are_the_fourteen_aws_prices() -> None:
+    names = [region.name for region in microvms.Region.measured()]
     assert names == [
         "us-east-1",
         "us-east-2",
         "us-west-2",
         "eu-west-1",
         "ap-northeast-1",
+        "ap-south-1",
+        "ap-southeast-1",
+        "ap-southeast-2",
+        "eu-central-1",
+        "eu-north-1",
+        "ap-east-1",
+        "ap-southeast-5",
+        "ap-southeast-7",
+        "eu-south-2",
     ]
-    assert all(region.is_supported for region in microvms.Region.supported())
+    assert all(region.is_measured for region in microvms.Region.measured())
 
 
-def test_the_escape_hatch_is_visible_in_the_value_it_produces() -> None:
-    """`unlisted` works and says so, and normalises a supported name."""
-    unlisted = microvms.Region.unlisted("eu-central-1")
-    assert unlisted.name == "eu-central-1"
-    assert not unlisted.is_supported
-    # A supported name comes back as its proper region, so nothing downstream handles two
-    # spellings of one region.
-    assert microvms.Region.unlisted("us-east-1") == microvms.Region.us_east_1()
-    assert microvms.Region.us_east_1().is_supported
+def test_the_deprecated_escape_hatch_still_builds_a_region() -> None:
+    """`unlisted` warns, and returns the value `parse` and the named constructors do."""
+    with pytest.deprecated_call():
+        unlisted = microvms.Region.unlisted("us-west-1")
+    assert unlisted == microvms.Region.parse("us-west-1")
+    with pytest.deprecated_call():
+        assert microvms.Region.unlisted("us-east-1") == microvms.Region.us_east_1()
+    with pytest.deprecated_call():
+        assert microvms.Region.us_east_1().is_supported
 
 
 def test_no_method_on_the_surface_takes_a_region_string() -> None:
-    """`Sandbox(region="us-east-1")` raises, which is what keeps TRAP-6 closed.
+    """`Sandbox(region="us-east-1")` raises, so every region on the surface is a parsed value.
 
-    A string parameter here would be the loosening: the core's `Region` is an enum, so a typo
-    is a compile error there, and a binding accepting a name would put the check back at
-    runtime for every Python caller.
+    A string parameter here would skip the shape check `Region.parse` makes, and a typo would
+    reach the endpoint's host name instead of raising `InvalidArgError` where it was written.
     """
     with pytest.raises(TypeError):
         microvms.Sandbox("us-east-1")  # type: ignore[arg-type]
@@ -480,7 +487,7 @@ def test_every_error_kind_has_an_exception_and_they_share_one_base() -> None:
 def test_an_exception_carries_its_code_rather_than_needing_a_message_parsed() -> None:
     """Nobody parses a message. That rule is why these are attributes."""
     with pytest.raises(microvms.MicrovmError) as raised:
-        microvms.Region.parse("nope-1")
+        microvms.Region.parse("nope")
     error = raised.value
     assert error.code == "ERR_INVALID_ARG"
     assert error.kind == "ERR_INVALID_ARG"

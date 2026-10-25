@@ -2696,16 +2696,16 @@ mod tests {
     #[test]
     fn the_base_image_arn_names_the_request_region_with_a_colon_separator() {
         assert_eq!(
-            BaseImage::al2023().arn(&crate::region::Region::UsEast1),
+            BaseImage::al2023().arn(&crate::region::Region::US_EAST_1),
             "arn:aws:lambda:us-east-1:aws:microvm-image:al2023-1"
         );
         assert_eq!(
-            BaseImage::al2023().arn(&crate::region::Region::ApNortheast1),
+            BaseImage::al2023().arn(&crate::region::Region::AP_NORTHEAST_1),
             "arn:aws:lambda:ap-northeast-1:aws:microvm-image:al2023-1"
         );
         assert!(
             !BaseImage::al2023()
-                .arn(&crate::region::Region::UsEast1)
+                .arn(&crate::region::Region::US_EAST_1)
                 .contains("microvm-image/"),
             "the slash form answers AccessDeniedException, not a validation error"
         );

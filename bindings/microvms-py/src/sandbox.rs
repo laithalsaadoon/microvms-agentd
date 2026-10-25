@@ -977,9 +977,8 @@ impl PyManagedBaseVersion {
 impl PySandbox {
     /// Resolves credentials for `region` and returns a sandbox with nothing launched.
     ///
-    /// `region` is a [`PyRegion`] and not a string, which is TRAP-6 at this boundary: the
-    /// five supported regions are named constructors and everything else goes through
-    /// `Region.parse` (refused) or `Region.unlisted` (opted into, at the call site).
+    /// `region` is a [`PyRegion`] and not a string, so a region name is parsed once, at
+    /// `Region.parse` or a named constructor, and a malformed one never reaches this call.
     #[new]
     #[pyo3(signature = (region, *, retry=None))]
     fn new(py: Python<'_>, region: PyRegion, retry: Option<(u32, f64)>) -> PyCoreResult<PySandbox> {

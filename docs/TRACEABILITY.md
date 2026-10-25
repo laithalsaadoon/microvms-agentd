@@ -116,7 +116,7 @@ traced requirement is missing a layer. Requirements are defined in
 | TRAP-3 | waived | waived | waived | 1 | 6 | 1 |
 | TRAP-4 | waived | 1 | 1 | 2 | 4 | waived |
 | TRAP-5 | waived | waived | waived | 2 | 6 | waived |
-| TRAP-6 | waived | 1 | waived | 4 | 12 | waived |
+| TRAP-6 | waived | 1 | waived | 3 | 11 | waived |
 | TRAP-7 | waived | waived | waived | 5 | 7 | 1 |
 | TRAP-8 | waived | waived | waived | 3 | 7 | waived |
 | TRAP-9 | waived | waived | waived | 5 | 10 | waived |
@@ -1326,14 +1326,14 @@ If a run-hook payload exceeds the ceiling of 4096 bytes that the service model d
 
 ## TRAP-6
 
-If the requested region is outside the five regions this client lists, then the microvms-core shall reject the operation locally before the first control-plane call, naming the null-message AccessDeniedException trap.
+If the control-plane call in the requested region fails with the null-message AccessDeniedException and the requested region is outside the measured MicroVMs regions, then the microvms-core shall report the error naming the region's service availability and the access policy, the two causes to verify.
 
-- **model:** waived: a membership check over a closed set of five regions, not a state
+- **model:** waived: one branch on a membership test in an error's text, not a state
 - **gherkin:** `crates/microvms-core/tests/features/request_and_preflight.feature`
-- **fuzz:** waived: the region set is a closed enum of five names, and parsing is an exact match the tests enumerate
-- **test:** `bindings/microvms-py/tests/test_smoke.py`, `crates/microvms-app/src/control/ops.rs`, `crates/microvms-app/src/control/transport.rs`, `crates/microvms-domain/src/region.rs`
-- **impl:** `bindings/microvms-js/src/lib.rs`, `bindings/microvms-js/src/region.rs`, `bindings/microvms-js/src/sandbox.rs`, `bindings/microvms-py/src/lib.rs`, `bindings/microvms-py/src/region.rs`, `bindings/microvms-py/src/sandbox.rs`, `crates/microvms-app/src/control/image.rs`, `crates/microvms-app/src/control/ops.rs`, `crates/microvms-app/src/control/transport.rs`, `crates/microvms-app/src/preflight.rs`, `crates/microvms-core/src/prelude.rs`, `crates/microvms-domain/src/region.rs`
-- **live:** waived: refused before the first control-plane call, so the service never sees it
+- **fuzz:** waived: the classifier's inputs are a status, an empty message and a region, which the tests enumerate on both sides of the membership test
+- **test:** `bindings/microvms-py/tests/test_smoke.py`, `crates/microvms-app/src/control/ops.rs`, `crates/microvms-app/src/control/transport.rs`
+- **impl:** `bindings/microvms-js/src/lib.rs`, `bindings/microvms-js/src/region.rs`, `bindings/microvms-py/src/lib.rs`, `bindings/microvms-py/src/region.rs`, `crates/microvms-app/src/control/image.rs`, `crates/microvms-app/src/control/ops.rs`, `crates/microvms-app/src/control/transport.rs`, `crates/microvms-app/src/preflight.rs`, `crates/microvms-core/src/lib.rs`, `crates/microvms-core/src/prelude.rs`, `crates/microvms-domain/src/region.rs`
+- **live:** waived: the live suite runs in a region AWS was measured running MicroVMs in, so its calls can't produce the response; docs/PLATFORM.md records the response in us-west-1
 
 ## TRAP-7
 

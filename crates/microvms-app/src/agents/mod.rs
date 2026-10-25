@@ -970,7 +970,7 @@ mod tests {
 
     fn access() -> BedrockAccess {
         BedrockAccess {
-            region: Region::UsEast1,
+            region: Region::US_EAST_1,
             // Token-shaped and never signed: nothing here sends it anywhere.
             token: bedrock::BearerToken::new("bedrock-api-key-test".to_string()),
         }
@@ -1319,7 +1319,7 @@ mod tests {
     fn sandbox() -> Sandbox {
         Sandbox::with_control_plane(crate::testing::control_plane(
             Arc::new(crate::control::fake::FakeControlPlane::new()),
-            Region::UsEast1,
+            Region::US_EAST_1,
             Arc::new(crate::control::fake::TestClock::new()),
         ))
     }
@@ -1362,7 +1362,7 @@ mod tests {
         let plane = |recorder: &Arc<FakeControlPlane>| {
             crate::testing::control_plane(
                 Arc::clone(recorder) as Arc<dyn crate::control::transport::Transport>,
-                Region::UsEast1,
+                Region::US_EAST_1,
                 Arc::new(TestClock::new()),
             )
         };
@@ -1418,7 +1418,7 @@ mod tests {
         let prepared = crate::control::ensure::prepare(
             &crate::testing::control_plane(
                 Arc::new(crate::control::fake::FakeControlPlane::new()),
-                Region::UsEast1,
+                Region::US_EAST_1,
                 Arc::new(crate::control::fake::TestClock::new()),
             ),
             ensure,

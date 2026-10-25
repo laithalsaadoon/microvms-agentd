@@ -658,11 +658,11 @@ pub fn resolve_vm_identifier<O: Write, E: Write>(
 /// `AWS_REGION` is us-east-1 is the case the record's region exists for, so only a region the
 /// caller typed can disagree with it.
 pub fn explicit_region(flags: &crate::cli::RegionFlags) -> Option<microvms_core::Region> {
-    flags.region.map(|region| region.region()).or_else(|| {
+    flags.region.clone().or_else(|| {
         flags
             .unlisted_region
             .as_deref()
-            .map(microvms_core::Region::unlisted)
+            .map(crate::seam::unlisted_region)
     })
 }
 

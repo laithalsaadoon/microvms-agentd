@@ -1335,7 +1335,7 @@ mod tests {
     fn the_agent_port_defaults_to_nine_thousand_and_is_overridable() {
         let plane = crate::testing::control_plane(
             Arc::new(fake::FakeControlPlane::new()),
-            Region::UsEast1,
+            Region::US_EAST_1,
             Arc::new(fake::TestClock::new()),
         );
         assert_eq!(plane.port(), DEFAULT_AGENT_PORT);

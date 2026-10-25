@@ -63,9 +63,8 @@ pub struct ProjectConfig {
     /// `run --memory`: baseline MiB. Validated against the same closed set as the flag —
     /// the file must not be a side door past CLI-5.
     pub memory: Option<u32>,
-    /// `run --region`: any region string; an unlisted one costs the null-message
-    /// diagnostic exactly as `--unlisted-region` does, and [`load`] refuses nothing here —
-    /// resolution happens where the flag's does.
+    /// `run --region`: any well-formed region name, which [`load`] checks as the flag's
+    /// parser does.
     pub region: Option<String>,
     /// `run --egress`: request the managed INTERNET_EGRESS connector.
     pub egress: Option<bool>,
@@ -215,13 +214,11 @@ fn validate(path: &Path, config: &ProjectConfig) -> Result<(), ConfigError> {
         ));
     }
     if let Some(region) = config.region.as_deref()
-        && crate::cli::RegionArg::from_name(region).is_none()
+        && region.parse::<microvms_core::Region>().is_err()
     {
         problems.push(format!(
-            "region = {region:?} is not a region this client has seen carry MicroVMs; the \
-             listed ones are us-east-1, us-east-2, us-west-2, eu-west-1, ap-northeast-1. An \
-             unlisted region costs the null-message diagnostic, so it stays a spelled-out \
-             opt-in: pass --unlisted-region {region} on the command line"
+            "region = {region:?} is not a region name: a region name is lowercase letters, \
+             digits and hyphens, starts with a letter and ends with a digit, such as us-east-1"
         ));
     }
     if let Some(duration) = config.max_duration_sec
@@ -419,14 +416,13 @@ pub struct MergedRegion {
 ///
 /// A config value joins the flag chain *above* the environment, because the file is project
 /// state and the environment is machine state. `run` and `doctor` both call this, so `doctor`
-/// checks the region `run` launches in (#336). The closed set only: [`load`] already refused
-/// an unlisted name with the flag's own remedy, which is why this is an expect rather than a
-/// second refusal.
+/// checks the region `run` launches in (#336). [`load`] already refused a malformed name,
+/// which is why this is an expect rather than a second refusal.
 ///
 /// The report continues down the chain the resolution itself walks. A report that said
 /// `default` while the launch went where the environment pointed would be the report lying
 /// about the one knob whose chain doesn't end at the file. The environment's word is reported
-/// unvalidated: `resolve` refuses an unlisted name later with the remedy attached, and this
+/// unvalidated: `resolve` refuses a malformed name later with where it came from, and this
 /// report must not pre-empt that refusal by pretending the value was something else.
 pub fn merge_region(
     flags: &crate::cli::RegionFlags,
@@ -434,11 +430,12 @@ pub fn merge_region(
     env: &dyn Fn(&str) -> Option<String>,
 ) -> MergedRegion {
     let from_config = config_region.map(|name| {
-        crate::cli::RegionArg::from_name(name).expect("config::load validated the region domain")
+        name.parse::<microvms_core::Region>()
+            .expect("config::load validated the region name")
     });
     let region = pick(
         flags.region.is_some() || flags.unlisted_region.is_some(),
-        flags.region,
+        flags.region.clone(),
         from_config.map(Some),
     );
     let mut merged = flags.clone();
@@ -447,7 +444,8 @@ pub fn merge_region(
     }
     let named = merged
         .region
-        .map(|arg| arg.region().as_str().to_string())
+        .as_ref()
+        .map(|region| region.as_str().to_string())
         .or_else(|| merged.unlisted_region.clone());
     let reported = match named {
         Some(value) => Knob {
@@ -460,7 +458,7 @@ pub fn merge_region(
                 source: Source::Env,
             },
             None => Knob {
-                value: microvms_core::Region::UsEast1.as_str().to_string(),
+                value: microvms_core::Region::US_EAST_1.as_str().to_string(),
                 source: Source::Default,
             },
         },
@@ -616,19 +614,26 @@ CI = "1"
         assert!(message.contains("512, 1024, 2048, 4096, 8192"), "{message}");
     }
 
-    /// An unlisted region in the file is refused at load with the flag's own remedy.
+    /// A malformed region in the file is refused at load, naming the shape.
     ///
     /// At *load*, deliberately: doctor validates through this same loader, so a domain
     /// check that lived past it would be one doctor passes and `run` refuses — the exact
     /// disagreement `check_config` exists to prevent.
     #[test]
-    fn an_unlisted_region_is_refused_at_load_with_the_opt_in_named() {
-        let file = TempFile::new("region", "region = \"mars-central-1\"\n");
+    fn a_malformed_region_is_refused_at_load_naming_the_shape() {
+        let file = TempFile::new("region", "region = \"Mars-Central-1\"\n");
         let message = load(Some(&file.0), false, Path::new("."))
             .expect_err("refused")
             .to_string();
-        assert!(message.contains("mars-central-1"), "{message}");
-        assert!(message.contains("--unlisted-region"), "{message}");
+        assert!(message.contains("Mars-Central-1"), "{message}");
+        assert!(message.contains("not a region name"), "{message}");
+    }
+
+    /// A well-formed region outside the measured list loads: AWS may run MicroVMs there.
+    #[test]
+    fn an_unlisted_region_in_the_file_loads() {
+        let file = TempFile::new("region-unlisted", "region = \"mars-central-1\"\n");
+        load(Some(&file.0), false, Path::new(".")).expect("a well-formed region loads");
     }
 
     /// A duration past the platform's eight-hour ceiling is refused at load, not after a

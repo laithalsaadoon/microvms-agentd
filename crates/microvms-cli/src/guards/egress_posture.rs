@@ -54,7 +54,7 @@ async fn egress_posture_answers_cores_posture_for_runs_flags() {
             egress,
             &connectors,
             deny,
-            Some(&Region::UsEast1),
+            Some(&Region::US_EAST_1),
         )
         .expect("a launch core accepts");
         let (result, seam) = posture(flags).await;
@@ -112,7 +112,7 @@ async fn egress_posture_refuses_a_connector_core_refuses() {
         false,
         &["not-an-arn".to_string()],
         false,
-        Some(&Region::UsEast1),
+        Some(&Region::US_EAST_1),
     )
     .expect_err("core refuses it too");
     assert_eq!(failure.message, core.to_string());

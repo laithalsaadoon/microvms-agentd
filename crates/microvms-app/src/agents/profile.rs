@@ -310,7 +310,7 @@ mod tests {
 
     #[test]
     fn the_codex_config_names_the_bedrock_runtime_host_for_the_region() {
-        let config = codex_config("global.openai.gpt-5.6-sol", &Region::UsWest2);
+        let config = codex_config("global.openai.gpt-5.6-sol", &Region::US_WEST_2);
         assert!(config.contains("https://bedrock-runtime.us-west-2.amazonaws.com/openai/v1"));
         assert!(
             !config.contains("mantle"),

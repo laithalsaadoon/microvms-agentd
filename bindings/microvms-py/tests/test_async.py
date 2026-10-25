@@ -536,7 +536,7 @@ def test_the_daemon_fetch_twin_answers_a_caller_supplied_binary(tmp_path: Path) 
 def test_a_refused_environment_region_stops_the_preflight_twin_before_any_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("AWS_REGION", "eu-central-1")
+    monkeypatch.setenv("AWS_REGION", "EU-CENTRAL-1")
     monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
     report = asyncio.run(microvms.preflight_async())
     assert report.to_dict() == microvms.preflight().to_dict()

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# The behavior spec for BIND-14, BIND-15, and BIND-16 in verify/spec/core.symspec.json (issue #223).
+# The behavior spec for BIND-14, BIND-15, BIND-16, and TRAP-6 in verify/spec/core.symspec.json (issue #223).
 # `crates/model/src/preflight.rs` checks the preflight's aggregation and calls as a Stateright model;
 # `crates/microvms-domain/src/sizing_fuzz.rs` fuzzes the size-class selection for minimality and
 # coverage. Run by `crates/microvms-core/tests/bdd_preflight.rs`; the preflights go through a scripted
@@ -51,7 +51,7 @@ Feature: What a harness checks before it queues work
 
     @BIND-15 @BIND-16
     Scenario: an unlisted region is advisory, and the listing decides
-      Given the unlisted region ap-south-1
+      Given the unlisted region us-west-1
       And credentials that resolve
       And a service that answers the listing
       When the harness runs a preflight
@@ -61,7 +61,7 @@ Feature: What a harness checks before it queues work
 
     @BIND-15 @BIND-16
     Scenario: a service that denies the listing fails the preflight
-      Given the unlisted region ap-south-1
+      Given the unlisted region us-west-1
       And credentials that resolve
       And a service that denies the listing
       When the harness runs a preflight
@@ -80,12 +80,31 @@ Feature: What a harness checks before it queues work
       And the service check was not run
       And no AWS call was made
 
-    @BIND-15 @BIND-16 @TRAP-6
-    Scenario: an environment region the client refuses stops the preflight before any call
-      Given the environment names the region eu-central-1
+    @BIND-15 @BIND-16
+    Scenario: a malformed environment region stops the preflight before any call
+      Given the environment names the region US-EAST-1
       When the harness runs a preflight with no region
       Then the preflight is not ok
       And the region check failed as fatal
       And the credentials check was not run
       And the service check was not run
       And no AWS call was made
+
+  Rule: TRAP-6 — a null-message denial outside the measured regions names the region alongside IAM
+
+    @TRAP-6
+    Scenario: a null-message denial in an unmeasured region names the region's availability
+      Given the unlisted region us-west-1
+      And credentials that resolve
+      And a service that denies the listing
+      When the harness runs a preflight
+      Then the service check names the region's availability as a cause
+      And the service check does not call an IAM policy the likely cause
+
+    @TRAP-6
+    Scenario: a null-message denial in a measured region names the IAM policy
+      Given the region eu-central-1
+      And credentials that resolve
+      And a service that denies the listing
+      When the harness runs a preflight
+      Then the service check calls an IAM policy the likely cause

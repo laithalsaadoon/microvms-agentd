@@ -92,7 +92,7 @@ test('a synchronous refusal carries the code on .code and on the cause', () => {
   // Both, and the test says which to rely on. `.code` really is the `ERR_*` string here, but it is
   // documented as *not* the thing to branch on — because the async path cannot offer it.
   assert.throws(
-    () => Region.parse('nope-1'),
+    () => Region.parse('nope'),
     (error) => {
       assert.equal(error.code, 'ERR_INVALID_ARG', 'sync .code should be the ERR_ string');
       assert.equal(codeOf(error), 'ERR_INVALID_ARG', 'the uniform rule holds on the sync path too');
@@ -106,7 +106,7 @@ test('every synchronous factory that can refuse uses the one chain', () => {
   // other way would be the one place a caller's `err.cause.message` read `undefined`, and it would
   // be found in production rather than here.
   const refusals = {
-    'Region.parse': () => Region.parse('eu-central-1'),
+    'Region.parse': () => Region.parse('EU-CENTRAL-1'),
     'SizeClass.fromBaselineMib': () => SizeClass.fromBaselineMib(1500),
     'Duration.measured': () => Duration.measured(-1),
     'Duration.projected': () => Duration.projected(Number.NaN),
@@ -129,15 +129,14 @@ test('every synchronous factory that can refuse uses the one chain', () => {
 });
 
 test('a local refusal carries the core’s own message rather than a reworded one', () => {
-  // The core's messages name the `docs/PLATFORM.md` finding that measured the behaviour, and a
-  // binding that shortened them would discard the point of the closure. The region refusal has two
-  // halves that only mean something together: "AccessDeniedException" alone reads as an IAM
-  // problem, and the word *null* is what says the region may be the cause instead.
+  // The core's messages name the rule a value broke, and a binding that shortened them would
+  // discard the half that says how to fix it. The region refusal names the rejected value and then
+  // the shape a region name has; both have to cross the boundary.
   assert.throws(
-    () => Region.parse('eu-central-1'),
+    () => Region.parse('EU-CENTRAL-1'),
     (error) => {
-      assert.match(error.message, /AccessDeniedException/);
-      assert.match(error.message, /null/);
+      assert.match(error.message, /EU-CENTRAL-1/);
+      assert.match(error.message, /such as us-east-1/);
       assert.ok(error.message.length > 80, `truncated on the way out: ${error.message}`);
       return true;
     },
@@ -259,7 +258,7 @@ test('every thrown value is a real Error, so a stack and instanceof both work', 
   // A thrown string or plain object would satisfy a `throws` assertion and break every `catch`
   // that expected an `Error` — including the `instanceof` checks a framework does before logging.
   assert.throws(
-    () => Region.parse('nope-1'),
+    () => Region.parse('nope'),
     (error) => {
       assert.ok(error instanceof Error);
       assert.ok(error.cause instanceof Error, 'the cause is not an Error either');
@@ -339,7 +338,7 @@ test('isRetryable answers what Python\'s .retryable answers, from the chain', as
   assert.equal(isRetryable(refused), false, 'repeating a refused argument changes nothing');
 
   assert.throws(
-    () => Region.parse('nope-1'),
+    () => Region.parse('nope'),
     (error) => {
       assert.equal(isRetryable(error), false, 'a synchronous refusal reads the same chain');
       return true;

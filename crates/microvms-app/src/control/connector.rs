@@ -379,8 +379,8 @@ mod tests {
         let prefix = "arn:aws:lambda:us-east-1:123456789012:network-connector:";
         let maximum = crate::constants::MAX_NETWORK_CONNECTOR_LEN;
         let arn = format!("{prefix}{}", "x".repeat(maximum - prefix.len()));
-        require_egress_connector_arn(&arn, &Region::UsEast1).expect("at the request limit");
-        require_egress_connector_arn(&format!("{arn}x"), &Region::UsEast1)
+        require_egress_connector_arn(&arn, &Region::US_EAST_1).expect("at the request limit");
+        require_egress_connector_arn(&format!("{arn}x"), &Region::US_EAST_1)
             .expect_err("one over the request limit");
     }
 
@@ -502,7 +502,7 @@ mod tests {
         use EgressPosture::{BestEffort, Open, Unsealed};
         /// `(egress, connectors, malformed, deny, answer or the refusal's words)`.
         type Row = (bool, usize, bool, bool, Result<EgressPosture, &'static str>);
-        let region = Region::UsEast1;
+        let region = Region::US_EAST_1;
         let malformed = "network-connector:vpc-0".to_string();
         let table: [Row; 14] = [
             (false, 0, false, false, Ok(Unsealed)),
@@ -558,7 +558,7 @@ mod tests {
                 for count in 0..=crate::constants::MAX_NETWORK_CONNECTORS + 1 {
                     let connectors: Vec<String> = (0..count).map(|i| vpc("us-east-1", i)).collect();
                     if let Ok(posture) =
-                        egress_posture_for(egress, &connectors, deny, Some(&Region::UsEast1))
+                        egress_posture_for(egress, &connectors, deny, Some(&Region::US_EAST_1))
                     {
                         assert!(!posture.is_sealed(), "{egress} {count} {deny}");
                     }
@@ -576,7 +576,7 @@ mod tests {
             egress_posture_for(false, &elsewhere, false, None).expect("a well-formed ARN"),
             EgressPosture::Unsealed
         );
-        let error = egress_posture_for(false, &elsewhere, false, Some(&Region::UsEast1))
+        let error = egress_posture_for(false, &elsewhere, false, Some(&Region::US_EAST_1))
             .expect_err("an ARN from another region cannot attach to a us-east-1 launch");
         assert!(error.to_string().contains("in us-east-1"), "{error}");
         let error = egress_posture_for(false, &["not-an-arn".into()], false, None)
@@ -590,7 +590,7 @@ mod tests {
     #[test]
     fn the_ingress_arn_is_the_measured_literal() {
         assert_eq!(
-            ConnectorIntent::AllIngress.arn(&Region::UsEast1),
+            ConnectorIntent::AllIngress.arn(&Region::US_EAST_1),
             "arn:aws:lambda:us-east-1:aws:network-connector:aws-network-connector:ALL_INGRESS"
         );
     }
@@ -600,29 +600,30 @@ mod tests {
     #[test]
     fn the_egress_arn_uses_the_internet_egress_wire_name() {
         assert_eq!(
-            ConnectorIntent::Egress.arn(&Region::UsEast1),
+            ConnectorIntent::Egress.arn(&Region::US_EAST_1),
             "arn:aws:lambda:us-east-1:aws:network-connector:aws-network-connector:INTERNET_EGRESS"
         );
     }
 
-    /// The region is interpolated rather than fixed, for every region including the
-    /// escape hatch. TRAP-4 is "for the request region", and a hardcoded `us-east-1`
+    /// The region is interpolated rather than fixed, for every region including an
+    /// unlisted one. TRAP-4 is "for the request region", and a hardcoded `us-east-1`
     /// would pass both tests above.
     #[test]
     fn the_arn_carries_the_request_region_for_every_region() {
-        for region in crate::region::MICROVM_REGIONS {
+        for name in crate::region::MEASURED_REGIONS {
+            let region: Region = name.parse().expect("a measured name parses");
             let arn = ConnectorIntent::AllIngress.arn(&region);
             assert!(
                 arn.contains(&format!(":lambda:{}:aws:", region.as_str())),
                 "{arn}"
             );
         }
-        let unlisted = Region::unlisted("me-south-1");
+        let unlisted: Region = "me-south-1".parse().expect("a region name");
         assert!(
             ConnectorIntent::Egress
                 .arn(&unlisted)
                 .contains(":lambda:me-south-1:aws:"),
-            "the escape hatch still derives an ARN for its own region"
+            "an unlisted region still derives an ARN for its own region"
         );
     }
 
@@ -656,7 +657,7 @@ mod tests {
             "exactly one intent names the shell, and it is the one that says so"
         );
         assert_eq!(
-            ConnectorIntent::ShellIngress.arn(&Region::UsEast1),
+            ConnectorIntent::ShellIngress.arn(&Region::US_EAST_1),
             "arn:aws:lambda:us-east-1:aws:network-connector:aws-network-connector:SHELL_INGRESS"
         );
     }
@@ -667,7 +668,7 @@ mod tests {
     #[test]
     fn the_http_ingress_arn_is_the_measured_literal() {
         assert_eq!(
-            ConnectorIntent::HttpIngress.arn(&Region::UsEast1),
+            ConnectorIntent::HttpIngress.arn(&Region::US_EAST_1),
             "arn:aws:lambda:us-east-1:aws:network-connector:aws-network-connector:HTTP_INGRESS"
         );
     }
@@ -680,7 +681,7 @@ mod tests {
     fn no_two_intents_render_the_same_arn() {
         let arns: Vec<String> = ConnectorIntent::ALL
             .iter()
-            .map(|intent| intent.arn(&Region::EuWest1))
+            .map(|intent| intent.arn(&Region::EU_WEST_1))
             .collect();
         for (i, a) in arns.iter().enumerate() {
             for b in &arns[i + 1..] {
@@ -697,7 +698,8 @@ mod tests {
     /// "malformed" message a bare name gets.
     #[test]
     fn every_derived_arn_fits_the_models_connector_bounds() {
-        for region in crate::region::MICROVM_REGIONS {
+        for name in crate::region::MEASURED_REGIONS {
+            let region: Region = name.parse().expect("a measured name parses");
             for intent in ConnectorIntent::ALL {
                 let arn = intent.arn(&region);
                 assert!((1..=2048).contains(&arn.len()), "{arn}");

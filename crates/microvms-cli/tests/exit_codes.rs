@@ -67,8 +67,8 @@ fn every_locally_reachable_row_exits_with_its_own_integer_and_code() {
             "",
         ),
         (
-            "a region outside this client's list",
-            vec!["logs", "img", "--region", "eu-central-1", "--json"],
+            "a malformed region name",
+            vec!["logs", "img", "--region", "EU-CENTRAL-1", "--json"],
             2,
             "ERR_INVALID_ARG",
             "",

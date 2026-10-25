@@ -64,7 +64,7 @@ async fn preflight_passes_in_the_suites_region_and_changes_nothing() {
 #[tokio::test]
 #[ignore = "needs AWS credentials; makes one free read-only call in us-west-1"]
 async fn preflight_in_a_region_without_microvms_fails_its_service_check() {
-    let report = preflight(Some(Region::unlisted("us-west-1"))).await;
+    let report = preflight(Some("us-west-1".parse().expect("a region name"))).await;
     print("elsewhere", &report);
     let region = report.check("region").expect("a region line");
     assert!(!region.ok && !region.fatal, "{region:?}");
@@ -80,7 +80,7 @@ async fn preflight_in_a_region_without_microvms_fails_its_service_check() {
 #[tokio::test]
 #[ignore = "run by the conformance driver with every credential source removed"]
 async fn preflight_without_credentials_makes_no_call() {
-    let report = preflight(Some(Region::UsEast1)).await;
+    let report = preflight(Some(Region::US_EAST_1)).await;
     print("nocreds", &report);
     let credentials = report.check("credentials").expect("a credentials line");
     assert!(credentials.ran && !credentials.ok, "{credentials:?}");

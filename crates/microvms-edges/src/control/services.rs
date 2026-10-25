@@ -327,12 +327,12 @@ mod tests {
             s3_object_url(
                 "agentd-conformance",
                 "harbor/task-0123456789ab/artifact.zip",
-                &Region::UsEast1
+                &Region::US_EAST_1
             ),
             "https://agentd-conformance.s3.us-east-1.amazonaws.com/harbor/task-0123456789ab/artifact.zip"
         );
         assert_eq!(
-            s3_object_url("my.bucket", "a b/c+d.zip", &Region::EuWest1),
+            s3_object_url("my.bucket", "a b/c+d.zip", &Region::EU_WEST_1),
             "https://s3.eu-west-1.amazonaws.com/my.bucket/a%20b/c%2Bd.zip"
         );
     }
@@ -409,13 +409,17 @@ mod tests {
             aws_credential_types::Credentials::new("AKIDEXAMPLE", "secret", None, None, "test");
         let mut request = http::Request::builder()
             .method("PUT")
-            .uri(s3_object_url("bucket", "k/artifact.zip", &Region::UsEast1))
+            .uri(s3_object_url(
+                "bucket",
+                "k/artifact.zip",
+                &Region::US_EAST_1,
+            ))
             .body(b"zip bytes".to_vec())
             .expect("a request");
         crate::control::transport::sign_for(
             &mut request,
             &credentials,
-            &Region::UsEast1,
+            &Region::US_EAST_1,
             "s3",
             s3_signing_settings(),
         )

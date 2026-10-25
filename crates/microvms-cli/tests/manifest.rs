@@ -99,14 +99,14 @@ fn every_published_domain_is_the_domain_the_parser_enforces() {
             };
             let flag = format!("--{}", param["name"].as_str().expect("a name"));
             // A command that needs positional arguments cannot be probed this way; `cost` and
-            // `logs` between them cover both S1 options and take at most one positional.
+            // `logs` take at most one positional, and `cost` carries `--memory`.
             let positional: Vec<&str> = match name {
                 "cost" | "ls" | "manifest" | "constants" | "doctor" => vec![],
                 "logs" => vec!["img"],
                 // Skipped rather than fabricated: `run`, `build`, `exec`, and the lifecycle
                 // commands need real identifiers, and inventing them would make this test about
-                // argument shapes rather than about domains. Their `--memory`/`--region` are the
-                // *same* clap types, asserted through `cost` and `logs`.
+                // argument shapes rather than about domains. Their `--memory` is the *same* clap
+                // type, asserted through `cost`.
                 _ => continue,
             };
 
@@ -144,11 +144,42 @@ fn every_published_domain_is_the_domain_the_parser_enforces() {
             assert_eq!(refused.envelope()["code"], "ERR_INVALID_ARG");
         }
     }
+    // `--memory`'s five baselines, through `cost`. `--region` published five choices before
+    // 1.3.0 and publishes none now; `every_region_name_parses_and_a_malformed_one_exits_two`
+    // round-trips it.
     assert!(
-        round_tripped >= 10,
+        round_tripped >= 5,
         "only {round_tripped} domain values were round-tripped; the S1 options must actually be \
          reachable or this passes vacuously"
     );
+}
+
+/// **CLI-5 for `--region`.** The binary takes any well-formed region name, measured or not,
+/// and refuses a malformed one with `ERR_INVALID_ARG` and exit 2, the refusal core's parser
+/// makes. The deprecated `--unlisted-region` takes the same names and warns on stderr, and
+/// `--region` does not.
+#[test]
+fn every_region_name_parses_and_a_malformed_one_exits_two() {
+    for region in ["us-east-1", "eu-central-1", "us-west-1"] {
+        for flag in ["--region", "--unlisted-region"] {
+            let outcome = run(&["logs", "img", flag, region, "--json"], &[]);
+            assert_ne!(
+                outcome.exit_code(),
+                2,
+                "logs {flag} {region} was refused as an argument: {}",
+                outcome.stdout
+            );
+            assert_eq!(
+                outcome.stderr.contains("--unlisted-region is deprecated"),
+                flag == "--unlisted-region",
+                "logs {flag} {region}: {}",
+                outcome.stderr
+            );
+        }
+    }
+    let refused = run(&["logs", "img", "--region", "US-EAST-1", "--json"], &[]);
+    assert_eq!(refused.exit_code(), 2, "{}", refused.stdout);
+    assert_eq!(refused.envelope()["code"], "ERR_INVALID_ARG");
 }
 
 /// **The published global flags are the ones the binary accepts, on either side of the
@@ -304,6 +335,7 @@ fn constants_emit_json_writes_the_bare_object_the_drift_gate_reads() {
         "TOLERATED_IMAGE_READY_STATES",
         "TERMINAL_STATES",
         "DEAD_STATES",
+        "MEASURED_REGIONS",
         "MICROVM_REGIONS",
         "SIZE_CLASSES",
     ] {
@@ -315,6 +347,14 @@ fn constants_emit_json_writes_the_bare_object_the_drift_gate_reads() {
     }
     assert_eq!(parsed["MODEL_API_VERSION"], "2025-09-09");
     assert_eq!(parsed["MAX_RUN_HOOK_PAYLOAD_BYTES"], 4096);
+    assert_eq!(
+        parsed["MEASURED_REGIONS"]
+            .as_array()
+            .expect("an array")
+            .len(),
+        14
+    );
+    // The deprecated key keeps the five it printed before 1.3.0.
     assert_eq!(
         parsed["MICROVM_REGIONS"]
             .as_array()

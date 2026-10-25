@@ -227,22 +227,25 @@ impl CoreSeam for AwsSeam {
 /// Flags win over the environment, and the environment order is `AWS_REGION` then
 /// `AWS_DEFAULT_REGION` — boto3's and aws-config's own. See the module docs on why agreeing
 /// with the SDK matters more than picking the better order.
+/// `unlisted` is the deprecated `--unlisted-region`, read by [`unlisted_region`].
 pub fn resolve_region(
     flag: Option<Region>,
     unlisted: Option<&str>,
     env: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Region, Error> {
-    if let Some(region) = flag {
+    if let Some(region) = flag.or_else(|| unlisted.map(unlisted_region)) {
         return Ok(region);
     }
-    if let Some(name) = unlisted {
-        // The escape hatch, and it normalises a supported name back to its own variant, so
-        // `--unlisted-region us-east-1` is not a second spelling of a listed region.
-        return Ok(Region::unlisted(name));
-    }
     // The environment, parsed in core so the bindings' `preflight` reads it the same way; a
-    // region the client has not seen carry MicroVMs is refused with the remedy named.
+    // malformed name is refused with where it came from.
     Region::from_env(env)
+}
+
+/// The region the deprecated `--unlisted-region` names: the name as typed, without
+/// `--region`'s name check, as 1.2 took it (#743).
+#[allow(deprecated)]
+pub fn unlisted_region(name: &str) -> Region {
+    Region::unlisted(name)
 }
 
 /// The three account-specific values, resolved before any call.
@@ -372,7 +375,7 @@ mod tests {
         ]);
         assert_eq!(
             resolve_region(None, None, &env).expect("resolves"),
-            Region::UsWest2
+            Region::US_WEST_2
         );
     }
 
@@ -381,48 +384,48 @@ mod tests {
     fn a_flag_wins_and_the_default_is_us_east_one() {
         let env = env_of(&[("AWS_REGION", "us-west-2")]);
         assert_eq!(
-            resolve_region(Some(Region::EuWest1), None, &env).expect("resolves"),
-            Region::EuWest1
+            resolve_region(Some(Region::EU_WEST_1), None, &env).expect("resolves"),
+            Region::EU_WEST_1
         );
         let empty = env_of(&[]);
         assert_eq!(
             resolve_region(None, None, &empty).expect("resolves"),
-            Region::UsEast1
+            Region::US_EAST_1
         );
     }
 
-    /// An unsupported region in the environment is refused, with the finding and the flag
-    /// that opts in.
-    ///
-    /// The environment is the one place a region arrives as a free string, so it is the one
-    /// place the enum cannot help — and letting it through silently is exactly the
-    /// null-message trap, which the message has to name because "region is invalid" sends
-    /// someone to check their spelling.
+    /// A well-formed region from the environment resolves, measured or not, and a malformed
+    /// one is refused saying where it came from, because "not a region name" alone sends
+    /// someone to the flags they did not type.
     #[test]
-    fn an_unsupported_region_from_the_environment_is_refused_naming_the_escape_hatch() {
-        let env = env_of(&[("AWS_REGION", "eu-central-1")]);
-        let error = resolve_region(None, None, &env).expect_err("eu-central-1 is unlisted");
+    fn the_environment_region_resolves_and_a_malformed_one_names_its_source() {
+        let env = env_of(&[("AWS_REGION", "us-west-1")]);
+        let region = resolve_region(None, None, &env).expect("a well-formed name resolves");
+        assert_eq!(region.as_str(), "us-west-1");
+        assert!(!region.is_measured());
+
+        let env = env_of(&[("AWS_REGION", "US-WEST-1")]);
+        let error = resolve_region(None, None, &env).expect_err("a case change is a typo");
         assert_eq!(error.kind(), ErrorKind::InvalidArg);
         let message = error.to_string();
-        assert!(message.contains("null message"), "{message}");
+        assert!(message.contains("not a region name"), "{message}");
         assert!(message.contains("$AWS_REGION"), "{message}");
-        assert!(message.contains("--unlisted-region"), "{message}");
     }
 
-    /// The escape hatch normalises a supported name back to its variant.
-    ///
-    /// Otherwise `--unlisted-region us-east-1` would produce a second spelling of a listed
-    /// region and every `is_supported` check downstream would answer wrongly.
+    /// The deprecated `--unlisted-region` keeps its 1.2 behavior: a named region's name comes
+    /// back equal to its constant, any other name is taken as typed, without `--region`'s
+    /// name check, and the flag wins over the environment.
     #[test]
-    fn the_escape_hatch_normalises_a_supported_name() {
-        let empty = env_of(&[]);
+    fn the_deprecated_unlisted_flag_keeps_its_one_two_behavior() {
+        let env = env_of(&[("AWS_REGION", "eu-west-1")]);
         assert_eq!(
-            resolve_region(None, Some("us-east-1"), &empty).expect("resolves"),
-            Region::UsEast1
+            resolve_region(None, Some("us-east-1"), &env).expect("resolves"),
+            Region::US_EAST_1
         );
-        let unlisted = resolve_region(None, Some("eu-central-1"), &empty).expect("opted in");
-        assert!(!unlisted.is_supported());
-        assert_eq!(unlisted.as_str(), "eu-central-1");
+        let unlisted = resolve_region(None, Some("us-west-1"), &env).expect("resolves");
+        assert_eq!(unlisted.as_str(), "us-west-1");
+        let unchecked = resolve_region(None, Some("US-WEST-1"), &env).expect("resolves");
+        assert_eq!(unchecked.as_str(), "US-WEST-1");
     }
 
     /// Every missing infrastructure value is named at once, with its flag and its variable.

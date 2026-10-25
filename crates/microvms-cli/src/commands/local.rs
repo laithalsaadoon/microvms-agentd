@@ -1585,7 +1585,7 @@ mod tests {
             &LogsArgs {
                 image_name: "agentd-conformance".to_string(),
                 region: crate::cli::RegionFlags {
-                    region: Some(crate::cli::RegionArg::EuWest1),
+                    region: Some(microvms_core::Region::EU_WEST_1),
                     unlisted_region: None,
                 },
             },
@@ -1620,7 +1620,7 @@ mod tests {
         assert_eq!(parsed, microvms_core::constants::as_json());
         assert_eq!(parsed["MODEL_API_VERSION"], "2025-09-09");
         assert_eq!(parsed["MAX_RUN_HOOK_PAYLOAD_BYTES"], 4096);
-        assert!(parsed["MICROVM_REGIONS"].is_array());
+        assert!(parsed["MEASURED_REGIONS"].is_array());
         // And the envelope form carries the identical object under `constants`.
         assert_eq!(rendered.data["constants"], parsed);
     }
