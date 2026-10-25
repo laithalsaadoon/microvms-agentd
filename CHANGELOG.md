@@ -13,6 +13,49 @@ CONTRIBUTING.md, "Changelog", says how to write one.
 
 <!-- towncrier release notes start -->
 
+## [1.3.0] - 2026-10-25
+
+### Added
+
+- **Region constants, `MEASURED_REGIONS` and `Region::is_measured` (#743).** `Region::US_EAST_1`,
+  `US_EAST_2`, `US_WEST_2`, `EU_WEST_1` and `AP_NORTHEAST_1` replace the deprecated variants.
+  `MEASURED_REGIONS` holds the 14 regions the Pricing API priced MicroVMs in on 2026-10-24, and
+  `is_measured` says whether a region is one of them. Both bindings add `Region.measured()` and
+  `is_measured` (`isMeasured` in Node.js), and `microvm constants` adds a `MEASURED_REGIONS` key.
+
+### Changed
+
+- **Every well-formed region name works, and the null-message diagnosis moved to the error the
+  call produces (#743).** `--region`, `$AWS_REGION`, a project file's `region` and `Region.parse`
+  in both bindings take any name of lowercase letters, digits and hyphens, such as
+  `eu-central-1`. 1.2 refused every name outside five regions unless the caller opted in with
+  `--unlisted-region` or `Region.unlisted`. A malformed name, such as one in capitals or with a
+  trailing space, is still refused before any call, and the CLI exits 2. When a call in a region
+  outside the 14 AWS was measured running MicroVMs in gets an `AccessDeniedException` with a null
+  message, the error names the region's service availability as a cause to verify alongside the
+  IAM policy. The region line of `preflight` and `doctor` passes for the 14 and is an advisory
+  failure elsewhere. `microvm manifest` reports `--region` as a string with no `choices`.
+- **The region docs and messages no longer claim that a region without MicroVMs always answers
+  with a null-message `AccessDeniedException`, or that such a message rules out IAM (#743).** The
+  CLI's suggestion for a credentials failure names both causes, a region without MicroVMs or an
+  IAM denial of an implied action, and still says to check `--region` first. The error for a
+  region the rate catalog has no line items for says the same.
+
+### Deprecated
+
+- **The closed list of five regions is deprecated (#743).** Deprecated starting in 1.3.0, and
+  removable no earlier than 2.0.0, after at least six calendar months and two minor releases. In
+  Rust, `Region`'s variants, from `Region::UsEast1` to `Region::Unlisted`, are deprecated along
+  with `Region::unlisted`, `Region::is_supported` and `MICROVM_REGIONS`. Use the constants such as
+  `Region::US_EAST_1`, `name.parse::<Region>()`, `Region::as_str`, `Region::is_measured` and
+  `MEASURED_REGIONS`. 2.0.0 at the earliest makes `Region` a name with no variants, so a `match`
+  on the variants stops compiling there. In both bindings, `Region.unlisted`, `Region.supported()`
+  and `is_supported` (`isSupported` in Node.js) are deprecated, keep their 1.2 results, and raise
+  a `DeprecationWarning` in Python; use `Region.parse`, `Region.measured()` and `is_measured`. In
+  the CLI, `--unlisted-region` keeps its 1.2 behavior, taking a name without `--region`'s check,
+  and prints a warning, and the `MICROVM_REGIONS` key of `microvm constants` keeps the five; use
+  `--region` and `MEASURED_REGIONS`.
+
 ## [1.2.1] - 2026-10-23
 
 ### Changed
