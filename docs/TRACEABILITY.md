@@ -99,6 +99,7 @@ traced requirement is missing a layer. Requirements are defined in
 | IMAGE-10 | 1 | 1 | waived | 2 | 1 | 1 |
 | IMAGE-11 | 1 | 1 | waived | 1 | 1 | 1 |
 | IMAGE-12 | waived | waived | waived | 2 | 2 | waived |
+| IMAGE-13 | 1 | 1 | waived | 1 | 1 | 1 |
 | STATE-1 | 1 | waived | waived | 2 | 3 | waived |
 | STATE-2 | 1 | waived | waived | 2 | 4 | waived |
 | STATE-3 | 1 | waived | waived | 2 | 3 | waived |
@@ -303,7 +304,7 @@ When a start request carries its user and group as integers and its shell as a b
 
 ## AGENTD-17
 
-If the handshake of an identity-verified tunnel is not made with the host key the run hook pinned, then the agentd shall close the tunnel with close code 4403.
+If the handshake of an identity-verified tunnel is not made with the host key the run hook pinned, then the agentd shall close the tunnel with the IDENTITY_REFUSED close code.
 
 - **model:** `crates/model/src/tunnel.rs`
 - **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
@@ -556,7 +557,7 @@ The language bindings layer shall preserve the cost honesty rules, exposing prov
 
 ## BIND-6
 
-The microvms-core shall report a finished exec's POSIX exit code as 124 when a deadline ended the command, as 128 plus the signal number for any other signal death, and otherwise as the exit code.
+The microvms-core shall report a finished exec's POSIX exit code as the timeout status when a deadline ended the command, as the signal status offset plus the signal number for any other signal death, and otherwise as the exit code.
 
 - **model:** `crates/model/src/run.rs`
 - **gherkin:** `crates/microvms-core/tests/features/run_to_completion.feature`
@@ -600,7 +601,7 @@ If the client deadline of a run-to-completion call expires before the exec's res
 
 ## BIND-10
 
-If the acknowledgement that follows a client-deadline kill fails, then the microvms-core shall return a synthesized result whose POSIX exit code is 124 and whose notes name the failure.
+If the acknowledgement that follows a client-deadline kill fails, then the microvms-core shall return a synthesized result whose POSIX exit code is the timeout status and whose notes name the failure.
 
 - **model:** `crates/model/src/run.rs`
 - **gherkin:** `crates/microvms-core/tests/features/run_to_completion.feature`
@@ -732,7 +733,7 @@ If the far end of an identity-verified tunnel does not complete the handshake ag
 
 ## BIND-22
 
-If a daemon event stream carries bytes that are not well-formed server-sent events, then the microvms-core shall drop the frame or end the stream with an error, without a panic and without holding more than 4 MiB of bytes that no frame terminator ends between reads.
+If a daemon event stream carries bytes that are not well-formed server-sent events, then the microvms-core shall drop the frame or end the stream with an error, without panicking, while retaining at most 4 MiB of unterminated bytes between reads.
 
 - **model:** waived: one stream read by one parser has no interleavings to explore; its input space is bytes
 - **gherkin:** waived: hostile bytes aren't a scenario a caller drives; the parser's tests feed it directly
@@ -765,7 +766,7 @@ If a frame of an identity-verified tunnel does not authenticate at the frame's p
 
 ## BIND-25
 
-When a caller awaits the awaitable twin of a Python binding method that calls AWS or the daemon, the Python binding shall run the future that the method's blocking spelling runs, with the same arguments, as a task on the binding's shared runtime, and answer that future's result or its error class.
+When a caller awaits the awaitable twin of a Python binding method that calls AWS or the daemon, the Python binding shall run the future used by the method's blocking spelling, with the same arguments, as a task on the binding's shared runtime, returning that future's result on success, propagating its error class on failure.
 
 - **model:** waived: one future behind two spellings has no state of its own to explore; the future's states are core's, which its models hold
 - **gherkin:** waived: no Gherkin tier drives the bindings; the Python suite calls each twin beside its blocking spelling and compares the answers
@@ -864,7 +865,7 @@ If a command is interrupted after a MicroVM has launched, then the CLI crate sha
 
 ## CLI-7
 
-If a reader closes the CLI's stdout or stderr, then the CLI crate shall exit with a status from its exit table and neither panic nor terminate by signal.
+If a reader closes the CLI's stdout or stderr, then the CLI crate shall exit with a status from its exit table, without panicking, without terminating by signal.
 
 - **model:** `crates/model/src/output.rs`
 - **gherkin:** `crates/microvms-cli/tests/features/closed_output.feature`
@@ -875,7 +876,7 @@ If a reader closes the CLI's stdout or stderr, then the CLI crate shall exit wit
 
 ## CLI-8
 
-If the reader of stdout or stderr closes after a command has started, then the CLI crate shall perform every teardown and ledger write that command owes and exit with the code of the command's own outcome, except for a streaming command whose stdout reader closes.
+If the reader of stdout or stderr closes after a command has started, then the CLI crate shall perform every teardown the command owes, perform every ledger write the command owes, then exit with the code of the command's own outcome, except for a streaming command whose stdout reader closes.
 
 - **model:** `crates/model/src/output.rs`
 - **gherkin:** `crates/microvms-cli/tests/features/closed_output.feature`
@@ -1073,7 +1074,7 @@ The microvms-core shall name an ensured image by its prefix and twelve hex chara
 
 ## IMAGE-7
 
-When a caller supplies a build context directory, the microvms-core shall add each regular file that Dockerfile.dockerignore, or else .dockerignore, does not exclude to an artifact zip with fixed entry dates and modes, skipping each symlink with a warning.
+When a caller supplies a build context directory, the microvms-core shall select Dockerfile.dockerignore when present and .dockerignore otherwise, using no ignore rules when neither exists; omit the root Dockerfile and both root ignore files from the context; reject a nonexcluded regular file named agentd at the root; add each remaining nonexcluded regular file to an artifact zip with fixed entry dates and normalized file modes; skip each remaining symlink without following it, warning for each nonexcluded symlink.
 
 - **model:** waived: reading a directory has no states; the ignore rules are fuzzed against moby's own regex translation instead
 - **gherkin:** `crates/microvms-core/tests/features/ensure_image.feature`
@@ -1084,7 +1085,7 @@ When a caller supplies a build context directory, the microvms-core shall add ea
 
 ## IMAGE-8
 
-When the microvms-core ensures an image, the microvms-core shall resolve the image ARN from one caller-identity call per sandbox and upload the artifact to the content-addressed key under the caller's bucket and key prefix.
+When the ensure-image decision proceeds to a build attempt, the microvms-core shall upload the artifact to the content-addressed key under the caller's bucket and key prefix before attempting to create the image.
 
 - **model:** `crates/model/src/image.rs`
 - **gherkin:** `crates/microvms-core/tests/features/ensure_image.feature`
@@ -1095,7 +1096,7 @@ When the microvms-core ensures an image, the microvms-core shall resolve the ima
 
 ## IMAGE-9
 
-When a describe finds the ensured image ready or building and the caller has not forced a rebuild, the microvms-core shall return the image once it is ready, marked reused, with no upload and no create.
+When an ensure-image call evaluates an image without an outstanding forced rebuild, or a wait for image readiness fails, the microvms-core shall return an already-ready image marked reused without a new upload or create whenever no forced rebuild remains outstanding; under the same condition, wait for a building image and return it marked reused without a new upload or create when ready; after a failed readiness wait for an existing build, an accepted create, or a refused-create winner, restart the describe-and-decide loop when the call has not used its recovery restart and a follow-up describe finds (no image or state DELETING); otherwise propagate the failure; share one recovery restart across the entire ensure-image call, including recovery from a refused create.
 
 - **model:** `crates/model/src/image.rs`
 - **gherkin:** `crates/microvms-core/tests/features/ensure_image.feature`
@@ -1106,7 +1107,7 @@ When a describe finds the ensured image ready or building and the caller has not
 
 ## IMAGE-10
 
-If the ensured image has failed or the caller forces a rebuild, then the microvms-core shall delete the image and wait for the name to be free before building, deleting a ready image only under a forced rebuild.
+If an ensure-image call evaluates the image state and whether its forced-rebuild request remains outstanding, then the microvms-core shall delete a failed image before rebuilding; delete a ready image when a forced rebuild remains outstanding, preserving it otherwise; for a building image under forced rebuild, wait for the build to settle and delete any surviving image before rebuilding; after requesting deletion, wait for (absence or a replacement image) before attempting the build; apply that wait when deletion is already in progress; build directly when no image exists; consume the forced-rebuild request after the deletion path or the forced wait-and-replace path so recovery does not repeatedly force replacement.
 
 - **model:** `crates/model/src/image.rs`
 - **gherkin:** `crates/microvms-core/tests/features/ensure_image.feature`
@@ -1136,6 +1137,17 @@ The language bindings layer shall expose ensure_image as a thin wrapper that ret
 - **test:** `bindings/microvms-js/__test__/ensure.mjs`, `bindings/microvms-py/tests/test_ensure_image.py`
 - **impl:** `bindings/microvms-js/src/sandbox.rs`, `bindings/microvms-py/src/sandbox.rs`
 - **live:** waived: the conformance section drives core's ensure_image, which each binding forwards unchanged
+
+## IMAGE-13
+
+When the microvms-core has locally validated an ensure-image request, the microvms-core shall resolve the image ARN from the sandbox's cached caller identity, looking up and caching the identity when no cached identity exists.
+
+- **model:** `crates/model/src/image.rs`
+- **gherkin:** `crates/microvms-core/tests/features/ensure_image.feature`
+- **fuzz:** waived: the caller-identity cache is a state transition, explored by the image model; it does not consume unstructured input
+- **test:** `crates/microvms-app/src/control/ensure.rs`
+- **impl:** `crates/microvms-app/src/control/ensure.rs`
+- **live:** `conformance/lanes/ensure_image.py`
 
 ## STATE-1
 
@@ -1304,7 +1316,7 @@ Where guest identity repair is requested, the microvms-core shall set the additi
 
 ## TRAP-4
 
-The microvms-core shall derive each platform network connector value as a fully-qualified connector ARN for the request region from an enumerated ingress or egress intent, and accept a caller-supplied connector ARN only as a customer-managed egress connector in the request region when the platform egress intent is absent.
+The microvms-core shall derive each platform network connector value as a fully-qualified connector ARN for the request region from an enumerated connector intent, and accept a caller-supplied connector ARN only as a customer-managed egress connector in the request region when the platform egress intent is absent.
 
 - **model:** waived: a derivation from a closed enum and a shape check on caller ARNs, not a state
 - **gherkin:** `crates/microvms-core/tests/features/egress_posture.feature`

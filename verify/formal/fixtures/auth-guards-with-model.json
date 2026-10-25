@@ -1,0 +1,84 @@
+{
+  "antonyms": [],
+  "docVersion": 3,
+  "glossary": [],
+  "stateModel": {
+    "variables": [
+      {
+        "name": "token_matches",
+        "type": "bool"
+      },
+      {
+        "name": "request_accepted",
+        "type": "bool"
+      }
+    ],
+    "initial": "request_accepted = token_matches"
+  },
+  "terms": [],
+  "waivers": [],
+  "requirements": {
+    "64c3f6b9-b3e1-459f-95db-969638de56e6": {
+      "createdAt": "2026-08-05T17:40:49.854Z",
+      "derives": [],
+      "id": "64c3f6b9-b3e1-459f-95db-969638de56e6",
+      "key": "AGENTD-6",
+      "negated": false,
+      "patternType": "event-driven",
+      "priority": "medium",
+      "refines": [],
+      "satisfies": [],
+      "sentence": "When a control request presents a token equal to the installed agent token, the agentd shall accept the control request.",
+      "status": "draft",
+      "systemName": "agentd",
+      "systemResponse": "accept the control request",
+      "trigger": "a control request presents a token equal to the installed agent token",
+      "updatedAt": "2026-08-05T17:40:49.854Z",
+      "verificationMethod": "test",
+      "verifies": [],
+      "responseKind": "effect",
+      "stateEffect": "when token_matches: request_accepted := true, token_matches := token_matches"
+    },
+    "d8f5ac1b-42e0-44bc-aa05-6eb2a0586847": {
+      "createdAt": "2026-08-05T17:40:49.757Z",
+      "derives": [],
+      "id": "d8f5ac1b-42e0-44bc-aa05-6eb2a0586847",
+      "key": "AGENTD-5",
+      "negated": false,
+      "patternType": "event-driven",
+      "priority": "medium",
+      "refines": [],
+      "satisfies": [],
+      "sentence": "When a control request presents a token that differs from the installed agent token, the agentd shall reject the control request.",
+      "status": "draft",
+      "systemName": "agentd",
+      "systemResponse": "reject the control request",
+      "trigger": "a control request presents a token that differs from the installed agent token",
+      "updatedAt": "2026-08-05T17:40:49.757Z",
+      "verificationMethod": "test",
+      "verifies": [],
+      "responseKind": "effect",
+      "stateEffect": "when not token_matches: request_accepted := false, token_matches := token_matches"
+    },
+    "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": {
+      "createdAt": "2026-08-05T17:40:49.854Z",
+      "derives": [],
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "key": "AUTH-INVARIANT",
+      "negated": false,
+      "patternType": "ubiquitous",
+      "priority": "medium",
+      "refines": [],
+      "satisfies": [],
+      "sentence": "The agentd shall preserve authorization consistency.",
+      "status": "draft",
+      "systemName": "agentd",
+      "systemResponse": "preserve authorization consistency",
+      "updatedAt": "2026-08-05T17:40:49.854Z",
+      "verificationMethod": "test",
+      "verifies": [],
+      "responseKind": "constraint",
+      "stateConstraint": "request_accepted = token_matches"
+    }
+  }
+}
