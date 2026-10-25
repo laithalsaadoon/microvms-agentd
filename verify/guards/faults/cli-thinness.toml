@@ -43,7 +43,7 @@ run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact
 expect = "test-failed"
 suite = "rust"
 note = "crates/microvms-cli/src/guards/doctor.rs::doctor_reads_no_managed_base_when_the_region_does_not_resolve"
-transform = { file = "crates/microvms-cli/src/commands/doctor.rs", replace = "    let Ok(region) = region else {", with = "    let fallback = Region::UsEast1;\n    let Ok(region) = region.as_ref().or(Ok::<_, ()>(&fallback)) else {" }
+transform = { file = "crates/microvms-cli/src/commands/doctor.rs", replace = "    let Ok(region) = region else {", with = "    let fallback = Region::US_EAST_1;\n    let Ok(region) = region.as_ref().or(Ok::<_, ()>(&fallback)) else {" }
 
 [[fault]]
 id = "doctor-region-unresolved-keeps-identity-fatal"
@@ -52,7 +52,7 @@ run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact
 expect = "test-failed"
 suite = "rust"
 note = "crates/microvms-cli/src/guards/doctor.rs::doctor_keeps_a_missing_identity_fatal_when_the_region_does_not_resolve"
-transform = { file = "crates/microvms-cli/src/commands/doctor.rs", replace = "        Err(_) => Region::UsEast1,", with = "        Err(_) => {\n            return Check::fail(\"credentials\", \"not checked\", \"see the region check above\")\n                .advisory();\n        }" }
+transform = { file = "crates/microvms-cli/src/commands/doctor.rs", replace = "        Err(_) => Region::US_EAST_1,", with = "        Err(_) => {\n            return Check::fail(\"credentials\", \"not checked\", \"see the region check above\")\n                .advisory();\n        }" }
 
 [[fault]]
 id = "doctor-region-unlisted"
@@ -60,7 +60,7 @@ guard = "guards::doctor::doctor_asks_every_check_about_the_region_its_flag_names
 run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::doctor::doctor_asks_every_check_about_the_region_its_flag_names"]
 expect = "test-failed"
 suite = "rust"
-transform = { file = "crates/microvms-cli/src/commands/doctor.rs", replace = "    let region = merged.flags.resolve(ctx.env);", with = "    let region = crate::seam::resolve_region(merged.flags.region.map(|r| r.region()), None, ctx.env);" }
+transform = { file = "crates/microvms-cli/src/commands/doctor.rs", replace = "    let region = merged.flags.resolve(ctx.env);", with = "    let region = crate::seam::resolve_region(merged.flags.region.clone(), None, ctx.env);" }
 
 [[fault]]
 id = "doctor-region-unresolved-names-stand-in"

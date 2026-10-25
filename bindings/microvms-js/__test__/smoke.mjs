@@ -241,40 +241,57 @@ test('the report JSON shape is the Python client’s', () => {
   assert.equal(typeof parsed.items[0].quantity, 'string');
 });
 
-// -- BIND-2 / TRAP-6: the region set is closed --------------------------------
+// -- BIND-2 / TRAP-6: a region is any well-formed name -------------------------
 
-test('eu-central-1 is refused naming the null-message trap', () => {
+test('a malformed region is refused, and an unmeasured one parses', () => {
+  // A well-formed region AWS was not measured running MicroVMs in still parses: since 1.3.0 the
+  // error a call there produces names the region (TRAP-6), and `isMeasured` says so up front.
   assert.throws(
-    () => Region.parse('eu-central-1'),
+    () => Region.parse('eu central 1'),
     (error) => {
       assert.equal(codeOf(error), 'ERR_INVALID_ARG');
-      // Both halves: "AccessDeniedException" alone reads as an IAM problem, and the word
-      // *null* is what says the region may be the cause instead.
-      assert.match(error.message, /AccessDeniedException/);
-      assert.match(error.message, /null/);
+      assert.match(error.message, /not a region name/);
       // A local reject reached no daemon, so there is no wire kind to report.
       assert.equal(error.cause?.cause, undefined);
       return true;
     },
   );
+  const unmeasured = Region.parse('us-west-1');
+  assert.equal(unmeasured.name, 'us-west-1');
+  assert.equal(unmeasured.isMeasured, false);
 });
 
-test('the five supported regions are the measured ones', () => {
+test('the measured regions are the fourteen AWS prices', () => {
   assert.deepEqual(
-    Region.supported().map((region) => region.name),
-    ['us-east-1', 'us-east-2', 'us-west-2', 'eu-west-1', 'ap-northeast-1'],
+    Region.measured().map((region) => region.name),
+    [
+      'us-east-1',
+      'us-east-2',
+      'us-west-2',
+      'eu-west-1',
+      'ap-northeast-1',
+      'ap-south-1',
+      'ap-southeast-1',
+      'ap-southeast-2',
+      'eu-central-1',
+      'eu-north-1',
+      'ap-east-1',
+      'ap-southeast-5',
+      'ap-southeast-7',
+      'eu-south-2',
+    ],
   );
-  assert.ok(Region.supported().every((region) => region.isSupported));
+  assert.ok(Region.measured().every((region) => region.isMeasured));
 });
 
-test('the escape hatch is visible in the value it produces', () => {
-  const unlisted = Region.unlisted('eu-central-1');
-  assert.equal(unlisted.name, 'eu-central-1');
-  assert.equal(unlisted.isSupported, false);
-  // A supported name comes back as its proper region, so nothing downstream handles two
-  // spellings of one region. `equals` and not `===`: class instances compare by reference.
+test('the deprecated escape hatch still builds the region parse does', () => {
+  assert.ok(Region.unlisted('us-west-1').equals(Region.parse('us-west-1')));
+  // `equals` and not `===`: class instances compare by reference.
   assert.ok(Region.unlisted('us-east-1').equals(Region.usEast1()));
+  // The deprecated five-region accessors keep their 1.2 answers.
   assert.equal(Region.usEast1().isSupported, true);
+  assert.equal(Region.parse('eu-central-1').isSupported, false);
+  assert.equal(Region.supported().length, 5);
 });
 
 test('Region has no constructor, so an unchecked name is not writable', () => {
@@ -380,7 +397,7 @@ test('a synchronous rejection carries the code on .code as well as on the cause'
   // and the uniform `cause.message` rule holds too. Both are asserted so a reader can see
   // which one to rely on.
   assert.throws(
-    () => Region.parse('nope-1'),
+    () => Region.parse('nope'),
     (error) => {
       assert.equal(error.code, 'ERR_INVALID_ARG', 'sync .code should be the ERR_ string');
       assert.equal(codeOf(error), 'ERR_INVALID_ARG');

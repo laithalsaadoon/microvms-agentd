@@ -306,7 +306,7 @@ mod tests {
     fn fixture() -> (Arc<FakeControlPlane>, Arc<TestClock>, ControlPlane) {
         let fake = Arc::new(FakeControlPlane::new());
         let clock = Arc::new(TestClock::new());
-        let plane = control_plane(fake.clone(), Region::UsEast1, clock.clone());
+        let plane = control_plane(fake.clone(), Region::US_EAST_1, clock.clone());
         (fake, clock, plane)
     }
 

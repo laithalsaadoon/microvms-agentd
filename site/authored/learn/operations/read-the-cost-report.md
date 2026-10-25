@@ -33,7 +33,7 @@ Snapshots bill three ways. Image storage bills per GB-hour with a one-week minim
 adds a snapshot write and read; use the calculator with the intended region,
 size, duration, and cycle count to compare alternatives.
 
-Rates vary by region. `us-east-2` and `us-west-2` match `us-east-1` on every line; `eu-west-1` and `ap-northeast-1` are higher, most of all on the snapshot dimensions, so a design that leans on a suspended pool should price in its own region. Data transfer bills at standard AWS rates and is not on the report. The measurements are in [Platform](/internals/platform/), under "What actually costs money".
+Rates vary by region. `us-east-2` and `us-west-2` match `us-east-1` on every line, and every other region charges more on the snapshot lines, by up to 60%, so a design that leans on a suspended pool should price in its own region. Data transfer bills at standard AWS rates and is not on the report. The measurements are in [Platform](/internals/platform/), under "What actually costs money".
 
 ## 3. A total may be a lower bound
 

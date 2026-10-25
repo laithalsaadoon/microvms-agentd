@@ -73,7 +73,7 @@ def test_a_refused_environment_region_stops_the_preflight_before_any_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """BIND-15 and BIND-16: no region to check, so nothing after it runs or calls AWS."""
-    monkeypatch.setenv("AWS_REGION", "eu-central-1")
+    monkeypatch.setenv("AWS_REGION", "EU-CENTRAL-1")
     monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
     report = microvms.preflight()
     assert report.ok is False
@@ -83,7 +83,7 @@ def test_a_refused_environment_region_stops_the_preflight_before_any_call(
     region = report.check("region")
     assert region is not None
     assert region.ok is False and region.fatal and region.ran
-    assert "eu-central-1" in region.detail
+    assert "EU-CENTRAL-1" in region.detail
     for name in ("credentials", "service"):
         check = report.check(name)
         assert check is not None

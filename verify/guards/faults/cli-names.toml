@@ -92,7 +92,7 @@ run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact
 expect = "test-failed"
 suite = "rust"
 message = "exec --unlisted-region: seam-was-refused-a1b2c3: the attach_session door refused"
-transform = { file = "crates/microvms-cli/src/commands/mod.rs", replace = "            .unlisted_region\n            .as_deref()\n            .map(microvms_core::Region::unlisted)\n", with = "            .unlisted_region\n            .as_deref()\n            .filter(|_| false)\n            .map(microvms_core::Region::unlisted)\n" }
+transform = { file = "crates/microvms-cli/src/commands/mod.rs", replace = "            .map(crate::seam::unlisted_region)\n", with = "            .filter(|_| false)\n            .map(crate::seam::unlisted_region)\n" }
 
 [[family]]
 guard = "guards::names::a_lifecycle_command_by_name_asks_for_the_records_region_over_the_environments"

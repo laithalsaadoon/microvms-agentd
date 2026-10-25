@@ -34,9 +34,9 @@ waive.live = "refused before the first control-plane call, so the service never 
 
 [TRAP-6]
 issue = "#301"
-waive.model = "a membership check over a closed set of five regions, not a state"
-waive.fuzz = "the region set is a closed enum of five names, and parsing is an exact match the tests enumerate"
-waive.live = "refused before the first control-plane call, so the service never sees it"
+waive.model = "one branch on a membership test in an error's text, not a state"
+waive.fuzz = "the classifier's inputs are a status, an empty message and a region, which the tests enumerate on both sides of the membership test"
+waive.live = "the live suite runs in a region AWS was measured running MicroVMs in, so its calls can't produce the response; docs/PLATFORM.md records the response in us-west-1"
 
 [TRAP-7]
 issue = "#301"

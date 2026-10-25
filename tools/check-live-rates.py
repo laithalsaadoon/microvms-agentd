@@ -70,11 +70,11 @@ SERVICE_CODE = "AWSLambda"
 #: ap-northeast-1 is the normal case, not a mistake.
 PRICING_API_REGION = "us-east-1"
 
-#: The regions `microvms-core` lists, which this script names when it explains an empty
-#: catalog. AWS prices and runs MicroVMs in more regions than these: measured 2026-10-24,
-#: the regions the Pricing API prices are the ones AWS's launch posts and regional
-#: availability data name. A `ListMicrovms` that answers is not that evidence, since
-#: regions AWS lists as planned answer it too. An unpriced region such as us-west-1 answers
+#: The regions AWS was measured running MicroVMs in, which this script names when it
+#: explains an empty catalog: measured 2026-10-24, the regions the Pricing API prices are
+#: the ones AWS's launch posts and regional availability data name, and `microvms-core`'s
+#: `MICROVM_REGIONS` holds the same 14. A `ListMicrovms` that answers is not that evidence,
+#: since regions AWS lists as planned answer it too. An unpriced region such as us-west-1 answers
 #: `AccessDeniedException` with a *null* message field, which a denied implied IAM action
 #: also produces.
 #:
@@ -85,7 +85,16 @@ PRICING_API_REGION = "us-east-1"
 #: being stale is one misleading sentence. `tools/check-model-drift.py` is what holds
 #: it equal to `microvms-core`'s.
 MICROVM_REGIONS = (
+    "ap-east-1",
     "ap-northeast-1",
+    "ap-south-1",
+    "ap-southeast-1",
+    "ap-southeast-2",
+    "ap-southeast-5",
+    "ap-southeast-7",
+    "eu-central-1",
+    "eu-north-1",
+    "eu-south-2",
     "eu-west-1",
     "us-east-1",
     "us-east-2",
@@ -203,7 +212,7 @@ def verify_twin(repo: Path) -> list[str]:
             )
 
     for label, literal, rust in (
-        ("region", PINNED_REGION, "Region::UsEast1"),
+        ("region", PINNED_REGION, "Region::US_EAST_1"),
         ("retrieved", PINNED_RETRIEVED, "CalendarDate::from_ymd(2026, 8, 7)"),
     ):
         if rust not in body:
@@ -479,10 +488,10 @@ def fetch_rates(region: str, *, client: Any = None) -> dict[str, Decimal]:
             "the regions the Pricing API prices are the regions AWS runs MicroVMs in, so AWS "
             "does not run them there yet. A lambda-microvms call there may answer, or may "
             "answer AccessDeniedException with a null message, which a denied implied IAM "
-            "action also produces. Check the region before auditing a policy. microvms-core "
-            f"lists {', '.join(MICROVM_REGIONS)}; this call attempts the fetch regardless of "
-            "that list, so a region AWS has launched in returns rates rather than reaching "
-            "this error."
+            "action also produces. Check the region before auditing a policy. AWS was measured "
+            f"running MicroVMs in {', '.join(MICROVM_REGIONS)}; this call attempts the fetch "
+            "regardless of that list, so a region AWS has launched in since returns rates "
+            "rather than reaching this error."
         )
     if failures:
         raise failures[0]

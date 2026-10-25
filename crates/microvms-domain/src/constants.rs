@@ -34,8 +34,9 @@
 //!
 //! [`as_json`] emits every value in this module as one object. The names are the
 //! keys consumed by `tools/check-model-drift.py`, which compares each value with
-//! the pinned model. `MICROVM_REGIONS` and `SIZE_CLASSES` have no model source;
-//! the gate compares them with independently pinned literals.
+//! the pinned model. `MEASURED_REGIONS`, the deprecated `MICROVM_REGIONS` and
+//! `SIZE_CLASSES` have no model source; the gate compares them with independently pinned
+//! literals.
 //!
 //! The names are therefore a contract with a script, not a style choice. Renaming
 //! `MAX_RUN_HOOK_PAYLOAD_BYTES` here without renaming it there does not fail
@@ -44,7 +45,7 @@
 
 use serde_json::{Value, json};
 
-use crate::region::MICROVM_REGIONS;
+use crate::region::MEASURED_REGIONS;
 
 /// The model version every constraint here was read from.
 ///
@@ -625,15 +626,26 @@ pub fn is_valid_role_arn(arn: &str) -> bool {
         })
 }
 
+/// The deprecated `MICROVM_REGIONS`' names, for the key `microvm constants` printed before 1.3.0.
+#[allow(deprecated)]
+fn first_launch_regions() -> Vec<String> {
+    crate::region::MICROVM_REGIONS
+        .iter()
+        .map(|region| region.as_str().to_string())
+        .collect()
+}
+
 /// Every constant in this module as one JSON object, keyed for the model drift gate.
 ///
 /// The drift gate's second source (TRAP-12). Emitted through `serde_json` rather than
 /// formatted by hand so the object is a function of the values above, which is the
 /// only version of this that cannot drift from them.
 ///
-/// `MICROVM_REGIONS` is in here and is explicitly **not** model-backed — no service
+/// `MEASURED_REGIONS` is in here and is explicitly **not** model-backed — no service
 /// model states it and no API answers the question (see [`crate::region`]). It is
 /// published so the gate can compare it with its independently pinned region list.
+/// `MICROVM_REGIONS`, the five regions with constants, stays a key for 1.x because
+/// `microvm constants` printed it before 1.3.0; it is deprecated with the Rust constant.
 ///
 /// # A list of pairs rather than one `json!({...})` literal, and that is forced
 ///
@@ -714,15 +726,8 @@ pub fn as_json() -> Value {
         ),
         ("TERMINAL_STATES", json!(TERMINAL_STATES)),
         ("DEAD_STATES", json!(DEAD_STATES)),
-        (
-            "MICROVM_REGIONS",
-            json!(
-                MICROVM_REGIONS
-                    .iter()
-                    .map(|region| region.as_str())
-                    .collect::<Vec<_>>()
-            ),
-        ),
+        ("MEASURED_REGIONS", json!(MEASURED_REGIONS)),
+        ("MICROVM_REGIONS", json!(first_launch_regions())),
         (
             "SIZE_CLASSES",
             json!(
@@ -800,6 +805,7 @@ mod tests {
                 "MAX_TAG_VALUE_LEN",
                 "MAX_USER_LOG_STREAM_LEN",
                 "MAX_VERSION_LEN",
+                "MEASURED_REGIONS",
                 "MICROVM_REGIONS",
                 "MICROVM_STATES",
                 "MIN_IDLE_DURATION_SEC",
@@ -925,6 +931,25 @@ mod tests {
         assert_eq!(
             emitted["TOLERATED_IMAGE_READY_STATES"],
             json!(["ACTIVE", "AVAILABLE"])
+        );
+        assert_eq!(
+            emitted["MEASURED_REGIONS"],
+            json!([
+                "us-east-1",
+                "us-east-2",
+                "us-west-2",
+                "eu-west-1",
+                "ap-northeast-1",
+                "ap-south-1",
+                "ap-southeast-1",
+                "ap-southeast-2",
+                "eu-central-1",
+                "eu-north-1",
+                "ap-east-1",
+                "ap-southeast-5",
+                "ap-southeast-7",
+                "eu-south-2"
+            ])
         );
         assert_eq!(
             emitted["MICROVM_REGIONS"],
@@ -1153,14 +1178,15 @@ mod tests {
              identifier, so a legal response value can be an illegal request value"
         );
 
-        // The worst legal real ARN: the longest region name, a twelve-digit account, and a
+        // The worst legal real ARN: the longest name of a region AWS runs MicroVMs in, a
+        // twelve-digit account, and a
         // 64-character image name. Built rather than written as a literal, so the arithmetic is
         // the test's rather than mine.
-        let longest_region = MICROVM_REGIONS
+        let longest_region = MEASURED_REGIONS
             .iter()
-            .map(|region| region.as_str().len())
+            .map(|region| region.len())
             .max()
-            .expect("five regions");
+            .expect("fourteen regions");
         let worst = format!(
             "arn:aws:lambda:{}:{}:microvm-image:{}",
             "x".repeat(longest_region),

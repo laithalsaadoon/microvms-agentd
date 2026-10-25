@@ -142,7 +142,7 @@ impl ParityControlPlane {
             ));
         }
         Ok(Arc::new(Self {
-            region: Region::UsEast1,
+            region: Region::US_EAST_1,
             exchanges: std::sync::Mutex::new(exchanges.into()),
             calls: std::sync::Mutex::new(Vec::new()),
         }))

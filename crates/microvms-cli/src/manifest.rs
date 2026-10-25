@@ -424,15 +424,17 @@ mod tests {
         assert_eq!(rows[0]["code"], Value::Null);
     }
 
-    /// **The CLI-5 witness.** `--memory` and `--region` report closed sets everywhere they
-    /// appear, and the sets are the documented ones.
+    /// **The CLI-5 witness.** `--memory` reports its closed set everywhere it appears, and the
+    /// set is the documented one. `--region` reports a string with no closed set everywhere,
+    /// because any region name parses and core's parser is the one that refuses (#743).
     ///
     /// Read off the manifest rather than off the enum, because the manifest is what an agent
     /// consumes — so this is the assertion that the *published* contract is the guarded one.
     #[test]
     fn every_s1_parameter_publishes_its_closed_set() {
         let manifest = build();
-        let mut checked = 0;
+        let mut memory = 0;
+        let mut region = 0;
         for command in manifest["commands"].as_array().expect("an array") {
             for param in command["parameters"].as_array().expect("an array") {
                 let name = param["name"].as_str().unwrap_or_default();
@@ -444,28 +446,23 @@ mod tests {
                         command["name"]
                     );
                     assert_eq!(param["type"], "enum");
-                    checked += 1;
+                    memory += 1;
                 }
                 if name == "region" {
                     assert_eq!(
                         param["choices"],
-                        json!([
-                            "us-east-1",
-                            "us-east-2",
-                            "us-west-2",
-                            "eu-west-1",
-                            "ap-northeast-1"
-                        ]),
+                        Value::Null,
                         "{}'s --region: {param}",
                         command["name"]
                     );
-                    checked += 1;
+                    assert_eq!(param["type"], "string");
+                    region += 1;
                 }
             }
         }
         assert!(
-            checked >= 3,
-            "the S1 options must actually appear: {checked}"
+            memory >= 3 && region >= 3,
+            "the options must actually appear: --memory on {memory}, --region on {region}"
         );
     }
 

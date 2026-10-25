@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! The Gherkin behavior spec for BIND-14, BIND-15, and BIND-16, run against the core.
+//! The Gherkin behavior spec for BIND-14, BIND-15, BIND-16, and TRAP-6, run against the core.
 //!
 //! The scenarios live in `tests/features/request_and_preflight.feature`; this file is their
 //! step definitions and runner, a `harness = false` test that `cargo test` runs everywhere.
@@ -70,7 +70,7 @@ fn region(world: &mut Harness, name: String) {
 
 #[given(expr = "the unlisted region {word}")]
 fn unlisted(world: &mut Harness, name: String) {
-    world.region = Some(Region::unlisted(name));
+    world.region = Some(name.parse().expect("a region name"));
 }
 
 #[given(expr = "the environment names the region {word}")]
@@ -99,7 +99,12 @@ fn service_denies(world: &mut Harness) {
 }
 
 async fn run(world: &mut Harness, resolved: Result<Region, Error>) {
-    let transport = Arc::new(FakeControlPlane::new());
+    // The signed transport carries its region for the null-message diagnosis, so the fake
+    // carries it too.
+    let transport = Arc::new(match &resolved {
+        Ok(region) => FakeControlPlane::in_region(region.clone()),
+        Err(_) => FakeControlPlane::new(),
+    });
     if world.credentials_fail {
         transport.fail_credentials("the scenario's credential chain resolves nothing");
     }
@@ -195,6 +200,35 @@ fn failed_as(world: &mut Harness, name: String, severity: String) {
 fn not_run(world: &mut Harness, name: String) {
     let check = report(world).check(&name).expect("the check is reported");
     assert!(!check.ran && !check.ok && check.fatal, "{check:?}");
+}
+
+fn service_detail(world: &Harness) -> &str {
+    &report(world)
+        .check("service")
+        .expect("the service check is reported")
+        .detail
+}
+
+#[then("the service check names the region's availability as a cause")]
+fn names_availability(world: &mut Harness) {
+    let detail = service_detail(world);
+    assert!(
+        detail.contains("verify service availability as well as the IAM policy"),
+        "{detail}"
+    );
+    assert!(detail.contains("us-west-1"), "{detail}");
+}
+
+#[then("the service check does not call an IAM policy the likely cause")]
+fn not_iam_first(world: &mut Harness) {
+    let detail = service_detail(world);
+    assert!(!detail.contains("policy is the likely cause"), "{detail}");
+}
+
+#[then("the service check calls an IAM policy the likely cause")]
+fn iam_first(world: &mut Harness) {
+    let detail = service_detail(world);
+    assert!(detail.contains("policy is the likely cause"), "{detail}");
 }
 
 #[then("the only AWS call was ListManagedMicrovmImages")]

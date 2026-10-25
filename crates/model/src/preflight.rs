@@ -8,14 +8,14 @@
 //!
 //! # The world and the procedure
 //!
-//! The world is chosen once, in the initial state: whether the region resolves (to a supported
-//! region, to one the caller opted into with `Region::unlisted`, or not at all), whether the
+//! The world is chosen once, in the initial state: whether the region resolves (to a region AWS
+//! was measured running MicroVMs in, to any other well-formed name, or not at all), whether the
 //! credential chain yields credentials, and how the service answers a listing. The procedure
 //! then runs three checks in order and reports:
 //!
-//! 1. **region**: fatal when it does not resolve, advisory when it is unlisted (the reason is
-//!    `doctor`'s: AWS adds regions faster than a constant is re-read, and a caller who wrote
-//!    `Region::unlisted` opted in at the call site).
+//! 1. **region**: fatal when it does not resolve, advisory when it is outside the
+//!    measured list (the reason is `doctor`'s: AWS adds regions faster than a constant is
+//!    re-read).
 //! 2. **credentials**: the chain resolves credentials. No AWS API call; resolving may reach
 //!    an SSO or metadata endpoint, which is free.
 //! 3. **service**: one `ListManagedMicrovmImages`, free and read-only, in that region. A
@@ -39,9 +39,10 @@ use stateright::{Model, Property};
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum RegionWorld {
     Supported,
-    /// `Region::unlisted`: opted into at the call site.
+    /// A well-formed name outside `MEASURED_REGIONS`.
     Unlisted,
-    /// An environment variable names a region the client refuses to parse.
+    /// An environment variable holds a malformed region name, which the client refuses to
+    /// parse.
     Unresolvable,
 }
 

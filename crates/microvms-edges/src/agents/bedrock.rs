@@ -242,7 +242,7 @@ mod tests {
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_789_000_000);
         let minted = mint_with(
             &credentials(),
-            &Region::UsEast1,
+            &Region::US_EAST_1,
             Duration::from_secs(3600),
             now,
         )
@@ -279,11 +279,11 @@ mod tests {
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_789_000_000);
         for lifetime in [Duration::ZERO, MAX_LIFETIME + Duration::from_secs(1)] {
             let error =
-                mint_with(&credentials(), &Region::UsEast1, lifetime, now).expect_err("refused");
+                mint_with(&credentials(), &Region::US_EAST_1, lifetime, now).expect_err("refused");
             assert_eq!(error.kind(), ErrorKind::InvalidArg);
             assert!(error.to_string().contains("43200"), "{error}");
         }
-        mint_with(&credentials(), &Region::UsEast1, MAX_LIFETIME, now)
+        mint_with(&credentials(), &Region::US_EAST_1, MAX_LIFETIME, now)
             .expect("the ceiling itself is legal");
     }
 
@@ -292,9 +292,9 @@ mod tests {
     #[test]
     fn minting_is_deterministic_in_its_inputs_and_sensitive_to_the_region() {
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_789_000_000);
-        let a = mint_with(&credentials(), &Region::UsEast1, MAX_LIFETIME, now).expect("a");
-        let b = mint_with(&credentials(), &Region::UsEast1, MAX_LIFETIME, now).expect("b");
-        let c = mint_with(&credentials(), &Region::EuWest1, MAX_LIFETIME, now).expect("c");
+        let a = mint_with(&credentials(), &Region::US_EAST_1, MAX_LIFETIME, now).expect("a");
+        let b = mint_with(&credentials(), &Region::US_EAST_1, MAX_LIFETIME, now).expect("b");
+        let c = mint_with(&credentials(), &Region::EU_WEST_1, MAX_LIFETIME, now).expect("c");
         assert_eq!(a.token, b.token);
         assert_ne!(a.token, c.token);
     }
@@ -310,9 +310,9 @@ mod tests {
             Some(expiry),
             "test",
         );
-        let minted = mint_with(&credentials, &Region::UsEast1, MAX_LIFETIME, now).expect("mint");
+        let minted = mint_with(&credentials, &Region::US_EAST_1, MAX_LIFETIME, now).expect("mint");
         assert_eq!(minted.expires_at, expiry);
-        assert!(mint_with(&credentials, &Region::UsEast1, MAX_LIFETIME, expiry).is_err());
+        assert!(mint_with(&credentials, &Region::US_EAST_1, MAX_LIFETIME, expiry).is_err());
     }
 
     /// The credential never prints. A `Debug` that leaked it would put the token in every
@@ -320,7 +320,7 @@ mod tests {
     #[test]
     fn debug_prints_the_length_and_never_the_token() {
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_789_000_000);
-        let minted = mint_with(&credentials(), &Region::UsEast1, MAX_LIFETIME, now).expect("m");
+        let minted = mint_with(&credentials(), &Region::US_EAST_1, MAX_LIFETIME, now).expect("m");
         let shown = format!("{:?}", minted.token);
         assert!(shown.starts_with("BearerToken(<"), "{shown}");
         assert!(!shown.contains(PREFIX), "{shown}");

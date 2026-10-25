@@ -62,7 +62,7 @@ use microvms_core::region::Region;
 /// environment, because these assertions are about a signed request's shape and a region
 /// that does not run MicroVMs can answer `AccessDeniedException` with a null message —
 /// which would read as this test's failure rather than as the wrong region.
-const REGION: Region = Region::UsEast1;
+const REGION: Region = Region::US_EAST_1;
 
 /// A cursor round-trips through the real signing path.
 ///

@@ -2011,7 +2011,7 @@ mod tests {
         let clock = Arc::new(TestClock::new());
         let plane = crate::testing::control_plane(
             Arc::clone(&recorder) as Arc<dyn crate::control::transport::Transport>,
-            Region::UsEast1,
+            Region::US_EAST_1,
             Arc::clone(&clock) as Arc<dyn crate::control::Clock>,
         );
         // A daemon that answers health, because a launch waits for one (#254).
@@ -2222,7 +2222,7 @@ mod tests {
         let entropy = Arc::new(SequenceEntropy::new());
         let plane = crate::testing::control_plane(
             Arc::clone(&recorder) as Arc<dyn crate::control::transport::Transport>,
-            Region::UsEast1,
+            Region::US_EAST_1,
             Arc::new(TestClock::new()),
         )
         .with_entropy(Arc::clone(&entropy) as Arc<dyn crate::entropy::Entropy>);
@@ -2270,7 +2270,7 @@ mod tests {
         let recorder = Arc::new(FakeControlPlane::new());
         let plane = crate::testing::control_plane(
             Arc::clone(&recorder) as Arc<dyn crate::control::transport::Transport>,
-            Region::UsEast1,
+            Region::US_EAST_1,
             Arc::new(TestClock::new()),
         )
         .with_entropy(Arc::new(SequenceEntropy::unavailable()));
@@ -2299,7 +2299,7 @@ mod tests {
         let recorder = Arc::new(FakeControlPlane::new());
         let plane = crate::testing::control_plane(
             Arc::clone(&recorder) as Arc<dyn crate::control::transport::Transport>,
-            Region::UsEast1,
+            Region::US_EAST_1,
             Arc::new(TestClock::new()),
         );
         let daemon = crate::testing::Recorder::with(replies);
@@ -2315,7 +2315,8 @@ mod tests {
         recorder.answer("RunMicrovm", Answer::throttled_as_400());
         answer_launch(&recorder);
         let clock = Arc::new(TestClock::new());
-        let plane = crate::testing::control_plane(recorder.clone(), Region::UsEast1, clock.clone());
+        let plane =
+            crate::testing::control_plane(recorder.clone(), Region::US_EAST_1, clock.clone());
         let mut sandbox = Sandbox::with_control_plane(plane)
             .with_session_backend(crate::testing::HealthyDaemon::new());
         let mut request = RunRequest::new().with_image("arn:image");
@@ -2406,7 +2407,7 @@ mod tests {
         recorder.answer("ListMicrovmImages", Answer::throttled_as_400());
         let plane = crate::testing::control_plane(
             recorder.clone(),
-            Region::UsEast1,
+            Region::US_EAST_1,
             Arc::new(crate::testing::YieldingClock::new()),
         )
         .with_retry(RetryPolicy::new(100, Duration::from_secs(3600)).unwrap());
@@ -2694,7 +2695,7 @@ mod tests {
                 request.egress,
                 &request.egress_network_connectors,
                 request.deny_egress,
-                Some(&Region::UsEast1),
+                Some(&Region::US_EAST_1),
             )
             .expect("a launchable request");
             assert_eq!(answered, expected);
@@ -2753,7 +2754,7 @@ mod tests {
         let adapters = Arc::new(crate::testing::TestAdapters::new());
         let plane = crate::control::ControlPlane::from_ports(
             Arc::clone(&recorder) as Arc<dyn crate::control::transport::Transport>,
-            Region::UsEast1,
+            Region::US_EAST_1,
             Arc::clone(&clock) as Arc<dyn crate::control::Clock>,
             Arc::new(crate::testing::SequenceEntropy::new()),
             Arc::clone(&adapters) as Arc<dyn crate::adapters::Adapters>,
@@ -2804,7 +2805,7 @@ mod tests {
         assert_eq!(detached.microvm_id, vm.id);
         assert_eq!(detached.endpoint, vm.endpoint);
         assert_eq!(detached.agent_token(), token);
-        assert_eq!(detached.region, Region::UsEast1);
+        assert_eq!(detached.region, Region::US_EAST_1);
         let printed = format!("{detached:?} {sandbox:?}");
         assert!(!printed.contains(&token), "{printed}");
         assert!(printed.contains("detached: true"), "{printed}");
@@ -2938,7 +2939,7 @@ mod tests {
         let clock = Arc::new(TestClock::new());
         let plane = crate::testing::control_plane(
             Arc::clone(&recorder) as Arc<dyn crate::control::transport::Transport>,
-            Region::UsEast1,
+            Region::US_EAST_1,
             Arc::clone(&clock) as Arc<dyn crate::control::Clock>,
         );
         (plane, recorder, clock)
@@ -3040,7 +3041,7 @@ mod tests {
         )
         .expect("record");
         let store = One(record.clone());
-        let foreign = crate::names::resolve(&store, "ci", Some(&Region::UsEast1))
+        let foreign = crate::names::resolve(&store, "ci", Some(&Region::US_EAST_1))
             .expect_err("registered in another region");
         assert_eq!(foreign.kind(), ErrorKind::InvalidArg);
         let missing = crate::names::resolve(&store, "nope", None).expect_err("no such name");
@@ -3052,7 +3053,7 @@ mod tests {
             "GetMicrovm",
             Answer::ok(fake::microvm_response("RUNNING", None)),
         );
-        let resolved = crate::names::resolve(&store, "ci", Some(&Region::UsWest2)).expect("ok");
+        let resolved = crate::names::resolve(&store, "ci", Some(&Region::US_WEST_2)).expect("ok");
         let sandbox = Sandbox::adopt_record(plane, resolved)
             .await
             .expect("adopts");
@@ -3277,7 +3278,7 @@ mod tests {
         let daemon = crate::testing::HealthyDaemon::new();
         let plane = crate::control::ControlPlane::from_ports(
             Arc::clone(&recorder) as Arc<dyn crate::control::transport::Transport>,
-            Region::UsEast1,
+            Region::US_EAST_1,
             Arc::new(TestClock::new()),
             Arc::new(crate::testing::SequenceEntropy::new()),
             Arc::new(crate::testing::TestAdapters::new().with_backend(daemon.clone())),
@@ -3357,7 +3358,7 @@ mod tests {
         let daemon = crate::testing::HealthyDaemon::new();
         let plane = crate::control::ControlPlane::from_ports(
             Arc::clone(&recorder) as Arc<dyn crate::control::transport::Transport>,
-            Region::UsEast1,
+            Region::US_EAST_1,
             Arc::new(TestClock::new()),
             Arc::new(crate::testing::SequenceEntropy::new()),
             Arc::new(crate::testing::TestAdapters::new().with_backend(daemon.clone())),

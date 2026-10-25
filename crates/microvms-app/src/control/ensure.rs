@@ -909,7 +909,7 @@ mod tests {
     fn sandbox(fake: &Arc<FakeControlPlane>, services: &Arc<FakeServices>) -> Sandbox {
         let plane = crate::testing::control_plane(
             fake.clone(),
-            Region::UsEast1,
+            Region::US_EAST_1,
             Arc::new(TestClock::new()),
         );
         Sandbox::with_control_plane(plane).with_build_services(services.clone())
@@ -1091,7 +1091,7 @@ mod tests {
 
         let plane = crate::testing::control_plane(
             Arc::new(FakeControlPlane::new()),
-            Region::UsEast1,
+            Region::US_EAST_1,
             Arc::new(TestClock::new()),
         );
         let plain = prepare(&plane, request()).expect("prepares");
@@ -1155,7 +1155,7 @@ mod tests {
     fn each_create_only_field_names_a_different_image() {
         let plane = crate::testing::control_plane(
             Arc::new(FakeControlPlane::new()),
-            Region::UsEast1,
+            Region::US_EAST_1,
             Arc::new(TestClock::new()),
         );
         let plain = prepare(&plane, request()).expect("prepares").name;
@@ -1231,7 +1231,7 @@ mod tests {
         direct.s3_key_prefix = None;
         let plane = crate::testing::control_plane(
             Arc::new(FakeControlPlane::new()),
-            Region::UsEast1,
+            Region::US_EAST_1,
             Arc::new(TestClock::new()),
         );
         assert_eq!(
@@ -1617,7 +1617,7 @@ mod tests {
         let fake = Arc::new(FakeControlPlane::new());
         let plane = crate::testing::control_plane(
             fake.clone(),
-            Region::UsEast1,
+            Region::US_EAST_1,
             Arc::new(TestClock::new()),
         );
         let mut sandbox = Sandbox::with_control_plane(plane).with_build_services(lookup.clone());

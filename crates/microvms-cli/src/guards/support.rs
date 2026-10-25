@@ -110,7 +110,7 @@ pub(super) fn full_infra() -> Infra {
 
 pub(super) fn region_flags() -> RegionFlags {
     RegionFlags {
-        region: Some(crate::cli::RegionArg::UsEast1),
+        region: Some(microvms_core::Region::US_EAST_1),
         unlisted_region: None,
     }
 }

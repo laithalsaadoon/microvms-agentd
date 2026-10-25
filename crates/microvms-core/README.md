@@ -50,7 +50,7 @@ use microvms_core::session::mint_exec_id;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let image = std::env::var("MICROVM_IMAGE")?;
     let role = std::env::var("MICROVM_EXECUTION_ROLE_ARN")?;
-    let mut sandbox = Sandbox::new(Region::UsEast1).await?;
+    let mut sandbox = Sandbox::new(Region::US_EAST_1).await?;
     let work = async {
         let mut request = RunRequest::new().with_image(&image);
         request.execution_role_arn = Some(role);

@@ -1006,7 +1006,7 @@ impl RateTable {
 /// per report.
 pub fn pinned_rates() -> RateTable {
     RateTable {
-        region: Region::UsEast1,
+        region: Region::US_EAST_1,
         source_url: "https://aws.amazon.com/lambda/pricing/".to_string(),
         retrieved: CalendarDate::from_ymd(2026, 8, 7),
         vcpu_second: dec!(0.0000276944),
@@ -2648,7 +2648,7 @@ mod tests {
     #[test]
     fn every_rate_byte_matches_the_python_literal() {
         let rates = rates();
-        assert_eq!(rates.region(), &Region::UsEast1);
+        assert_eq!(rates.region(), &Region::US_EAST_1);
         assert_eq!(rates.vcpu_second(), dec!(0.0000276944));
         assert_eq!(rates.gb_second(), dec!(0.0000036667));
         assert_eq!(rates.storage_gb_month(), dec!(0.0811111030));
@@ -3829,7 +3829,7 @@ mod tests {
     #[test]
     fn the_recorded_catalog_fills_a_table_that_matches_the_pinned_one() {
         let fetched = RateTable::from_catalog(
-            Region::UsEast1,
+            Region::US_EAST_1,
             "aws pricing api",
             CalendarDate::from_ymd(2026, 8, 7),
             &recorded_catalog(),
@@ -3862,7 +3862,7 @@ mod tests {
     fn a_catalog_with_only_the_x86_compute_line_is_refused_not_substituted() {
         let catalog = without("AWS-Lambda-MicroVM-vCPU-Second-ARM");
         let err = RateTable::from_catalog(
-            Region::UsEast1,
+            Region::US_EAST_1,
             "aws pricing api",
             CalendarDate::from_ymd(2026, 8, 7),
             &catalog,
@@ -3883,7 +3883,7 @@ mod tests {
     #[test]
     fn the_memory_line_refuses_its_x86_sibling_too() {
         let err = RateTable::from_catalog(
-            Region::UsEast1,
+            Region::US_EAST_1,
             "aws pricing api",
             CalendarDate::from_ymd(2026, 8, 7),
             &without("AWS-Lambda-MicroVM-Memory-GB-Second-ARM"),
@@ -3910,7 +3910,7 @@ mod tests {
             rebuilt
         };
         let err = RateTable::from_catalog(
-            Region::UsEast1,
+            Region::US_EAST_1,
             "aws pricing api",
             CalendarDate::from_ymd(2026, 8, 7),
             &catalog,
@@ -3927,7 +3927,7 @@ mod tests {
     #[test]
     fn a_missing_snapshot_rate_names_no_x86_sibling() {
         let err = RateTable::from_catalog(
-            Region::UsEast1,
+            Region::US_EAST_1,
             "aws pricing api",
             CalendarDate::from_ymd(2026, 8, 7),
             &without("AWS-Lambda-MicroVM-Snapshot-Write-GB"),
@@ -3946,7 +3946,7 @@ mod tests {
     #[test]
     fn an_empty_catalog_reads_as_an_unpriced_region_not_a_renamed_line() {
         let err = RateTable::from_catalog(
-            Region::unlisted("us-west-1"),
+            "us-west-1".parse().unwrap(),
             "aws pricing api",
             CalendarDate::from_ymd(2026, 8, 7),
             &RateCatalog::new(),
@@ -3973,7 +3973,7 @@ mod tests {
             dec!(0.0001111111),
         );
         let err = RateTable::from_catalog(
-            Region::UsEast1,
+            Region::US_EAST_1,
             "aws pricing api",
             CalendarDate::from_ymd(2026, 8, 7),
             &catalog,
@@ -3994,7 +3994,7 @@ mod tests {
             dec!(0.0000999999),
         );
         let err = RateTable::from_catalog(
-            Region::UsEast1,
+            Region::US_EAST_1,
             "aws pricing api",
             CalendarDate::from_ymd(2026, 8, 7),
             &catalog,
@@ -4036,7 +4036,7 @@ mod tests {
                 dec!(0.0046556039),
             );
         let tokyo = RateTable::from_catalog(
-            Region::ApNortheast1,
+            Region::AP_NORTHEAST_1,
             "aws pricing api",
             fresh_day(),
             &tokyo_catalog,

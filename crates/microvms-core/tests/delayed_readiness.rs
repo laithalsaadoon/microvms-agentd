@@ -44,7 +44,7 @@ fn delayed_readiness_recipe_passes_create_image_preflight() {
     let transport = Arc::new(FakeControlPlane::new());
     let plane = control_plane(
         transport.clone(),
-        Region::UsEast1,
+        Region::US_EAST_1,
         Arc::new(TestClock::new()),
     );
     let mut request = CreateImageRequest::new(

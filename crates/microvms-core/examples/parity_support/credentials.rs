@@ -169,7 +169,7 @@ pub fn run() {
             let input = input();
             let error = tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current().block_on(async {
-                    ControlPlane::new(Region::UsEast1)
+                    ControlPlane::new(Region::US_EAST_1)
                         .await?
                         .resume(input["microvm_id"].as_str().unwrap())
                         .await

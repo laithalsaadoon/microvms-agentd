@@ -1082,7 +1082,7 @@ mod tests {
     fn planted() -> (ControlPlane, Arc<FakeControlPlane>, Arc<TestClock>) {
         let fake = Arc::new(FakeControlPlane::new());
         let clock = Arc::new(TestClock::new());
-        let plane = crate::testing::control_plane(fake.clone(), Region::UsEast1, clock.clone());
+        let plane = crate::testing::control_plane(fake.clone(), Region::US_EAST_1, clock.clone());
         (plane, fake, clock)
     }
 
@@ -2202,7 +2202,7 @@ mod tests {
         let fake = Arc::new(FakeControlPlane::new());
         let plane = crate::testing::control_plane(
             fake.clone(),
-            Region::UsEast1,
+            Region::US_EAST_1,
             Arc::new(TestClock::new()),
         )
         .with_port(8080)

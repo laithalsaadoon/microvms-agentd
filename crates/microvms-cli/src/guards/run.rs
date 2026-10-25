@@ -734,7 +734,7 @@ async fn the_run_envelope_and_the_launched_session_report_the_same_posture() {
         let envelope = rendered.data["egressPosture"].clone();
 
         let mut sandbox = seam
-            .open_sandbox(Region::UsEast1, None)
+            .open_sandbox(Region::US_EAST_1, None)
             .await
             .expect("a scripted sandbox");
         let mut request = microvms_core::sandbox::RunRequest::new().with_image(image);
@@ -757,7 +757,7 @@ async fn the_run_envelope_and_the_launched_session_report_the_same_posture() {
                 egress,
                 &connectors,
                 deny,
-                Some(&Region::UsEast1)
+                Some(&Region::US_EAST_1)
             )
             .expect("launchable")
             .as_str(),

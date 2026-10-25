@@ -6,9 +6,10 @@
 //! "No option permits a value microvms-core rejects." The CLI is where an S1 guard is most
 //! easily downgraded: `--memory 1500` typed as `u32` compiles, parses, and fails at a
 //! library boundary a whole build cycle later. So every parameter whose library counterpart
-//! is a closed type is a [`clap::ValueEnum`] here — [`MemoryMib`] over the five documented
-//! baselines, [`RegionArg`] over the five listed regions — and clap refuses the rest
-//! before any handler runs.
+//! is a closed type is a [`clap::ValueEnum`] here, [`MemoryMib`] over the five documented
+//! baselines among them, and clap refuses the rest before any handler runs. `--region`
+//! takes any region name, and clap parses it with core's own [`Region`] parser, so it
+//! refuses exactly the malformed names core refuses.
 //!
 //! The domains are **spelled out** rather than generated from
 //! [`microvms_core::SizeClass::ALL`], for the same reason `cli.py:1447` spells its `Literal`:
@@ -30,13 +31,13 @@
 //! `tests/thinness.rs` and by the manifest cross-check: an option added later that carries a
 //! free-text S1 value shows up as a `choices: null` on a parameter the test names.
 //!
-//! # The escape hatch is a separate flag, not a permissive parser
+//! # `--unlisted-region` is a deprecated spelling of `--region`
 //!
-//! [`microvms_core::Region::unlisted`] exists because AWS adds regions faster than a
-//! constant is re-read, and it costs the caller the null-message diagnostic. So it is
-//! `--unlisted-region <NAME>`, conflicting with `--region`, with the cost in its help text —
-//! rather than `--region` accepting a free string and quietly widening. A reader of a command
-//! line can see that someone opted in.
+//! Before 1.3.0, `--region` took only five names and `--unlisted-region` was the opt-in to any
+//! other. Every well-formed region name parses now (#743), so the old flag is only another
+//! way to name a region. It stays through 1.x as 1.2 had it, taking the name without
+//! `--region`'s check and conflicting with `--region`, and prints a deprecation warning, so a
+//! script written against 1.2 keeps working; it goes no earlier than 2.0.0.
 //!
 //! (cli.py line numbers resolve at `git show 'c4d396e^:clients/python/src/microvms_agentd/cli.py'` — the retired oracle.)
 
@@ -535,73 +536,47 @@ impl SizeRequestFlags {
     }
 }
 
-/// The five regions this client lists. AWS runs MicroVMs in more, which
-/// `--unlisted-region` reaches.
-///
-/// A region without MicroVMs can answer `AccessDeniedException` with a **null message**, which
-/// is indistinguishable from a genuine IAM denial — so the last point where the diagnostic
-/// survives is before the first call, and for a CLI that means the parser. `--unlisted-region`
-/// is the named way out.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub enum RegionArg {
-    #[value(name = "us-east-1")]
-    UsEast1,
-    #[value(name = "us-east-2")]
-    UsEast2,
-    #[value(name = "us-west-2")]
-    UsWest2,
-    #[value(name = "eu-west-1")]
-    EuWest1,
-    #[value(name = "ap-northeast-1")]
-    ApNortheast1,
-}
-
-impl RegionArg {
-    /// The variant for a region name arriving from `microvm.toml`, or `None` when the name
-    /// is not one of the five listed regions.
-    ///
-    /// The file boundary takes the closed set only — `--unlisted-region` remains the one
-    /// spelled-out opt-in to the null-message diagnostic, and a file must not be a quieter
-    /// second door to it.
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "us-east-1" => Some(RegionArg::UsEast1),
-            "us-east-2" => Some(RegionArg::UsEast2),
-            "us-west-2" => Some(RegionArg::UsWest2),
-            "eu-west-1" => Some(RegionArg::EuWest1),
-            "ap-northeast-1" => Some(RegionArg::ApNortheast1),
-            _ => None,
-        }
-    }
-
-    pub fn region(self) -> Region {
-        match self {
-            RegionArg::UsEast1 => Region::UsEast1,
-            RegionArg::UsEast2 => Region::UsEast2,
-            RegionArg::UsWest2 => Region::UsWest2,
-            RegionArg::EuWest1 => Region::EuWest1,
-            RegionArg::ApNortheast1 => Region::ApNortheast1,
-        }
-    }
+/// `--region`'s parser: core's own, so clap refuses exactly the names [`Region`] refuses.
+fn region_name(name: &str) -> Result<Region, String> {
+    name.parse::<Region>().map_err(|error| error.to_string())
 }
 
 /// The region flags, flattened into every command that talks to AWS.
 ///
 /// One struct rather than two fields per command, so the `conflicts_with` relationship
-/// between the closed set and the escape hatch is declared once and cannot be forgotten on
+/// between the flag and its deprecated spelling is declared once and cannot be forgotten on
 /// the twelfth command.
 #[derive(Args, Clone, Debug, Default)]
 pub struct RegionFlags {
     /// AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1.
-    #[arg(long, value_enum)]
-    pub region: Option<RegionArg>,
-
-    /// Use a region this client has not seen carry MicroVMs. Costs you the diagnostic.
     ///
-    /// A region without MicroVMs can answer AccessDeniedException with a null message, which
-    /// reads as an IAM denial. Use this when AWS has launched MicroVMs somewhere new.
+    /// Any region name. `microvm constants` lists the regions AWS was measured running
+    /// MicroVMs in; in any other, a call can fail with an AccessDeniedException and a null
+    /// message, and the error names the region as a cause to check.
+    #[arg(long, value_name = "NAME", value_parser = region_name)]
+    pub region: Option<Region>,
+
+    /// Deprecated since 1.3.0: --region takes any region name.
+    ///
+    /// Takes the name as 1.2 did, without --region's name check, and conflicts with --region.
     #[arg(long, value_name = "NAME", conflicts_with = "region")]
     pub unlisted_region: Option<String>,
+}
+
+/// The warning `--unlisted-region` prints, once, before the command runs.
+pub const UNLISTED_REGION_DEPRECATED: &str = "--unlisted-region is deprecated since 1.3.0 and \
+     goes no earlier than 2.0.0: --region takes any region name.";
+
+/// Whether the command line typed `--unlisted-region`, at any subcommand depth.
+///
+/// Read from the matches rather than the parsed struct, because the flag sits on every
+/// command that talks to AWS and the matches are the one place that sees all of them.
+pub fn passed_unlisted_region(matches: &clap::ArgMatches) -> bool {
+    let here = matches.ids().any(|id| id.as_str() == "unlisted_region")
+        && matches.value_source("unlisted_region") == Some(clap::parser::ValueSource::CommandLine);
+    here || matches
+        .subcommand()
+        .is_some_and(|(_, sub)| passed_unlisted_region(sub))
 }
 
 impl RegionFlags {
@@ -612,11 +587,7 @@ impl RegionFlags {
     /// to drift. The resolution itself, and why its order must agree with the SDK's, lives at
     /// [`crate::seam::resolve_region`].
     pub fn resolve(&self, env: &dyn Fn(&str) -> Option<String>) -> Result<Region, Error> {
-        crate::seam::resolve_region(
-            self.region.map(|r| r.region()),
-            self.unlisted_region.as_deref(),
-            env,
-        )
+        crate::seam::resolve_region(self.region.clone(), self.unlisted_region.as_deref(), env)
     }
 }
 
@@ -2812,30 +2783,30 @@ mod tests {
         assert_eq!(spellings, ["512", "1024", "2048", "4096", "8192"]);
     }
 
-    /// The `--region` domain is exactly the five regions this client lists.
+    /// `--region` takes any well-formed region name and refuses a malformed one with core's
+    /// own message (CLI-5): the flag and `Region`'s parser are one rule, not two.
     ///
-    /// `eu-central-1` is the specific value worth naming: AWS runs MicroVMs there (launched
-    /// 2026-08-19), and it is outside this client's list, so it is the name a `--region`
-    /// domain grown without its own decision (#743) would most plausibly gain. A caller
-    /// reaches it through `--unlisted-region`.
+    /// `us-west-1` is the name worth naming: AWS does not run MicroVMs there (it answered
+    /// `ListMicrovms` with the null-message denial on 2026-10-24), and the flag still takes it,
+    /// because the client reports that region at the error rather than refusing it (#743).
     #[test]
-    fn the_region_domain_is_exactly_the_five_measured_regions_and_excludes_eu_central_one() {
-        let from_flag: Vec<String> = RegionArg::value_variants()
-            .iter()
-            .map(|variant| variant.region().as_str().to_string())
-            .collect();
-        let from_core: Vec<String> = microvms_core::region::MICROVM_REGIONS
-            .iter()
-            .map(|region| region.as_str().to_string())
-            .collect();
-        assert_eq!(from_flag, from_core);
-        assert!(!from_flag.contains(&"eu-central-1".to_string()));
-
-        // The parser really refuses it, rather than the domain merely omitting it.
-        // `logs` was chosen when `ls` carried no region flags at all; `ls --remote` gained them
-        // in #159, so either would do now, and the probe stays where it was.
-        let refused = Cli::try_parse_from(["microvm", "logs", "img", "--region", "eu-central-1"]);
-        assert!(refused.is_err(), "eu-central-1 must not parse");
+    fn the_region_flag_takes_any_region_name_and_refuses_a_malformed_one() {
+        for name in ["us-east-1", "eu-central-1", "us-west-1", "ca-central-1"] {
+            let parsed = Cli::try_parse_from(["microvm", "logs", "img", "--region", name])
+                .unwrap_or_else(|error| panic!("{name} must parse: {error}"));
+            let Command::Logs(args) = parsed.command else {
+                panic!("a logs parses as a logs");
+            };
+            assert_eq!(args.region.region.as_ref().map(Region::as_str), Some(name));
+        }
+        for name in ["US-EAST-1", "us east 1", "us-east-1.example.com"] {
+            let refused = Cli::try_parse_from(["microvm", "logs", "img", "--region", name])
+                .expect_err("a malformed region must not parse");
+            assert!(
+                refused.to_string().contains("not a region name"),
+                "{name}: {refused}"
+            );
+        }
     }
 
     /// `ls --prune` needs `--remote`, and `--remote` cannot ride a `--watch` (#159).
@@ -2858,7 +2829,7 @@ mod tests {
             panic!("an ls parses as an ls");
         };
         assert!(args.remote && args.prune);
-        assert_eq!(args.region.region, Some(RegionArg::UsEast1));
+        assert_eq!(args.region.region, Some(Region::US_EAST_1));
 
         let plain = Cli::try_parse_from(["microvm", "ls"]).expect("a plain ls parses");
         let Command::Ls(args) = plain.command else {
@@ -2893,12 +2864,12 @@ mod tests {
         Cli::try_parse_from(["microvm", "cost", "--memory", "8192"]).expect("8192 is a baseline");
     }
 
-    /// The escape hatch is a separate flag and cannot be combined with the closed set.
+    /// The deprecated `--unlisted-region` still parses, and cannot be combined with `--region`.
     ///
     /// Both together would mean two answers to one question, and the resolution would be
     /// whichever the code happened to read first.
     #[test]
-    fn the_unlisted_region_escape_hatch_conflicts_with_the_closed_set() {
+    fn the_deprecated_unlisted_region_flag_conflicts_with_the_region_flag() {
         Cli::try_parse_from([
             "microvm",
             "logs",
@@ -2906,7 +2877,7 @@ mod tests {
             "--unlisted-region",
             "eu-central-1",
         ])
-        .expect("the escape hatch parses on its own");
+        .expect("the deprecated flag parses on its own");
         let both = Cli::try_parse_from([
             "microvm",
             "logs",
@@ -2917,6 +2888,34 @@ mod tests {
             "eu-central-1",
         ]);
         assert!(both.is_err(), "two answers to one question must not parse");
+    }
+
+    /// `main` warns when `--unlisted-region` was typed, and only then: the check finds the
+    /// flag under a subcommand, and stays quiet for `--region` and for no flag at all.
+    #[test]
+    fn the_deprecated_unlisted_region_flag_is_detected_for_its_warning() {
+        let matches = |args: &[&str]| {
+            Cli::command()
+                .try_get_matches_from(args)
+                .expect("the arguments parse")
+        };
+        assert!(passed_unlisted_region(&matches(&[
+            "microvm",
+            "logs",
+            "img",
+            "--unlisted-region",
+            "eu-central-1",
+        ])));
+        assert!(!passed_unlisted_region(&matches(&[
+            "microvm",
+            "logs",
+            "img",
+            "--region",
+            "eu-central-1",
+        ])));
+        assert!(!passed_unlisted_region(&matches(&[
+            "microvm", "logs", "img"
+        ])));
     }
 
     /// Naming a config file and refusing every config file cannot be combined.
@@ -3750,17 +3749,25 @@ mod tests {
     }
 
     /// Every S1-typed option reports a closed domain, and the free-text ones are the ones
-    /// whose library counterpart really is a string.
+    /// whose library counterpart really is a string. `--region` is one of those since 1.3.0:
+    /// its counterpart is `Region`, which takes any well-formed name.
     ///
     /// The manifest's `choices` field is derived from exactly this, so this test is what
     /// makes that field trustworthy rather than decorative.
     #[test]
-    fn the_two_s1_options_report_closed_domains_everywhere_they_appear() {
+    fn the_s1_option_reports_its_closed_domain_everywhere_it_appears() {
         let mut seen = 0;
         for sub in Cli::command().get_subcommands() {
             for arg in sub.get_arguments() {
                 let Some(long) = arg.get_long() else { continue };
-                if long == "memory" || long == "region" {
+                if long == "region" || long == "unlisted-region" {
+                    assert!(
+                        arg.get_possible_values().is_empty(),
+                        "{}'s --{long} publishes a closed set, but any region name parses",
+                        sub.get_name(),
+                    );
+                }
+                if long == "memory" {
                     let choices = arg.get_possible_values();
                     assert!(
                         !choices.is_empty(),

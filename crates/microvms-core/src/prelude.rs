@@ -117,9 +117,9 @@ impl TunnelIdentityExt for TunnelIdentity {
 pub trait ControlPlaneExt: Sized {
     /// Resolves credentials for `region` and returns a usable client.
     ///
-    /// The region is a [`Region`], so an unsupported one is either a compile error or a
-    /// visible [`Region::unlisted`] at the call site. TRAP-6 is closed by the type before
-    /// this function is reached, which is why there is no region check here.
+    /// The region is a [`Region`], so its name was parsed before this is reached, which is
+    /// why there is no region check here. A region outside [`crate::region::MEASURED_REGIONS`]
+    /// is reported at the first null-message denial (TRAP-6).
     fn new(region: Region) -> impl Future<Output = Result<Self, Error>> + Send;
 
     /// A client over a caller-supplied transport and clock, with the OS random pool and the
@@ -171,8 +171,8 @@ async fn plane_for(region: Region, port: Option<u16>) -> Result<ControlPlane, Er
 pub trait SandboxExt: Sized {
     /// Resolves credentials for `region` and returns a sandbox with nothing launched.
     ///
-    /// TRAP-6 is closed by [`Region`] before this is reached, which is why there is no
-    /// region check here.
+    /// The region is a parsed [`Region`], which is why there is no region check here; a
+    /// region outside the measured list is reported at the first null-message denial (TRAP-6).
     fn new(region: Region) -> impl Future<Output = Result<Self, Error>> + Send;
 
     /// [`Sandbox::adopt`] over a plane resolved for `region`, on `port` when the image's
@@ -454,7 +454,7 @@ mod tests {
         let plane = || {
             ControlPlane::with_transport(
                 Arc::new(microvms_app::testing::FakeControlPlane::new()),
-                Region::UsEast1,
+                Region::US_EAST_1,
                 Arc::new(microvms_app::testing::TestClock::new()),
             )
         };
@@ -502,7 +502,7 @@ mod tests {
         )
         .expect("record");
         let store = One(record);
-        let foreign = Sandbox::from_name(&store, "ci", Some(Region::UsEast1), None)
+        let foreign = Sandbox::from_name(&store, "ci", Some(Region::US_EAST_1), None)
             .await
             .expect_err("registered in another region");
         assert_eq!(foreign.kind(), ErrorKind::InvalidArg);
@@ -511,7 +511,7 @@ mod tests {
             .expect_err("no such name");
         assert_eq!(missing.kind(), ErrorKind::Precondition);
         let specs = vec![AgentSpec::new(crate::agents::Agent::Codex)];
-        let agent = AgentVm::from_name(&store, specs, "ci", Some(Region::UsEast1), None)
+        let agent = AgentVm::from_name(&store, specs, "ci", Some(Region::US_EAST_1), None)
             .await
             .expect_err("registered in another region");
         assert_eq!(agent.kind(), ErrorKind::InvalidArg);

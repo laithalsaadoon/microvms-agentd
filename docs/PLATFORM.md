@@ -106,8 +106,10 @@ Inspect the matching event's `errorCode` and `errorMessage` for the denied
 action. [CloudTrail event lookup](https://docs.aws.amazon.com/awscloudtrail/latest/userguide/view-cloudtrail-events-cli.html)
 returns the event record as JSON text. The shared Lambda endpoint resolver
 can list ordinary Lambda regions that do not support MicroVMs. SDK endpoint
-availability is not a MicroVM service availability check. The package validates
-its known regions and permits an explicit `--unlisted-region` override.
+availability is not a MicroVM service availability check. Since 1.3.0 the
+package takes any well-formed region name. When a call in a region outside the
+14 measured ones gets the null-message denial, its error says to verify that
+AWS runs MicroVMs there as well as the IAM policy.
 
 ## Network connectors are ARNs
 

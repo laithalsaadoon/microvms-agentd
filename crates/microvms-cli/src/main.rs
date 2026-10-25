@@ -94,9 +94,11 @@ fn main() -> ExitCode {
     // merge tells `--memory 2048` (typed, wins over the file) from the same value arriving
     // as clap's default (loses to the file). The derive path is the same parser — this is
     // its own two-step spelling, not a second grammar.
+    let mut unlisted_region = false;
     let parsed = match Cli::command()
         .try_get_matches_from(std::env::args())
         .and_then(|matches| {
+            unlisted_region = cli::passed_unlisted_region(&matches);
             let mut parsed = Cli::from_arg_matches(&matches)?;
             if let (Command::Run(args), Some((_, sub))) =
                 (&mut parsed.command, matches.subcommand())
@@ -145,6 +147,11 @@ fn main() -> ExitCode {
         std::io::IsTerminal::is_terminal(&std::io::stdout()),
     );
     let mut out = Output::new(format, parsed.quiet, std::io::stdout(), std::io::stderr());
+    // The deprecated spelling still works through 1.x (#743); it says so on stderr, which a
+    // `--json` consumer does not parse.
+    if unlisted_region {
+        out.warn(cli::UNLISTED_REGION_DEPRECATED);
+    }
 
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()

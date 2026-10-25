@@ -1483,7 +1483,7 @@ fn a_control_plane_wait_reaches_its_deadline_in_simulated_time() -> turmoil::Res
     sim.client("harness", async move {
         let plane = ControlPlane::with_transport(
             transport as Arc<dyn Transport>,
-            Region::UsEast1,
+            Region::US_EAST_1,
             Arc::new(SystemClock::new()),
         );
         let started = tokio::time::Instant::now();

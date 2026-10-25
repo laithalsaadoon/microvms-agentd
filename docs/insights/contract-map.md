@@ -108,12 +108,12 @@ Mitigation: review the enum, `ALL`, code strings, and adapter mappings together.
 
 ## Region: endpoint and pricing selection
 
-**Producer:** `crates/microvms-domain/src/region.rs:45-63`
+**Producer:** `crates/microvms-domain/src/region.rs:56-151`
 
 **Consumer(s):**
 
 - `bindings/microvms-js/src/agents.rs:37`
-- `bindings/microvms-js/src/region.rs:27`
+- `bindings/microvms-js/src/region.rs:25`
 - `bindings/microvms-py/src/agents.rs:40`
 - `bindings/microvms-py/src/control.rs:522`
 - `bindings/microvms-py/src/region.rs:24`
@@ -150,34 +150,34 @@ Mitigation: review the enum, `ALL`, code strings, and adapter mappings together.
 ```rust
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum Region {
+    #[deprecated(since = "1.3.0", note = "use `Region::US_EAST_1`; ...")]
     UsEast1,
-    UsEast2,
-    UsWest2,
-    EuWest1,
-    ApNortheast1,
-    /// A region this client has not seen carry MicroVMs.
-    ///
-    /// **You are opting into the null-message trap.** If this region does not run
-    /// MicroVMs, the first control-plane call answers `AccessDeniedException` with a
-    /// null message and you will spend the next hour reading an IAM policy that is
-    /// correct. Constructible only through [`Region::unlisted`], which says so at
-    /// the call site.
-    ///
-    /// It exists because AWS adds regions faster than this list is re-read, and a
-    /// client that refuses a region AWS has just launched in is its own kind of
-    /// wrong. The override costs exactly the diagnostic above.
+    // UsEast2, UsWest2, EuWest1 and ApNortheast1, each deprecated the same way
+    /// Any region outside the five above, by name.
+    #[deprecated(since = "1.3.0", note = "parse the name ... and read it with `as_str`; ...")]
     Unlisted(String),
 }
+
+impl Region {
+    pub const US_EAST_1: Region = Region::UsEast1;
+    // US_EAST_2, US_WEST_2, EU_WEST_1 and AP_NORTHEAST_1
+}
+
+/// The regions AWS was measured running MicroVMs in: the 14 the Pricing API priced on
+/// 2026-10-24, in the order AWS launched them.
+pub const MEASURED_REGIONS: [&str; 14] = [/* "us-east-1", ... "eu-south-2" */];
 ```
 
 **Assumptions consumers make:**
 
-- The CLI maintains an explicit mapping between its argument variants and the domain variants. `crates/microvms-cli/src/cli.rs:576-583`.
-- The Python parsing entry point delegates to `FromStr`, while named constructors produce domain variants directly. `bindings/microvms-py/src/region.rs:38-81`.
+- Consumers read a region with `as_str` and compare regions by value. The deprecated variants appear only in `region.rs`. `crates/microvms-domain/src/region.rs:163-174`.
+- The CLI parses `--region` with core's `FromStr` and doesn't keep a region table of its own. `--unlisted-region` is a deprecated spelling of the same flag. `crates/microvms-cli/src/cli.rs:540-592`.
+- The Python and Node `parse` delegate to `FromStr`, and the named factories return the domain constants. `bindings/microvms-py/src/region.rs:40-165`, `bindings/microvms-js/src/region.rs:40-150`.
+- The null-message denial classifier reads `is_measured` to decide whether to name the region or the IAM policy as the likely cause. `crates/microvms-app/src/control/transport.rs:622-645`.
 - Pricing retains the selected region in its rate table and exposes it by reference. `crates/microvms-domain/src/cost.rs:846-865`.
 
-**Drift risk:** A new domain variant requires the CLI argument mapping to change with it. `crates/microvms-cli/src/cli.rs:576-583`.
-Mitigation: update the mapping and binding constructors with the domain region catalog. `crates/microvms-domain/src/region.rs:73-79`, `bindings/microvms-py/src/region.rs:38-81`.
+**Drift risk:** `MEASURED_REGIONS`, the drift script's `PINNED_REGIONS`, and the live-rates script's `MICROVM_REGIONS` change together when AWS launches a region. A stale list refuses no region. It makes a null-message denial there cite the region as a cause, and it puts the wrong regions in the live-rates script's empty-catalog message. `crates/microvms-domain/src/region.rs:121-136`, `tools/check-model-drift.py:201-221`, `tools/check-live-rates.py:87-102`.
+Mitigation: `tools/check-model-drift.py` holds the emitted list equal to its pinned literal, and holds the deprecated `MICROVM_REGIONS` to the five. No check compares the list with AWS, so growing it follows a fresh Pricing API measurement recorded in `docs/PLATFORM.md`. `tools/check-model-drift.py:977-997`.
 
 ## WireKind: specific daemon and transport outcomes
 

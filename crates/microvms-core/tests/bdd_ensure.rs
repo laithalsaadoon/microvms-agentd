@@ -375,7 +375,7 @@ impl Ensure {
     fn plane(&self) -> ControlPlane {
         ControlPlane::with_transport(
             self.platform.clone(),
-            Region::UsEast1,
+            Region::US_EAST_1,
             // Time that passes only when slept through, and lets the other caller run meanwhile.
             Arc::new(YieldingClock::new()),
         )

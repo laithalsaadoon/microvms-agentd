@@ -369,7 +369,7 @@ impl Replay {
             );
         let clock = Arc::new(TestClock::new());
         let transport = Arc::clone(&plane) as Arc<dyn Transport>;
-        let control = control_plane(transport, Region::UsEast1, clock.clone());
+        let control = control_plane(transport, Region::US_EAST_1, clock.clone());
         Self {
             // A daemon that answers health, which the wait after RUNNING polls.
             sandbox: Sandbox::with_control_plane(control)
@@ -398,7 +398,7 @@ impl Replay {
         // the platform state, without changing the sandbox's locally held lifecycle.
         control_plane(
             Arc::clone(&self.plane) as Arc<dyn Transport>,
-            Region::UsEast1,
+            Region::US_EAST_1,
             self.clock.clone(),
         )
         .get_microvm("mvm-abc123")

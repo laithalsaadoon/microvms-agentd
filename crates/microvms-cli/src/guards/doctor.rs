@@ -21,7 +21,7 @@ use super::support::{
     ConfigFile, ScriptedTransport, dispatch_with, dispatch_with_env, full_infra, no_config,
     region_flags,
 };
-use crate::cli::{Command, ConfigFlags, DoctorArgs, InfraFlags, RegionArg, RegionFlags};
+use crate::cli::{Command, ConfigFlags, DoctorArgs, InfraFlags, RegionFlags};
 use crate::commands::Rendered;
 use crate::seam::futures_util_shim::BoxFuture;
 use crate::seam::{Attach, CoreSeam};
@@ -224,7 +224,7 @@ fn doctor_line(rendered: &Rendered, name: &str) -> serde_json::Value {
 /// **Falsification** 2026-09-28. Put `resolve_region(None, None, ctx.env)` back as the region
 /// `check_credentials` or `check_managed_bases` asks for, and the recorded regions read
 /// `us-east-1` (or `eu-west-1`) for that check. Resolve with
-/// `resolve_region(args.region.region.map(|r| r.region()), None, ctx.env)`, dropping
+/// `resolve_region(merged.flags.region.clone(), None, ctx.env)`, dropping
 /// `--unlisted-region`, and the ca-central-1 pass records `us-east-1`. Skip the versions read
 /// and its count reads 0. Restored.
 #[tokio::test]
@@ -232,7 +232,7 @@ async fn doctor_asks_every_check_about_the_region_its_flag_names() {
     let flags = [
         (
             RegionFlags {
-                region: Some(crate::cli::RegionArg::UsWest2),
+                region: Some(microvms_core::Region::US_WEST_2),
                 unlisted_region: None,
             },
             "us-west-2",
@@ -328,7 +328,7 @@ async fn doctor_asks_every_check_about_the_region_run_would_launch_in() {
         ),
         (
             RegionFlags {
-                region: Some(RegionArg::ApNortheast1),
+                region: Some(microvms_core::Region::AP_NORTHEAST_1),
                 unlisted_region: None,
             },
             pinned(),
@@ -406,7 +406,7 @@ async fn doctor_asks_every_check_about_the_region_run_would_launch_in() {
 /// line says it wasn't read instead of listing us-east-1's bases. The credentials line says
 /// us-east-1 stood in, so the report doesn't name two regions without saying why.
 ///
-/// **Falsification** 2026-09-28. Fall back to `Region::UsEast1` in `check_managed_bases` when
+/// **Falsification** 2026-09-28. Fall back to `Region::US_EAST_1` in `check_managed_bases` when
 /// the region doesn't resolve, and a second plane is asked for. Skip the credentials check
 /// there, and none is. Drop the stand-in note from the credentials line and its detail
 /// doesn't say it. Restored.

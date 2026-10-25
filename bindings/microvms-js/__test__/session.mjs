@@ -32,7 +32,19 @@ import {
 } from '../index.js';
 import { codeOf, startSseServer, wireKindOf } from './support/sse.mjs';
 
-const SUPPORTED = ['us-east-1', 'us-east-2', 'us-west-2', 'eu-west-1', 'ap-northeast-1'];
+const NAMED = ['us-east-1', 'us-east-2', 'us-west-2', 'eu-west-1', 'ap-northeast-1'];
+const MEASURED = [
+  ...NAMED,
+  'ap-south-1',
+  'ap-southeast-1',
+  'ap-southeast-2',
+  'eu-central-1',
+  'eu-north-1',
+  'ap-east-1',
+  'ap-southeast-5',
+  'ap-southeast-7',
+  'eu-south-2',
+];
 
 /** A session against an endpoint nothing is listening on. */
 function offline() {
@@ -269,12 +281,12 @@ test('a non-finite ready timeout is refused before the poll loop starts', async 
   }
 });
 
-// -- the region closed set (`src/region.rs`) -----------------------------------
+// -- regions by name (`src/region.rs`) -----------------------------------------
 
-test('each named factory answers its own region and reports supported', () => {
+test('each named factory answers its own region and reports measured', () => {
   // Five factories, five distinct regions, no two aliased. Aliasing is the mistake worth checking:
-  // `usEast2()` returning `UsEast1` would send every call to the wrong region's endpoint and nothing
-  // local would object.
+  // `usEast2()` returning us-east-1 would send every call to the wrong region's endpoint and
+  // nothing local would object.
   const built = [
     ['us-east-1', Region.usEast1()],
     ['us-east-2', Region.usEast2()],
@@ -284,46 +296,51 @@ test('each named factory answers its own region and reports supported', () => {
   ];
   assert.deepEqual(
     built.map(([name]) => name),
-    SUPPORTED,
+    NAMED,
   );
   for (const [name, region] of built) {
     assert.equal(region.name, name);
-    assert.equal(region.isSupported, true);
+    assert.equal(region.isMeasured, true);
     assert.equal(region.toString(), name);
   }
 });
 
-test('supported is exactly the five named factories', () => {
-  // One list, reachable two ways, and they have to agree. A region present in one and absent from
-  // the other is a region that is either unreachable or undocumented.
-  assert.deepEqual(
-    Region.supported().map((region) => region.name),
-    SUPPORTED,
-  );
-  assert.ok(Region.supported().every((region) => region.isSupported));
+test('measured is the fourteen regions, starting with the named five', () => {
+  // The list AWS was measured running MicroVMs in, in launch order. The named factories are its
+  // first five, so a region reachable by name is one the list reports as measured.
+  const names = Region.measured().map((region) => region.name);
+  assert.deepEqual(names, MEASURED);
+  assert.deepEqual(names.slice(0, 5), NAMED);
+  assert.ok(Region.measured().every((region) => region.isMeasured));
 });
 
-test('parse accepts every supported name and round trips it', () => {
-  // The positive half of the refusal, so the guard is not a blanket no. `parse` is the boundary a
-  // region name arrives at from an environment variable or a config file, and a refusal that also
-  // rejected the good names would be worse than no check.
-  for (const name of SUPPORTED) {
+test('parse accepts every measured name and round trips it', () => {
+  for (const name of MEASURED) {
     const parsed = Region.parse(name);
     assert.equal(parsed.name, name);
-    assert.equal(parsed.isSupported, true);
+    assert.equal(parsed.isMeasured, true);
     // Round trip through the string form, which is what a config file round trip looks like.
     assert.ok(Region.parse(parsed.toString()).equals(parsed));
   }
 });
 
-test('parse refuses everything outside the five without normalising', () => {
-  // Exact matching, deliberately. A `parse` that trimmed or case-folded would accept two spellings
-  // of one region, and whichever consumer keyed on the raw string would split the group. More to
-  // the point: the whole value of this refusal is that it is the *only* warning before the
-  // null-message denial, and a normalising parse quietly widens the set it guards.
+test('parse accepts a well-formed unmeasured name and says so', () => {
+  // us-west-1 answered `ListMicrovms` with the null-message denial on 2026-10-24, and the client
+  // still takes it: the error a call there produces names the region, which is where the warning
+  // lives since 1.3.0.
+  for (const name of ['us-west-1', 'ca-central-1', 'us-gov-west-1', 'me-south-1']) {
+    const parsed = Region.parse(name);
+    assert.equal(parsed.name, name);
+    assert.equal(parsed.isMeasured, false);
+  }
+});
+
+test('parse refuses a malformed name without normalising', () => {
+  // Exact, deliberately. A `parse` that trimmed or case-folded would accept two spellings of one
+  // region, and whichever consumer keyed on the raw string would split the group. The name becomes
+  // the middle of the endpoint's host, so anything outside a region name's shape is refused before
+  // it reaches a URL.
   const spellings = [
-    'eu-central-1', // AWS runs MicroVMs here (2026-08-19); this client doesn't list it
-    'us-east-3',
     'US-EAST-1',
     'us-east-1 ',
     ' us-east-1',
@@ -331,6 +348,7 @@ test('parse refuses everything outside the five without normalising', () => {
     'us_east_1',
     '',
     'local',
+    'us-east-1.example.com',
   ];
   for (const name of spellings) {
     assert.throws(
@@ -345,53 +363,46 @@ test('parse refuses everything outside the five without normalising', () => {
   }
 });
 
-test('the refusal names the null-message trap and offers the supported set', () => {
-  // "AccessDeniedException" alone reads as an IAM problem — someone would spend an hour reading a
-  // policy that is correct — and the word *null* is what says the region may be the cause. The
-  // five names have to be there too, or the refusal tells a caller they are wrong without telling
-  // them what is right.
+test('the refusal names the shape and an example', () => {
   assert.throws(
-    () => Region.parse('eu-central-1'),
+    () => Region.parse('EU-CENTRAL-1'),
     (error) => {
-      assert.match(error.message, /AccessDeniedException/);
-      assert.match(error.message, /null/);
-      for (const name of SUPPORTED) {
-        assert.ok(error.message.includes(name), `${name} missing: ${error.message}`);
-      }
+      assert.match(error.message, /EU-CENTRAL-1/);
+      assert.match(error.message, /not a region name/);
+      assert.match(error.message, /us-east-1/);
       return true;
     },
   );
 });
 
-test('unlisted normalises a supported name back to the real region', () => {
+test('the deprecated unlisted gives a named region back as its factory does', () => {
   // One region, one value, however it was reached. Without this, `unlisted("us-east-1")` would be a
-  // *second* value for a supported region — equal to nothing and reporting `isSupported` false
-  // about a region that is — so anything keyed by region would hold two entries for one place.
-  for (const name of SUPPORTED) {
+  // *second* value for one region, so anything keyed by region would hold two entries for one place.
+  for (const name of NAMED) {
     const hatched = Region.unlisted(name);
     assert.ok(hatched.equals(Region.parse(name)));
-    assert.equal(hatched.isSupported, true);
+    assert.equal(hatched.isMeasured, true);
   }
 });
 
-test('unlisted accepts a name parse refuses, which is the whole point', () => {
-  // The two doors differ, and in exactly one direction. `parse` is for a name that must be checked;
-  // `unlisted` is for a name someone chose anyway. If `unlisted` refused too there would be no
-  // hatch, and if `parse` accepted there would be no guard.
-  assert.throws(() => Region.parse('me-south-1'));
-  const hatched = Region.unlisted('me-south-1');
-  assert.equal(hatched.name, 'me-south-1');
-  assert.equal(hatched.isSupported, false);
+test('the deprecated supported and isSupported keep the five', () => {
+  // The 1.2 meaning, one of the five named regions. eu-central-1 separates the two predicates: AWS
+  // runs MicroVMs there, so it is measured, and it has no named factory, so it was never supported.
+  assert.deepEqual(
+    Region.supported().map((region) => region.name),
+    NAMED,
+  );
+  assert.equal(Region.usEast1().isSupported, true);
+  assert.equal(Region.parse('eu-central-1').isSupported, false);
+  assert.equal(Region.parse('eu-central-1').isMeasured, true);
 });
 
-test('an unlisted name is carried verbatim, including a spelling parse would reject', () => {
-  // No normalising on the way through, because the caller may know something this client does not.
-  // A name is what goes into the endpoint's middle segment, so altering it would address a different
-  // region than the one asked for — and the reason to use this door is that the client's list is out
-  // of date rather than the caller's.
-  for (const name of ['EU-CENTRAL-1', 'eu-central-1', 'some-future-region-9']) {
+test('the deprecated unlisted carries a name verbatim, as 1.2 did', () => {
+  // No shape check and no normalising on the deprecated path, as in 1.2.
+  for (const name of ['EU-CENTRAL-1', 'some-future-region-9']) {
     assert.equal(Region.unlisted(name).name, name);
   }
+  assert.ok(Region.unlisted('us-west-1').equals(Region.parse('us-west-1')));
 });
 
 test('equals compares regions by value where === compares by reference', () => {
@@ -402,7 +413,7 @@ test('equals compares regions by value where === compares by reference', () => {
   assert.ok(Region.usEast1().equals(Region.usEast1()));
   assert.ok(!Region.usEast1().equals(Region.usWest2()));
   // Every pair of distinct regions is unequal, so `equals` is not "always true".
-  const regions = Region.supported();
+  const regions = Region.measured();
   for (let i = 0; i < regions.length; i += 1) {
     for (let j = i + 1; j < regions.length; j += 1) {
       assert.ok(!regions[i].equals(regions[j]), `${regions[i].name} == ${regions[j].name}`);
@@ -410,19 +421,17 @@ test('equals compares regions by value where === compares by reference', () => {
   }
 });
 
-test('an unlisted region is not equal to a supported one', () => {
-  // `isSupported` is part of the identity, not a label bolted on. Two values spelling the same name
-  // but disagreeing about support would make it arbitrary which one a consumer held — and that
-  // decides whether they get the warning.
-  const unlisted = Region.unlisted('eu-central-1');
-  for (const supported of Region.supported()) {
-    assert.ok(!unlisted.equals(supported));
+test('an unmeasured region is not equal to a measured one', () => {
+  // Equality is by name, so an unmeasured region is a distinct value from every measured one.
+  const unmeasured = Region.parse('us-west-1');
+  for (const measured of Region.measured()) {
+    assert.ok(!unmeasured.equals(measured));
   }
 });
 
 test('Region has no constructor, so an unchecked name is not writable', () => {
   // With one, `new Region("eu-central-1")` would be the shortest path in the module and would bypass
-  // both doors — the check and the visible opt-in — at once.
+  // the shape check `parse` makes.
   assert.throws(() => new Region('us-east-1'));
   assert.throws(() => new Region());
 });
