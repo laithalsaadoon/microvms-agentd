@@ -30,7 +30,7 @@
 //!   provenance cannot be omitted rather than merely defaulting wrong.
 //! * **A malformed region name.** [`region::PyRegion`] is a class whose doors are the five
 //!   named constructors and a `parse` that takes any well-formed region name and refuses a
-//!   malformed one; `supported()` lists the regions AWS was measured running MicroVMs in,
+//!   malformed one; `measured()` lists the regions AWS was measured running MicroVMs in,
 //!   which TRAP-6's error reads. No method on this surface takes a region string.
 //! * **Two hook timeouts whose ceilings are 60x apart, transposed.**
 //!   [`hooks::PyRunHookTimeout`] and [`hooks::PyBuildHookTimeout`] are separate

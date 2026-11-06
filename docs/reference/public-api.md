@@ -2,7 +2,7 @@
 
 The Rust client is `microvms-core`: its facade re-exports the shared wire contract,
 application APIs, domain values, and production adapters.
-`crates/microvms-core/src/lib.rs:85-95`
+`crates/microvms-core/src/lib.rs:88-98`
 
 Import `microvms_core::prelude::*` for the production constructors below; their
 extension traits connect the underlying port-based types to production adapters.
@@ -93,7 +93,7 @@ Appends the agentd startup instructions to a task Dockerfile using the supplied 
 
 Checks launch prerequisites for the supplied region or the region resolved from the environment.
 
-`crates/microvms-core/src/lib.rs:165`
+`crates/microvms-core/src/lib.rs:168`
 
 ### prelude::ControlPlaneExt::new
 

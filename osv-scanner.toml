@@ -8,8 +8,9 @@
 # trivy consume. See .vex/README.md.
 #
 # osv-scanner applies a config file to the lockfiles in its own directory, so each lockfile's
-# acceptances sit beside it: this file for Cargo.lock, site/osv-scanner.toml for the docs site's
-# pnpm-lock.yaml. OpenSSF Scorecard's Vulnerabilities check reads them the same way.
+# acceptances sit beside it: this file for Cargo.lock, crates/agentd/fuzz/osv-scanner.toml for the
+# fuzz workspace's own Cargo.lock, site/osv-scanner.toml for the docs site's pnpm-lock.yaml.
+# OpenSSF Scorecard's Vulnerabilities check reads them the same way.
 #
-# None today: rkyv, the one Cargo.lock acceptance (RUSTSEC-2026-0235), left the lockfile in the
-# 2026-09-04 dependency rollup (#127), and osv-scanner reported the ignore as unused.
+# It accepts no finding at present. Add an [[IgnoredVulns]] entry with an `id` and a `reason`
+# only together with its VEX statement.

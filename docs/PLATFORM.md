@@ -312,7 +312,9 @@ which support estimates:
 | Snapshot write GiB | 0.0037977138 |
 | Snapshot storage GiB-hour | 0.0001111111 |
 
-The API also returned non-ARM compute rates; MicroVMs support `ARM_64` only.
+The API also returned non-ARM compute rates. Estimates use the ARM rates because this client
+builds ARM64 images only, although the service model has also listed `X86_64` since
+2026-11-05 (botocore 1.43.125, #758).
 On 2026-10-24 it returned MicroVM rates for each region that
 [the null-message section](#a-null-message-accessdeniedexception-can-mean-region-availability-or-iam)
 names as priced. `us-east-2` and `us-west-2` match `us-east-1` on every line.
@@ -886,3 +888,11 @@ showed `PWD`, `SHLVL` and `_`, which `/bin/sh` sets itself. No credential or tok
 variable was present. The snapshot is taken in the image-build VM, so these are the
 build VM's values carried by the snapshot: key names only were recorded, and whether
 `AWS_REGION` or the image variables differ per launch was not measured.
+
+## An image's `environmentVariables` map holds at most 100 entries
+
+Measured 2026-11-06, us-east-1, API 2025-09-09, live. `CreateMicrovmImage` refused 101
+variables with a `ValidationException` whose message ends with the 100-entry limit. It accepted
+100, and `GetMicrovmImageVersion` read the 100 back. The service model raised the ceiling from
+50 to 100 in botocore 1.43.125 (2026-11-05). The client doesn't send image environment
+variables, so `tools/check-model-drift.py` pins the ceiling to notice the next change (#758).

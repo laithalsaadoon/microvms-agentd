@@ -13,6 +13,7 @@ consumed by two of the three scanners in CI's `sbom` job:
   shape and this README is the pointer to re-wire).
 - **osv-scanner** does not consume VEX documents; its overrides live in an
   `osv-scanner.toml` beside the lockfile they govern (the repo root for
+  `Cargo.lock`, `crates/agentd/fuzz/` for the fuzz workspace's own
   `Cargo.lock`, `site/` for the docs site), because osv-scanner and OpenSSF
   Scorecard apply a config file only to the lockfiles in its directory. Any
   vulnerability suppressed there must also carry a statement here, so this

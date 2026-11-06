@@ -3,7 +3,7 @@
 The daemon dispatches the routes declared in its schema, the app owns the client lifecycle,
 and the CLI dispatches user commands into those capabilities. The entry points below trace
 those boundaries. `crates/agentd/src/routes.rs:36` `crates/microvms-app/src/sandbox.rs:1113`
-`crates/microvms-cli/src/main.rs:216`
+`crates/microvms-cli/src/main.rs:223`
 
 ## Build or reuse an image
 
@@ -68,13 +68,13 @@ Entry point: `crates/microvms-app/src/sandbox.rs:1827`
 2. For a known VM, it records termination intent before calling the control plane, then records acceptance or the failure and undeleted identifier. `crates/microvms-app/src/sandbox.rs:1843`
 3. If requested and the termination was accepted, it waits for `TERMINATED`; a wait failure remains in the report. `crates/microvms-app/src/sandbox.rs:1858`
 4. Optional image deletion retries through the control plane and records whether deletion succeeded. `crates/microvms-app/src/sandbox.rs:1883`
-5. Each image deletion attempt lists all version pages before removing extra versions, deleting the image, and checking its response state. `crates/microvms-app/src/control/image.rs:1247`
+5. Each image deletion attempt lists all version pages before removing extra versions, deleting the image, and checking its response state. `crates/microvms-app/src/control/image.rs:1248`
 6. Optional build-log-group cleanup is reported last as undeleted because this path does not remove CloudWatch Logs groups. The returned report includes the final local lifecycle. `crates/microvms-app/src/sandbox.rs:1905`
 
 ### Related
 
 - `crates/microvms-app/src/control/microvm.rs:929`
-- `crates/microvms-app/src/control/image.rs:1217`
+- `crates/microvms-app/src/control/image.rs:1218`
 - `crates/microvms-app/src/sandbox.rs:478`
 - `crates/microvms-cli/src/commands/lifecycle.rs:2229`
 

@@ -582,7 +582,8 @@ def check(src: Source, model: dict[str, Any]) -> Checker:
         sides=(src.label, "required"),
     )
 
-    # ARM64-only is machine-checkable, not folklore.
+    # The architectures AWS accepts are machine-checkable, not folklore. Image builds send the
+    # first one, ARM_64, because agentd ships an aarch64 binary only.
     c.enum("Architecture enum", "Architecture", src.get("ARCHITECTURES"))
     # Why `build_image` takes `repair_guest_identity: bool` and not a capability list:
     # there is exactly one accepted value, so a list can only express a mistake.
@@ -1037,7 +1038,10 @@ def check(src: Source, model: dict[str, Any]) -> Checker:
 # loop. `ROLE_ARN_PATTERN` went the same way once there was a matcher to read it.
 #
 # What is left here is genuinely unbound by the client, and each one says why at its use site.
-MAX_ENVIRONMENT_VARIABLES = 50
+#: The image-level `environmentVariables` map's ceiling, 100 since botocore 1.43.125
+#: (2026-11-05). Measured that day in us-east-1: CreateMicrovmImage refused 101 with
+#: "Member must have length less than or equal to 100" and accepted 100, reading back 100.
+MAX_ENVIRONMENT_VARIABLES = 100
 #: Every paginated listing's `maxResults` ceiling, all six identical today.
 #:
 #: Held here rather than in `microvms-core`'s constants because no production path sends a page

@@ -190,7 +190,7 @@ Defined at: `crates/model/src/posture.rs:254-261`
 
 ## PreflightStep
 
-The preflight model starts at `Region` and advances through each report stage. A stage that cannot perform its probe still advances while recording `NotRun`; the report derives `ok` and reaches `Done` (`crates/model/src/preflight.rs:141-175`, `crates/model/src/preflight.rs:177-240`).
+The preflight model starts at `Region` and advances through each report stage. A stage that cannot perform its probe still advances while recording `NotRun`; the report derives `ok` and reaches `Done` (`crates/model/src/preflight.rs:144-178`, `crates/model/src/preflight.rs:180-243`).
 
 ```mermaid
 stateDiagram-v2
@@ -202,7 +202,7 @@ stateDiagram-v2
     Done --> [*]
 ```
 
-Defined at: `crates/model/src/preflight.rs:95-101`
+Defined at: `crates/model/src/preflight.rs:98-104`
 
 ## ProvisionPhase
 

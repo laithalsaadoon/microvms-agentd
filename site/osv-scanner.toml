@@ -4,6 +4,7 @@
 # vulnerability ignored here MUST also carry a statement there. It sits beside the lockfile
 # because osv-scanner, and OpenSSF Scorecard through it, apply a config file only to the
 # lockfiles in its own directory. See .vex/README.md.
-#
-# It accepts no finding at present. Add an [[IgnoredVulns]] entry with an `id` and a `reason`
-# only together with its VEX statement.
+
+[[IgnoredVulns]]
+id = "GHSA-g3hv-75wg-m249"
+reason = "minimatch 10.2.6, under typedoc 0.28.20, runs the amplifying preprocessing only at optimizationLevel 2 or above, and typedoc never sets that option; see the not_affected statement in .vex/microvms-agentd.openvex.json."

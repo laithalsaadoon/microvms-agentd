@@ -1,4 +1,3 @@
-# build-box.sh output and its clone of Strands Box, and run.sh evidence: all local.
-.box-src/
+# download-box.sh output and run.sh evidence: all local.
 .box-bin/
 out/
