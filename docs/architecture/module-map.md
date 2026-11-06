@@ -70,7 +70,7 @@ The edges layer implements the application ports with production I/O: signed con
 
 ## microvms-core
 
-The composition root presents the Rust client API used by the CLI and language bindings, re-exporting the domain, application, edges, and protocol layers. `crates/microvms-core/src/lib.rs:55-95` Its prelude supplies extension traits that construct application types with production ports. `crates/microvms-core/src/prelude.rs:2-17`
+The composition root presents the Rust client API used by the CLI and language bindings, re-exporting the domain, application, edges, and protocol layers. `crates/microvms-core/src/lib.rs:58-98` Its prelude supplies extension traits that construct application types with production ports. `crates/microvms-core/src/prelude.rs:2-17`
 
 - `crates/microvms-core/src/lib.rs:2`
 - `crates/microvms-core/src/prelude.rs:2`
@@ -78,7 +78,7 @@ The composition root presents the Rust client API used by the CLI and language b
 
 ## microvms-cli
 
-The `microvm` binary parses the command tree, dispatches handlers through its library seam, and renders command results. `crates/microvms-cli/src/main.rs:81-108` `crates/microvms-cli/src/main.rs:182-240` Command modules group lifecycle work, operations on existing VMs, local operations, and coding-agent workflows; project configuration supplies another source of run options. `crates/microvms-cli/src/commands/mod.rs:25-39` `crates/microvms-cli/src/config.rs:2-6`
+The `microvm` binary parses the command tree, dispatches handlers through its library seam, and renders command results. `crates/microvms-cli/src/main.rs:81-110` `crates/microvms-cli/src/main.rs:189-247` Command modules group lifecycle work, operations on existing VMs, local operations, and coding-agent workflows; project configuration supplies another source of run options. `crates/microvms-cli/src/commands/mod.rs:25-39` `crates/microvms-cli/src/config.rs:2-6`
 
 - `crates/microvms-cli/src/cli.rs:2`
 - `crates/microvms-cli/src/commands/attached.rs:2`

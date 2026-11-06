@@ -161,11 +161,11 @@ jobs:
         # rust-toolchain.toml declares the aarch64-musl target, so it installs
         # without a step here.
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       # Every `uses:` here is on a Node 24 major, for the reason `ci.yml`'s header
       # paragraph gives — including `configure-aws-credentials@v6`, whose rolling
       # v6 tag landed on node24 (checked against the tag's action.yml, 2026-08-09).
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           # See `ci.yml`'s `security` job: `conformance/run_rs.py` and
           # `tools/check-live-rates.py` are PEP 723 scripts carrying their own
@@ -223,7 +223,7 @@ jobs:
           name: native-box
           path: examples/strands-box-codex-sdk/.box-bin
       - name: restore executable modes on native Box artifacts
-        run: chmod +x examples/strands-box-codex-sdk/.box-bin/strands-box*
+        run: chmod +x examples/strands-box-codex-sdk/.box-bin/box examples/strands-box-codex-sdk/.box-bin/strands-box-*
 
       # The directory supplies quickstart's matching release on branches and tags alike.
       # It does not replace main's source-built AGENTD or MICROVM.
@@ -392,7 +392,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: false
       - name: recover only the reviewed resource identities

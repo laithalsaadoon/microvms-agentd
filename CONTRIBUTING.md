@@ -142,7 +142,7 @@ CI's `mutants` job runs cargo-mutants over the Rust a pull request changes, and
 code, such as a return value replaced or a `>` turned into `>=`. Only the
 mutated package's own tests run against it, so a test in `crates/microvms-core/tests`
 doesn't catch a mutant in the app. A change with no Rust in it passes at once. The job
-runs as four shards that report under their own names, and the `mutation testing` check
+runs as a matrix of shards that report under their own names, and the `mutation testing` check
 is their combined result, which fails when any shard didn't pass. It's the one name main's
 ruleset can require; until the ruleset lists it, read the shards before a merge.
 
@@ -170,7 +170,7 @@ it, so a script's own suite loads it with `runpy.run_path(<path>, run_name="tool
 script no suite loads that way isn't measured, and the job says so. A surviving mutant prints
 with its diff: write the assertion that fails with it in. One no test could tell from the
 original takes a no-mutate pragma on its line, with the reason in parentheses after it, which
-the script requires. The job runs in four shards, each with its share of the changed functions
+the script requires. The job runs as a matrix of shards, each with its share of the changed functions
 and their base, and each within a budget under the job's timeout; a function a shard's budget
 leaves undecided passes, and the log names it. `mise run mutmut` takes the same `--base` and
 `--shard` arguments the job hands `ci:mutmut`, and the `--budget` that `ci:mutmut` sets. The
@@ -551,7 +551,7 @@ reviewer in the `release` environment. Then:
    tag, at the tagged commit, a success, and a marker naming this draft. An
    approval given before that fails the job, and re-running the job once the
    live run has passed is the fix.
-3. Approve the four publishing jobs, which wait in the same environment:
+3. Approve the publishing jobs, which wait in the same environment:
    `github-release` checks that the draft still holds what the live run tested
    and publishes it, and `crates-io`, `pypi` and `npm` publish the packages.
 

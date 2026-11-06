@@ -48,11 +48,15 @@ class RunOrderingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             example = root / "example"
-            shutil.copytree(EXAMPLE, example)
+            # Without the checkout's own download-box.sh output, as in CI: a local .box-bin/
+            # would supply binaries the stubs below are meant to stand in for.
+            shutil.copytree(
+                EXAMPLE, example, ignore=shutil.ignore_patterns(".box-bin", "out")
+            )
             binaries = example / ".box-bin"
             binaries.mkdir(exist_ok=True)
             for name in (
-                "strands-box",
+                "box",
                 "strands-box-sock-alias",
                 "strands-box-contain-trampoline",
             ):
@@ -83,7 +87,9 @@ class RunOrderingTests(unittest.TestCase):
                 text=True,
                 timeout=120,
             )
-            return result, [json.loads(line) for line in calls.read_text().splitlines()]
+            # run.sh can exit before its first microvm call, and then the log is never written.
+            lines = calls.read_text().splitlines() if calls.exists() else []
+            return result, [json.loads(line) for line in lines]
 
     def test_root_route_precedes_driver_and_all_launchers_are_explicit_root(self):
         result, calls = self.run_example()

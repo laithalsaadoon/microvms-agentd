@@ -9,8 +9,6 @@ import hashlib
 import importlib.util
 import io
 import json
-import re
-import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -22,8 +20,9 @@ from lanes.native_box import (
     EXAMPLE,
     SCENARIOS,
     NativeCleanupResults,
+    box_release_ok,
     native_box_checks,
-    native_build_ok,
+    pinned_release,
 )
 
 
@@ -42,54 +41,48 @@ def check_native_box(results: Results, temporary: Path) -> None:
     directory.mkdir()
     for name in BINARIES:
         (directory / name).write_bytes(name.encode())
-    pin = re.search(
-        r"BOX_COMMIT:-([0-9a-f]{40})", (EXAMPLE / "build-box.sh").read_text()
-    )
+    pin = pinned_release()
     assert pin
+    version, archive_sha256 = pin
     receipt = {
-        "sourceRevision": pin.group(1),
-        "hostSystem": "Linux",
-        "hostArchitecture": "aarch64",
-        "target": "aarch64-unknown-linux-gnu.2.34",
-        "rustc": "rustc 1.98.1",
-        "cargoZigbuild": "cargo-zigbuild 0.23.4",
-        "zig": "0.16.0",
+        "version": version,
+        "archive": f"box-{version}-linux-arm64.tar.gz",
+        "archiveSha256": archive_sha256,
         "sha256": {
             name: hashlib.sha256(name.encode()).hexdigest() for name in BINARIES
         },
     }
 
     def write(value: dict) -> None:
-        (directory / "build.json").write_text(json.dumps(value))
+        (directory / "release.json").write_text(json.dumps(value))
 
     write(receipt)
     results.check(
-        "native Box accepts matching provenance and binary digests",
-        native_build_ok(directory),
+        "native Box accepts the pinned release and matching binary digests",
+        box_release_ok(directory),
     )
     for field in receipt:
         broken = copy.deepcopy(receipt)
         broken.pop(field)
         write(broken)
         results.check(
-            f"native Box rejects missing {field}", not native_build_ok(directory)
+            f"native Box rejects missing {field}", not box_release_ok(directory)
         )
     for field, value in (
-        ("hostArchitecture", "x86_64"),
-        ("hostSystem", "Darwin"),
-        ("sourceRevision", "0" * 40),
-        ("target", "aarch64-unknown-linux-gnu"),
+        ("version", "v0.0.0"),
+        ("archive", f"box-{version}-aarch64-apple-darwin.tar.gz"),
+        ("archiveSha256", "0" * 64),
     ):
         write({**receipt, field: value})
         results.check(
-            f"native Box rejects wrong {field}", not native_build_ok(directory)
+            f"native Box rejects wrong {field}", not box_release_ok(directory)
         )
     write(receipt)
-    check_build_receipt(results, directory, receipt)
+    check_release_receipt(results, directory, receipt)
     for name in BINARIES:
         (directory / name).write_bytes(b"changed")
         results.check(
-            f"native Box rejects changed {name}", not native_build_ok(directory)
+            f"native Box rejects changed {name}", not box_release_ok(directory)
         )
         (directory / name).write_bytes(name.encode())
 
@@ -131,39 +124,29 @@ def check_native_box(results: Results, temporary: Path) -> None:
     results.check("native Box rejects duplicate scenarios", bool(probe.failed))
 
 
-def check_build_receipt(results: Results, directory: Path, expected: dict) -> None:
-    script = (EXAMPLE / "build-box.sh").read_text()
+def check_release_receipt(results: Results, directory: Path, expected: dict) -> None:
+    """download-box.sh's own receipt code writes what box_release_ok accepts."""
+    script = (EXAMPLE / "download-box.sh").read_text()
     receipt_code = script.split("<<'PY_RECEIPT'\n", 1)[1].split("\nPY_RECEIPT", 1)[0]
-    versions = {
-        ("git", "rev-parse", "HEAD"): expected["sourceRevision"],
-        ("rustc", "--version"): expected["rustc"],
-        ("cargo-zigbuild", "--version"): expected["cargoZigbuild"],
-        ("zig", "version"): expected["zig"],
-    }
-
-    def tool_version(args, **kwargs):
-        if args not in versions:
-            raise subprocess.CalledProcessError(2, args)
-        return versions[args] + "\n"
-
-    # Execute the receipt generator with the pinned tools' command contracts.
-    # cargo injects a `zigbuild` subcommand, whose flags omit --version.
+    argv = [
+        "receipt",
+        str(directory),
+        expected["version"],
+        expected["archive"],
+        expected["archiveSha256"],
+    ]
     try:
         with (
-            patch.object(sys, "argv", ["receipt", str(directory)]),
-            patch.object(subprocess, "check_output", tool_version),
+            patch.object(sys, "argv", argv),
             contextlib.redirect_stdout(io.StringIO()),
         ):
-            exec(compile(receipt_code, str(EXAMPLE / "build-box.sh"), "exec"), {})
-        actual = json.loads((directory / "build.json").read_text())
-        valid = all(
-            actual[key] == expected[key]
-            for key in ("sourceRevision", "rustc", "cargoZigbuild", "zig", "sha256")
-        )
-    except (subprocess.CalledProcessError, KeyError):
+            exec(compile(receipt_code, str(EXAMPLE / "download-box.sh"), "exec"), {})
+        actual = json.loads((directory / "release.json").read_text())
+        valid = actual == expected and box_release_ok(directory)
+    except (KeyError, OSError, ValueError):
         valid = False
-    results.check("native Box records supported tool version commands", valid)
-    (directory / "build.json").write_text(json.dumps(expected))
+    results.check("native Box records the release it downloaded", valid)
+    (directory / "release.json").write_text(json.dumps(expected))
 
 
 def check_region_staging(results: Results, temporary: Path) -> None:
@@ -192,7 +175,8 @@ def check_region_staging(results: Results, temporary: Path) -> None:
             == region
             and model["model"] == "global.openai.gpt-6.1-sol"
             and model["model_provider"] == "amazon-bedrock-runtime"
-            and policy.count(f'context.input.host == "{endpoint}"') == 2
+            and policy.count(f'context.input.host == "{endpoint}"') == 3
+            and policy.count(f'input.host: "{endpoint}"') == 1
             and (region == "us-east-1" or "us-east-1" not in policy),
         )
     results.check(

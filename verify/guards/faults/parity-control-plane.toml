@@ -28,7 +28,7 @@ transform = { file = "crates/microvms-app/src/control/microvm.rs", replace = "Er
 [[fault]]
 id = "parity-window-closed-ts"
 guard = "control-plane/window-closed"
-run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"], ["node", "--test", "--test-reporter=tap", "--test-name-pattern=control-plane/window-closed", "bindings/microvms-js/__test__/parity_cases.mjs"]]
+run = [["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"], ["npx", "-y", "-p", "@napi-rs/cli@3.10.9", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"], ["node", "--test", "--test-reporter=tap", "--test-name-pattern=control-plane/window-closed", "bindings/microvms-js/__test__/parity_cases.mjs"]]
 expect = "test-failed"
 suite = "bindings"
 transform = { file = "crates/microvms-app/src/control/microvm.rs", replace = "Err(refused) if refused.kind() == ErrorKind::Platform => {", with = "Err(refused) if false && refused.kind() == ErrorKind::Platform => {" }

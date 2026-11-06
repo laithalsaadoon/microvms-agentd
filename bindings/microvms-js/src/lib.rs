@@ -49,7 +49,7 @@
 //!   `new Duration(3600)` throws rather than producing an unlabelled span.
 //! * **A malformed region name.** [`region::Region`] has factory methods for the five names and
 //!   a `parse` that takes any well-formed region name and refuses a malformed one;
-//!   `supported()` lists the regions AWS was measured running MicroVMs in, which TRAP-6's error
+//!   `measured()` lists the regions AWS was measured running MicroVMs in, which TRAP-6's error
 //!   reads. No method takes a region string.
 //! * **Two hook timeouts whose ceilings are 60x apart, transposed.**
 //!   [`hooks::RunHookTimeout`] and [`hooks::BuildHookTimeout`] are separate classes, so

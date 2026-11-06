@@ -1,0 +1,50 @@
+[[family]]
+guard = "tools/test_box_spend.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_box_spend.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "box-spend-interrupts"
+message = "test_interrupts_once_when_the_spend_reaches_the_cap"
+transform = { file = "examples/strands-box-codex-sdk/vm/spend.py", replace = "                interrupt()\n", with = "                pass\n" }
+
+[[family.fault]]
+id = "box-spend-cap-is-inclusive"
+message = "test_interrupts_once_when_the_spend_reaches_the_cap"
+transform = { file = "examples/strands-box-codex-sdk/vm/spend.py", replace = "if not interrupted and meter.spent >= cap:", with = "if not interrupted and meter.spent > cap:" }
+
+[[family.fault]]
+id = "box-spend-cache-reads-at-their-rate"
+message = "test_prices_fresh_input_both_cache_counts_and_output_at_the_card_rates"
+transform = { file = "examples/strands-box-codex-sdk/vm/spend.py", replace = "+ cached * rates.cache_read", with = "+ cached * rates.input" }
+
+[[family.fault]]
+id = "box-spend-cache-counts-inside-input"
+message = "test_prices_fresh_input_both_cache_counts_and_output_at_the_card_rates"
+transform = { file = "examples/strands-box-codex-sdk/vm/spend.py", replace = 'fresh = max(0, used["input_tokens"] - cached - written)', with = 'fresh = max(0, used["input_tokens"])' }
+
+[[family.fault]]
+id = "box-spend-prices-growth-only"
+message = "test_a_repeated_total_adds_nothing"
+transform = { file = "examples/strands-box-codex-sdk/vm/spend.py", replace = "        self._seen[thread_id] = now\n", with = "" }
+
+[[family.fault]]
+id = "box-spend-long-context-threshold"
+message = "test_long_context_rates_apply_to_a_whole_request_over_272k_input_tokens"
+transform = { file = "examples/strands-box-codex-sdk/vm/spend.py", replace = "grown[\"input_tokens\"]) > LONG_CONTEXT", with = "grown[\"input_tokens\"]) >= LONG_CONTEXT" }
+
+[[family.fault]]
+id = "box-spend-newest-request-tier"
+message = "test_the_newest_request_picks_the_long_context_rates"
+transform = { file = "examples/strands-box-codex-sdk/vm/spend.py", replace = 'long = max(newest, grown["input_tokens"]) > LONG_CONTEXT', with = 'long = grown["input_tokens"] > LONG_CONTEXT' }
+
+[[family.fault]]
+id = "box-spend-run-passes-the-cap"
+message = "test_run_sh_hands_the_driver_a_five_dollar_cap_by_default"
+transform = { file = "examples/strands-box-codex-sdk/run.sh", replace = 'driver.py --spend-cap-usd $SPEND_CAP_USD" 900', with = 'driver.py" 900' }
+
+[[family.fault]]
+id = "box-spend-run-validates-the-cap"
+message = "test_run_sh_refuses_a_cap_that_is_not_a_dollar_amount_before_any_aws_call"
+transform = { file = "examples/strands-box-codex-sdk/run.sh", replace = '[[ "$SPEND_CAP_USD" =~ ^[0-9]+([.][0-9]+)?$ ]] || {', with = 'true || {' }

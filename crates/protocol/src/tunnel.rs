@@ -75,8 +75,8 @@ pub mod close {
     pub const NO_IDENTITY: u16 = 4401;
     /// The Noise handshake or session confirmation failed.
     ///
-    /// Deliberately one code for all three. Under `KK` both static keys are mixed into the
-    /// handshake hash, so the daemon cannot distinguish "the caller pinned the wrong VM" from
+    /// Deliberately one code for every such failure. Under `KK` both static keys are mixed into
+    /// the handshake hash, so the daemon cannot distinguish "the caller pinned the wrong VM" from
     /// "the caller is not the launching host" — both arrive as a decryption failure, and a
     /// code that claimed to tell them apart would be guessing. The client knows which key it
     /// offered and can say more; the daemon cannot.

@@ -322,12 +322,14 @@ pub const MAX_HOOK_PORT: u32 = 65_535;
 /// capability list (TRAP-3): there is no way to ask for `CAP_SYS_ADMIN` alone.
 pub const CAPABILITIES: [&str; 1] = ["ALL"];
 
-/// The `Architecture` enum, which is exactly this one value: a MicroVM cannot be x86.
+/// The `Architecture` enum: `ARM_64` (Graviton) and `X86_64`, which the service model added
+/// on 2026-11-05 (botocore 1.43.125).
 ///
-/// Load-bearing for cost (COST-9) as well as for requests — the Pricing API returns
-/// both ARM and non-ARM compute rates 17.9% apart, and only the ARM line can ever
-/// apply.
-pub const ARCHITECTURES: [&str; 1] = ["ARM_64"];
+/// `ARM_64` stays first because image builds send `ARCHITECTURES[0]`: agentd ships an aarch64
+/// binary only, so this client builds ARM64 images and no others. That also keeps cost (COST-9)
+/// on the ARM line: the Pricing API returns ARM and non-ARM compute rates 17.9% apart, and only
+/// the ARM line applies to a VM this client launches.
+pub const ARCHITECTURES: [&str; 2] = ["ARM_64", "X86_64"];
 
 /// `NetworkConnectorList.max` — the **VM-level** list, which `RunMicrovm` sends.
 pub const MAX_NETWORK_CONNECTORS: usize = 10;
@@ -442,7 +444,8 @@ pub const IMAGE_VERSION_STATES: [&str; 7] = [
 /// live AWS for a review round.
 pub const BUILD_STATES: [&str; 4] = ["PENDING", "IN_PROGRESS", "SUCCESSFUL", "FAILED"];
 
-/// The `Chipset` enum, which is exactly this one value.
+/// The `Chipset` enum: `GRAVITON` and `INTEL`, which the service model added on 2026-11-05
+/// with `X86_64` (botocore 1.43.125).
 ///
 /// Now deserialized: `microvms_core::control::ops::MicrovmImageBuildSummaryWire::chipset` and
 /// `GetImageBuildResponseWire::chipset` both read it, so the drift-gate observation in issue #24
@@ -452,8 +455,8 @@ pub const BUILD_STATES: [&str; 4] = ["PENDING", "IN_PROGRESS", "SUCCESSFUL", "FA
 /// its own file.
 ///
 /// Carried as a `String` on the wire types rather than narrowed to this set, for the reason
-/// those types state: a second chipset AWS adds must parse rather than fail a build readback.
-pub const CHIPSETS: [&str; 1] = ["GRAVITON"];
+/// those types state: a chipset AWS adds must parse rather than fail a build readback.
+pub const CHIPSETS: [&str; 2] = ["GRAVITON", "INTEL"];
 
 /// `ResourcesList.max`.
 ///
@@ -865,7 +868,7 @@ mod tests {
         assert_eq!(emitted["MAX_IMAGE_HOOK_TIMEOUT_SEC"], 3_600);
         assert_eq!(emitted["MAX_HOOK_PORT"], 65_535);
         assert_eq!(emitted["CAPABILITIES"], json!(["ALL"]));
-        assert_eq!(emitted["ARCHITECTURES"], json!(["ARM_64"]));
+        assert_eq!(emitted["ARCHITECTURES"], json!(["ARM_64", "X86_64"]));
         assert_eq!(emitted["MAX_NETWORK_CONNECTORS"], 10);
         // 1, not 10. The image-level list and the VM-level one differ by an order of
         // magnitude, and this is the assertion that says so in one place.
@@ -916,7 +919,7 @@ mod tests {
             emitted["BUILD_STATES"],
             json!(["PENDING", "IN_PROGRESS", "SUCCESSFUL", "FAILED"])
         );
-        assert_eq!(emitted["CHIPSETS"], json!(["GRAVITON"]));
+        assert_eq!(emitted["CHIPSETS"], json!(["GRAVITON", "INTEL"]));
         assert_eq!(emitted["MAX_RESOURCES"], 1);
         assert_eq!(emitted["MAX_CLIENT_TOKEN_LEN"], 128);
         assert_eq!(

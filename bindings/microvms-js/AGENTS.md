@@ -28,7 +28,7 @@ converts types and maps errors; behavior belongs in the Rust layers below.
   The task's pinned builder in `.config/mise/tasks/test.toml` runs from the repository root:
 
   ```bash
-  npx -y -p @napi-rs/cli@3.10.8 napi build --manifest-path Cargo.toml \
+  npx -y -p @napi-rs/cli@3.10.9 napi build --manifest-path Cargo.toml \
     --package microvms-js --platform --output-dir . --cwd bindings/microvms-js \
     --features parity-fixtures --dts parity-fixtures.d.ts
   ```

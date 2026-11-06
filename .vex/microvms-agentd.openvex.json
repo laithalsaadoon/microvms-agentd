@@ -2,27 +2,42 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://github.com/laithalsaadoon/microvms-agentd/blob/main/.vex/microvms-agentd.openvex.json",
   "author": "laithalsaadoon/microvms-agentd maintainers",
-  "timestamp": "2026-10-24T04:12:56Z",
-  "version": 7,
+  "timestamp": "2026-11-03T09:12:14Z",
+  "version": 9,
   "statements": [
     {
-      "timestamp": "2026-10-10T17:03:27Z",
+      "timestamp": "2026-10-27T08:18:42Z",
       "vulnerability": {
-        "name": "GHSA-vfj7-8cjw-p6xm",
-        "description": "braces: stack-exhaustion denial of service through deeply nested brace patterns",
+        "name": "GHSA-qwgh-2vcv-g2f7",
+        "description": "block-buffer: a panic caught inside a compression or block-generation callback leaves the cursor stored in the buffer's block out of bounds"
+      },
+      "products": [
+        {
+          "@id": "pkg:cargo/block-buffer@0.10.4"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "block-buffer 0.10.4 is in Cargo.lock and crates/agentd/fuzz/Cargo.lock only through digest 0.10.7, under blake2 0.10.6 and sha2 0.10.9 (snow) and sha1 0.10.7 (aws-config, axum, tungstenite); `cargo tree -i block-buffer@0.10.4 --target all` lists them. The 0.12.1 copy in Cargo.lock is the fixed release. The advisory's corruption needs the cursor to live inside the data block: 0.12.0's EagerBuffer keeps it in the block's last byte and its ReadBuffer in byte 0, so input copied in before a panicking callback overwrites it. 0.10.4 keeps the cursor in its own `pos: u8` field (src/lib.rs:61-62), which only `set_pos_unchecked` writes, after each callback returns (`digest_blocks`, `set_data`, `digest_pad`), and it has no ReadBuffer, so a caught panic leaves the previous, valid position. The advisory's EagerBuffer proof of concept, built in debug mode against both releases on 2026-10-27, read cursor 2 after the caught panic on 0.10.4 and failed the cursor invariant on 0.12.0. Re-check if either lockfile gains block-buffer 0.11.x or 0.12.0, if a 0.10.x release moves the cursor into the block, or if the advisory names a 0.10 code path.",
+      "status_notes": "Since 2026-10-30 GitHub and osv.dev list GHSA-qwgh-2vcv-g2f7's affected range as >= 0.11.0, < 0.12.1, so no scanner matches block-buffer 0.10.4 and the root and crates/agentd/fuzz osv-scanner.toml files no longer ignore it. The statement stays as the record of the 2026-10-27 analysis, which still holds for 0.10.4."
+    },
+    {
+      "timestamp": "2026-11-03T09:12:14Z",
+      "vulnerability": {
+        "name": "GHSA-g3hv-75wg-m249",
+        "description": "minimatch: at optimizationLevel 2 or above, a pattern's `**/../` segments multiply its glob parts during preprocessing, and the pairwise pass over them then takes quadratic time",
         "aliases": [
-          "CVE-2026-93687"
+          "CVE-2026-118764"
         ]
       },
       "products": [
         {
-          "@id": "pkg:npm/braces@3.0.3"
+          "@id": "pkg:npm/minimatch@10.2.6"
         }
       ],
       "status": "not_affected",
-      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
-      "impact_statement": "braces is in site/pnpm-lock.yaml only, the docs site's build tooling, through micromatch 4.0.8, which only starlight-llms-txt 0.11.0 depends on (its generator.ts matches page ids against the include, exclude, promote and demote patterns). Those patterns are the ones site/astro.config.ts sets, so the nested patterns the advisory needs would have to be committed to this repository, and the worst they do is crash a docs build. Nothing in site/ ships in a crate, wheel or npm package. Re-check if the site starts taking glob patterns from anything other than its own config, or when braces publishes a fixed release.",
-      "status_notes": "GitHub withdrew GHSA-vfj7-8cjw-p6xm (CVE-2026-93687) at 2026-10-23T12:53:02Z, and osv.dev marks it withdrawn, so no scanner reports it and site/osv-scanner.toml no longer ignores it. The statement stays as the record of the 2026-10-10 decision, because an OpenVEX document holds one or more statements; drop it when the next accepted finding is added."
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "minimatch 10.2.6 is in site/pnpm-lock.yaml only, required as ^10.2.5 by typedoc 0.28.20 (also reached through typedoc-plugin-markdown 4.13.1), the docs site's devDependency that renders the TypeScript SDK reference from site/scripts/reference/sdk/typescript.mjs; `pnpm why minimatch` in site/ lists that one path, and nothing in site/ ships in a crate, wheel or npm package. The advisory's growth happens in firstPhasePreProcess and secondPhasePreProcess, which minimatch calls only when a caller sets optimizationLevel to 2 or more (dist/esm/index.js:332-341; the default is 1). typedoc builds every Minimatch with `{ dot: true }` or no options (dist/node-utils.js:62, :83 and :318), and `grep -rl optimizationLevel` over the dist directories of typedoc 0.28.20 and typedoc-plugin-markdown 4.13.1 finds no file, so that branch never runs. No semver-compatible fix exists: the fix is minimatch 11.0.1, which removes matchOne(), and typedoc's glob() calls it (dist/node-utils.js:328). Re-check when typedoc or typedoc-plugin-markdown is bumped or another package in the site lockfile starts to depend on minimatch, and drop this statement once typedoc requires minimatch 11."
     }
   ]
 }
