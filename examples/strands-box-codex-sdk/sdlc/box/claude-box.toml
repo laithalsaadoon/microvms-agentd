@@ -1,0 +1,87 @@
+# SPDX-License-Identifier: Apache-2.0
+# The box for Claude Code in the SDLC variant: the same policy.dw, check and git tool tables, and
+# egress route as box.toml, with Claude Code as the agent in place of Codex. driver.py copies
+# this file once for each phase and replaces box_dir. Every path is a path in the guest. Box's
+# own reference for each key: https://github.com/strands-agents/box/blob/main/docs/user/config.md
+
+name = "claude-sdlc"
+box_dir = "/home/agent/sdlc/state"
+policy = "policy.dw"
+
+# Claude Code's Bash tool waits up to 120 seconds for a command; Box's own default for one Strands
+# Shell call is 30.
+[limits]
+shell.timeout = 120
+
+[agent]
+# The Claude Code binary the Dockerfile installs from its pinned npm package; driver.py appends
+# the headless, stream-json arguments after `--`. HOME and the temporary directory are Claude
+# Code's own, both under ~/agent-state, where the policy's agent_state rule lets the shell read
+# and write too; the project is in neither.
+command = ["/opt/claude/claude"]
+workspace = "/home/agent/project"
+
+# Bedrock with the placeholder key Box injects, Opus 5.5, and no traffic but the model's.
+[agent.env]
+AWS_REGION = "us-east-1"
+CLAUDE_CODE_USE_BEDROCK = "1"
+ANTHROPIC_MODEL = "us.anthropic.claude-opus-5-5"
+ANTHROPIC_DEFAULT_OPUS_MODEL = "us.anthropic.claude-opus-5-5"
+ANTHROPIC_DEFAULT_SONNET_MODEL = "us.anthropic.claude-sonnet-5-5"
+ANTHROPIC_DEFAULT_HAIKU_MODEL = "us.anthropic.claude-haiku-5-5"
+CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
+DISABLE_TELEMETRY = "1"
+DISABLE_ERROR_REPORTING = "1"
+DISABLE_UPDATES = "1"
+CLAUDE_CODE_DISABLE_TERMINAL_TITLE = "1"
+CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS = "1"
+CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR = "1"
+HOME = "/home/agent/agent-state"
+CLAUDE_CONFIG_DIR = "/home/agent/agent-state/.claude"
+TMPDIR = "/home/agent/agent-state/tmp"
+CLAUDE_CODE_TMPDIR = "/home/agent/agent-state/tmp"
+PATH = "/usr/bin:/bin"
+# Box runs the agent as uid 0 in the box's user namespace (uid 1000 outside it), and Claude Code
+# refuses --dangerously-skip-permissions as root unless IS_SANDBOX=1 says a sandbox holds it.
+IS_SANDBOX = "1"
+
+# Claude Code's own process reaches its binary, its config and its temporary files, and no
+# project file: its Read, Write and Edit tools find nothing there, so it reaches each project file
+# through Box's shell, where the policy decides.
+[agent.filesystem]
+read = ["/opt/claude", "/home/agent/agent-state"]
+write = ["/home/agent/agent-state"]
+
+# The check: `python3.12 check.py`, read-only on the project, with .env empty. check.py runs
+# `git status` to refuse a dirty tree. A tool's sandbox executes only files its grants show, and
+# Box refuses a system root such as /usr/bin as a grant, so /usr/bin/git is named on its own. The
+# loader's library directories come with every tool's sandbox.
+# A host program's children raise no decision, so code that the tests import also runs here,
+# where nothing in the project or origin is writable.
+[tool.check]
+command = ["python3.12", "check.py"]
+env = { PATH = "/usr/bin:/bin", GIT_CONFIG_GLOBAL = "/home/agent/sdlc/gitconfig", GIT_CONFIG_NOSYSTEM = "1", GIT_OPTIONAL_LOCKS = "0" }
+
+[tool.check.filesystem]
+read = ["/home/agent/project", "/usr/lib64/python3.12", "/usr/libexec/git-core", "/usr/share/git-core", "/home/agent/sdlc/gitconfig"]
+read_file = ["/usr/bin/git"]
+deny = ["/home/agent/project/.env"]
+
+# git: writes only the project's .git and the bare origin outside the project. policy.dw decides
+# which subcommands start; git's own file operations raise no decision, so these lists bound them.
+# origin's URL uses git's ext transport, so a push runs `git receive-pack` with no shell.
+[tool.git]
+command = ["git"]
+env = { PATH = "/usr/bin:/bin", GIT_CONFIG_GLOBAL = "/home/agent/sdlc/gitconfig", GIT_CONFIG_NOSYSTEM = "1" }
+
+[tool.git.filesystem]
+read = ["/home/agent/project", "/home/agent/origin.git", "/usr/libexec/git-core", "/usr/share/git-core", "/home/agent/sdlc/gitconfig"]
+read_file = ["/usr/bin/git"]
+write = ["/home/agent/project/.git", "/home/agent/origin.git"]
+deny = ["/home/agent/project/.env"]
+
+# The egress gateway adds the real Bedrock API key to each request to bedrock-runtime in
+# us-east-1; Claude Code gets a placeholder.
+[egress.model]
+destinations = ["bedrock-runtime.us-east-1.amazonaws.com"]
+secret.ref = "env://AWS_BEARER_TOKEN_BEDROCK"

@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: Apache-2.0
+# The box for the SDLC variant. driver.py copies this file once for each phase and replaces
+# box_dir, so every phase starts with a fresh box and an empty history. Every path is a path in
+# the guest. Box's own reference for each key:
+# https://github.com/strands-agents/box/blob/main/docs/user/config.md
+
+name = "codex-sdlc"
+box_dir = "/home/agent/sdlc/state"
+policy = "policy.dw"
+
+[agent]
+# The Codex binary the openai-codex-cli-bin wheel installed; driver.py appends the app-server
+# arguments after `--`.
+command = ["/opt/guest/.venv/lib/python3.12/site-packages/codex_cli_bin/bin/codex"]
+workspace = "/home/agent/project"
+env = { AWS_REGION = "us-east-1", CODEX_HOME = "/home/agent/codex-home", HOME = "/home/agent/codex-home", TMPDIR = "/home/agent/codex-tmp", PATH = "/usr/bin:/bin" }
+
+# Codex's own process reaches its install tree, config and temporary files, and no project file:
+# it opens each project file through its shell, where the policy decides.
+[agent.filesystem]
+read = ["/opt/guest/.venv/lib/python3.12/site-packages/codex_cli_bin", "/home/agent/codex-home", "/home/agent/codex-tmp"]
+write = ["/home/agent/codex-home", "/home/agent/codex-tmp"]
+
+# The check: `python3.12 check.py`, read-only on the project, with .env empty. check.py runs
+# `git status` to refuse a dirty tree. A tool's sandbox executes only files its grants show, and
+# Box refuses a system root such as /usr/bin as a grant, so /usr/bin/git is named on its own. The
+# loader's library directories come with every tool's sandbox.
+# A host program's children raise no decision, so code that the tests import also runs here,
+# where nothing in the project or origin is writable.
+[tool.check]
+command = ["python3.12", "check.py"]
+env = { PATH = "/usr/bin:/bin", GIT_CONFIG_GLOBAL = "/home/agent/sdlc/gitconfig", GIT_CONFIG_NOSYSTEM = "1", GIT_OPTIONAL_LOCKS = "0" }
+
+[tool.check.filesystem]
+read = ["/home/agent/project", "/usr/lib64/python3.12", "/usr/libexec/git-core", "/usr/share/git-core", "/home/agent/sdlc/gitconfig"]
+read_file = ["/usr/bin/git"]
+deny = ["/home/agent/project/.env"]
+
+# git: writes only the project's .git and the bare origin outside the project. policy.dw decides
+# which subcommands start; git's own file operations raise no decision, so these lists bound them.
+# origin's URL uses git's ext transport, so a push runs `git receive-pack` with no shell.
+[tool.git]
+command = ["git"]
+env = { PATH = "/usr/bin:/bin", GIT_CONFIG_GLOBAL = "/home/agent/sdlc/gitconfig", GIT_CONFIG_NOSYSTEM = "1" }
+
+[tool.git.filesystem]
+read = ["/home/agent/project", "/home/agent/origin.git", "/usr/libexec/git-core", "/usr/share/git-core", "/home/agent/sdlc/gitconfig"]
+read_file = ["/usr/bin/git"]
+write = ["/home/agent/project/.git", "/home/agent/origin.git"]
+deny = ["/home/agent/project/.env"]
+
+# The egress gateway adds the real Bedrock API key to each request to bedrock-runtime in
+# us-east-1; Codex gets a placeholder.
+[egress.model]
+destinations = ["bedrock-runtime.us-east-1.amazonaws.com"]
+secret.ref = "env://AWS_BEARER_TOKEN_BEDROCK"

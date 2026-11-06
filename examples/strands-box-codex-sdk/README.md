@@ -50,7 +50,7 @@ From the outside in:
 1. **The MicroVM** is the hardware isolation boundary: one Firecracker VM per run, with
    `--egress` for outbound network.
 2. **The driver**, `vm/driver.py`, runs in the VM as uid 1000, outside the box. It uses the Codex
-   Python SDK (`openai-codex` 0.162.1), holds the Bedrock API key, and caps what the run's
+   Python SDK (`openai-codex` 0.163.0), holds the Bedrock API key, and caps what the run's
    model calls cost.
 3. **Box** runs as the same uid. It puts Codex in its own user, mount, PID, IPC, UTS, and
    network namespaces under a seccomp filter. Box's shell, its egress gateway, and the Dogwood
