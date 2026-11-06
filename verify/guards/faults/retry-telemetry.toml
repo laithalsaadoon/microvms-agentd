@@ -119,7 +119,7 @@ transform = { file = "crates/microvms-app/src/sandbox.rs", replace = "        wi
 [[fault]]
 id = "js-retry-details-null-floor"
 guard = "retryDetails refuses unrelated values and reads telemetry without parsing text"
-run = [["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"], ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/retry.mjs"]]
+run = [["npx", "-y", "-p", "@napi-rs/cli@3.10.9", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"], ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/retry.mjs"]]
 expect = "test-failed"
 suite = "bindings"
 transform = { file = "bindings/microvms-js/src/errors.rs", replace = "pub fn retry_details(error: Unknown<'_>) -> Option<RetryDetails> {\n    if error.get_type().ok()? != ValueType::Object {\n        return None;\n    }", with = "pub fn retry_details(error: Unknown<'_>) -> Option<RetryDetails> {" }
@@ -127,7 +127,7 @@ transform = { file = "bindings/microvms-js/src/errors.rs", replace = "pub fn ret
 [[fault]]
 id = "js-retry-details-zero-attempts"
 guard = "retryDetails refuses unrelated values and reads telemetry without parsing text"
-run = [["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"], ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/retry.mjs"]]
+run = [["npx", "-y", "-p", "@napi-rs/cli@3.10.9", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"], ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/retry.mjs"]]
 expect = "test-failed"
 suite = "bindings"
 transform = { file = "bindings/microvms-js/src/errors.rs", replace = "    if attempt_count == 0 {\n        return None;\n    }", with = "    if false && attempt_count == 0 {\n        return None;\n    }" }
@@ -135,7 +135,7 @@ transform = { file = "bindings/microvms-js/src/errors.rs", replace = "    if att
 [[fault]]
 id = "js-retry-details-forwarded"
 guard = "Sandbox control-plane failures retain retry telemetry"
-run = [["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"], ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/retry.mjs"]]
+run = [["npx", "-y", "-p", "@napi-rs/cli@3.10.9", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"], ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/retry.mjs"]]
 expect = "test-failed"
 suite = "bindings"
 transform = { file = "bindings/microvms-js/src/errors.rs", replace = "result.map_err(|error| with_retry_details(env, error))", with = "result.map_err(napi::Error::from)" }

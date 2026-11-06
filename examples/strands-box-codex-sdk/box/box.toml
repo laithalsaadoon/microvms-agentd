@@ -24,13 +24,28 @@ env = { AWS_REGION = "us-east-1", CODEX_HOME = "/home/agent/codex-home", HOME = 
 # What Codex's own process can touch without asking the policy.
 [agent.filesystem]
 # Codex reads its install tree and its config.
-read = ["/opt/guest/.venv/lib/python3.12/site-packages/codex_cli_bin", "/home/agent/codex-home"]
-# Codex writes its sessions, logs, and history, and its temporary files.
+read = ["/opt/guest/.venv/lib/python3.12/site-packages/codex_cli_bin", "/home/agent/codex-home", "/home/agent/codex-tmp"]
+# Codex writes its sessions, logs, and history, and its temporary files. On Linux, Box refuses a
+# write grant that no read grant covers, so `read` above lists both directories too.
 write = ["/home/agent/codex-home", "/home/agent/codex-tmp"]
 # No list holds the project. The box enters it as Codex's working directory and grants nothing
 # else, so Codex reaches every project file through its shell, where the policy decides each one.
 # (Box's macOS examples grant `list` here; its Linux backend has no lowering for `list` and
 # refuses it, so a direct grant on Linux would have to be `read`, which bypasses the policy.)
+
+# The project's tests, as a host program. Box's shell implements `python3` itself (Monty, whose
+# exit status the workload can set), so the tests run under `python3.12`, which it doesn't
+# implement: `python3.12 test_calc.py` is a shell:spawn that policy.dw's run_tests permits, and
+# Box records the real exit status. A table matches only a command that starts with its own
+# words, so `python3.12 -c ...` finds no table and exits 126 even if a rule permitted it.
+# A host program's file operations raise no fs:* decision, so this table bounds them: the tests
+# read the project and the standard library, write nothing in the project, and see .env empty.
+[tool.tests]
+command = ["python3.12", "test_calc.py"]
+
+[tool.tests.filesystem]
+read = ["/home/agent/project", "/usr/lib64/python3.12"]
+deny = ["/home/agent/project/.env"]
 
 # The egress gateway adds the real Bedrock API key to each request to bedrock-runtime in
 # us-east-1. Codex, and anything else in the box, gets a placeholder in AWS_BEARER_TOKEN_BEDROCK,

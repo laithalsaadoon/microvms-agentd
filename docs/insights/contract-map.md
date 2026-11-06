@@ -2,7 +2,7 @@
 
 A contract here is a shared value shape or port that another source module interprets: domain enums, execution requests and results, and transport interfaces. Opaque service handles and simple re-exports are not included in the detailed inventory. The declaration boundaries are the domain, protocol, and application layers. `crates/microvms-domain/src/error.rs:167`, `crates/protocol/src/exec.rs:219`, `crates/microvms-app/src/control/transport.rs:386`.
 
-Sections are ordered by distinct directly consuming production source paths found in the current tree, with related wire shapes grouped together. Test fixtures, fuzz harnesses, and re-export-only references do not contribute to ordering. Consumer citations identify imports or use sites; assumptions cite the code that interprets the shape. The source paths identify the owning layer even when adapters import the public re-exports. `crates/microvms-core/src/lib.rs:97-100`, `crates/microvms-app/src/session/mod.rs:51-62`.
+Sections are ordered by distinct directly consuming production source paths found in the current tree, with related wire shapes grouped together. Test fixtures, fuzz harnesses, and re-export-only references do not contribute to ordering. Consumer citations identify imports or use sites; assumptions cite the code that interprets the shape. The source paths identify the owning layer even when adapters import the public re-exports. `crates/microvms-core/src/lib.rs:100-103`, `crates/microvms-app/src/session/mod.rs:51-62`.
 
 ## ErrorKind: coarse failure classes
 
@@ -34,7 +34,7 @@ Sections are ordered by distinct directly consuming production source paths foun
 - `crates/microvms-app/src/session/proxy.rs:72`
 - `crates/microvms-app/src/session/sse.rs:26`
 - `crates/microvms-app/src/workspace.rs:32`
-- `crates/microvms-cli/src/cli.rs:806`
+- `crates/microvms-cli/src/cli.rs:778`
 - `crates/microvms-cli/src/commands/agent.rs:36`
 - `crates/microvms-cli/src/commands/attached.rs:43`
 - `crates/microvms-cli/src/commands/lifecycle.rs:36`
@@ -116,7 +116,7 @@ Mitigation: review the enum, `ALL`, code strings, and adapter mappings together.
 - `bindings/microvms-js/src/region.rs:25`
 - `bindings/microvms-py/src/agents.rs:40`
 - `bindings/microvms-py/src/control.rs:522`
-- `bindings/microvms-py/src/region.rs:24`
+- `bindings/microvms-py/src/region.rs:26`
 - `bindings/microvms-py/src/sandbox.rs:48`
 - `crates/microvms-app/src/adapters.rs:27`
 - `crates/microvms-app/src/agents/mod.rs:49`
@@ -126,16 +126,16 @@ Mitigation: review the enum, `ALL`, code strings, and adapter mappings together.
 - `crates/microvms-app/src/control/mod.rs:136`
 - `crates/microvms-app/src/control/transport.rs:37`
 - `crates/microvms-app/src/names.rs:19`
-- `crates/microvms-app/src/preflight.rs:40`
+- `crates/microvms-app/src/preflight.rs:42`
 - `crates/microvms-app/src/sandbox.rs:73`
-- `crates/microvms-cli/src/cli.rs:46`
+- `crates/microvms-cli/src/cli.rs:47`
 - `crates/microvms-cli/src/commands/agent.rs:647`
 - `crates/microvms-cli/src/commands/attached.rs:112`
 - `crates/microvms-cli/src/commands/doctor.rs:17`
 - `crates/microvms-cli/src/commands/mod.rs:623`
-- `crates/microvms-cli/src/config.rs:463`
+- `crates/microvms-cli/src/config.rs:461`
 - `crates/microvms-cli/src/seam.rs:49`
-- `crates/microvms-core/src/lib.rs:159`
+- `crates/microvms-core/src/lib.rs:162`
 - `crates/microvms-core/src/prelude.rs:36`
 - `crates/microvms-domain/src/cost.rs:71`
 - `crates/microvms-domain/src/names.rs:24`
@@ -287,7 +287,7 @@ Mitigation: review consumers that branch on the affected variant alongside its m
 - `crates/microvms-app/src/control/image.rs:31`
 - `crates/microvms-app/src/control/mod.rs:137`
 - `crates/microvms-app/src/defaults.rs:28`
-- `crates/microvms-cli/src/cli.rs:46`
+- `crates/microvms-cli/src/cli.rs:47`
 - `crates/microvms-cli/src/commands/agent.rs:637`
 - `crates/microvms-domain/src/cost.rs:72`
 
@@ -306,12 +306,12 @@ pub enum SizeClass {
 
 **Assumptions consumers make:**
 
-- The CLI maps its memory arguments to exact enum variants. `crates/microvms-cli/src/cli.rs:463-479`.
-- The cost calculation uses baseline CPU and memory accessors. `crates/microvms-domain/src/cost.rs:1586-1605`.
+- The CLI maps its memory arguments to exact enum variants. `crates/microvms-cli/src/cli.rs:464-480`.
+- The cost calculation uses baseline CPU and memory accessors. `crates/microvms-domain/src/cost.rs:1587-1606`.
 - The Node binding converts JavaScript numbers before delegating class selection to the domain. `bindings/microvms-js/src/cost.rs:374-400`.
 
-**Drift risk:** Changing the baseline meaning would change pricing and image identity for existing variants. `crates/microvms-domain/src/cost.rs:1586-1605`, `crates/microvms-app/src/control/ensure.rs:166-184`.
-Mitigation: keep the resource table, conversion methods, and adapter mappings consistent. `crates/microvms-domain/src/sizing.rs:139-155`, `crates/microvms-cli/src/cli.rs:463-479`.
+**Drift risk:** Changing the baseline meaning would change pricing and image identity for existing variants. `crates/microvms-domain/src/cost.rs:1587-1606`, `crates/microvms-app/src/control/ensure.rs:166-184`.
+Mitigation: keep the resource table, conversion methods, and adapter mappings consistent. `crates/microvms-domain/src/sizing.rs:139-155`, `crates/microvms-cli/src/cli.rs:464-480`.
 
 ## StartRequest: starting an exec
 
@@ -329,7 +329,7 @@ Mitigation: keep the resource table, conversion methods, and adapter mappings co
 - `crates/microvms-app/src/session/complete.rs:98`
 - `crates/microvms-app/src/session/mod.rs:520`
 - `crates/microvms-app/src/workspace.rs:374`
-- `crates/microvms-core/src/lib.rs:192`
+- `crates/microvms-core/src/lib.rs:195`
 
 **Shape:** Source documentation comments omitted.
 

@@ -83,7 +83,9 @@ class RunOrderingTests(unittest.TestCase):
                 text=True,
                 timeout=120,
             )
-            return result, [json.loads(line) for line in calls.read_text().splitlines()]
+            # run.sh can exit before its first microvm call, and then the log is never written.
+            lines = calls.read_text().splitlines() if calls.exists() else []
+            return result, [json.loads(line) for line in lines]
 
     def test_root_route_precedes_driver_and_all_launchers_are_explicit_root(self):
         result, calls = self.run_example()

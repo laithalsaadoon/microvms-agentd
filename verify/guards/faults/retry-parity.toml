@@ -51,7 +51,7 @@ id = "f2p-parity-ts-control-plane-malformed-success-retains"
 guard = "control-plane/malformed-success-retains-retries"
 run = [
   ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
-  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.9", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"],
   ["node", "--test", "--test-reporter=tap", "--test-name-pattern=^control\\-plane/malformed\\-success\\-retains\\-retries$", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
 expect = "test-failed"
@@ -101,7 +101,7 @@ id = "f2p-parity-ts-control-plane-server-failures-keep-default"
 guard = "control-plane/server-failures-keep-default-budget"
 run = [
   ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
-  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.9", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"],
   ["node", "--test", "--test-reporter=tap", "--test-name-pattern=^control\\-plane/server\\-failures\\-keep\\-default\\-budget$", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
 expect = "test-failed"
@@ -151,7 +151,7 @@ id = "f2p-parity-ts-control-plane-throttle-attempt-budget"
 guard = "control-plane/throttle-attempt-budget"
 run = [
   ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
-  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.9", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"],
   ["node", "--test", "--test-reporter=tap", "--test-name-pattern=^control\\-plane/throttle\\-attempt\\-budget$", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
 expect = "test-failed"
@@ -201,7 +201,7 @@ id = "f2p-parity-ts-control-plane-throttle-elapsed-budget"
 guard = "control-plane/throttle-elapsed-budget"
 run = [
   ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
-  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.9", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"],
   ["node", "--test", "--test-reporter=tap", "--test-name-pattern=^control\\-plane/throttle\\-elapsed\\-budget$", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
 expect = "test-failed"
@@ -251,7 +251,7 @@ id = "f2p-parity-ts-control-plane-window-closed"
 guard = "control-plane/window-closed"
 run = [
   ["cargo", "build", "-p", "microvms-core", "--example", "parity-tunnel-peer"],
-  ["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"],
+  ["npx", "-y", "-p", "@napi-rs/cli@3.10.9", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js", "--features", "parity-fixtures", "--dts", "parity-fixtures.d.ts"],
   ["node", "--test", "--test-reporter=tap", "--test-name-pattern=^control\\-plane/window\\-closed$", "bindings/microvms-js/__test__/parity_cases.mjs"],
 ]
 expect = "test-failed"

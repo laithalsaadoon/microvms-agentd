@@ -7,7 +7,7 @@ No current per-file diagnostic dataset supports warning or error totals, so this
 | File | Trend | Top owner | Citation |
 | --- | --- | --- | --- |
 | `conformance/run_rs.py` | ↑ rising | Conformance maintainers | `conformance/run_rs.py:142` |
-| `crates/microvms-cli/src/cli.rs` | ↑ rising | CLI interface maintainers | `crates/microvms-cli/src/cli.rs:65` |
+| `crates/microvms-cli/src/cli.rs` | ↑ rising | CLI interface maintainers | `crates/microvms-cli/src/cli.rs:66` |
 | `crates/microvms-cli/src/commands/lifecycle.rs` | ↑ rising | CLI lifecycle maintainers | `crates/microvms-cli/src/commands/lifecycle.rs:437` |
 | `bindings/microvms-py/src/session.rs` | ↑ rising | Python binding maintainers | `bindings/microvms-py/src/session.rs:542` |
 | `crates/microvms-cli/src/commands/attached.rs` | ↑ rising | CLI session maintainers | `crates/microvms-cli/src/commands/attached.rs:245` |
@@ -33,13 +33,13 @@ No current per-file diagnostic dataset supports warning or error totals, so this
 
 ### 2. `crates/microvms-cli/src/cli.rs`
 
-**What's there.** `Cli` defines the command selection and global JSON, dense, and quiet output flags (`crates/microvms-cli/src/cli.rs:65-83`). The command enum starts with the run, quickstart, and build workflows (`crates/microvms-cli/src/cli.rs:97-120`).
+**What's there.** `Cli` defines the command selection and global JSON, dense, and quiet output flags (`crates/microvms-cli/src/cli.rs:66-84`). The command enum starts with the run, quickstart, and build workflows (`crates/microvms-cli/src/cli.rs:98-121`).
 
 **Recent activity.** 21 commits; `↑ rising`, in the dated window above.
 
 **Review ownership.** CLI interface maintainers should coordinate with the handler's review area. Recorded contributions are concentrated: the leading author's share is 90%, with the remainder at 10%.
 
-**Review focus.** Treat changes to accepted arguments as interface changes. The parser's size-request test checks both valid combinations and conflicts with the older memory option (`crates/microvms-cli/src/cli.rs:3962-3987`); the duration test separately checks the accepted domain for seconds-valued flags (`crates/microvms-cli/src/cli.rs:3991-4006`). These source references identify useful tests; this measurement did not run them.
+**Review focus.** Treat changes to accepted arguments as interface changes. The parser's size-request test checks both valid combinations and conflicts with the older memory option (`crates/microvms-cli/src/cli.rs:3971-3996`); the duration test separately checks the accepted domain for seconds-valued flags (`crates/microvms-cli/src/cli.rs:4000-4015`). These source references identify useful tests; this measurement did not run them.
 
 ### 3. `crates/microvms-cli/src/commands/lifecycle.rs`
 

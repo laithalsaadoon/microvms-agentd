@@ -213,8 +213,8 @@ impl ControlPlane {
             code_artifact: ops::CodeArtifact {
                 uri: request.code_artifact_uri.clone(),
             },
-            // The enum's only value. Injected rather than accepted, because a field could
-            // only ever express a request AWS rejects — after the upload.
+            // ARM_64, the enum's first value. Injected rather than accepted, because agentd
+            // ships an aarch64 binary only, so an X86_64 image could not start its daemon.
             cpu_configurations: vec![ops::CpuConfiguration {
                 architecture: crate::constants::ARCHITECTURES[0].to_string(),
             }],

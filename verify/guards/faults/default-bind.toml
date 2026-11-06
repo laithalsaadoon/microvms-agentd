@@ -69,7 +69,7 @@ transform = [{ file = "bindings/microvms-js/index.d.ts", replace = "@defaultValu
 [[fault]]
 id = "default-bind-node-omission"
 guard = "omitted listener options resolve to the shared effective default"
-run = [["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"], ["node", "--test", "--test-reporter=tap", "--test-name-pattern", "omitted listener options resolve to the shared effective default", "bindings/microvms-js/__test__/serve.mjs"]]
+run = [["npx", "-y", "-p", "@napi-rs/cli@3.10.9", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"], ["node", "--test", "--test-reporter=tap", "--test-name-pattern", "omitted listener options resolve to the shared effective default", "bindings/microvms-js/__test__/serve.mjs"]]
 expect = "test-failed"
 suite = "bindings"
 transform = [{ file = "bindings/microvms-js/src/serve.rs", replace = "bind_address(options.bind.as_deref()).map_err(js_async)?", with = "bind_address(options.bind.as_deref().or(Some(\"127.0.0.2:0\"))).map_err(js_async)?" }]

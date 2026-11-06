@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+# Accepted findings for this directory's Cargo.lock (the fuzz workspace's own lockfile), each with
+# its reason. A mirror of .vex/microvms-agentd.openvex.json for osv-scanner, which cannot read VEX:
+# every vulnerability ignored here MUST also carry a statement there. It sits beside the lockfile
+# because osv-scanner, and OpenSSF Scorecard through it, apply a config file only to the lockfiles
+# in its own directory; the root osv-scanner.toml does not reach this one. See .vex/README.md.
+#
+# It accepts no finding at present. Add an [[IgnoredVulns]] entry with an `id` and a `reason`
+# only together with its VEX statement.

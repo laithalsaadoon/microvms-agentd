@@ -11,7 +11,7 @@ transform = { file = "bindings/microvms-py/src/session.rs", replace = "        .
 [[fault]]
 id = "poweroff-node-forwarding"
 guard = "run forwards poweroffOnExit and refuses unsupported peers"
-run = [["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"], ["node", "--test", "--test-reporter=tap", "--test-name-pattern", "poweroff", "bindings/microvms-js/__test__/run_to_completion.mjs"]]
+run = [["npx", "-y", "-p", "@napi-rs/cli@3.10.9", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"], ["node", "--test", "--test-reporter=tap", "--test-name-pattern", "poweroff", "bindings/microvms-js/__test__/run_to_completion.mjs"]]
 expect = "test-failed"
 suite = "bindings"
 transform = { file = "bindings/microvms-js/src/session.rs", replace = "            request = request.with_poweroff_on_exit(poweroff);", with = "            request = request.with_poweroff_on_exit(false && poweroff);" }

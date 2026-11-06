@@ -6,20 +6,21 @@
 # What this does, end to end:
 #   1. builds a MicroVM image with agentd, Python 3.12, and the Codex SDK (first run only),
 #   2. launches a VM from it with outbound network (--egress),
-#   3. blocks guest metadata access, then copies Strands Box (from build-box.sh), the box's config, and the driver into the VM,
+#   3. blocks guest metadata access, then copies Strands Box (from download-box.sh), the box's config, and the driver into the VM,
 #   4. mints a short-lived Bedrock API key locally and copies it in for Box, not for Codex,
 #   5. checks the VM's metadata service is refused outside and inside a box,
-#   6. runs vm/driver.py, which runs six scenarios through the SDK and checks Box's decisions,
+#   6. runs vm/driver.py, which runs twelve scenarios through the SDK and checks Box's decisions,
+#      and interrupts Codex once the run's model calls cost SPEND_CAP_USD (5 dollars by default),
 #   7. copies the results and Box's decision log back to out/, and terminates the VM.
 #
-# It exits 0 only when both metadata probes and every scenario pass.
+# It exits 0 only when both metadata probes and every scenario pass, under the spend cap.
 #
 # Prerequisites:
 #   - `microvm` 1.1.1 or later on PATH, with MICROVM_BUCKET, MICROVM_BUILD_ROLE_ARN, and
-#     MICROVM_EXECUTION_ROLE_ARN set (the repo README's Getting started),
+#     MICROVM_EXECUTION_ROLE_ARN set (the repo README's Configure AWS),
 #   - AWS credentials that can call lambda-microvms and bedrock:InvokeModel on GPT-6.1 Sol,
 #   - uv on PATH (mints the Bedrock API key),
-#   - Strands Box built with ./build-box.sh into .box-bin/.
+#   - Strands Box downloaded with ./download-box.sh into .box-bin/.
 set -euo pipefail
 
 REGION="${AWS_REGION:-us-east-1}"
@@ -28,9 +29,16 @@ BOXBIN="${BOX_BIN_DIR:-$HERE/.box-bin}"
 OUT="${BOX_OUT_DIR:-$HERE/out}"
 MICROVM="${MICROVM:-microvm}"
 NAME="strands-box-codex-$$"
+# vm/spend.py prices each model response at the model card's rates, and the driver interrupts
+# Codex once the run's spend reaches this many dollars.
+SPEND_CAP_USD="${SPEND_CAP_USD:-5}"
+[[ "$SPEND_CAP_USD" =~ ^[0-9]+([.][0-9]+)?$ ]] || {
+  echo "SPEND_CAP_USD must be a dollar amount such as 5 or 0.25, not '$SPEND_CAP_USD'" >&2
+  exit 2
+}
 
-for bin in strands-box strands-box-sock-alias strands-box-contain-trampoline; do
-  [ -x "$BOXBIN/$bin" ] || { echo "missing $BOXBIN/$bin: run ./build-box.sh first" >&2; exit 2; }
+for bin in box strands-box-sock-alias strands-box-contain-trampoline; do
+  [ -x "$BOXBIN/$bin" ] || { echo "missing $BOXBIN/$bin: run ./download-box.sh first" >&2; exit 2; }
 done
 # Validate before creating AWS resources; stage_box.py later renders a private
 # copy of the policy, gateway destination, and model region from the east template.
@@ -91,13 +99,15 @@ vmroot "/sbin/ip -4 route replace blackhole 169.254.169.254/32" >/dev/null
 # ── 3. Box, its config, and the driver ──────────────────────────────────────
 STAGE=$(mktemp -d)
 mkdir -p "$STAGE/opt" "$STAGE/home/project" "$STAGE/home/codex-tmp"
-cp "$BOXBIN"/strands-box "$BOXBIN"/strands-box-sock-alias "$BOXBIN"/strands-box-contain-trampoline \
+cp "$BOXBIN"/box "$BOXBIN"/strands-box-sock-alias "$BOXBIN"/strands-box-contain-trampoline \
   "$HERE/vm/launch_in_fresh_proc.py" "$STAGE/opt/"
 python3 "$HERE/stage_box.py" "$REGION" "$HERE/box" "$STAGE/home/box"
 mv "$STAGE/home/box/codex-home" "$STAGE/home/codex-home"
-cp "$HERE/vm/driver.py" "$HERE/vm/probe_mmds.py" "$STAGE/home/"
-# The project Codex works on, with a file the policy keeps unread.
+cp "$HERE/vm/driver.py" "$HERE/vm/spend.py" "$HERE/vm/probe_mmds.py" "$STAGE/home/"
+# The project Codex works on: a calculator with a bug, its frozen tests, and a file the policy
+# keeps unread.
 printf '# calc\n\nA tiny calculator project.\n' > "$STAGE/home/project/README.md"
+cp "$HERE/project/calc.py" "$HERE/project/test_calc.py" "$STAGE/home/project/"
 printf 'DB_PASSWORD=not-a-real-secret-0123\n' > "$STAGE/home/project/.env"
 tar -C "$STAGE/opt" -cf "$STAGE/opt.tar" .
 tar -C "$STAGE/home" -cf "$STAGE/home.tar" .
@@ -112,7 +122,7 @@ vmroot "mv /home/agent/box-bin-upload /opt/box && chown -R 0:0 /opt/box && chmod
 
 # ── 4. the Bedrock API key, for Box ─────────────────────────────────────────
 # aws-bedrock-token-generator turns the caller's AWS credentials into a key that lasts up to 12
-# hours. The driver hands it to `strands-box run`, whose egress gateway adds it to each request to
+# hours. The driver hands it to `box run`, whose egress gateway adds it to each request to
 # bedrock-runtime; Codex gets a placeholder. The key never appears on a command line or in a log.
 KEYFILE=$(mktemp)
 uvx --from aws-bedrock-token-generator@1.1.0 --quiet python -c \
@@ -131,7 +141,7 @@ echo "--- metadata service probe ---"
 vmroot "$LAUNCHER /usr/bin/python3.12 /home/agent/probe_mmds.py" | grep '^\['
 printf 'passed\n' > "$OUT/metadata-outside.ok"
 set +e
-INSIDE=$(vmroot "$LAUNCHER /opt/box/strands-box run --config /home/agent/box/probe-box.toml \
+INSIDE=$(vmroot "$LAUNCHER /opt/box/box run --config /home/agent/box/probe-box.toml \
   2>/home/agent/probe-box.err")
 PROBE_STATUS=$?
 set -e
@@ -147,7 +157,7 @@ printf 'passed\n' > "$OUT/metadata-inside.ok"
 # ── 6. the scenarios ────────────────────────────────────────────────────────
 echo "--- codex sdk scenarios ---"
 set +e
-vmroot "$LAUNCHER /opt/guest/.venv/bin/python /home/agent/driver.py" 900
+vmroot "$LAUNCHER /opt/guest/.venv/bin/python /home/agent/driver.py --spend-cap-usd $SPEND_CAP_USD" 900
 DRIVER_STATUS=$?
 set -e
 

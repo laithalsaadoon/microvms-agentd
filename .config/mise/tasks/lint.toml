@@ -71,5 +71,5 @@ description = "Format the background example's Terraform and Python"
 run = ["ruff check --fix examples/background-coding-agent", "ruff format examples/background-coding-agent", "terraform -chdir=examples/background-coding-agent/infra fmt"]
 
 ["box:check"]
-description = "Check metadata refusal and startup ordering in the Box example without AWS"
-run = "uv run --locked pytest -q -p no:cacheprovider tools/test_box_metadata.py"
+description = "Check metadata refusal, startup ordering and the spend cap in the Box example without AWS"
+run = "uv run --locked pytest -q -p no:cacheprovider tools/test_box_metadata.py tools/test_box_spend.py"

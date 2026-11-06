@@ -1,6 +1,6 @@
 # A MicroVM image for the Strands Box example: agentd, Python 3.12, and the Codex Python SDK
 # with its bundled Codex binary. Strands Box itself is not in the image; run.sh copies the
-# binaries build-box.sh produced into each VM, because Box publishes no Linux release yet.
+# binaries download-box.sh fetched into each VM, so a new Box version needs no image rebuild.
 #
 # The FROM must stay `public.ecr.aws/amazonlinux/amazonlinux:2023-minimal`, digest-pinned the
 # same way examples/coding-agents-on-bedrock/Dockerfile pins it: microvms-core pairs that ref

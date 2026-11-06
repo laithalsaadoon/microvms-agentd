@@ -21,7 +21,10 @@ description: >-
 # files that decide what gets installed, mise.toml (which pins the tasks' own tools in `[vars]`)
 # and mise.lock. Only the `guards-cache` job saves it, on a push to main, after installing the
 # tasks' tools too; every other job restores it, or with `restore-keys` the newest entry for
-# this platform when the key is new, and `mise install` adds whatever that one lacks.
+# this platform when the key is new, and `mise install` adds whatever that one lacks. The key
+# and its prefix also name the runner image (`ImageOS`, such as ubuntu24 or ubuntu26), because
+# a pipx tool installed on one image needn't run on another: semgrep installed on Ubuntu 24.04
+# fails to import on 26.04.
 
 inputs:
   install_args:
@@ -73,15 +76,17 @@ runs:
         version=$(sed -n 's/^min_version = "\([0-9.]*\)".*/\1/p' mise.toml)
         [ -n "$version" ] || { echo "::error file=mise.toml::mise.toml has no min_version = \"X.Y.Z\" line"; exit 1; }
         echo "version=$version" >> "$GITHUB_OUTPUT"
-        echo "key=mise-tools-$RUNNER_OS-$RUNNER_ARCH-$(cat mise.toml mise.lock | sha256sum | cut -c1-64)" >> "$GITHUB_OUTPUT"
+        prefix="mise-tools-$RUNNER_OS-$RUNNER_ARCH-${ImageOS:-unknown}-"
+        echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+        echo "key=$prefix$(cat mise.toml mise.lock | sha256sum | cut -c1-64)" >> "$GITHUB_OUTPUT"
     - id: cache
       if: inputs.tools-cache != 'none'
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.local/share/mise
         key: ${{ steps.key.outputs.key }}
-        restore-keys: ${{ inputs.tools-cache == 'restore' && format('mise-tools-{0}-{1}-', runner.os, runner.arch) || '' }}
-    - uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
+        restore-keys: ${{ inputs.tools-cache == 'restore' && steps.key.outputs.prefix || '' }}
+    - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
       with:
         version: ${{ steps.key.outputs.version }}
         minimum_release_age: 24h

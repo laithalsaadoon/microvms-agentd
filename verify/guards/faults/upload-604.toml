@@ -191,7 +191,7 @@ transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "Non
 [[fault]]
 id = "upload-604-js-incremental-sync"
 guard = "a second syncDir after one edit uploads that member and deletes nothing"
-run = [["npx", "-y", "-p", "@napi-rs/cli@3.10.8", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"], ["node", "--test", "--test-reporter=tap", "--test-name-pattern", "a second syncDir after one edit uploads that member and deletes nothing", "bindings/microvms-js/__test__/workspace.mjs"]]
+run = [["npx", "-y", "-p", "@napi-rs/cli@3.10.9", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"], ["node", "--test", "--test-reporter=tap", "--test-name-pattern", "a second syncDir after one edit uploads that member and deletes nothing", "bindings/microvms-js/__test__/workspace.mjs"]]
 expect = "test-failed"
 suite = "bindings"
 transform = { file = "crates/microvms-app/src/session/upload.rs", replace = "None => return Ok((ROOT_UID, ROOT_UID)),", with = "None => return Err(Error::invalid_arg(\"missing ownership marker\"))," }

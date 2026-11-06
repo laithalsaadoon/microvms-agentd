@@ -6,7 +6,7 @@ The selection follows those boundaries: shared wire types, failure classificatio
 CLI results, service constraints, sizing, regions, pricing, and command discovery.
 Core re-exports the domain and app layers; the CLI and bindings therefore often
 consume definitions through core without owning their behavior.
-`crates/microvms-core/src/lib.rs:85-100`
+`crates/microvms-core/src/lib.rs:88-103`
 
 Use each table as a review map. `yes` means update a mirrored contract or generated
 artifact when its represented value changes; `likely` means inspect a consumer
@@ -33,7 +33,7 @@ Defined at: `crates/protocol/src/lib.rs:30-35`.
 | Node request builder and exported phase names | direct import | likely | `bindings/microvms-js/src/session.rs:303-319`, `bindings/microvms-js/src/session.rs:1275-1281` |
 | Client-default publication | indirect | likely | `crates/microvms-app/src/defaults.rs:151-186` |
 | Model-to-client outcome conversion | test | likely | `crates/model-conformance/tests/tables.rs:380-401` |
-| Core's compatibility re-export | indirect | no | `crates/microvms-core/src/lib.rs:93-95` |
+| Core's compatibility re-export | indirect | no | `crates/microvms-core/src/lib.rs:96-98` |
 | Committed schema artifact | config | yes | `crates/agentd/src/schema.rs:240-286`, `crates/agentd/tests/schema_artifact.rs:39-50` |
 | Transport simulation fixtures | test | likely | `crates/microvms-core/tests/turmoil_client.rs:853-876` |
 | Python and TypeScript declaration checks | config | likely | `.config/mise/tasks/contracts.toml:220-232`, `.config/mise/tasks/contracts.toml:279-314` |
@@ -68,8 +68,8 @@ Defined at: `crates/microvms-domain/src/error.rs:34`,
 | Failure envelope's detailed kind | indirect | likely | `crates/microvms-cli/src/envelope.rs:367-383` |
 | Conformance envelope interpretation | indirect | likely | `conformance/harness/envelope.py:35-44`, `conformance/harness/envelope.py:70-89` |
 | Mapping, retryability, and status round-trip tests | test | yes | `crates/microvms-domain/src/error.rs:605-655`, `crates/microvms-domain/src/error.rs:698-730` |
-| Cross-surface exception and code tests | test | yes | `bindings/microvms-py/tests/test_smoke.py:458-491`, `bindings/microvms-js/__test__/smoke.mjs:359-391` |
-| Exit-table agreement tests | test | yes | `crates/microvms-cli/src/exit.rs:588-627` |
+| Cross-surface exception and code tests | test | yes | `bindings/microvms-py/tests/test_smoke.py:465-495`, `bindings/microvms-js/__test__/smoke.mjs:376-407` |
+| Exit-table agreement tests | test | yes | `crates/microvms-cli/src/exit.rs:589-628` |
 
 ### Blast-radius notes
 
@@ -83,7 +83,7 @@ Defined at: `crates/microvms-domain/src/error.rs:34`,
   `bindings/microvms-js/src/errors.rs:215-226`
 - The CLI exit code groups some daemon failures together, while `data.kind`
   preserves their distinction. A change to either representation needs both
-  envelope and exception review. `crates/microvms-cli/src/exit.rs:641-656`,
+  envelope and exception review. `crates/microvms-cli/src/exit.rs:642-657`,
   `crates/microvms-cli/src/envelope.rs:367-383`
 
 ## CLI exit table
@@ -93,16 +93,16 @@ Defined at: `crates/microvms-cli/src/exit.rs:79-134` and
 
 | Downstream | Type | Touch on change | Citation |
 | --- | --- | --- | --- |
-| Process completion and parse-failure reporting | direct import | likely | `crates/microvms-cli/src/main.rs:119-127`, `crates/microvms-cli/src/main.rs:236-244` |
-| Failure classification | direct import | likely | `crates/microvms-cli/src/exit.rs:371-466` |
+| Process completion and parse-failure reporting | direct import | likely | `crates/microvms-cli/src/main.rs:121-129`, `crates/microvms-cli/src/main.rs:243-251` |
+| Failure classification | direct import | likely | `crates/microvms-cli/src/exit.rs:371-467` |
 | JSON failure envelopes | direct import | likely | `crates/microvms-cli/src/envelope.rs:367-383` |
 | Published manifest exit rows | direct import | yes | `crates/microvms-cli/src/manifest.rs:112-117` |
 | Conformance subprocess status interpretation | indirect | likely | `conformance/harness/envelope.py:29-33`, `conformance/harness/envelope.py:57-66` |
-| Table-index and core-class agreement tests | test | yes | `crates/microvms-cli/src/exit.rs:551-566`, `crates/microvms-cli/src/exit.rs:588-627` |
+| Table-index and core-class agreement tests | test | yes | `crates/microvms-cli/src/exit.rs:552-567`, `crates/microvms-cli/src/exit.rs:589-628` |
 | CLI command-local failures | direct import | likely | `crates/microvms-cli/src/commands/attached.rs:169-186`, `crates/microvms-cli/src/commands/mod.rs:630-651` |
 | Induced failure-class guards | test | yes | `crates/microvms-cli/src/guards/exit_codes.rs:25-37` |
 | Spawned CLI exit-code tests | test | yes | `crates/microvms-cli/tests/exit_codes.rs:29-49` |
-| Manifest-to-process exit comparison | test | yes | `crates/microvms-cli/tests/manifest.rs:195-238` |
+| Manifest-to-process exit comparison | test | yes | `crates/microvms-cli/tests/manifest.rs:226-269` |
 
 ### Blast-radius notes
 
@@ -116,39 +116,39 @@ Defined at: `crates/microvms-cli/src/exit.rs:79-134` and
   `crates/microvms-cli/src/exit.rs:103-133`
 - The table deliberately spells out error codes separately from core. Preserve
   the agreement test instead of deriving both sides from the same table.
-  `crates/microvms-cli/src/exit.rs:197-205`, `crates/microvms-cli/src/exit.rs:581-607`
+  `crates/microvms-cli/src/exit.rs:197-205`, `crates/microvms-cli/src/exit.rs:582-608`
 
 ## Service constants and JSON emission
 
-Defined at: `crates/microvms-domain/src/constants.rs:54` and
-`crates/microvms-domain/src/constants.rs:647-739`.
+Defined at: `crates/microvms-domain/src/constants.rs:55` and
+`crates/microvms-domain/src/constants.rs:659-744`.
 
 | Downstream | Type | Touch on change | Citation |
 | --- | --- | --- | --- |
 | CLI constants command | indirect | likely | `crates/microvms-cli/src/commands/local.rs:946-967` |
-| Model comparison keys and source loader | runtime dispatch | yes | `tools/check-model-drift.py:54-60`, `tools/check-model-drift.py:90-151`, `tools/check-model-drift.py:288-307` |
+| Model comparison keys and source loader | runtime dispatch | yes | `tools/check-model-drift.py:54-60`, `tools/check-model-drift.py:90-152`, `tools/check-model-drift.py:311-330` |
 | Control-plane versioned request paths | direct import | likely | `crates/microvms-app/src/control/transport.rs:179-183` |
 | Control request duration policy | direct import | likely | `crates/microvms-app/src/control/mod.rs:611-621` |
 | Image state and build parameters | direct import | likely | `crates/microvms-app/src/control/image.rs:112-113`, `crates/microvms-app/src/control/image.rs:219-233` |
 | Hook-timeout types | direct import | likely | `crates/microvms-domain/src/hooks.rs:37-40` |
 | Session keepalive and no-timeout ceiling | direct import | likely | `crates/microvms-app/src/session/keepalive.rs:32-37`, `crates/microvms-app/src/session/complete.rs:27-30` |
-| Region and size table emission | indirect | likely | `crates/microvms-domain/src/constants.rs:718-739` |
-| JSON key and value assertions | test | yes | `crates/microvms-domain/src/constants.rs:760-826` |
-| Bare-object command contract test | test | yes | `crates/microvms-cli/tests/manifest.rs:277-314` |
+| Region and size table emission | indirect | likely | `crates/microvms-domain/src/constants.rs:729-744` |
+| JSON key and value assertions | test | yes | `crates/microvms-domain/src/constants.rs:765-832` |
+| Bare-object command contract test | test | yes | `crates/microvms-cli/tests/manifest.rs:308-346` |
 | Model comparison task | config | no | `.config/mise/tasks/contracts.toml:316-341` |
 
 ### Blast-radius notes
 
 - The JSON keys are a script interface. Renaming a constant in Rust is incomplete
   until its emitted key and the script's expected-key set agree.
-  `crates/microvms-domain/src/constants.rs:647-652`, `tools/check-model-drift.py:90-151`
+  `crates/microvms-domain/src/constants.rs:659-664`, `tools/check-model-drift.py:90-152`
 - `constants --emit-json` exposes the bare object; the normal JSON command wraps
   it in `data.constants`. Preserve both views when changing command rendering.
   `crates/microvms-cli/src/commands/local.rs:946-967`
 - Region and size tables are compared with independent literals because the
   service model does not define them. A model comparison is not evidence that
   their measured platform behavior remains current.
-  `tools/check-model-drift.py:949-975`
+  `tools/check-model-drift.py:972-1006`
 
 ## Size classes
 
@@ -156,17 +156,17 @@ Defined at: `crates/microvms-domain/src/sizing.rs:74-125`.
 
 | Downstream | Type | Touch on change | Citation |
 | --- | --- | --- | --- |
-| CLI memory variants and conversions | direct import | yes | `crates/microvms-cli/src/cli.rs:448-498` |
-| CLI resource-request resolution | direct import | likely | `crates/microvms-cli/src/cli.rs:503-534` |
+| CLI memory variants and conversions | direct import | yes | `crates/microvms-cli/src/cli.rs:449-499` |
+| CLI resource-request resolution | direct import | likely | `crates/microvms-cli/src/cli.rs:504-535` |
 | Control-plane run and image data | direct import | likely | `crates/microvms-app/src/control/mod.rs:368`, `crates/microvms-app/src/control/image.rs:72` |
 | Python size factories | direct import | likely | `bindings/microvms-py/src/cost.rs:457-485` |
 | Node size factories | direct import | likely | `bindings/microvms-js/src/cost.rs:363-401` |
 | Published client defaults | indirect | likely | `crates/microvms-app/src/defaults.rs:51-52`, `crates/microvms-app/src/defaults.rs:159` |
 | Agent recipe sizes | direct import | likely | `crates/microvms-app/src/agents/mod.rs:44-52` |
 | CLI cost report | indirect | likely | `crates/microvms-cli/src/commands/cost.rs:33-34` |
-| Constants emission and independent size table | config | yes | `crates/microvms-domain/src/constants.rs:727-739`, `tools/check-model-drift.py:213-219` |
-| CLI domain and resource-request tests | test | yes | `crates/microvms-cli/src/cli.rs:2793-2810`, `crates/microvms-cli/src/cli.rs:3962-3980` |
-| Binding sizing and billing tests | test | likely | `bindings/microvms-py/tests/test_smoke.py:406-430`, `bindings/microvms-js/__test__/smoke.mjs:315-340` |
+| Constants emission and independent size table | config | yes | `crates/microvms-domain/src/constants.rs:732-744`, `tools/check-model-drift.py:236-242` |
+| CLI domain and resource-request tests | test | yes | `crates/microvms-cli/src/cli.rs:2765-2782`, `crates/microvms-cli/src/cli.rs:3971-3989` |
+| Binding sizing and billing tests | test | likely | `bindings/microvms-py/tests/test_smoke.py:413-437`, `bindings/microvms-js/__test__/smoke.mjs:332-357` |
 | Shared size and cost case runner | test | likely | `crates/microvms-core/tests/parity_cases.rs:35-73` |
 | Public capability mapping | config | likely | `verify/parity/capabilities.toml:759-790` |
 
@@ -182,7 +182,7 @@ Defined at: `crates/microvms-domain/src/sizing.rs:74-125`.
   class requires reviewing these together with the CLI's exhaustive conversion.
   `crates/microvms-domain/src/sizing.rs:138-145`,
   `crates/microvms-domain/src/sizing.rs:273-280`,
-  `crates/microvms-cli/src/cli.rs:463-481`
+  `crates/microvms-cli/src/cli.rs:464-482`
 
 ## Region values
 
@@ -198,7 +198,7 @@ Defined at: `crates/microvms-domain/src/region.rs:56-281`.
 | Null-message denial diagnosis | direct import | yes | `crates/microvms-app/src/control/transport.rs:622-645` |
 | Control-plane identity | direct import | no | `crates/microvms-app/src/control/mod.rs:154`, `crates/microvms-app/src/control/mod.rs:268-270` |
 | Constant emission and independent region lists | config | yes | `crates/microvms-domain/src/constants.rs:629-636`, `crates/microvms-domain/src/constants.rs:729-730`, `tools/check-model-drift.py:201-232`, `tools/check-live-rates.py:87-102` |
-| Preflight and registered-name resolution | direct import | likely | `crates/microvms-app/src/preflight.rs:40-47`, `crates/microvms-app/src/names.rs:55-63` |
+| Preflight and registered-name resolution | direct import | likely | `crates/microvms-app/src/preflight.rs:42-49`, `crates/microvms-app/src/names.rs:55-63` |
 | Agent recipe region | direct import | likely | `crates/microvms-app/src/agents/mod.rs:49` |
 | Pinned rate-table region | indirect | likely | `crates/microvms-domain/src/cost.rs:1007-1011` |
 | Region parsing and round-trip tests | test | yes | `crates/microvms-domain/src/region.rs:284-408` |
@@ -229,15 +229,15 @@ Defined at: `crates/microvms-domain/src/cost.rs:1007-1021`.
 
 | Downstream | Type | Touch on change | Citation |
 | --- | --- | --- | --- |
-| Independent rate literals and source parser | runtime dispatch | yes | `tools/check-live-rates.py:119-142`, `tools/check-live-rates.py:169-210` |
+| Independent rate literals and source parser | runtime dispatch | yes | `tools/check-live-rates.py:129-152`, `tools/check-live-rates.py:179-220` |
 | CLI cost command | direct import | likely | `crates/microvms-cli/src/commands/cost.rs:18`, `crates/microvms-cli/src/commands/cost.rs:33-34` |
 | Python rate factory and report defaults | direct import | likely | `bindings/microvms-py/src/cost.rs:577`, `bindings/microvms-py/src/cost.rs:948` |
 | Node rate factory and report defaults | direct import | likely | `bindings/microvms-js/src/cost.rs:482`, `bindings/microvms-js/src/cost.rs:837` |
 | Completed-run cost attachment | direct import | likely | `crates/microvms-cli/src/commands/lifecycle.rs:1363-1396` |
 | Shared cost case runner | test | likely | `crates/microvms-core/tests/parity_cases.rs:224-233` |
-| Report's preserved rate table | indirect | no | `crates/microvms-domain/src/cost.rs:1471-1496` |
-| Independent rate and storage-unit assertions | test | yes | `crates/microvms-domain/src/cost.rs:2648-2677` |
-| Binding cost-contract tests | test | likely | `bindings/microvms-py/tests/test_smoke.py:531-546`, `bindings/microvms-js/__test__/smoke.mjs:428-442` |
+| Report's preserved rate table | indirect | no | `crates/microvms-domain/src/cost.rs:1472-1497` |
+| Independent rate and storage-unit assertions | test | yes | `crates/microvms-domain/src/cost.rs:2649-2678` |
+| Binding cost-contract tests | test | likely | `bindings/microvms-py/tests/test_smoke.py:538-553`, `bindings/microvms-js/__test__/smoke.mjs:445-459` |
 | `docs/PLATFORM.md` rate evidence | config | yes | `crates/microvms-domain/src/cost.rs:988-998` |
 
 ### Blast-radius notes
@@ -245,14 +245,14 @@ Defined at: `crates/microvms-domain/src/cost.rs:1007-1021`.
 - The comparison script locates `pinned_rates` and its decimal literals by source
   text. A function rename or different literal representation needs a matching
   parser update even when Rust callers compile.
-  `tools/check-live-rates.py:133-142`, `tools/check-live-rates.py:177-199`
+  `tools/check-live-rates.py:143-152`, `tools/check-live-rates.py:187-209`
 - Snapshot storage is expressed per GB-month in the table but per GB-hour in
   the catalog. Preserve the unit conversion and its independent assertion.
   `crates/microvms-domain/src/cost.rs:988-994`,
-  `crates/microvms-domain/src/cost.rs:2670-2677`
+  `crates/microvms-domain/src/cost.rs:2671-2678`
 - Reports retain their own rate table. A new pinned table changes future reports;
   it should not make an existing report depend on whatever rates are current
-  when rendered. `crates/microvms-domain/src/cost.rs:1471-1496`
+  when rendered. `crates/microvms-domain/src/cost.rs:1472-1497`
 
 ## CLI manifest
 
@@ -265,7 +265,7 @@ Defined at: `crates/microvms-cli/src/manifest.rs:51-117`.
 | Command response type and key registry | indirect | yes | `crates/microvms-cli/src/commands/mod.rs:110-119`, `crates/microvms-cli/src/commands/mod.rs:674-684` |
 | Global-flag and client-default publication | indirect | likely | `crates/microvms-cli/src/manifest.rs:97-111` |
 | Committed manifest artifact | config | yes | `.config/mise/tasks/contracts.toml:123-164` |
-| CLI command, flag-domain, and exit-code tests | test | yes | `crates/microvms-cli/tests/manifest.rs:46-80`, `crates/microvms-cli/tests/manifest.rs:90-112`, `crates/microvms-cli/tests/manifest.rs:195-238` |
+| CLI command, flag-domain, and exit-code tests | test | yes | `crates/microvms-cli/tests/manifest.rs:46-80`, `crates/microvms-cli/tests/manifest.rs:90-112`, `crates/microvms-cli/tests/manifest.rs:226-269` |
 | Streaming response contract test | test | likely | `crates/microvms-cli/src/manifest.rs:369-402` |
 | Conformance command discovery | indirect | likely | `conformance/lanes/local.py:82-89` |
 | Binding default mapping | config | likely | `verify/parity/capabilities.toml:868-884` |
@@ -279,7 +279,7 @@ Defined at: `crates/microvms-cli/src/manifest.rs:51-117`.
 - Global flags are gathered before clap propagates them to subcommands. Preserve
   their separate publication rather than duplicating them per command.
   `crates/microvms-cli/src/manifest.rs:97-103`,
-  `crates/microvms-cli/src/manifest.rs:666-685`
+  `crates/microvms-cli/src/manifest.rs:663-682`
 - The streaming exec response is a separate contract published through
   `alternateResponse`; a consumer cannot use the ordinary response shape for
   that mode. `crates/microvms-cli/src/manifest.rs:61-79`,
