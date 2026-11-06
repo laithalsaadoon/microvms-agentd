@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: Apache-2.0
+# The model-free probe for the SDLC variant: the same policy and tool tables as box.toml, with a
+# Python script as the agent. probe.py runs each command through `bash -c`, and on the agent's
+# PATH bash is Box's shell alias, so each command gets the decisions an agent's would.
+# driver.py copies this file per run and replaces box_dir.
+
+name = "codex-sdlc-probe"
+box_dir = "/home/agent/sdlc/state-probe"
+policy = "policy.dw"
+
+[agent]
+command = ["/usr/bin/python3.12", "/home/agent/sdlc/probe.py"]
+workspace = "/home/agent/project"
+env = { PATH = "/usr/bin:/bin" }
+
+# The probe reads origin's branch ref itself after each step, to see whether a step moved it.
+[agent.filesystem]
+read = ["/usr/lib64/python3.12", "/home/agent/origin.git"]
+read_file = ["/home/agent/sdlc/probe.py"]
+exec = ["/usr/lib64/python3.12/lib-dynload"]
+
+[tool.check]
+command = ["python3.12", "check.py"]
+env = { PATH = "/usr/bin:/bin", GIT_CONFIG_GLOBAL = "/home/agent/sdlc/gitconfig", GIT_CONFIG_NOSYSTEM = "1", GIT_OPTIONAL_LOCKS = "0" }
+
+[tool.check.filesystem]
+read = ["/home/agent/project", "/usr/lib64/python3.12", "/usr/libexec/git-core", "/usr/share/git-core", "/home/agent/sdlc/gitconfig"]
+read_file = ["/usr/bin/git"]
+deny = ["/home/agent/project/.env"]
+
+[tool.git]
+command = ["git"]
+env = { PATH = "/usr/bin:/bin", GIT_CONFIG_GLOBAL = "/home/agent/sdlc/gitconfig", GIT_CONFIG_NOSYSTEM = "1" }
+
+[tool.git.filesystem]
+read = ["/home/agent/project", "/home/agent/origin.git", "/usr/libexec/git-core", "/usr/share/git-core", "/home/agent/sdlc/gitconfig"]
+read_file = ["/usr/bin/git"]
+write = ["/home/agent/project/.git", "/home/agent/origin.git"]
+deny = ["/home/agent/project/.env"]

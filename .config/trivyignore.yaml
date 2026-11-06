@@ -30,6 +30,7 @@ misconfigurations:
       - examples/code-server-remote-dev/Dockerfile
       - examples/s3-prefetch-at-build/Dockerfile
       - examples/strands-box-codex-sdk/Dockerfile
+      - examples/strands-box-codex-sdk/sdlc/Dockerfile
     statement: >-
       The image's process is agentd, which runs as root in the guest
       deliberately. It demotes each exec to the user a caller names

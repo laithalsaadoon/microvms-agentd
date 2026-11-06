@@ -71,5 +71,9 @@ description = "Format the background example's Terraform and Python"
 run = ["ruff check --fix examples/background-coding-agent", "ruff format examples/background-coding-agent", "terraform -chdir=examples/background-coding-agent/infra fmt"]
 
 ["box:check"]
-description = "Check metadata refusal, startup ordering and the spend cap in the Box example without AWS"
-run = "uv run --locked pytest -q -p no:cacheprovider tools/test_box_metadata.py tools/test_box_spend.py"
+description = "Check metadata refusal, startup ordering and the spend cap in the Box example, and its SDLC variant's check, seeding, grants, and scoring, without AWS"
+run = "uv run --locked pytest -q -p no:cacheprovider tools/test_box_metadata.py tools/test_box_spend.py tools/test_box_sdlc.py"
+
+["box:sdlc:replay"]
+description = "Replay hand-built Box traces against the SDLC variant's policy with the Dogwood CLI, and prove each seeded fault is caught (DOGWOOD names the CLI)"
+run = "python3 -I examples/strands-box-codex-sdk/sdlc/replay/replay.py --faults"

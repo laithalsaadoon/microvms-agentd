@@ -1,0 +1,187 @@
+// SPDX-License-Identifier: Apache-2.0
+// The Dogwood policy for the SDLC variant: a coding agent (Codex or Claude Code, each in its own
+// box.toml) fixes a bug and pushes the fix, and this file holds the order red check -> fix ->
+// commit -> check -> push. Nothing outside the agent sequences those steps. Box denies every
+// operation it checks unless a permit matches, and a matching forbid overrides any permit. A
+// path under the operator's home (/home/agent) starts with "~" on fs:*, and a host program's
+// cwd is a full path.
+//
+// check.py is the project's one check. It exits 3 when it can't read the git tree, 2 when the
+// tree differs from HEAD (an untracked file counts), 1 when a test fails, and 0 when every test
+// passes. So a pass always describes HEAD, and a 1 always means tests that ran and failed. That
+// keeps the push rule small: it asks only whether a commit came after the last pass.
+//
+// Box's reference for each action and field:
+// https://github.com/strands-agents/box/blob/main/docs/user/policy/actions.md
+
+// ── The model ────────────────────────────────────────────────────────────────
+@id("model_connect")
+permit (principal, action == Box::Action::"net:connect", resource)
+when { context.input.host == "bedrock-runtime.us-east-1.amazonaws.com" && context.input.port == 443 };
+
+@id("model_request")
+permit (principal, action == Box::Action::"http:request", resource)
+when { context.input.host == "bedrock-runtime.us-east-1.amazonaws.com" };
+
+// ── The shell and the project ────────────────────────────────────────────────
+// Every command Strands Shell implements. `python3` here is Box's own interpreter (Monty), whose
+// exit status the workload can set, so no rule below reads a shell:exec status.
+@id("shell_commands")
+permit (principal, action == Box::Action::"shell:exec", resource);
+
+// The check, as a host program: exactly `python3.12 check.py` in the project. Box records the
+// program's own exit status on the shell:spawn response. box.toml's [tool.check] runs it with
+// the project read-only and .env empty.
+@id("run_check")
+permit (principal, action == Box::Action::"shell:spawn", resource)
+when {
+  context.input.program_path == "/usr/bin/python3.12" &&
+  context.input has arg1 && context.input.arg1 == "check.py" &&
+  context.input.arg_count == 1 &&
+  context.input.cwd == "/home/agent/project"
+};
+
+// git, as a host program, from the project only. A host program's own file operations raise no
+// fs:* decision, so only subcommands that leave tracked files in the work tree alone have a
+// permit: checkout, stash, reset, restore, apply, config and `git -c` have none.
+@id("git_commands")
+permit (principal, action == Box::Action::"shell:spawn", resource)
+when {
+  context.input.program_path == "/usr/bin/git" &&
+  context.input.cwd == "/home/agent/project" &&
+  context.input has arg1 &&
+  ["status", "diff", "log", "show", "add", "commit", "push"].contains(context.input.arg1)
+};
+
+@id("project_read")
+permit (principal, action == Box::Action::"fs:read", resource)
+when { context.input.path == "~/project" || context.input.path like "~/project/*" };
+
+@id("project_write")
+permit (principal, action == Box::Action::"fs:write", resource)
+when { context.input.path like "~/project/*" };
+
+// Agents redirect output to /dev/null all the time.
+@id("dev_null")
+permit (principal, action in [Box::Action::"fs:read", Box::Action::"fs:write"], resource)
+when { context.input.path == "/dev/null" };
+
+// The agent's own state directory, outside the project: its home and temporary files. A harness
+// can keep its bookkeeping there through the shell, as Claude Code's Bash tool does when it
+// snapshots the shell's environment and records the working directory after each command.
+@id("agent_state")
+permit (principal, action in [Box::Action::"fs:read", Box::Action::"fs:write"], resource)
+when { context.input.path like "~/agent-state/*" };
+
+// ── What stays refused whatever the permits say ──────────────────────────────
+@id("no_env")
+@description("The .env file holds credentials the agent must not read.")
+forbid (principal, action == Box::Action::"fs:read", resource)
+when {
+  context.input.path == "~/project/.env" &&
+  context.input.operation == Box::FsReadOperation::"read_content"
+};
+
+@id("no_deletes")
+@description("This agent writes the project and runs commands in it. It deletes nothing.")
+forbid (principal, action == Box::Action::"fs:delete", resource);
+
+@id("metadata_hosts")
+@description("Refuse the instance metadata service by name, before resolution.")
+forbid (principal, action == Box::Action::"net:connect", resource)
+when { context.input.host == "169.254.169.254" || context.input.host == "fd00:ec2::254" };
+
+@id("metadata_addresses")
+@description("Refuse link-local and cloud metadata addresses, on the address resolution pinned.")
+forbid (principal, action == Box::Action::"net:connect", resource)
+when {
+  (context.input has ip4 && context.input.ip4 like "169.254.*") ||
+  (context.input has ip6 && (
+    context.input.ip6 == "fd00:ec2::254" ||
+    context.input.ip6 like "fe8*" || context.input.ip6 like "fe9*" ||
+    context.input.ip6 like "fea*" || context.input.ip6 like "feb*"))
+};
+
+// ── Fixed files ──────────────────────────────────────────────────────────────
+@id("checks_are_frozen")
+@description("The tests and check.py are fixed. Change the code until `python3.12 check.py` passes.")
+forbid (principal, action in [Box::Action::"fs:write", Box::Action::"fs:move"], resource)
+when {
+  context.input.path == "~/project/test_calc.py" ||
+  context.input.path == "~/project/check.py" ||
+  context.input.path == "~/project/tests" ||
+  context.input.path like "~/project/tests/*"
+};
+
+// A hook or a config line in .git runs inside git's process tree, where no decision fires, so a
+// pre-push hook could push anything. Only git itself writes .git.
+@id("git_dir_is_gits")
+@description("Only git writes .git. Use git add and git commit.")
+forbid (principal, action in [Box::Action::"fs:write", Box::Action::"fs:move", Box::Action::"fs:delete"], resource)
+when { context.input.path == "~/project/.git" || context.input.path like "~/project/.git/*" };
+
+// ── The order, as rules over time ────────────────────────────────────────────
+// Each rule reads the check's shell:spawn response, which carries the exit status Box saw,
+// pinned to the one command run_check permits.
+
+@id("red_before_green")
+@description("Run `python3.12 check.py` on the clean tree first and watch it fail, then change the code.")
+forbid (principal, action == Box::Action::"fs:write", resource)
+when { context.input.path like "~/project/*" }
+unless temporal {
+  formerly within 24h Box::Action::"shell:spawn"::response{ input.program_path: "/usr/bin/python3.12", input.arg1: "check.py", input.arg_count: 1, input.cwd: "/home/agent/project", output.status: 1 }
+};
+
+@id("push_shape")
+@description("Push with exactly `git push origin`.")
+forbid (principal, action == Box::Action::"shell:spawn", resource)
+when { context.input.program_path == "/usr/bin/git" && context.input has arg1 && context.input.arg1 == "push" }
+unless { context.input.arg_count == 2 && context.input has arg2 && context.input.arg2 == "origin" };
+
+// Any commit attempt after the pass closes the gate, a failed one included, until the check
+// passes again on the new HEAD. A file write after the pass leaves it open: HEAD is unchanged,
+// and the check refuses a dirty tree, so the pass still describes what the push sends.
+@id("push_after_green_check")
+@description("Commit, then run `python3.12 check.py` on the committed tree. Push only after it passes, with no commit since.")
+forbid (principal, action == Box::Action::"shell:spawn", resource)
+when { context.input.program_path == "/usr/bin/git" && context.input has arg1 && context.input.arg1 == "push" }
+unless temporal {
+  !Box::Action::"shell:spawn"::response{ input.program_path: "/usr/bin/git", input.arg1: "commit" }
+    since within 30m
+  Box::Action::"shell:spawn"::response{ input.program_path: "/usr/bin/python3.12", input.arg1: "check.py", input.arg_count: 1, input.cwd: "/home/agent/project", output.status: 0 }
+};
+
+// After 10 failed checks in the last hour, the agent is going in circles: refuse every project
+// write until the failures are an hour old. A dirty-tree exit (2) counts as a failure too.
+@id("stall_brake")
+@description("The check failed 10 times in the last hour. Stop and report what is failing; project writes resume when the failures are an hour old.")
+forbid (principal, action == Box::Action::"fs:write", resource)
+when { context.input.path like "~/project/*" }
+when temporal {
+  exists (fails: Long). (
+    (count for (t: Timepoint). where (
+      formerly within 1h (
+        Box::Action::"shell:spawn"::response{ input.program_path: "/usr/bin/python3.12", input.arg1: "check.py", input.arg_count: 1, input.cwd: "/home/agent/project" } &&
+        !Box::Action::"shell:spawn"::response{ output.status: 0 } && tp(t)
+      )
+    )) == fails
+    && fails >= 10
+  )
+};
+
+// The agent may send bedrock-runtime 400 requests in any hour, counted on ::request so the cap admits
+// exactly 400.
+@id("model_call_budget")
+@description("This agent has sent bedrock-runtime 400 requests in the last hour, the most this box allows.")
+forbid (principal, action == Box::Action::"http:request", resource)
+when { context.input.host == "bedrock-runtime.us-east-1.amazonaws.com" }
+when temporal {
+  exists (calls: Long). (
+    (count for (t: Timepoint). where (
+      formerly within 1h (
+        Box::Action::"http:request"::request{ input.host: "bedrock-runtime.us-east-1.amazonaws.com" } && tp(t)
+      )
+    )) == calls
+    && calls > 400
+  )
+};

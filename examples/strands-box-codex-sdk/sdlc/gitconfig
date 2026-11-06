@@ -1,0 +1,15 @@
+# The git config the box's tools read (GIT_CONFIG_GLOBAL), outside the project, so the agent can't
+# change it. Box runs tools in their own user namespace, so the repo's owner may not match.
+[safe]
+	directory = *
+[core]
+	hooksPath = /dev/null
+[user]
+	name = Agent in Box
+	email = agent@example.invalid
+[init]
+	defaultBranch = main
+# origin's URL uses the ext transport (seed.sh says why). git refuses ext unless a config
+# allows it; this one is outside the project, where the agent can't write.
+[protocol "ext"]
+	allow = always

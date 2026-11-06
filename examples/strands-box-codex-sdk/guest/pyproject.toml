@@ -1,12 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 # The guest's Python environment: the Codex Python SDK, which also installs the matching
 # Codex binary (openai-codex-cli-bin). `microvm build --project guest` bakes it into the
-# image from uv.lock, so a launch installs nothing.
+# image from uv.lock, so a launch installs nothing. 0.163.0 is the newest release that starts
+# inside Strands Box v0.2.1 on Linux: from 0.166.0 the app-server calls statfs on its SQLite
+# home and exits when that fails, and Box's seccomp filter for the agent refuses statfs (EPERM).
 [project]
 name = "strands-box-codex-sdk-guest"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["openai-codex==0.162.1"]
+dependencies = ["openai-codex==0.163.0"]
 
 [tool.uv]
 package = false
