@@ -662,7 +662,7 @@ async fn replay(steps: &[Step<'_>]) -> Result<(), String> {
 }
 
 /// Every path stateright walks through the guarded client lifecycle replays against
-/// `Sandbox` with the model's five state variables, wire calls, run-hook payloads and proxy
+/// `Sandbox` with the model's lifecycle variables, wire calls, run-hook payloads and proxy
 /// token, after every call.
 ///
 /// It's the sandbox's side of the model's keyed properties, each a comparison this test makes

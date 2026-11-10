@@ -1,0 +1,16 @@
+# The real verifier must distinguish call history from the resulting lifecycle state.
+[[family]]
+guard = "STATE-5 proves legal calls and rejects repeated suspend calls"
+run = ["mise", "run", "spec:regression"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "formal-state5-post-state-only"
+message = "STATE-5 must reject the illegal suspend guard"
+transform = { file = "verify/spec/core.symspec.json", replace = '"stateConstraint": "not suspend_outside_running"', with = '"stateConstraint": "not (vm_state = SUSPENDING and (was_terminated or not token_installed))"' }
+
+[[family.fault]]
+id = "formal-state5-pre-state-unrecorded"
+message = "STATE-5 must reject the illegal suspend guard"
+transform = { file = "verify/spec/core.symspec.json", replace = "suspend_outside_running := suspend_outside_running or vm_state != RUNNING", with = "suspend_outside_running := suspend_outside_running" }

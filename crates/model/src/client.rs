@@ -10,15 +10,16 @@
 //!
 //! # What this model is for
 //!
-//! `verify/spec/core.symspec.json` carries a five-variable state model and Z3 has already proved
-//! three things over it: bootstrap happens at most once, a suspend from a non-RUNNING state
-//! is unreachable, and TERMINATED never returns to RUNNING. Those proofs are about the
+//! `verify/spec/core.symspec.json` models at-most-once bootstrap, legal suspend calls, and
+//! the prohibition on returning TERMINATED to RUNNING. Its proofs are about the
 //! *specification*. This model is the second half — it enumerates every interleaving of the
-//! actions a caller and the platform can actually take, so the same three claims become
+//! actions a caller and the platform can actually take, so the same claims become
 //! claims about a state machine somebody can execute rather than about prose.
 //!
-//! The variables are the symspec's, unchanged: `vm_state`, `token_installed`,
-//! `image_exists`, `was_terminated`, `bootstrap_count`.
+//! The lifecycle variables mirror the symspec's: `vm_state`, `token_installed`,
+//! `image_exists`, `was_terminated`, `bootstrap_count`. Its sticky
+//! `suspend_outside_running` flag records the same pre-state violation as this model's
+//! `suspends_outside_running` counter; both require that no such call occurred.
 //!
 //! # The wire calls are in the state, which is the whole trick
 //!
@@ -146,10 +147,10 @@ pub enum Action {
     TerminateComplete,
 }
 
-/// The symspec's five variables, plus what reached the wire and what the client holds.
+/// The symspec's lifecycle variables, plus what reached the wire and what the client holds.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct State {
-    // ── the symspec's five ───────────────────────────────────────────────────
+    // ── the symspec's lifecycle state ────────────────────────────────────────
     pub vm_state: VmState,
     pub token_installed: bool,
     pub image_exists: bool,

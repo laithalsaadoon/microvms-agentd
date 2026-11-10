@@ -59,16 +59,16 @@ Feature: One call from build inputs to a usable image
       When the image is ensured
       Then the uploaded artifact's Dockerfile ends with the agentd stanza
 
-  Rule: IMAGE-8 — one account lookup per sandbox, one content-addressed key
+  Rule: IMAGE-8 and IMAGE-13 — upload for a build, one account lookup per sandbox
 
-    @IMAGE-8
+    @IMAGE-8 @IMAGE-13
     Scenario: a build uploads to the key under the prefix and names that URI
       When the image is ensured
       Then the artifact was uploaded to "harbor/<name>/artifact.zip"
       And the create named that artifact
       And the account was looked up 1 time
 
-    @IMAGE-8
+    @IMAGE-13
     Scenario: two ensures on one sandbox look the account up once
       When the image is ensured
       And the image is ensured again on the same sandbox

@@ -13,7 +13,7 @@
 //! 2. Two sandboxes ensure the image at once: one builds, the other joins (IMAGE-11). A probe
 //!    task beside them records the longest time any task held the runtime's one worker.
 //! 3. A third ensure on one of those sandboxes reuses it with no upload (IMAGE-9) and no
-//!    second account lookup (IMAGE-8).
+//!    second account lookup (IMAGE-13).
 //! 4. A VM launched from it shows the daemon running as root after the task's `USER`
 //!    (IMAGE-2), the context's script, and neither the ignored file nor the link (IMAGE-7).
 //! 5. A forced ensure deletes the ready image and rebuilds it under the same name (IMAGE-10).

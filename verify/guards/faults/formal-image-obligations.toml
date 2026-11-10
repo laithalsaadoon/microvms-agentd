@@ -1,0 +1,56 @@
+# The split obligations retain independent evidence: upload precedes either outcome of a
+# create attempt, while successful caller-identity lookups are cached per sandbox.
+[[fault]]
+id = "model-image-create-without-upload"
+guard = "image::tests::the_specified_ensure_satisfies_every_property"
+run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "image::tests::the_specified_ensure_satisfies_every_property"]
+expect = "test-failed"
+suite = "rust"
+message = "IMAGE-8 every observed create attempt has an artifact upload"
+transform = { file = "crates/model/src/image.rs", replace = "                caller.uploaded = true;", with = "                caller.uploaded = false;" }
+
+[[family]]
+guard = "conformance/run_rs.py --self-test: conformance/selftest/ensure_image.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "conformance-image-account-unchecked"
+message = "FAIL  each ensure-image check fails on the one gap it is about"
+transform = { file = "conformance/lanes/ensure_image.py", replace = "        report.get(\"accountCalls\") == [1, 1],", with = "        True," }
+
+[[family.fault]]
+id = "conformance-image-upload-unchecked"
+message = "FAIL  each ensure-image check fails on the one gap it is about"
+transform = { file = "conformance/lanes/ensure_image.py", replace = "        and bool(puts)\n", with = "" }
+
+[[fault]]
+id = "app-image-create-before-upload"
+guard = "control::ensure::tests::an_absent_image_is_uploaded_to_its_key_and_built"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::ensure::tests::an_absent_image_is_uploaded_to_its_key_and_built"]
+expect = "test-failed"
+suite = "rust"
+message = "IMAGE-8: upload must precede the create call"
+[fault.transform]
+file = "crates/microvms-app/src/control/ensure.rs"
+replace = '''
+        // The name is free as far as this call knows: upload, create, and wait.
+        if !progress.uploaded {
+            services
+                .put_object(&prepared.bucket, &prepared.key, prepared.artifact.clone())
+                .await?;
+            progress.uploaded = true;
+        }
+        match control.create_image(prepared.create.clone()).await {
+'''
+with = '''
+        let created = control.create_image(prepared.create.clone()).await;
+        if !progress.uploaded {
+            services
+                .put_object(&prepared.bucket, &prepared.key, prepared.artifact.clone())
+                .await?;
+            progress.uploaded = true;
+        }
+        match created {
+'''

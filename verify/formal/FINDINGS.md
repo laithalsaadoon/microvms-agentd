@@ -1,0 +1,273 @@
+# Formal findings reconciliation
+
+Working inventory from symspec 2.0.0, read October 17, 2026. The baseline is
+`db68a0091801c8b6bbeb245925612fa76cb9d4c5`. This record does not claim strict
+verification: uncovered requirements and undecided guard relationships remain.
+
+## Evidence
+
+- On October 17, 2026, the strict core check at
+  `e69fc07a`, based on the commit above, exited 3 with 0 errors, 560 warnings,
+  and 138 informational findings. It compared 0 requirement pairs and left 92
+  requirements uncovered. The core inventory below records that run.
+- `mise run spec` and `mise run spec:core` produced the baseline reports.
+- The lifecycle effects now explicitly preserve the variables each event does not
+  change, matching `crates/model/src/client.rs` (the `next_state` clone and updates).
+  `FND_REACHABILITY_PROVED` now carries `certificateVerified: true` and
+  `frameClosed: true` for `STATE-3`, `STATE-5`, and `STATE-11`.
+- A negative run changed the `STATE-2` bootstrap increment to two. The verifier
+  returned `FND_REACHABILITY_VIOLATED` for `STATE-3` and exited with failure;
+  the restored model returned the frame-closed proof again.
+- Categorical exit and close codes now use named statuses. Their numeric values
+  remain recorded with their implementation references; they are not quantities.
+  The old unscoped waivers for these codes have been removed.
+
+## Suspend call history
+
+`STATE-5` requires the sticky `suspend_outside_running` audit flag to remain
+false. The `STATE-4` effect records the lifecycle before the suspend transition,
+and every other effect preserves the flag. This matches the audit counter in
+`crates/model/src/client.rs` and the local guard in
+`crates/microvms-app/src/sandbox.rs::suspend`, read October 17, 2026. A legal
+suspend and a repeated call from `SUSPENDING` leave the same lifecycle and token
+state, so the resulting state alone does not establish the call's legality.
+
+`mise run spec:regression` requires a frame-closed, certificate-verified proof
+for the authored model. It then widens the `STATE-4` guard to admit calls from
+`SUSPENDING` and `SUSPENDED`, and requires a `STATE-5` violation whose trace records
+the bad pre-state. Registered faults `formal-state5-post-state-only` and
+`formal-state5-pre-state-unrecorded` each make this test fail. The existing model
+counterexample and the runtime's zero-wire-call test check the corresponding
+implementation guard.
+
+This transition model describes accepted suspend calls; failed outbound attempts
+are not represented. The regression isolates reachability without loading the
+semantic model. It establishes neither strict coverage nor exhaustive runtime
+call-attempt coverage.
+
+## Ensure-image obligations
+
+The image clauses follow the design documented in merged [PR #237](https://github.com/laithalsaadoon/microvms-agentd/pull/237),
+read October 17, 2026, and the current implementation. The original design names
+reserved context files, a forced replacement that is consumed once, and a
+recovery describe when an awaited image disappears.
+
+`IMAGE-7` selects `Dockerfile.dockerignore` before `.dockerignore`, or empty rules
+when neither exists. The context omits the root Dockerfile and both root ignore
+files: the artifact supplies its own Dockerfile, and an included ignore file
+could exclude the daemon during the platform build. A nonexcluded regular root
+file named `agentd` is rejected. Remaining nonexcluded regular files retain
+fixed archive dates and normalized modes. Remaining symlinks are skipped without
+following them; only nonexcluded symlinks produce warnings. These boundaries are
+implemented in [the context rules](../../crates/microvms-app/src/control/context.rs),
+[the directory walk](../../crates/microvms-edges/src/control/context.rs), and
+[the artifact writer](../../crates/microvms-app/src/control/artifact.rs).
+
+`IMAGE-9` requires a ready image to be returned as reused whenever no forced
+rebuild remains outstanding, without a new upload or create. A building image
+under the same condition is waited on and returned as reused when ready. A
+failed readiness wait for an existing build, accepted create, or refused-create
+winner requires recovery when the call has not used its recovery restart and a
+follow-up describe finds no image or reports `DELETING`; otherwise the failure
+propagates. The entire ensure call shares one recovery restart, including
+recovery from refused creates. Forced-settle and deletion wait failures propagate
+directly. Work done before recovery can leave `uploaded` true
+on a reused result, but reuse itself adds no upload or create.
+
+`IMAGE-10` makes the state-dependent replacement rules explicit. Failed images
+are deleted before rebuilding. A ready image is deleted only under an
+outstanding forced rebuild. A forced caller waits for a building image to settle
+before deleting a surviving image. Requested and existing deletions are waited
+on until absence or a replacement image permits the create-race path. An absent
+image builds directly. The deletion path or forced wait-and-replace path consumes
+the force request, so recovery cannot repeatedly force replacement. The
+[decision table and execution loop](../../crates/microvms-app/src/control/ensure.rs)
+and the [image model](../../crates/model/src/image.rs) retain these distinctions.
+
+`IMAGE-8` applies to a build attempt: upload the artifact to its content-addressed
+key before the create. `IMAGE-13` separately requires resolving the image ARN from
+the sandbox's cached caller identity, looking up and caching a missing identity
+after local validation. The successful reuse and wait paths return before the
+upload; a recovery that needs to build follows `IMAGE-8`. The sources above and
+[Sandbox::ensure_image](../../crates/microvms-app/src/sandbox.rs) were read on
+October 17, 2026.
+
+The image model checks that an observed accepted or refused create has an
+upload. The absent-image Rust test checks call order by refusing an upload if
+the control-plane log already contains a create. The account-cache property
+names `IMAGE-13`. The live conformance report checks account calls and artifact
+uploads separately; its offline twins reject an extra account lookup and an
+absent upload. Registered faults remove each guard and the model's upload, or
+move the real create before the upload, and each fault fails its check.
+The [direct ensure-image regressions](../../crates/microvms-app/src/control/ensure.rs)
+assert first recovery for existing builds, accepted creates, and refused-create
+winners after disappearance confirmed as absence or `DELETING`. A second
+disappearance returns the wait error. They also assert that force on an
+absent or deleting image adds no deletion, and that a forced building image
+settles before deletion and can join a competing replacement after force is
+consumed. The [symlink regression](../../crates/microvms-edges/src/control/context.rs)
+checks included and ignored file and directory links, their warning selection,
+and the absence of target data in the context. The registered mutations in
+[formal-image-paths.toml](../guards/faults/formal-image-paths.toml) remove or widen
+these branch guards; each is checked with clean, seeded, and restored runs.
+
+These assertions add implementation evidence; they do not supply shared atoms
+or waive a formal coverage demotion.
+
+The pinned verifier's strict result remains the failing result recorded above.
+The lifecycle proofs do not discharge `uncovered-requirement` or
+`no-decide-tier-comparison`.
+
+## Core wording review
+
+The October 17, 2026 review preserves the requirement identifiers, trace links,
+state-model predicates and effects, and existing obligations. It adds noun-term
+expansions for ARN (Amazon Resource Name), AWS (Amazon Web Services), CLI
+(command-line interface), ELF (Executable and Linkable Format), OS (operating
+system), POSIX (Portable Operating System Interface), and VM (virtual machine).
+These entries identify the same terms; they do not equate different operations,
+guards, or lifecycle states. The per-statement `GTWR_R37_ACRONYM` advisory can
+still appear because a term-table definition is not an inline expansion.
+
+The resulting `FND_TERM_INCONSISTENT` suggestions compare different concerns
+that use the same noun. `CLI` denotes the same command-line interface in
+`BIND-1`'s dependency boundary and `BIND-12`'s output contract. `ARN` denotes
+Amazon Resource Name in `IMAGE-13` and `TRAP-4`; the image and connector qualifiers
+remain distinct. `VM` denotes the virtual machine in `BIND-21`'s pinned identity
+and `STATE-3`'s lifetime. None of these entries equates the requirements' actions
+or conditions. The suggestions remain visible, without waivers.
+
+The remaining uppercase tokens are literal names, not missing acronym expansions:
+
+| Tokens | Meaning and source |
+| --- | --- |
+| `ARM` | The compute architecture marker in the pricing catalog groups selected by `CatalogLine::group` in [cost.rs](../../crates/microvms-domain/src/cost.rs). The requirement keeps the catalog's spelling. |
+| `FROM`, `USER` | Dockerfile instructions read and emitted by [artifact.rs](../../crates/microvms-app/src/control/artifact.rs). |
+| `CREATING`, `DELETING`, image-build `PENDING` | Service image and build status names read by [ensure.rs](../../crates/microvms-app/src/control/ensure.rs). |
+| Lifecycle `PENDING`, `RUNNING`, `SUSPENDING`, `SUSPENDED`, `TERMINATING`, `TERMINATED` | The client lifecycle values defined by `VmState` in [client.rs](../../crates/model/src/client.rs). `PENDING` also names a build status; those domains are not merged. |
+
+The mixed-conjunction findings were checked against the following source branches:
+
+| Requirement | Clarification and evidence |
+| --- | --- |
+| `IMAGE-7` | The ignore precedence, reserved-root exclusions, daemon-name refusal, archive metadata, and symlink behavior are stated separately, following the original design and context sources above. |
+| `IMAGE-9` | Ready and successful building-wait reuse retain their no-new-upload/create obligation. The failed-wait branch names its absence/deleting condition and one shared recovery allowance. |
+| `IMAGE-10` | The failed, forced-ready, forced-building, deleting, and absent branches name their respective actions. Force consumption and replacement-image handling match the decision loop. |
+| `TRAP-4` | “Enumerated connector intent” names the closed `ConnectorIntent` enum in [connector.rs](../../crates/microvms-app/src/control/connector.rs), which contains ingress and egress variants. The caller-supplied egress restriction in [microvm.rs](../../crates/microvms-app/src/control/microvm.rs) remains a separate obligation. |
+| `BIND-22` | Both permitted malformed-frame outcomes retain the no-panic obligation and the bound on unterminated bytes between reads. [sse.rs](../../crates/microvms-app/src/session/sse.rs) drains complete frames before checking that bound. |
+| `BIND-25` | Success returns the shared future's result; failure propagates its error class. The async wrappers in [session.rs](../../bindings/microvms-py/src/session.rs) and task handling in [runtime.rs](../../bindings/microvms-py/src/runtime.rs) preserve the blocking call's arguments and runtime. |
+| `CLI-7`, `CLI-8` | Separate clauses retain the exit status, no-panic, no-signal-death, teardown, and ledger obligations, including the streaming exception. [closed_output.rs](../../crates/microvms-cli/src/closed_output.rs) separates the stop-stream case from normal completion; [the regression](../../crates/microvms-cli/src/guards/closed_output.rs) checks teardown and the surviving leak record. |
+
+The image clauses state the original design's case distinctions rather than
+leaving the reserved-file and recovery paths implicit. No wording waiver is
+added. The remaining formal coverage and guard-relation limitations are not
+resolved by these source-backed clarifications.
+
+## Remaining limitation
+
+The verifier treats event and state clauses as independent Boolean atoms. Its
+`conditional-conflict-unchecked` repair explicitly says it cannot record that
+different guards are mutually exclusive, and that such a finding cannot be
+waived. The valid-token, invalid-token, and uninitialized-token cases in
+`AGENTD-1` through `AGENTD-6` need that distinction. Their existing route and
+model tests do not make a failed formal comparison pass.
+
+Source: symspec 2.0.0 distributed `dist/cli.mjs`, the
+`conditionalConflicts` and `buildCoverage` implementations, read October 17, 2026.
+The tables below index every finding code and its requirement set.
+
+### Reproduce the guard limitation
+
+After `mise run spec:setup`, run these commands from the repository root:
+
+```sh
+mise exec node@24.22.0 -- tools/check-spec.sh verify/formal/fixtures/auth-guards.json --strict
+mise exec node@24.22.0 -- tools/check-spec.sh verify/formal/fixtures/auth-guards-with-model.json --strict
+```
+
+Both commands exit with status 3 and report `conditional-conflict-unchecked` for
+`AGENTD-5` and `AGENTD-6`. The first document preserves their existing requirement
+text. The second preserves that text and adds complementary Boolean transition
+guards and an authorization invariant. Its reachability result proves the
+invariant with `certificateVerified: true` and `frameClosed: true`, but the
+conditional coverage demotion remains. These are diagnostic fixtures, not an
+alternative specification or an exclusion from verification.
+
+No newer supported release was available on October 17, 2026: the npm `latest`
+tag and the [GitHub releases](https://github.com/laithalsaadoon/symspec/releases)
+both identify 2.0.0. The current upstream source at commit
+`49b37c6a700a7915df36c7fbe41a93a19baa7b56` retains the same limitation:
+
+- [The coverage decision](https://github.com/laithalsaadoon/symspec/blob/49b37c6a700a7915df36c7fbe41a93a19baa7b56/src/domain/engine/pipeline/check.ts#L1983)
+  explicitly leaves mutually exclusive guards undecided and disallows a waiver.
+- [The operation](https://github.com/laithalsaadoon/symspec/blob/49b37c6a700a7915df36c7fbe41a93a19baa7b56/src/app/operations/check.ts#L1240)
+  combines engine and reachability demotions; a proved state invariant cannot
+  discharge an engine coverage demotion.
+
+A verifier enhancement must connect the original guard clauses to their typed
+predicates, prove disjointness or overlap, and preserve an undecided result when
+that proof is absent. Increasing a timeout cannot supply that missing relation.
+Strict verification remains incomplete until the verifier can make this decision
+and every other demotion below has a justified resolution.
+
+## Finding inventory
+
+### agentd
+
+| Finding | Severity | Requirements | Disposition |
+| --- | --- | --- | --- |
+| `FND_ACRONYM_UNDEFINED` | info | [AGENTD-14](../../docs/TRACEABILITY.md#agentd-14), [AGENTD-26](../../docs/TRACEABILITY.md#agentd-26), [AGENTD-9](../../docs/TRACEABILITY.md#agentd-9) | Unresolved; review the detailed finding against the traced implementation. |
+| `FND_AMBIGUITY_NEEDS_JUDGMENT` | info | [AGENTD-10](../../docs/TRACEABILITY.md#agentd-10), [AGENTD-11](../../docs/TRACEABILITY.md#agentd-11), [AGENTD-14](../../docs/TRACEABILITY.md#agentd-14), [AGENTD-15](../../docs/TRACEABILITY.md#agentd-15), [AGENTD-16](../../docs/TRACEABILITY.md#agentd-16), [AGENTD-17](../../docs/TRACEABILITY.md#agentd-17), [AGENTD-19](../../docs/TRACEABILITY.md#agentd-19), [AGENTD-20](../../docs/TRACEABILITY.md#agentd-20), [AGENTD-21](../../docs/TRACEABILITY.md#agentd-21), [AGENTD-23](../../docs/TRACEABILITY.md#agentd-23), [AGENTD-25](../../docs/TRACEABILITY.md#agentd-25), [AGENTD-9](../../docs/TRACEABILITY.md#agentd-9) | Unresolved; review the detailed finding against the traced implementation. |
+| `FND_AMBIGUOUS_QUANTIFIER` | warn | [AGENTD-18](../../docs/TRACEABILITY.md#agentd-18), [AGENTD-26](../../docs/TRACEABILITY.md#agentd-26), [AGENTD-8](../../docs/TRACEABILITY.md#agentd-8) | Unresolved; review the detailed finding against the traced implementation. |
+| `FND_AMBIGUOUS_VAGUE` | info | [AGENTD-22](../../docs/TRACEABILITY.md#agentd-22), [AGENTD-24](../../docs/TRACEABILITY.md#agentd-24), [AGENTD-7](../../docs/TRACEABILITY.md#agentd-7), [AGENTD-8](../../docs/TRACEABILITY.md#agentd-8) | Unresolved; review the detailed finding against the traced implementation. |
+| `FND_DUPLICATE_CLUSTER` | info | [AGENTD-1](../../docs/TRACEABILITY.md#agentd-1), [AGENTD-19](../../docs/TRACEABILITY.md#agentd-19), [AGENTD-2](../../docs/TRACEABILITY.md#agentd-2), [AGENTD-20](../../docs/TRACEABILITY.md#agentd-20), [AGENTD-21](../../docs/TRACEABILITY.md#agentd-21), [AGENTD-22](../../docs/TRACEABILITY.md#agentd-22), [AGENTD-24](../../docs/TRACEABILITY.md#agentd-24), [AGENTD-3](../../docs/TRACEABILITY.md#agentd-3), [AGENTD-4](../../docs/TRACEABILITY.md#agentd-4), [AGENTD-5](../../docs/TRACEABILITY.md#agentd-5), [AGENTD-6](../../docs/TRACEABILITY.md#agentd-6), [AGENTD-7](../../docs/TRACEABILITY.md#agentd-7), [AGENTD-8](../../docs/TRACEABILITY.md#agentd-8) | Unresolved; review the detailed finding against the traced implementation. |
+| `FND_REACHABILITY_NOT_CHECKED` | info | Document-wide | No daemon symbolic state model is declared; portable model tests remain separate evidence. |
+| `FND_SIMILAR_SEMANTIC` | info | [AGENTD-1](../../docs/TRACEABILITY.md#agentd-1), [AGENTD-10](../../docs/TRACEABILITY.md#agentd-10), [AGENTD-11](../../docs/TRACEABILITY.md#agentd-11), [AGENTD-15](../../docs/TRACEABILITY.md#agentd-15), [AGENTD-16](../../docs/TRACEABILITY.md#agentd-16), [AGENTD-20](../../docs/TRACEABILITY.md#agentd-20), [AGENTD-21](../../docs/TRACEABILITY.md#agentd-21), [AGENTD-22](../../docs/TRACEABILITY.md#agentd-22), [AGENTD-23](../../docs/TRACEABILITY.md#agentd-23), [AGENTD-24](../../docs/TRACEABILITY.md#agentd-24), [AGENTD-3](../../docs/TRACEABILITY.md#agentd-3), [AGENTD-4](../../docs/TRACEABILITY.md#agentd-4), [AGENTD-5](../../docs/TRACEABILITY.md#agentd-5), [AGENTD-6](../../docs/TRACEABILITY.md#agentd-6), [AGENTD-7](../../docs/TRACEABILITY.md#agentd-7), [AGENTD-8](../../docs/TRACEABILITY.md#agentd-8), [AGENTD-9](../../docs/TRACEABILITY.md#agentd-9) | Unresolved; review the detailed finding against the traced implementation. |
+| `FND_SIMILAR_UNUNIFIED` | info | [AGENTD-24](../../docs/TRACEABILITY.md#agentd-24), [AGENTD-3](../../docs/TRACEABILITY.md#agentd-3), [AGENTD-4](../../docs/TRACEABILITY.md#agentd-4), [AGENTD-5](../../docs/TRACEABILITY.md#agentd-5), [AGENTD-6](../../docs/TRACEABILITY.md#agentd-6), [AGENTD-8](../../docs/TRACEABILITY.md#agentd-8) | Unresolved; review the detailed finding against the traced implementation. |
+| `GTWR_R15_LOGICAL_EXPR` | warn | [AGENTD-10](../../docs/TRACEABILITY.md#agentd-10), [AGENTD-11](../../docs/TRACEABILITY.md#agentd-11), [AGENTD-14](../../docs/TRACEABILITY.md#agentd-14), [AGENTD-15](../../docs/TRACEABILITY.md#agentd-15), [AGENTD-16](../../docs/TRACEABILITY.md#agentd-16), [AGENTD-18](../../docs/TRACEABILITY.md#agentd-18), [AGENTD-2](../../docs/TRACEABILITY.md#agentd-2), [AGENTD-24](../../docs/TRACEABILITY.md#agentd-24), [AGENTD-26](../../docs/TRACEABILITY.md#agentd-26), [AGENTD-7](../../docs/TRACEABILITY.md#agentd-7), [AGENTD-8](../../docs/TRACEABILITY.md#agentd-8), [AGENTD-9](../../docs/TRACEABILITY.md#agentd-9) | Wording review remains open; no blanket waiver. |
+| `GTWR_R16_NEGATION` | warn | [AGENTD-1](../../docs/TRACEABILITY.md#agentd-1), [AGENTD-17](../../docs/TRACEABILITY.md#agentd-17), [AGENTD-18](../../docs/TRACEABILITY.md#agentd-18), [AGENTD-2](../../docs/TRACEABILITY.md#agentd-2), [AGENTD-21](../../docs/TRACEABILITY.md#agentd-21), [AGENTD-24](../../docs/TRACEABILITY.md#agentd-24), [AGENTD-8](../../docs/TRACEABILITY.md#agentd-8) | Wording review remains open; no blanket waiver. |
+| `GTWR_R19_COMBINATOR` | warn | [AGENTD-10](../../docs/TRACEABILITY.md#agentd-10), [AGENTD-11](../../docs/TRACEABILITY.md#agentd-11), [AGENTD-12](../../docs/TRACEABILITY.md#agentd-12), [AGENTD-13](../../docs/TRACEABILITY.md#agentd-13), [AGENTD-14](../../docs/TRACEABILITY.md#agentd-14), [AGENTD-15](../../docs/TRACEABILITY.md#agentd-15), [AGENTD-16](../../docs/TRACEABILITY.md#agentd-16), [AGENTD-18](../../docs/TRACEABILITY.md#agentd-18), [AGENTD-24](../../docs/TRACEABILITY.md#agentd-24), [AGENTD-26](../../docs/TRACEABILITY.md#agentd-26), [AGENTD-7](../../docs/TRACEABILITY.md#agentd-7), [AGENTD-8](../../docs/TRACEABILITY.md#agentd-8), [AGENTD-9](../../docs/TRACEABILITY.md#agentd-9) | Wording review remains open; no blanket waiver. |
+| `GTWR_R24_PRONOUN` | warn | [AGENTD-13](../../docs/TRACEABILITY.md#agentd-13), [AGENTD-15](../../docs/TRACEABILITY.md#agentd-15), [AGENTD-16](../../docs/TRACEABILITY.md#agentd-16), [AGENTD-22](../../docs/TRACEABILITY.md#agentd-22), [AGENTD-23](../../docs/TRACEABILITY.md#agentd-23), [AGENTD-25](../../docs/TRACEABILITY.md#agentd-25), [AGENTD-26](../../docs/TRACEABILITY.md#agentd-26), [AGENTD-3](../../docs/TRACEABILITY.md#agentd-3), [AGENTD-5](../../docs/TRACEABILITY.md#agentd-5), [AGENTD-7](../../docs/TRACEABILITY.md#agentd-7), [AGENTD-8](../../docs/TRACEABILITY.md#agentd-8) | Wording review remains open; no blanket waiver. |
+| `GTWR_R32_UNIVERSAL` | warn | [AGENTD-18](../../docs/TRACEABILITY.md#agentd-18) | Wording review remains open; no blanket waiver. |
+| `GTWR_R35_TEMPORAL` | warn | [AGENTD-14](../../docs/TRACEABILITY.md#agentd-14), [AGENTD-15](../../docs/TRACEABILITY.md#agentd-15), [AGENTD-16](../../docs/TRACEABILITY.md#agentd-16), [AGENTD-19](../../docs/TRACEABILITY.md#agentd-19), [AGENTD-22](../../docs/TRACEABILITY.md#agentd-22), [AGENTD-25](../../docs/TRACEABILITY.md#agentd-25), [AGENTD-26](../../docs/TRACEABILITY.md#agentd-26), [AGENTD-7](../../docs/TRACEABILITY.md#agentd-7) | Wording review remains open; no blanket waiver. |
+| `GTWR_R37_ACRONYM` | warn | [AGENTD-14](../../docs/TRACEABILITY.md#agentd-14), [AGENTD-26](../../docs/TRACEABILITY.md#agentd-26), [AGENTD-9](../../docs/TRACEABILITY.md#agentd-9) | Wording review remains open; no blanket waiver. |
+| `GTWR_R5_INDEFINITE_ARTICLE` | warn | [AGENTD-10](../../docs/TRACEABILITY.md#agentd-10), [AGENTD-11](../../docs/TRACEABILITY.md#agentd-11), [AGENTD-13](../../docs/TRACEABILITY.md#agentd-13), [AGENTD-14](../../docs/TRACEABILITY.md#agentd-14), [AGENTD-15](../../docs/TRACEABILITY.md#agentd-15), [AGENTD-16](../../docs/TRACEABILITY.md#agentd-16), [AGENTD-17](../../docs/TRACEABILITY.md#agentd-17), [AGENTD-18](../../docs/TRACEABILITY.md#agentd-18), [AGENTD-19](../../docs/TRACEABILITY.md#agentd-19), [AGENTD-2](../../docs/TRACEABILITY.md#agentd-2), [AGENTD-20](../../docs/TRACEABILITY.md#agentd-20), [AGENTD-21](../../docs/TRACEABILITY.md#agentd-21), [AGENTD-23](../../docs/TRACEABILITY.md#agentd-23), [AGENTD-24](../../docs/TRACEABILITY.md#agentd-24), [AGENTD-25](../../docs/TRACEABILITY.md#agentd-25), [AGENTD-3](../../docs/TRACEABILITY.md#agentd-3), [AGENTD-4](../../docs/TRACEABILITY.md#agentd-4), [AGENTD-5](../../docs/TRACEABILITY.md#agentd-5), [AGENTD-6](../../docs/TRACEABILITY.md#agentd-6), [AGENTD-7](../../docs/TRACEABILITY.md#agentd-7), [AGENTD-8](../../docs/TRACEABILITY.md#agentd-8), [AGENTD-9](../../docs/TRACEABILITY.md#agentd-9) | Wording review remains open; no blanket waiver. |
+
+| Strict demotion | Requirements | Disposition |
+| --- | --- | --- |
+| `conditional-conflict-unchecked` | AGENTD-1, AGENTD-2, AGENTD-3, AGENTD-4, AGENTD-5, AGENTD-6 | Unresolved; strict verification stays disabled. |
+| `uncovered-requirement` | AGENTD-1, AGENTD-10, AGENTD-11, AGENTD-12, AGENTD-13, AGENTD-14, AGENTD-15, AGENTD-16, AGENTD-17, AGENTD-18, AGENTD-19, AGENTD-2, AGENTD-20, AGENTD-21, AGENTD-24, AGENTD-25, AGENTD-26, AGENTD-3, AGENTD-4, AGENTD-5, AGENTD-6, AGENTD-7, AGENTD-8, AGENTD-9 | Unresolved; strict verification stays disabled. |
+
+### core
+
+| Finding | Severity | Requirements | Disposition |
+| --- | --- | --- | --- |
+| `FND_ACRONYM_UNDEFINED` | info | [COST-9](../../docs/TRACEABILITY.md#cost-9), [IMAGE-2](../../docs/TRACEABILITY.md#image-2), [IMAGE-3](../../docs/TRACEABILITY.md#image-3), [IMAGE-4](../../docs/TRACEABILITY.md#image-4), [IMAGE-9](../../docs/TRACEABILITY.md#image-9), [STATE-1](../../docs/TRACEABILITY.md#state-1), [STATE-10](../../docs/TRACEABILITY.md#state-10), [STATE-11](../../docs/TRACEABILITY.md#state-11), [STATE-2](../../docs/TRACEABILITY.md#state-2), [STATE-4](../../docs/TRACEABILITY.md#state-4), [STATE-5](../../docs/TRACEABILITY.md#state-5), [STATE-6](../../docs/TRACEABILITY.md#state-6), [STATE-7](../../docs/TRACEABILITY.md#state-7), [STATE-9](../../docs/TRACEABILITY.md#state-9), [TRAP-2](../../docs/TRACEABILITY.md#trap-2), [TRAP-8](../../docs/TRACEABILITY.md#trap-8) | Reviewed literal status, instruction, and catalog names; see Core wording review. No waiver or state equivalence added. |
+| `FND_AMBIGUITY_NEEDS_JUDGMENT` | info | [BIND-11](../../docs/TRACEABILITY.md#bind-11), [BIND-12](../../docs/TRACEABILITY.md#bind-12), [BIND-13](../../docs/TRACEABILITY.md#bind-13), [BIND-14](../../docs/TRACEABILITY.md#bind-14), [BIND-16](../../docs/TRACEABILITY.md#bind-16), [BIND-18](../../docs/TRACEABILITY.md#bind-18), [BIND-19](../../docs/TRACEABILITY.md#bind-19), [BIND-21](../../docs/TRACEABILITY.md#bind-21), [BIND-23](../../docs/TRACEABILITY.md#bind-23), [BIND-24](../../docs/TRACEABILITY.md#bind-24), [BIND-6](../../docs/TRACEABILITY.md#bind-6), [BIND-7](../../docs/TRACEABILITY.md#bind-7), [BIND-8](../../docs/TRACEABILITY.md#bind-8), [BIND-9](../../docs/TRACEABILITY.md#bind-9), [CLI-4](../../docs/TRACEABILITY.md#cli-4), [CLI-7](../../docs/TRACEABILITY.md#cli-7), [CLI-8](../../docs/TRACEABILITY.md#cli-8), [CLI-9](../../docs/TRACEABILITY.md#cli-9), [COST-7](../../docs/TRACEABILITY.md#cost-7), [IMAGE-13](../../docs/TRACEABILITY.md#image-13), [IMAGE-2](../../docs/TRACEABILITY.md#image-2), [IMAGE-4](../../docs/TRACEABILITY.md#image-4), [IMAGE-6](../../docs/TRACEABILITY.md#image-6), [IMAGE-8](../../docs/TRACEABILITY.md#image-8), [STATE-7](../../docs/TRACEABILITY.md#state-7), [TRAP-10](../../docs/TRACEABILITY.md#trap-10), [TRAP-2](../../docs/TRACEABILITY.md#trap-2), [TRAP-3](../../docs/TRACEABILITY.md#trap-3), [TRAP-4](../../docs/TRACEABILITY.md#trap-4), [TRAP-7](../../docs/TRACEABILITY.md#trap-7) | Coordination and image cases reviewed against the original design and source as recorded above; remaining contextual ambiguity is unresolved. |
+| `FND_AMBIGUOUS_REFERENCE` | info | [ARCH-2](../../docs/TRACEABILITY.md#arch-2), [ARCH-7](../../docs/TRACEABILITY.md#arch-7), [BIND-1](../../docs/TRACEABILITY.md#bind-1), [BIND-10](../../docs/TRACEABILITY.md#bind-10), [BIND-15](../../docs/TRACEABILITY.md#bind-15), [BIND-17](../../docs/TRACEABILITY.md#bind-17), [BIND-2](../../docs/TRACEABILITY.md#bind-2), [BIND-20](../../docs/TRACEABILITY.md#bind-20), [BIND-22](../../docs/TRACEABILITY.md#bind-22), [BIND-25](../../docs/TRACEABILITY.md#bind-25), [BIND-26](../../docs/TRACEABILITY.md#bind-26), [BIND-27](../../docs/TRACEABILITY.md#bind-27), [CLI-5](../../docs/TRACEABILITY.md#cli-5), [CLI-6](../../docs/TRACEABILITY.md#cli-6), [COST-10](../../docs/TRACEABILITY.md#cost-10), [COST-4](../../docs/TRACEABILITY.md#cost-4), [IMAGE-10](../../docs/TRACEABILITY.md#image-10), [IMAGE-11](../../docs/TRACEABILITY.md#image-11), [IMAGE-12](../../docs/TRACEABILITY.md#image-12), [IMAGE-3](../../docs/TRACEABILITY.md#image-3), [IMAGE-5](../../docs/TRACEABILITY.md#image-5), [IMAGE-7](../../docs/TRACEABILITY.md#image-7), [IMAGE-9](../../docs/TRACEABILITY.md#image-9), [STATE-12](../../docs/TRACEABILITY.md#state-12), [STATE-2](../../docs/TRACEABILITY.md#state-2), [TRAP-5](../../docs/TRACEABILITY.md#trap-5), [TRAP-6](../../docs/TRACEABILITY.md#trap-6) | Unresolved; review the detailed finding against the traced implementation. |
+| `FND_DUPLICATE_CLUSTER` | info | [ARCH-4](../../docs/TRACEABILITY.md#arch-4), [ARCH-6](../../docs/TRACEABILITY.md#arch-6), [ARCH-8](../../docs/TRACEABILITY.md#arch-8), [CLI-5](../../docs/TRACEABILITY.md#cli-5), [IMAGE-10](../../docs/TRACEABILITY.md#image-10), [IMAGE-11](../../docs/TRACEABILITY.md#image-11), [IMAGE-9](../../docs/TRACEABILITY.md#image-9), [STATE-10](../../docs/TRACEABILITY.md#state-10), [STATE-11](../../docs/TRACEABILITY.md#state-11), [STATE-4](../../docs/TRACEABILITY.md#state-4), [STATE-5](../../docs/TRACEABILITY.md#state-5), [STATE-6](../../docs/TRACEABILITY.md#state-6), [STATE-7](../../docs/TRACEABILITY.md#state-7), [STATE-9](../../docs/TRACEABILITY.md#state-9) | Unresolved; review the detailed finding against the traced implementation. |
+| `FND_LEAF_UNVERIFIABLE` | warn | [ARCH-3](../../docs/TRACEABILITY.md#arch-3), [BIND-11](../../docs/TRACEABILITY.md#bind-11), [BIND-15](../../docs/TRACEABILITY.md#bind-15), [BIND-2](../../docs/TRACEABILITY.md#bind-2), [CLI-3](../../docs/TRACEABILITY.md#cli-3), [CLI-6](../../docs/TRACEABILITY.md#cli-6), [COST-1](../../docs/TRACEABILITY.md#cost-1), [STATE-7](../../docs/TRACEABILITY.md#state-7), [TRAP-1](../../docs/TRACEABILITY.md#trap-1) | Unresolved; review the detailed finding against the traced implementation. |
+| `FND_MISSING_TRACE_LINK` | info | [ARCH-1](../../docs/TRACEABILITY.md#arch-1), [ARCH-3](../../docs/TRACEABILITY.md#arch-3), [ARCH-4](../../docs/TRACEABILITY.md#arch-4), [ARCH-6](../../docs/TRACEABILITY.md#arch-6), [ARCH-8](../../docs/TRACEABILITY.md#arch-8), [BIND-10](../../docs/TRACEABILITY.md#bind-10), [BIND-18](../../docs/TRACEABILITY.md#bind-18), [BIND-19](../../docs/TRACEABILITY.md#bind-19), [BIND-21](../../docs/TRACEABILITY.md#bind-21), [BIND-24](../../docs/TRACEABILITY.md#bind-24), [BIND-26](../../docs/TRACEABILITY.md#bind-26), [BIND-27](../../docs/TRACEABILITY.md#bind-27), [BIND-3](../../docs/TRACEABILITY.md#bind-3), [BIND-4](../../docs/TRACEABILITY.md#bind-4), [BIND-6](../../docs/TRACEABILITY.md#bind-6), [CLI-5](../../docs/TRACEABILITY.md#cli-5), [CLI-8](../../docs/TRACEABILITY.md#cli-8), [CLI-9](../../docs/TRACEABILITY.md#cli-9), [IMAGE-10](../../docs/TRACEABILITY.md#image-10), [IMAGE-11](../../docs/TRACEABILITY.md#image-11), [IMAGE-9](../../docs/TRACEABILITY.md#image-9), [STATE-10](../../docs/TRACEABILITY.md#state-10), [STATE-11](../../docs/TRACEABILITY.md#state-11), [STATE-4](../../docs/TRACEABILITY.md#state-4), [STATE-5](../../docs/TRACEABILITY.md#state-5), [STATE-6](../../docs/TRACEABILITY.md#state-6), [STATE-7](../../docs/TRACEABILITY.md#state-7), [STATE-9](../../docs/TRACEABILITY.md#state-9) | Unresolved; review the detailed finding against the traced implementation. |
+| `FND_ORPHAN` | warn | [ARCH-1](../../docs/TRACEABILITY.md#arch-1), [ARCH-2](../../docs/TRACEABILITY.md#arch-2), [ARCH-4](../../docs/TRACEABILITY.md#arch-4), [ARCH-5](../../docs/TRACEABILITY.md#arch-5), [ARCH-6](../../docs/TRACEABILITY.md#arch-6), [ARCH-7](../../docs/TRACEABILITY.md#arch-7), [ARCH-8](../../docs/TRACEABILITY.md#arch-8), [BIND-1](../../docs/TRACEABILITY.md#bind-1), [BIND-10](../../docs/TRACEABILITY.md#bind-10), [BIND-14](../../docs/TRACEABILITY.md#bind-14), [BIND-17](../../docs/TRACEABILITY.md#bind-17), [BIND-18](../../docs/TRACEABILITY.md#bind-18), [BIND-19](../../docs/TRACEABILITY.md#bind-19), [BIND-20](../../docs/TRACEABILITY.md#bind-20), [BIND-21](../../docs/TRACEABILITY.md#bind-21), [BIND-22](../../docs/TRACEABILITY.md#bind-22), [BIND-23](../../docs/TRACEABILITY.md#bind-23), [BIND-24](../../docs/TRACEABILITY.md#bind-24), [BIND-25](../../docs/TRACEABILITY.md#bind-25), [BIND-26](../../docs/TRACEABILITY.md#bind-26), [BIND-27](../../docs/TRACEABILITY.md#bind-27), [BIND-3](../../docs/TRACEABILITY.md#bind-3), [BIND-4](../../docs/TRACEABILITY.md#bind-4), [BIND-6](../../docs/TRACEABILITY.md#bind-6), [BIND-7](../../docs/TRACEABILITY.md#bind-7), [BIND-8](../../docs/TRACEABILITY.md#bind-8), [BIND-9](../../docs/TRACEABILITY.md#bind-9), [CLI-1](../../docs/TRACEABILITY.md#cli-1), [CLI-4](../../docs/TRACEABILITY.md#cli-4), [COST-10](../../docs/TRACEABILITY.md#cost-10), [COST-2](../../docs/TRACEABILITY.md#cost-2), [COST-3](../../docs/TRACEABILITY.md#cost-3), [COST-4](../../docs/TRACEABILITY.md#cost-4), [COST-5](../../docs/TRACEABILITY.md#cost-5), [COST-6](../../docs/TRACEABILITY.md#cost-6), [COST-7](../../docs/TRACEABILITY.md#cost-7), [COST-8](../../docs/TRACEABILITY.md#cost-8), [COST-9](../../docs/TRACEABILITY.md#cost-9), [IMAGE-1](../../docs/TRACEABILITY.md#image-1), [IMAGE-10](../../docs/TRACEABILITY.md#image-10), [IMAGE-11](../../docs/TRACEABILITY.md#image-11), [IMAGE-12](../../docs/TRACEABILITY.md#image-12), [IMAGE-13](../../docs/TRACEABILITY.md#image-13), [IMAGE-2](../../docs/TRACEABILITY.md#image-2), [IMAGE-3](../../docs/TRACEABILITY.md#image-3), [IMAGE-4](../../docs/TRACEABILITY.md#image-4), [IMAGE-5](../../docs/TRACEABILITY.md#image-5), [IMAGE-6](../../docs/TRACEABILITY.md#image-6), [IMAGE-7](../../docs/TRACEABILITY.md#image-7), [IMAGE-8](../../docs/TRACEABILITY.md#image-8), [IMAGE-9](../../docs/TRACEABILITY.md#image-9), [STATE-1](../../docs/TRACEABILITY.md#state-1), [STATE-10](../../docs/TRACEABILITY.md#state-10), [STATE-11](../../docs/TRACEABILITY.md#state-11), [STATE-2](../../docs/TRACEABILITY.md#state-2), [STATE-3](../../docs/TRACEABILITY.md#state-3), [STATE-4](../../docs/TRACEABILITY.md#state-4), [STATE-5](../../docs/TRACEABILITY.md#state-5), [STATE-6](../../docs/TRACEABILITY.md#state-6), [STATE-9](../../docs/TRACEABILITY.md#state-9), [TRAP-10](../../docs/TRACEABILITY.md#trap-10), [TRAP-11](../../docs/TRACEABILITY.md#trap-11), [TRAP-12](../../docs/TRACEABILITY.md#trap-12), [TRAP-13](../../docs/TRACEABILITY.md#trap-13), [TRAP-3](../../docs/TRACEABILITY.md#trap-3), [TRAP-4](../../docs/TRACEABILITY.md#trap-4), [TRAP-5](../../docs/TRACEABILITY.md#trap-5), [TRAP-6](../../docs/TRACEABILITY.md#trap-6), [TRAP-7](../../docs/TRACEABILITY.md#trap-7), [TRAP-8](../../docs/TRACEABILITY.md#trap-8), [TRAP-9](../../docs/TRACEABILITY.md#trap-9) | Unresolved; review the detailed finding against the traced implementation. |
+| `FND_REACHABILITY_PROVED` | info | [STATE-11](../../docs/TRACEABILITY.md#state-11), [STATE-3](../../docs/TRACEABILITY.md#state-3), [STATE-5](../../docs/TRACEABILITY.md#state-5) | Proved without frame assumptions; certificate rechecked by the verifier. |
+| `FND_SIMILAR_SEMANTIC` | info | [ARCH-3](../../docs/TRACEABILITY.md#arch-3), [BIND-10](../../docs/TRACEABILITY.md#bind-10), [BIND-18](../../docs/TRACEABILITY.md#bind-18), [BIND-2](../../docs/TRACEABILITY.md#bind-2), [BIND-20](../../docs/TRACEABILITY.md#bind-20), [BIND-21](../../docs/TRACEABILITY.md#bind-21), [BIND-22](../../docs/TRACEABILITY.md#bind-22), [BIND-24](../../docs/TRACEABILITY.md#bind-24), [BIND-6](../../docs/TRACEABILITY.md#bind-6), [BIND-7](../../docs/TRACEABILITY.md#bind-7), [CLI-2](../../docs/TRACEABILITY.md#cli-2), [CLI-3](../../docs/TRACEABILITY.md#cli-3), [CLI-7](../../docs/TRACEABILITY.md#cli-7), [COST-1](../../docs/TRACEABILITY.md#cost-1), [COST-10](../../docs/TRACEABILITY.md#cost-10), [COST-2](../../docs/TRACEABILITY.md#cost-2), [COST-3](../../docs/TRACEABILITY.md#cost-3), [COST-4](../../docs/TRACEABILITY.md#cost-4), [COST-6](../../docs/TRACEABILITY.md#cost-6), [IMAGE-1](../../docs/TRACEABILITY.md#image-1), [IMAGE-10](../../docs/TRACEABILITY.md#image-10), [IMAGE-11](../../docs/TRACEABILITY.md#image-11), [IMAGE-12](../../docs/TRACEABILITY.md#image-12), [IMAGE-3](../../docs/TRACEABILITY.md#image-3), [IMAGE-5](../../docs/TRACEABILITY.md#image-5), [IMAGE-9](../../docs/TRACEABILITY.md#image-9), [STATE-1](../../docs/TRACEABILITY.md#state-1), [STATE-10](../../docs/TRACEABILITY.md#state-10), [STATE-11](../../docs/TRACEABILITY.md#state-11), [STATE-2](../../docs/TRACEABILITY.md#state-2), [STATE-3](../../docs/TRACEABILITY.md#state-3), [STATE-4](../../docs/TRACEABILITY.md#state-4), [STATE-5](../../docs/TRACEABILITY.md#state-5), [STATE-6](../../docs/TRACEABILITY.md#state-6), [STATE-7](../../docs/TRACEABILITY.md#state-7), [STATE-9](../../docs/TRACEABILITY.md#state-9), [TRAP-10](../../docs/TRACEABILITY.md#trap-10), [TRAP-5](../../docs/TRACEABILITY.md#trap-5), [TRAP-6](../../docs/TRACEABILITY.md#trap-6), [TRAP-8](../../docs/TRACEABILITY.md#trap-8) | Unresolved; review the detailed finding against the traced implementation. |
+| `FND_SIMILAR_UNUNIFIED` | info | [STATE-10](../../docs/TRACEABILITY.md#state-10), [STATE-6](../../docs/TRACEABILITY.md#state-6) | Unresolved; review the detailed finding against the traced implementation. |
+| `FND_TERM_INCONSISTENT` | info | [BIND-1](../../docs/TRACEABILITY.md#bind-1), [BIND-12](../../docs/TRACEABILITY.md#bind-12), [BIND-21](../../docs/TRACEABILITY.md#bind-21), [IMAGE-13](../../docs/TRACEABILITY.md#image-13), [STATE-3](../../docs/TRACEABILITY.md#state-3), [TRAP-4](../../docs/TRACEABILITY.md#trap-4) | Reviewed the CLI, ARN, and VM contexts; the abbreviations retain the same meanings and distinct qualifiers. See Core wording review; no waiver. |
+| `GTWR_R15_LOGICAL_EXPR` | warn | [BIND-10](../../docs/TRACEABILITY.md#bind-10), [BIND-11](../../docs/TRACEABILITY.md#bind-11), [BIND-13](../../docs/TRACEABILITY.md#bind-13), [BIND-14](../../docs/TRACEABILITY.md#bind-14), [BIND-15](../../docs/TRACEABILITY.md#bind-15), [BIND-18](../../docs/TRACEABILITY.md#bind-18), [BIND-19](../../docs/TRACEABILITY.md#bind-19), [BIND-20](../../docs/TRACEABILITY.md#bind-20), [BIND-22](../../docs/TRACEABILITY.md#bind-22), [BIND-25](../../docs/TRACEABILITY.md#bind-25), [BIND-27](../../docs/TRACEABILITY.md#bind-27), [BIND-6](../../docs/TRACEABILITY.md#bind-6), [BIND-8](../../docs/TRACEABILITY.md#bind-8), [CLI-6](../../docs/TRACEABILITY.md#cli-6), [CLI-7](../../docs/TRACEABILITY.md#cli-7), [CLI-8](../../docs/TRACEABILITY.md#cli-8), [CLI-9](../../docs/TRACEABILITY.md#cli-9), [IMAGE-10](../../docs/TRACEABILITY.md#image-10), [IMAGE-11](../../docs/TRACEABILITY.md#image-11), [IMAGE-13](../../docs/TRACEABILITY.md#image-13), [IMAGE-3](../../docs/TRACEABILITY.md#image-3), [IMAGE-4](../../docs/TRACEABILITY.md#image-4), [IMAGE-7](../../docs/TRACEABILITY.md#image-7), [IMAGE-8](../../docs/TRACEABILITY.md#image-8), [IMAGE-9](../../docs/TRACEABILITY.md#image-9), [STATE-1](../../docs/TRACEABILITY.md#state-1), [STATE-12](../../docs/TRACEABILITY.md#state-12), [STATE-2](../../docs/TRACEABILITY.md#state-2), [STATE-4](../../docs/TRACEABILITY.md#state-4), [STATE-7](../../docs/TRACEABILITY.md#state-7), [STATE-9](../../docs/TRACEABILITY.md#state-9), [TRAP-4](../../docs/TRACEABILITY.md#trap-4), [TRAP-8](../../docs/TRACEABILITY.md#trap-8) | Wording review remains open; no blanket waiver. |
+| `GTWR_R16_NEGATION` | warn | [ARCH-4](../../docs/TRACEABILITY.md#arch-4), [ARCH-5](../../docs/TRACEABILITY.md#arch-5), [ARCH-6](../../docs/TRACEABILITY.md#arch-6), [ARCH-7](../../docs/TRACEABILITY.md#arch-7), [ARCH-8](../../docs/TRACEABILITY.md#arch-8), [BIND-11](../../docs/TRACEABILITY.md#bind-11), [BIND-12](../../docs/TRACEABILITY.md#bind-12), [BIND-16](../../docs/TRACEABILITY.md#bind-16), [BIND-19](../../docs/TRACEABILITY.md#bind-19), [BIND-2](../../docs/TRACEABILITY.md#bind-2), [BIND-20](../../docs/TRACEABILITY.md#bind-20), [BIND-21](../../docs/TRACEABILITY.md#bind-21), [BIND-22](../../docs/TRACEABILITY.md#bind-22), [BIND-24](../../docs/TRACEABILITY.md#bind-24), [BIND-26](../../docs/TRACEABILITY.md#bind-26), [CLI-5](../../docs/TRACEABILITY.md#cli-5), [CLI-6](../../docs/TRACEABILITY.md#cli-6), [COST-2](../../docs/TRACEABILITY.md#cost-2), [IMAGE-10](../../docs/TRACEABILITY.md#image-10), [IMAGE-3](../../docs/TRACEABILITY.md#image-3), [IMAGE-9](../../docs/TRACEABILITY.md#image-9), [STATE-11](../../docs/TRACEABILITY.md#state-11), [STATE-5](../../docs/TRACEABILITY.md#state-5), [TRAP-10](../../docs/TRACEABILITY.md#trap-10), [TRAP-11](../../docs/TRACEABILITY.md#trap-11) | Wording review remains open; no blanket waiver. |
+| `GTWR_R19_COMBINATOR` | warn | [ARCH-1](../../docs/TRACEABILITY.md#arch-1), [ARCH-3](../../docs/TRACEABILITY.md#arch-3), [ARCH-5](../../docs/TRACEABILITY.md#arch-5), [ARCH-6](../../docs/TRACEABILITY.md#arch-6), [ARCH-7](../../docs/TRACEABILITY.md#arch-7), [ARCH-8](../../docs/TRACEABILITY.md#arch-8), [BIND-1](../../docs/TRACEABILITY.md#bind-1), [BIND-10](../../docs/TRACEABILITY.md#bind-10), [BIND-11](../../docs/TRACEABILITY.md#bind-11), [BIND-12](../../docs/TRACEABILITY.md#bind-12), [BIND-13](../../docs/TRACEABILITY.md#bind-13), [BIND-14](../../docs/TRACEABILITY.md#bind-14), [BIND-15](../../docs/TRACEABILITY.md#bind-15), [BIND-16](../../docs/TRACEABILITY.md#bind-16), [BIND-17](../../docs/TRACEABILITY.md#bind-17), [BIND-18](../../docs/TRACEABILITY.md#bind-18), [BIND-19](../../docs/TRACEABILITY.md#bind-19), [BIND-22](../../docs/TRACEABILITY.md#bind-22), [BIND-5](../../docs/TRACEABILITY.md#bind-5), [BIND-6](../../docs/TRACEABILITY.md#bind-6), [BIND-7](../../docs/TRACEABILITY.md#bind-7), [BIND-8](../../docs/TRACEABILITY.md#bind-8), [CLI-2](../../docs/TRACEABILITY.md#cli-2), [CLI-4](../../docs/TRACEABILITY.md#cli-4), [CLI-6](../../docs/TRACEABILITY.md#cli-6), [CLI-8](../../docs/TRACEABILITY.md#cli-8), [CLI-9](../../docs/TRACEABILITY.md#cli-9), [COST-1](../../docs/TRACEABILITY.md#cost-1), [IMAGE-1](../../docs/TRACEABILITY.md#image-1), [IMAGE-10](../../docs/TRACEABILITY.md#image-10), [IMAGE-11](../../docs/TRACEABILITY.md#image-11), [IMAGE-12](../../docs/TRACEABILITY.md#image-12), [IMAGE-13](../../docs/TRACEABILITY.md#image-13), [IMAGE-4](../../docs/TRACEABILITY.md#image-4), [IMAGE-5](../../docs/TRACEABILITY.md#image-5), [IMAGE-6](../../docs/TRACEABILITY.md#image-6), [IMAGE-7](../../docs/TRACEABILITY.md#image-7), [IMAGE-8](../../docs/TRACEABILITY.md#image-8), [IMAGE-9](../../docs/TRACEABILITY.md#image-9), [STATE-1](../../docs/TRACEABILITY.md#state-1), [STATE-12](../../docs/TRACEABILITY.md#state-12), [STATE-2](../../docs/TRACEABILITY.md#state-2), [STATE-4](../../docs/TRACEABILITY.md#state-4), [STATE-7](../../docs/TRACEABILITY.md#state-7), [STATE-9](../../docs/TRACEABILITY.md#state-9), [TRAP-11](../../docs/TRACEABILITY.md#trap-11), [TRAP-13](../../docs/TRACEABILITY.md#trap-13), [TRAP-4](../../docs/TRACEABILITY.md#trap-4), [TRAP-7](../../docs/TRACEABILITY.md#trap-7), [TRAP-8](../../docs/TRACEABILITY.md#trap-8) | Wording review remains open; no blanket waiver. |
+| `GTWR_R20_PURPOSE` | warn | [ARCH-2](../../docs/TRACEABILITY.md#arch-2), [COST-10](../../docs/TRACEABILITY.md#cost-10) | Wording review remains open; no blanket waiver. |
+| `GTWR_R21_PARENTHESES` | warn | [BIND-27](../../docs/TRACEABILITY.md#bind-27), [IMAGE-10](../../docs/TRACEABILITY.md#image-10), [IMAGE-9](../../docs/TRACEABILITY.md#image-9) | Wording review remains open; no blanket waiver. |
+| `GTWR_R24_PRONOUN` | warn | [ARCH-2](../../docs/TRACEABILITY.md#arch-2), [ARCH-7](../../docs/TRACEABILITY.md#arch-7), [BIND-1](../../docs/TRACEABILITY.md#bind-1), [BIND-10](../../docs/TRACEABILITY.md#bind-10), [BIND-11](../../docs/TRACEABILITY.md#bind-11), [BIND-13](../../docs/TRACEABILITY.md#bind-13), [BIND-15](../../docs/TRACEABILITY.md#bind-15), [BIND-17](../../docs/TRACEABILITY.md#bind-17), [BIND-18](../../docs/TRACEABILITY.md#bind-18), [BIND-19](../../docs/TRACEABILITY.md#bind-19), [BIND-2](../../docs/TRACEABILITY.md#bind-2), [BIND-20](../../docs/TRACEABILITY.md#bind-20), [BIND-22](../../docs/TRACEABILITY.md#bind-22), [BIND-25](../../docs/TRACEABILITY.md#bind-25), [BIND-26](../../docs/TRACEABILITY.md#bind-26), [BIND-27](../../docs/TRACEABILITY.md#bind-27), [BIND-7](../../docs/TRACEABILITY.md#bind-7), [BIND-8](../../docs/TRACEABILITY.md#bind-8), [CLI-1](../../docs/TRACEABILITY.md#cli-1), [CLI-4](../../docs/TRACEABILITY.md#cli-4), [CLI-5](../../docs/TRACEABILITY.md#cli-5), [CLI-6](../../docs/TRACEABILITY.md#cli-6), [CLI-7](../../docs/TRACEABILITY.md#cli-7), [CLI-9](../../docs/TRACEABILITY.md#cli-9), [COST-10](../../docs/TRACEABILITY.md#cost-10), [COST-4](../../docs/TRACEABILITY.md#cost-4), [COST-8](../../docs/TRACEABILITY.md#cost-8), [IMAGE-1](../../docs/TRACEABILITY.md#image-1), [IMAGE-10](../../docs/TRACEABILITY.md#image-10), [IMAGE-11](../../docs/TRACEABILITY.md#image-11), [IMAGE-12](../../docs/TRACEABILITY.md#image-12), [IMAGE-3](../../docs/TRACEABILITY.md#image-3), [IMAGE-5](../../docs/TRACEABILITY.md#image-5), [IMAGE-6](../../docs/TRACEABILITY.md#image-6), [IMAGE-7](../../docs/TRACEABILITY.md#image-7), [IMAGE-9](../../docs/TRACEABILITY.md#image-9), [STATE-12](../../docs/TRACEABILITY.md#state-12), [STATE-2](../../docs/TRACEABILITY.md#state-2), [TRAP-10](../../docs/TRACEABILITY.md#trap-10), [TRAP-5](../../docs/TRACEABILITY.md#trap-5), [TRAP-6](../../docs/TRACEABILITY.md#trap-6) | Wording review remains open; no blanket waiver. |
+| `GTWR_R26_ABSOLUTE` | warn | [BIND-11](../../docs/TRACEABILITY.md#bind-11), [BIND-15](../../docs/TRACEABILITY.md#bind-15), [CLI-6](../../docs/TRACEABILITY.md#cli-6), [CLI-8](../../docs/TRACEABILITY.md#cli-8), [TRAP-2](../../docs/TRACEABILITY.md#trap-2) | Wording review remains open; no blanket waiver. |
+| `GTWR_R32_UNIVERSAL` | warn | [ARCH-5](../../docs/TRACEABILITY.md#arch-5), [BIND-13](../../docs/TRACEABILITY.md#bind-13), [BIND-14](../../docs/TRACEABILITY.md#bind-14), [BIND-16](../../docs/TRACEABILITY.md#bind-16), [BIND-6](../../docs/TRACEABILITY.md#bind-6), [IMAGE-10](../../docs/TRACEABILITY.md#image-10), [IMAGE-7](../../docs/TRACEABILITY.md#image-7), [TRAP-5](../../docs/TRACEABILITY.md#trap-5) | Wording review remains open; no blanket waiver. |
+| `GTWR_R33_MISSING_TOLERANCE` | warn | [BIND-22](../../docs/TRACEABILITY.md#bind-22), [TRAP-5](../../docs/TRACEABILITY.md#trap-5) | Wording review remains open; no blanket waiver. |
+| `GTWR_R35_TEMPORAL` | info | [BIND-6](../../docs/TRACEABILITY.md#bind-6) | Wording review remains open; no blanket waiver. |
+| `GTWR_R35_TEMPORAL` | warn | [BIND-11](../../docs/TRACEABILITY.md#bind-11), [BIND-15](../../docs/TRACEABILITY.md#bind-15), [BIND-16](../../docs/TRACEABILITY.md#bind-16), [BIND-23](../../docs/TRACEABILITY.md#bind-23), [BIND-25](../../docs/TRACEABILITY.md#bind-25), [BIND-6](../../docs/TRACEABILITY.md#bind-6), [BIND-9](../../docs/TRACEABILITY.md#bind-9), [CLI-6](../../docs/TRACEABILITY.md#cli-6), [CLI-8](../../docs/TRACEABILITY.md#cli-8), [COST-10](../../docs/TRACEABILITY.md#cost-10), [COST-3](../../docs/TRACEABILITY.md#cost-3), [COST-6](../../docs/TRACEABILITY.md#cost-6), [IMAGE-10](../../docs/TRACEABILITY.md#image-10), [IMAGE-12](../../docs/TRACEABILITY.md#image-12), [IMAGE-5](../../docs/TRACEABILITY.md#image-5), [IMAGE-8](../../docs/TRACEABILITY.md#image-8), [IMAGE-9](../../docs/TRACEABILITY.md#image-9), [STATE-1](../../docs/TRACEABILITY.md#state-1), [STATE-12](../../docs/TRACEABILITY.md#state-12), [STATE-3](../../docs/TRACEABILITY.md#state-3), [STATE-9](../../docs/TRACEABILITY.md#state-9), [TRAP-13](../../docs/TRACEABILITY.md#trap-13), [TRAP-4](../../docs/TRACEABILITY.md#trap-4), [TRAP-5](../../docs/TRACEABILITY.md#trap-5), [TRAP-6](../../docs/TRACEABILITY.md#trap-6), [TRAP-8](../../docs/TRACEABILITY.md#trap-8) | Wording review remains open; no blanket waiver. |
+| `GTWR_R37_ACRONYM` | warn | [ARCH-1](../../docs/TRACEABILITY.md#arch-1), [ARCH-3](../../docs/TRACEABILITY.md#arch-3), [ARCH-4](../../docs/TRACEABILITY.md#arch-4), [ARCH-5](../../docs/TRACEABILITY.md#arch-5), [ARCH-7](../../docs/TRACEABILITY.md#arch-7), [BIND-1](../../docs/TRACEABILITY.md#bind-1), [BIND-10](../../docs/TRACEABILITY.md#bind-10), [BIND-12](../../docs/TRACEABILITY.md#bind-12), [BIND-13](../../docs/TRACEABILITY.md#bind-13), [BIND-16](../../docs/TRACEABILITY.md#bind-16), [BIND-20](../../docs/TRACEABILITY.md#bind-20), [BIND-21](../../docs/TRACEABILITY.md#bind-21), [BIND-25](../../docs/TRACEABILITY.md#bind-25), [BIND-6](../../docs/TRACEABILITY.md#bind-6), [CLI-1](../../docs/TRACEABILITY.md#cli-1), [CLI-2](../../docs/TRACEABILITY.md#cli-2), [CLI-3](../../docs/TRACEABILITY.md#cli-3), [CLI-4](../../docs/TRACEABILITY.md#cli-4), [CLI-5](../../docs/TRACEABILITY.md#cli-5), [CLI-6](../../docs/TRACEABILITY.md#cli-6), [CLI-7](../../docs/TRACEABILITY.md#cli-7), [CLI-8](../../docs/TRACEABILITY.md#cli-8), [CLI-9](../../docs/TRACEABILITY.md#cli-9), [COST-9](../../docs/TRACEABILITY.md#cost-9), [IMAGE-13](../../docs/TRACEABILITY.md#image-13), [IMAGE-2](../../docs/TRACEABILITY.md#image-2), [IMAGE-3](../../docs/TRACEABILITY.md#image-3), [IMAGE-4](../../docs/TRACEABILITY.md#image-4), [IMAGE-9](../../docs/TRACEABILITY.md#image-9), [STATE-1](../../docs/TRACEABILITY.md#state-1), [STATE-10](../../docs/TRACEABILITY.md#state-10), [STATE-11](../../docs/TRACEABILITY.md#state-11), [STATE-2](../../docs/TRACEABILITY.md#state-2), [STATE-3](../../docs/TRACEABILITY.md#state-3), [STATE-4](../../docs/TRACEABILITY.md#state-4), [STATE-5](../../docs/TRACEABILITY.md#state-5), [STATE-6](../../docs/TRACEABILITY.md#state-6), [STATE-7](../../docs/TRACEABILITY.md#state-7), [STATE-9](../../docs/TRACEABILITY.md#state-9), [TRAP-2](../../docs/TRACEABILITY.md#trap-2), [TRAP-3](../../docs/TRACEABILITY.md#trap-3), [TRAP-4](../../docs/TRACEABILITY.md#trap-4), [TRAP-8](../../docs/TRACEABILITY.md#trap-8) | Wording review remains open; no blanket waiver. |
+| `GTWR_R5_INDEFINITE_ARTICLE` | warn | [ARCH-2](../../docs/TRACEABILITY.md#arch-2), [ARCH-5](../../docs/TRACEABILITY.md#arch-5), [ARCH-7](../../docs/TRACEABILITY.md#arch-7), [BIND-10](../../docs/TRACEABILITY.md#bind-10), [BIND-11](../../docs/TRACEABILITY.md#bind-11), [BIND-12](../../docs/TRACEABILITY.md#bind-12), [BIND-13](../../docs/TRACEABILITY.md#bind-13), [BIND-14](../../docs/TRACEABILITY.md#bind-14), [BIND-15](../../docs/TRACEABILITY.md#bind-15), [BIND-16](../../docs/TRACEABILITY.md#bind-16), [BIND-17](../../docs/TRACEABILITY.md#bind-17), [BIND-18](../../docs/TRACEABILITY.md#bind-18), [BIND-19](../../docs/TRACEABILITY.md#bind-19), [BIND-2](../../docs/TRACEABILITY.md#bind-2), [BIND-20](../../docs/TRACEABILITY.md#bind-20), [BIND-21](../../docs/TRACEABILITY.md#bind-21), [BIND-22](../../docs/TRACEABILITY.md#bind-22), [BIND-23](../../docs/TRACEABILITY.md#bind-23), [BIND-24](../../docs/TRACEABILITY.md#bind-24), [BIND-25](../../docs/TRACEABILITY.md#bind-25), [BIND-26](../../docs/TRACEABILITY.md#bind-26), [BIND-27](../../docs/TRACEABILITY.md#bind-27), [BIND-3](../../docs/TRACEABILITY.md#bind-3), [BIND-4](../../docs/TRACEABILITY.md#bind-4), [BIND-6](../../docs/TRACEABILITY.md#bind-6), [BIND-7](../../docs/TRACEABILITY.md#bind-7), [BIND-8](../../docs/TRACEABILITY.md#bind-8), [BIND-9](../../docs/TRACEABILITY.md#bind-9), [CLI-3](../../docs/TRACEABILITY.md#cli-3), [CLI-4](../../docs/TRACEABILITY.md#cli-4), [CLI-5](../../docs/TRACEABILITY.md#cli-5), [CLI-6](../../docs/TRACEABILITY.md#cli-6), [CLI-7](../../docs/TRACEABILITY.md#cli-7), [CLI-8](../../docs/TRACEABILITY.md#cli-8), [CLI-9](../../docs/TRACEABILITY.md#cli-9), [COST-1](../../docs/TRACEABILITY.md#cost-1), [COST-10](../../docs/TRACEABILITY.md#cost-10), [COST-2](../../docs/TRACEABILITY.md#cost-2), [COST-3](../../docs/TRACEABILITY.md#cost-3), [COST-4](../../docs/TRACEABILITY.md#cost-4), [COST-7](../../docs/TRACEABILITY.md#cost-7), [COST-9](../../docs/TRACEABILITY.md#cost-9), [IMAGE-1](../../docs/TRACEABILITY.md#image-1), [IMAGE-10](../../docs/TRACEABILITY.md#image-10), [IMAGE-11](../../docs/TRACEABILITY.md#image-11), [IMAGE-12](../../docs/TRACEABILITY.md#image-12), [IMAGE-13](../../docs/TRACEABILITY.md#image-13), [IMAGE-2](../../docs/TRACEABILITY.md#image-2), [IMAGE-3](../../docs/TRACEABILITY.md#image-3), [IMAGE-4](../../docs/TRACEABILITY.md#image-4), [IMAGE-6](../../docs/TRACEABILITY.md#image-6), [IMAGE-7](../../docs/TRACEABILITY.md#image-7), [IMAGE-8](../../docs/TRACEABILITY.md#image-8), [IMAGE-9](../../docs/TRACEABILITY.md#image-9), [STATE-1](../../docs/TRACEABILITY.md#state-1), [STATE-11](../../docs/TRACEABILITY.md#state-11), [STATE-12](../../docs/TRACEABILITY.md#state-12), [STATE-2](../../docs/TRACEABILITY.md#state-2), [STATE-4](../../docs/TRACEABILITY.md#state-4), [STATE-5](../../docs/TRACEABILITY.md#state-5), [STATE-7](../../docs/TRACEABILITY.md#state-7), [STATE-8](../../docs/TRACEABILITY.md#state-8), [STATE-9](../../docs/TRACEABILITY.md#state-9), [TRAP-1](../../docs/TRACEABILITY.md#trap-1), [TRAP-10](../../docs/TRACEABILITY.md#trap-10), [TRAP-11](../../docs/TRACEABILITY.md#trap-11), [TRAP-2](../../docs/TRACEABILITY.md#trap-2), [TRAP-3](../../docs/TRACEABILITY.md#trap-3), [TRAP-4](../../docs/TRACEABILITY.md#trap-4), [TRAP-5](../../docs/TRACEABILITY.md#trap-5), [TRAP-8](../../docs/TRACEABILITY.md#trap-8), [TRAP-9](../../docs/TRACEABILITY.md#trap-9) | Wording review remains open; no blanket waiver. |
+
+| Strict demotion | Requirements | Disposition |
+| --- | --- | --- |
+| `no-decide-tier-comparison` | ARCH-1, ARCH-2, ARCH-3, ARCH-4, ARCH-5, ARCH-6, ARCH-7, ARCH-8, BIND-1, BIND-10, BIND-11, BIND-12, BIND-13, BIND-14, BIND-15, BIND-16, BIND-17, BIND-18, BIND-19, BIND-2, BIND-20, BIND-21, BIND-22, BIND-23, BIND-24, BIND-25, BIND-26, BIND-27, BIND-3, BIND-4, BIND-5, BIND-6, BIND-7, BIND-8, BIND-9, CLI-1, CLI-2, CLI-3, CLI-4, CLI-5, CLI-6, CLI-7, CLI-8, CLI-9, COST-1, COST-10, COST-2, COST-3, COST-4, COST-5, COST-6, COST-7, COST-8, COST-9, IMAGE-1, IMAGE-10, IMAGE-11, IMAGE-12, IMAGE-13, IMAGE-2, IMAGE-3, IMAGE-4, IMAGE-5, IMAGE-6, IMAGE-7, IMAGE-8, IMAGE-9, STATE-1, STATE-10, STATE-11, STATE-12, STATE-2, STATE-3, STATE-4, STATE-5, STATE-6, STATE-7, STATE-8, STATE-9, TRAP-1, TRAP-10, TRAP-11, TRAP-12, TRAP-13, TRAP-2, TRAP-3, TRAP-4, TRAP-5, TRAP-6, TRAP-7, TRAP-8, TRAP-9 | Unresolved; strict verification stays disabled. |
+| `uncovered-requirement` | ARCH-1, ARCH-2, ARCH-3, ARCH-4, ARCH-5, ARCH-6, ARCH-7, ARCH-8, BIND-1, BIND-10, BIND-11, BIND-12, BIND-13, BIND-14, BIND-15, BIND-16, BIND-17, BIND-18, BIND-19, BIND-2, BIND-20, BIND-21, BIND-22, BIND-23, BIND-24, BIND-25, BIND-26, BIND-27, BIND-3, BIND-4, BIND-5, BIND-6, BIND-7, BIND-8, BIND-9, CLI-1, CLI-2, CLI-3, CLI-4, CLI-5, CLI-6, CLI-7, CLI-8, CLI-9, COST-1, COST-10, COST-2, COST-3, COST-4, COST-5, COST-6, COST-7, COST-8, COST-9, IMAGE-1, IMAGE-10, IMAGE-11, IMAGE-12, IMAGE-13, IMAGE-2, IMAGE-3, IMAGE-4, IMAGE-5, IMAGE-6, IMAGE-7, IMAGE-8, IMAGE-9, STATE-1, STATE-10, STATE-11, STATE-12, STATE-2, STATE-3, STATE-4, STATE-5, STATE-6, STATE-7, STATE-8, STATE-9, TRAP-1, TRAP-10, TRAP-11, TRAP-12, TRAP-13, TRAP-2, TRAP-3, TRAP-4, TRAP-5, TRAP-6, TRAP-7, TRAP-8, TRAP-9 | Unresolved; strict verification stays disabled. |

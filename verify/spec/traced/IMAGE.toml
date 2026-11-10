@@ -52,3 +52,7 @@ waive.model = "a binding pass-through has no states; core's are modeled as IMAGE
 waive.gherkin = "the scenarios are core's (IMAGE-6..11); each binding's tests check the pass-through"
 waive.fuzz = "the binding hands its arguments unchanged to core's fuzzed functions"
 waive.live = "the conformance section drives core's ensure_image, which each binding forwards unchanged"
+
+[IMAGE-13]
+issue = "#571"
+waive.fuzz = "the caller-identity cache is a state transition, explored by the image model; it does not consume unstructured input"
