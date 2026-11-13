@@ -15,8 +15,12 @@ is never published. `effect`, which symspec depends on, asks for `toml`
 `^4.1.2`, and the `overrides` entry in `package.json` replaces it with `toml`
 5.0.1, the first release that fixes GHSA-4qx8-w7c3-pj3p, GHSA-9j65-hcg3-gc64 and
 GHSA-9qmh-m7c6-f92p. Remove the entry once a symspec release depends on a fixed
-`toml`. The wrapper refuses a different verifier version and returns
-the verifier's exit status without changing it.
+`toml`. A second `overrides` entry pins the `effect` that symspec resolves to
+4.0.0-beta.103, the first release that fixes GHSA-chp3-j5qr-2vfr, a cookie
+attribute injection in `makeCookie()`. The symspec 2.0.0 release pins beta.102
+exactly. Remove that entry once a symspec release requires `effect`
+4.0.0-beta.103 or later itself. The wrapper refuses a different verifier version
+and returns the verifier's exit status without changing it.
 
 Setup downloads the verifier's semantic model into `model/`, which is ignored.
 The symspec distribution pins the model revision and verifies each asset's SHA-256

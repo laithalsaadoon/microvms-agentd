@@ -1,5 +1,5 @@
-# Class conversion is selected by a Cargo feature, so each proof changes that feature
-# and rebuilds the addon before running the ordinary behavior test.
+# napi 3.15+ checks class identity on every feature set (napi-rs#3610), so each proof swaps one
+# typed class parameter or receiver for an unchecked JS object and rebuilds the addon.
 
 [[fault]]
 id = "js-class-arguments"
@@ -10,7 +10,7 @@ run = [
 ]
 expect = "test-failed"
 suite = "bindings"
-transform = { file = "bindings/microvms-js/Cargo.toml", replace = '    "napi8",', with = '    "napi5",' }
+transform = { file = "bindings/microvms-js/src/region.rs", replace = "    pub fn equals(&self, other: &Region) -> bool {\n        self.inner == other.inner\n", with = "    pub fn equals(&self, other: napi::bindgen_prelude::Object<'_>) -> bool {\n        use napi::bindgen_prelude::JsObjectValue as _;\n        other.get_named_property::<String>(\"name\").is_ok_and(|name| name == self.inner.as_str())\n" }
 
 [[fault]]
 id = "js-async-class-arguments"
@@ -21,7 +21,7 @@ run = [
 ]
 expect = "test-failed"
 suite = "bindings"
-transform = { file = "bindings/microvms-js/Cargo.toml", replace = '    "napi8",', with = '    "napi5",' }
+transform = { file = "bindings/microvms-js/src/sandbox.rs", replace = "        region: &Region,\n        retry: Option<crate::control::RetryOptions>,\n    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, Sandbox>> {\n        let region = region.clone();\n", with = "        region: napi::bindgen_prelude::Object<'env>,\n        retry: Option<crate::control::RetryOptions>,\n    ) -> napi::Result<napi::bindgen_prelude::PromiseRaw<'env, Sandbox>> {\n        use napi::bindgen_prelude::JsObjectValue as _;\n        let name = region.get_named_property::<String>(\"name\")?;\n        let region = Region { inner: name.parse().map_err(|_| napi::Error::from_reason(name))? };\n" }
 
 [[fault]]
 id = "js-class-getters"
@@ -32,4 +32,4 @@ run = [
 ]
 expect = "test-failed"
 suite = "bindings"
-transform = { file = "bindings/microvms-js/Cargo.toml", replace = '    "napi8",', with = '    "napi5",' }
+transform = { file = "bindings/microvms-js/src/region.rs", replace = "    pub fn is_measured(&self) -> bool {\n        self.inner.is_measured()\n", with = "    pub fn is_measured(this: napi::bindgen_prelude::This<'_>) -> bool {\n        use napi::bindgen_prelude::JsObjectValue as _;\n        this.get_named_property::<String>(\"name\").is_ok_and(|name| microvms_core::region::MEASURED_REGIONS.contains(&name.as_str()))\n" }
