@@ -28,16 +28,16 @@ permit (principal, action == Box::Action::"shell:exec", resource);
 // Run the project's tests, and only them, as a host program: `python3.12 test_calc.py` in the
 // project directory. The Shell doesn't implement `python3.12`, so this is a shell:spawn, and Box
 // records the program's own exit status. program_path is the file with every link resolved, and
-// cwd is a full path, unlike the "~" paths on fs:*. A host program's file operations raise no
-// fs:* decision, so box.toml's [tool.tests] table runs it read-only on the project with .env
-// denied. Every other host program has no permit, so none runs.
+// cwd is spelled as the fs:* paths are: "~/project", under the operator's home. A host program's
+// file operations raise no fs:* decision, so box.toml's [tool.tests] table runs it read-only on
+// the project with .env denied. Every other host program has no permit, so none runs.
 @id("run_tests")
 permit (principal, action == Box::Action::"shell:spawn", resource)
 when {
   context.input.program_path == "/usr/bin/python3.12" &&
   context.input has arg1 && context.input.arg1 == "test_calc.py" &&
   context.input.arg_count == 1 &&
-  context.input.cwd == "/home/agent/project"
+  context.input.cwd == "~/project"
 };
 
 @id("project_read")
@@ -116,7 +116,7 @@ unless temporal {
   !(Box::Action::"fs:write"::response{ input.path: _ } &&
     !Box::Action::"fs:write"::response{ input.path: "/dev/null" })
     since within 15m
-  Box::Action::"shell:spawn"::response{ input.program_path: "/usr/bin/python3.12", input.arg1: "test_calc.py", input.arg_count: 1, input.cwd: "/home/agent/project", output.status: 0 }
+  Box::Action::"shell:spawn"::response{ input.program_path: "/usr/bin/python3.12", input.arg1: "test_calc.py", input.arg_count: 1, input.cwd: "~/project", output.status: 0 }
 };
 
 // After 10 test runs that failed in the last hour, Codex is going in circles: refuse every
@@ -130,7 +130,7 @@ when temporal {
   exists (fails: Long). (
     (count for (t: Timepoint). where (
       formerly within 1h (
-        Box::Action::"shell:spawn"::response{ input.program_path: "/usr/bin/python3.12", input.arg1: "test_calc.py", input.arg_count: 1, input.cwd: "/home/agent/project" } &&
+        Box::Action::"shell:spawn"::response{ input.program_path: "/usr/bin/python3.12", input.arg1: "test_calc.py", input.arg_count: 1, input.cwd: "~/project" } &&
         !Box::Action::"shell:spawn"::response{ output.status: 0 } && tp(t)
       )
     )) == fails

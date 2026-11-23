@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Codex's configuration inside the box (CODEX_HOME=/home/agent/codex-home).
 #
-# The model is GPT-6.1 Sol on Amazon Bedrock's bedrock-runtime endpoint, through Codex's
+# The model is GPT-6.2 Sol on Amazon Bedrock's bedrock-runtime endpoint, through Codex's
 # built-in `amazon-bedrock-runtime` provider, which targets
 # https://bedrock-runtime.<region>.amazonaws.com/openai/v1 on the Responses wire API. The
 # Mantle endpoint is the separate `amazon-bedrock` provider, and no proxy sits in between.
-# The model id is the Global cross-region inference profile; the bare `openai.gpt-6.1-sol`
+# The model id is the Global cross-region inference profile; the bare `openai.gpt-6.2-sol`
 # id has no on-demand throughput.
-model = "global.openai.gpt-6.1-sol"
+model = "global.openai.gpt-6.2-sol"
 model_provider = "amazon-bedrock-runtime"
 model_reasoning_effort = "medium"
 

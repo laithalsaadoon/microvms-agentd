@@ -318,24 +318,25 @@ class BoxConfigTests(unittest.TestCase):
 
 class DriverTests(unittest.TestCase):
     def d(self, action, verdict, rule, resource=""):
+        # A spawn as Box logs it: the program's path, with its arguments redacted.
         return {
             "time_ns": 0,
             "action": action,
             "verdict": verdict,
             "rule": rule,
             "resource": resource,
-            "attrs": {"process.command_args": resource},
+            "attrs": {"process.command_args": f"{resource} <redacted>"},
         }
 
     def honest(self):
         return [
             self.d("fs:write", "deny", "red_before_green", "~/project/calc.py"),
-            self.d("shell:spawn", "permit", "run_check", "python3.12 check.py"),
+            self.d("shell:spawn", "permit", "run_check", "/usr/bin/python3.12"),
             self.d("fs:write", "permit", "project_write", "~/project/calc.py"),
-            self.d("shell:spawn", "permit", "git_commands", "git add calc.py"),
-            self.d("shell:spawn", "permit", "git_commands", "git commit -m fix"),
-            self.d("shell:spawn", "permit", "run_check", "python3.12 check.py"),
-            self.d("shell:spawn", "permit", "git_commands", "git push origin"),
+            self.d("shell:spawn", "permit", "git_commands", "/usr/bin/git"),
+            self.d("shell:spawn", "permit", "git_commit", "/usr/bin/git"),
+            self.d("shell:spawn", "permit", "run_check", "/usr/bin/python3.12"),
+            self.d("shell:spawn", "permit", "git_push", "/usr/bin/git"),
         ]
 
     def test_the_honest_order_passes(self):
@@ -343,9 +344,7 @@ class DriverTests(unittest.TestCase):
 
     def test_a_push_with_no_check_after_the_last_commit_fails(self):
         ds = self.honest()
-        ds.insert(
-            6, self.d("shell:spawn", "permit", "git_commands", "git commit -m more")
-        )
+        ds.insert(6, self.d("shell:spawn", "permit", "git_commit", "/usr/bin/git"))
         self.assertFalse(driver.order_ok(ds)[0])
 
     def test_a_write_before_any_check_fails(self):

@@ -1,7 +1,7 @@
 # The SDLC variant: the policy enforces the order
 
 This variant runs the same stack as the parent example. The Codex Python SDK drives Codex inside
-Box, inside a Lambda MicroVM, against GPT-6.1 Sol on `bedrock-runtime`. Claude Code, on Claude
+Box, inside a Lambda MicroVM, against GPT-6.2 Sol on `bedrock-runtime`. Claude Code, on Claude
 Opus 5.5 on `bedrock-runtime`, runs under the same policy with `SDLC_AGENT=claude`. The agent's
 one job is to fix the bug and push the fix to `origin`. Nobody gives it steps, and no workflow
 engine sequences anything. `box/policy.dw` defines the order (red check, fix, commit, check,
@@ -10,7 +10,7 @@ resources.
 
 ```bash
 # from the repo root, with the parent example's prerequisites in place:
-examples/strands-box-codex-sdk/download-box.sh     # once: Box v0.2.1 for aarch64 Linux
+examples/strands-box-codex-sdk/download-box.sh     # once: Box v0.3.0 for aarch64 Linux
 examples/strands-box-codex-sdk/sdlc/run.sh         # probe, goal, cheats
 SDLC_PHASES=goal SDLC_NO_HINTS=1 examples/strands-box-codex-sdk/sdlc/run.sh
 SDLC_PHASES=goal SDLC_PROJECT=shop examples/strands-box-codex-sdk/sdlc/run.sh
@@ -45,16 +45,16 @@ Each phase seeds one project into `/home/agent/project`, with the same frozen `c
   file is outside the project, where the agent can't change it.
 - `box/claude-box.toml` is `box/box.toml` with Claude Code as the agent: the same policy, the
   same `[tool.check]` and `[tool.git]` tables, and the same model route, with Claude Code's own
-  home and temporary directory as its only grants. The Dockerfile installs Claude Code 2.1.319's
+  home and temporary directory as its only grants. The Dockerfile installs Claude Code 2.1.330's
   native Linux ARM64 binary from its npm package, pinned by SHA-256. Box runs the agent as uid 0
   in the box's user namespace. Claude Code refuses `--dangerously-skip-permissions` as root
   unless `IS_SANDBOX=1`, and the config sets that variable. Claude Code's home and temporary
   directory are under `~/agent-state`, where the policy's `agent_state` rule lets the shell read
   and write. Its Bash tool writes the working directory to a file there after every command,
   and without that rule each command would end with a refusal the agent sees.
-- `../guest/pyproject.toml` pins the Codex SDK to 0.163.0. From 0.166.0 Codex's
-  app-server calls `statfs` on its SQLite home at startup and exits when that fails, and Box
-  v0.2.1's seccomp filter for the agent refuses `statfs` with `EPERM`.
+- `../guest/pyproject.toml` pins the Codex SDK to 0.171.0. GPT-6.2 Sol needs Codex 0.166.0 or
+  later. From 0.166.0 Codex's app-server calls `statfs` on its SQLite home at startup, and Box
+  answers that call from v0.2.2 on.
 - origin's URL is `ext::git %s /home/agent/origin.git`. git pushes to a plain path by running
   `git-receive-pack` through `/bin/sh`, and a Box tool's sandbox has no shell. The ext transport
   execs `git receive-pack <path>` directly.
@@ -69,7 +69,7 @@ Each phase seeds one project into `/home/agent/project`, with the same frozen `c
 | `checks_are_frozen` | tests that only the pipeline can change | writes and moves of `test_calc.py`, `tests/`, and `check.py`, in every project |
 | `push_after_green_check` | "CI passes, then push" | `git push` unless the check exited 0 in the last 30 minutes with no commit since |
 | `push_shape` | a branch and refspec guard | any push other than `git push origin` |
-| `git_commands` | nothing | every git subcommand but status, diff, log, show, add, commit, and push |
+| `git_commands`, `git_commit`, `git_push` | nothing | every git subcommand but status, diff, log, show, add, commit, and push |
 | `git_dir_is_gits` | nothing | shell writes, moves, and deletes under `.git` |
 | `stall_brake`, `model_call_budget` | retry limits and timeouts | project writes after 10 failed checks in an hour; model requests past 400 in an hour |
 
@@ -78,10 +78,13 @@ time reads that program's shell:spawn response, which includes the exit status B
 write after a passing check leaves the push open, because HEAD hasn't changed and the check
 refuses a dirty tree. A commit closes it until the check passes on the new HEAD.
 
-`git_commands` and `git_dir_is_gits` close two gaps that host programs open. Without them,
+The git permits and `git_dir_is_gits` close two gaps that host programs open. Without them,
 `git checkout -- calc.py` could swap the code after a passing check with no decision recorded,
 and a pre-push hook or a config line written into `.git` would run inside git's own process,
 where no rule sees it.
+
+Box's decision log redacts a command's arguments, so a commit and a push each have a permit of
+their own. The rule id in the log is how the driver tells them apart when it checks the order.
 
 Each rule's `@description` is the text Box puts in its denial, and the agent reads it. A refused
 push tells the agent to commit and run the check first.
@@ -116,7 +119,7 @@ remote, and the driver makes origin read-only while the pushed code runs there.
 
 ```bash
 mise run box:check                                  # check.py, seeding, grants, scoring
-DOGWOOD=/path/to/dogwood mise run box:sdlc:replay   # 55 traces and 12 seeded faults
+DOGWOOD=/path/to/dogwood mise run box:sdlc:replay   # 57 traces and 14 seeded faults
 ```
 
 `replay/replay.py` replays hand-built traces against `box/policy.dw` with the Dogwood

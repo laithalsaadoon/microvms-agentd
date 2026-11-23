@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # Codex, driven by the Codex Python SDK, inside a Strands Box, inside a Lambda MicroVM, against
-# GPT-6.1 Sol on Amazon Bedrock's bedrock-runtime endpoint.
+# GPT-6.2 Sol on Amazon Bedrock's bedrock-runtime endpoint.
 #
 # What this does, end to end:
 #   1. builds a MicroVM image with agentd, Python 3.12, and the Codex SDK (first run only),
@@ -18,7 +18,7 @@
 # Prerequisites:
 #   - `microvm` 1.1.1 or later on PATH, with MICROVM_BUCKET, MICROVM_BUILD_ROLE_ARN, and
 #     MICROVM_EXECUTION_ROLE_ARN set (the repo README's Configure AWS),
-#   - AWS credentials that can call lambda-microvms and bedrock:InvokeModel on GPT-6.1 Sol,
+#   - AWS credentials that can call lambda-microvms and bedrock:InvokeModel on GPT-6.2 Sol,
 #   - uv on PATH (mints the Bedrock API key),
 #   - Strands Box downloaded with ./download-box.sh into .box-bin/.
 set -euo pipefail
