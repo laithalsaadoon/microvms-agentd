@@ -12,5 +12,8 @@
 # fuzz workspace's own Cargo.lock, site/osv-scanner.toml for the docs site's pnpm-lock.yaml.
 # OpenSSF Scorecard's Vulnerabilities check reads them the same way.
 #
-# It accepts no finding at present. Add an [[IgnoredVulns]] entry with an `id` and a `reason`
-# only together with its VEX statement.
+# Add an [[IgnoredVulns]] entry with an `id` and a `reason` only together with its VEX statement.
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0542"
+reason = "An informational advisory that marks humantime unmaintained and names no defect. humantime 2.4.0 is in Cargo.lock only through cucumber 0.23.0, a test-only dependency, so no shipped build links it; see the not_affected statement in .vex/microvms-agentd.openvex.json."

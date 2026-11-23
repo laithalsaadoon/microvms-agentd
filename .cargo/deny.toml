@@ -55,6 +55,10 @@ wildcards = "deny"
 # three scanners sees them.
 version = 2
 yanked = "deny"
+ignore = [
+    # humantime 2.4.0 has no fixed release. Only cucumber, a test dependency, pulls it in.
+    { id = "RUSTSEC-2026-0542", reason = "unmaintained, no fixed release; reached only through cucumber, a dev-dependency" },
+]
 
 [sources]
 unknown-registry = "deny"

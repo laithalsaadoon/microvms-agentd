@@ -7,7 +7,7 @@
 //!
 //! # The ELF check is the one worth the file read
 //!
-//! MicroVMs are ARM64-only. A daemon built for the host produces an image whose CMD cannot
+//! agentd images are ARM64-only. A daemon built for the host produces an image whose CMD cannot
 //! exec, and that surfaces as a **run-hook timeout** — 45 minutes into a build, saying nothing
 //! about architecture. Twenty bytes of header answers it before the build starts.
 //!
@@ -528,8 +528,8 @@ fn check_binary(binary: Option<&std::path::Path>) -> Check {
                 "{} is ELF machine 0x{machine:x}, not aarch64 (0x{REQUIRED_ELF_MACHINE:x})",
                 path.display()
             ),
-            "MicroVMs are ARM64-only. Rebuild for aarch64-unknown-linux-musl — a host-arch \
-             binary fails as a run-hook timeout, which says nothing about architecture.",
+            "This client builds ARM64 images only. Rebuild for aarch64-unknown-linux-musl — a \
+             host-arch binary fails as a run-hook timeout, which says nothing about architecture.",
         ),
         Some(_) => Check::pass(
             "daemon-binary",

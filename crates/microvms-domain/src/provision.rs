@@ -51,9 +51,9 @@ pub fn require_aarch64(bytes: &[u8]) -> Result<(), Error> {
         Some(why) => Err(Error::new(
             ErrorKind::Precondition,
             format!(
-                "the daemon binary is {why}. MicroVMs are ARM64-only, and a wrong-architecture \
-                 daemon fails as a run-hook timeout 45 minutes into a build.\n  - build one: \
-                 cargo build --release -p agentd --target aarch64-unknown-linux-musl"
+                "the daemon binary is {why}. This client builds ARM64 images only, and a \
+                 wrong-architecture daemon fails as a run-hook timeout 45 minutes into a build.\n  \
+                 - build one: cargo build --release -p agentd --target aarch64-unknown-linux-musl"
             ),
         )),
     }
@@ -104,7 +104,7 @@ mod tests {
             assert_eq!(error.kind(), ErrorKind::Precondition, "{error}");
             let message = error.to_string();
             assert!(message.contains(why), "{message}");
-            assert!(message.contains("ARM64-only"), "{message}");
+            assert!(message.contains("ARM64 images only"), "{message}");
             assert!(
                 message.contains("--target aarch64-unknown-linux-musl"),
                 "{message}"

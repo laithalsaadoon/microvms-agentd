@@ -4,6 +4,11 @@ target/
 /conformance/evidence/
 /evidence/background-coding-agent/
 Cargo.lock.orig
+# Claude Code's per-machine settings and scratch worktrees. `.claude/agents/` and
+# `.claude/stewards/` are committed: the steward definitions and the record of their wakes,
+# which AGENTS.md's Stewards section describes.
+.claude/settings.local.json
+.claude/worktrees/
 # An agent workflow tool's lesson and session store. Nothing in the repository reads it, so a
 # local run's notes stay on the machine that wrote them rather than riding into a commit.
 .erpaval/

@@ -7,7 +7,7 @@
 # the reader did not know they were using. Listing the target here makes rustup
 # install it on first use, for every contributor and for CI, with no setup step.
 #
-# aarch64 is the shipping target because Lambda MicroVMs are ARM64-only. The x86
+# aarch64 is the shipping target because agentd ships for ARM64 only. The x86
 # musl target is here for local experiments on this box; it costs a download and
 # saves the same confusing failure.
 #

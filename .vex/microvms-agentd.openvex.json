@@ -2,8 +2,8 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://github.com/laithalsaadoon/microvms-agentd/blob/main/.vex/microvms-agentd.openvex.json",
   "author": "laithalsaadoon/microvms-agentd maintainers",
-  "timestamp": "2026-11-03T09:12:14Z",
-  "version": 9,
+  "timestamp": "2026-11-19T09:25:00Z",
+  "version": 11,
   "statements": [
     {
       "timestamp": "2026-10-27T08:18:42Z",
@@ -38,6 +38,57 @@
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
       "impact_statement": "minimatch 10.2.6 is in site/pnpm-lock.yaml only, required as ^10.2.5 by typedoc 0.28.20 (also reached through typedoc-plugin-markdown 4.13.1), the docs site's devDependency that renders the TypeScript SDK reference from site/scripts/reference/sdk/typescript.mjs; `pnpm why minimatch` in site/ lists that one path, and nothing in site/ ships in a crate, wheel or npm package. The advisory's growth happens in firstPhasePreProcess and secondPhasePreProcess, which minimatch calls only when a caller sets optimizationLevel to 2 or more (dist/esm/index.js:332-341; the default is 1). typedoc builds every Minimatch with `{ dot: true }` or no options (dist/node-utils.js:62, :83 and :318), and `grep -rl optimizationLevel` over the dist directories of typedoc 0.28.20 and typedoc-plugin-markdown 4.13.1 finds no file, so that branch never runs. No semver-compatible fix exists: the fix is minimatch 11.0.1, which removes matchOne(), and typedoc's glob() calls it (dist/node-utils.js:328). Re-check when typedoc or typedoc-plugin-markdown is bumped or another package in the site lockfile starts to depend on minimatch, and drop this statement once typedoc requires minimatch 11."
+    },
+    {
+      "timestamp": "2026-11-17T09:15:04Z",
+      "vulnerability": {
+        "name": "GHSA-r3h5-4585-7x3w",
+        "description": "astro: the `/_image` endpoint used by the @astrojs/node adapter compares paths case-insensitively, so on a case-sensitive filesystem it serves image files from a directory that differs from the output directory only by letter case",
+        "aliases": [
+          "CVE-2026-126364"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:npm/astro@7.3.3"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "astro 7.3.3 is in site/pnpm-lock.yaml only, as the docs site's static-site generator, and nothing in site/ ships in a crate, wheel or npm package. The advisory needs on-demand rendering with the @astrojs/node adapter, whose server answers `/_image` requests. `grep -c '@astrojs/node' site/package.json site/pnpm-lock.yaml` counts 0 in both files, so the adapter is not installed. `grep -nE '\\b(output|adapter|prerender)\\b' site/astro.config.ts` matches nothing, so the build uses Astro's default static output with no adapter, and `grep -rn prerender site/src site/authored` finds no route that opts out of prerendering. The config sets `image: { service: passthroughImageService() }`, so the site optimizes no images. .github/workflows/docs.yml runs `astro build` and uploads site/dist to GitHub Pages as static files, so no Astro server and no `/_image` endpoint exist where the site is served. Re-check if the site adds @astrojs/node or any other server adapter, sets `output` or a route's `prerender` to on-demand rendering, or is served by `astro preview` or `astro dev` instead of static hosting. Drop this statement and its osv-scanner ignore once astro is 7.4.7 or later."
+    },
+    {
+      "timestamp": "2026-11-17T09:15:04Z",
+      "vulnerability": {
+        "name": "GHSA-mh32-jxcr-mh9f",
+        "description": "astro: a dynamic tag whose name is a string keeps `/` in the element name, and the MDX JSX renderer does not filter string tag names, so untrusted input used as an element name injects attributes",
+        "aliases": [
+          "CVE-2026-126361"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:npm/astro@7.3.3"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "astro 7.3.3 is in site/pnpm-lock.yaml only, as the docs site's static-site generator. The advisory needs untrusted input (a request parameter, an uncontrolled CMS field) to choose all or part of an element name in a dynamic tag (`const Tag = ...; <Tag />`) or in MDX. The site's own templates are three files, site/src/components/Head.astro, PageActions.astro and PageTitle.astro (`git ls-files site | grep -E '\\.(astro|mdx|tsx|jsx)$'`), and `grep -nE '(const|let|var) +[A-Z][A-Za-z0-9]* *=' site/src/components/*.astro` finds no capitalized identifier assigned from a string: every capitalized tag in them is an imported component. The same grep over the `.astro` files of the installed dependencies finds one dynamic tag, `HeadingElement` in @astrojs/starlight 0.41.10's components/AnchorHeading.astro, which accepts only heading levels 1 to 6 and which no site source references (`grep -rn AnchorHeading site/src site/authored site/astro.config.ts docs` finds nothing). Content is the repository's own Markdown: docs/ and site/authored/ hold `.md` files and no `.mdx` (`git ls-files docs site/authored | grep -c '\\.mdx$'` prints 0), and the reference pages generated beside them at build time are `.md` too. The build is static (no `output`, `adapter` or `prerender` setting in site/astro.config.ts) and no site source reads `Astro.request`, `Astro.url.searchParams`, `Astro.cookies` or `Astro.params`, so no request input exists when a page renders. Re-check if a template or MDX page takes an element name from content, front matter or a request, if the site adds `.mdx` content or content from outside the repository, or if it adds a server adapter or on-demand rendering. Drop this statement and its osv-scanner ignore once astro is 7.4.5 or later."
+    },
+    {
+      "timestamp": "2026-11-19T09:25:00Z",
+      "vulnerability": {
+        "name": "RUSTSEC-2026-0542",
+        "description": "humantime: marked unmaintained in every version; the advisory names no vulnerable code"
+      },
+      "products": [
+        {
+          "@id": "pkg:cargo/humantime@2.4.0"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "RUSTSEC-2026-0542 is an informational advisory (`informational = \"unmaintained\"`) with no fixed release: it marks every humantime version unmaintained and describes no defect. humantime 2.4.0 is in Cargo.lock only through cucumber 0.23.0, the test runner that agentd, microvms-cli and microvms-core list under `[dev-dependencies]`; `cargo tree -i humantime@2.4.0 -e normal` prints nothing, and `cargo tree -i humantime@2.4.0 --depth 2` lists cucumber alone. No build dependency or shipped binary, wheel or npm package links it, and crates/agentd/fuzz/Cargo.lock has no humantime (`grep -c 'name = \"humantime\"' crates/agentd/fuzz/Cargo.lock` prints 0). cucumber calls only `humantime::parse_duration`, on the test runner's `--retry-after` command-line value and on `@retry(...).after(...)` tags in the repository's own feature files (cucumber 0.23.0 src/runner/basic.rs:84 and :163). cucumber 0.23.0 is its newest release and requires humantime unconditionally, so no update removes it. Re-check when cucumber publishes a release, if `cargo tree -i humantime -e normal` ever prints a dependent, or if RustSec files a vulnerability against humantime. Drop this statement and the osv-scanner ignore once Cargo.lock has no humantime or the advisory is withdrawn."
     }
   ]
 }

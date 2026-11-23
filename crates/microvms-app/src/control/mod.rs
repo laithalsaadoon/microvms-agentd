@@ -310,9 +310,9 @@ impl ControlPlane {
 ///
 /// A `capabilities` list. See `repair_guest_identity`.
 ///
-/// An `architecture` field. The model's enum has exactly one value, so the only thing a
-/// field could express is a rejected request — and the rejection arrives *after* the
-/// artifact upload, reported as a constraint on a field the caller thought was a choice.
+/// An `architecture` field. agentd ships an aarch64 binary only, so the only thing a
+/// field could add is an `X86_64` image whose daemon cannot start, and that failure
+/// arrives long after the artifact upload, as a run-hook timeout naming no architecture.
 /// `ARM_64` is injected. A caller who built an x86 binary finds out from `doctor`'s ELF
 /// check, not from a build cycle.
 #[derive(Clone, Debug)]

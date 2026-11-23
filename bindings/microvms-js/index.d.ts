@@ -1555,8 +1555,8 @@ export interface BaseImageInput {
  * itself, so `["CAP_SYS_ADMIN"]` — the request AWS rejects after the artifact upload — is not
  * something a caller can write (TRAP-3).
  *
- * An `architecture`. The model's enum has exactly one value, so the only thing a field could
- * express is a rejected request.
+ * An `architecture`. agentd ships an aarch64 binary only, so the only thing a field could
+ * add is an `X86_64` image whose daemon cannot start.
  */
 export interface BuildImageOptions {
   name: string

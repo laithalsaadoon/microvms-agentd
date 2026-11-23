@@ -76,7 +76,7 @@ jq = "1.8.1"
 cargo.binstall = false
 
 [env]
-# The shipping target. MicroVMs are ARM64-only, and a static binary is what lets
+# The shipping target. agentd ships for ARM64 only, and a static binary is what lets
 # the daemon bake into any task image without depending on an interpreter or libc
 # that image may not have. Linker choice lives in .cargo/config.toml.
 AGENTD_TARGET = "aarch64-unknown-linux-musl"

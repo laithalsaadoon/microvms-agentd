@@ -24,7 +24,7 @@ This index covers domain validation and calculations in `microvms-domain`, orche
 | Maximum VM duration must be 1 to 28800 seconds; an explicit idle duration must be at least 60 seconds. | Launch | `crates/microvms-app/src/control/mod.rs:610`, `crates/microvms-app/src/control/mod.rs:978` | Invalid-argument error. |
 | Versions and nonblank strings must be nonempty, at most 2048 bytes, and contain no ASCII whitespace. Identifiers must be nonempty and at most 256 bytes. | Request shapes | `crates/microvms-app/src/control/mod.rs:645`, `crates/microvms-app/src/control/mod.rs:698`, `crates/microvms-app/src/control/mod.rs:754` | Invalid-argument error naming the member. |
 | Role ARNs must satisfy the length limits and the structural role-ARN predicate; ports represented as `u16` must be nonzero. | Request shapes | `crates/microvms-app/src/control/mod.rs:803`, `crates/microvms-app/src/control/mod.rs:945` | Invalid-argument error; the ARN check does not establish that a role exists. |
-| Image names must be nonempty, at most 64 bytes, and use ASCII letters, digits, hyphen, or underscore. | Image build | `crates/microvms-app/src/control/mod.rs:1064`, `crates/microvms-domain/src/constants.rs:510` | Invalid-argument error. |
+| Image names must be nonempty, at most 64 bytes, and use ASCII letters, digits, hyphen, or underscore. | Image build | `crates/microvms-app/src/control/mod.rs:1064`, `crates/microvms-domain/src/constants.rs:513` | Invalid-argument error. |
 | Tag keys must be nonempty and at most 128 bytes; values may be empty and are limited to 256 bytes. Both use the shared tag-character predicate. | Image build | `crates/microvms-app/src/control/mod.rs:1011` | Invalid-argument error identifying the key or value. |
 | A serialized run-hook payload must fit within 4096 bytes. | Launch | `crates/microvms-app/src/control/microvm.rs:201`, `crates/microvms-domain/src/constants.rs:81` | Invalid-argument error. |
 | A configured log stream requires a log group. Its caller-supplied prefix reserves room for the per-attempt suffix and cannot contain `:` or `*`. | Image build | `crates/microvms-app/src/control/image.rs:311`, `crates/microvms-app/src/control/mod.rs:887` | Invalid-argument error during preflight. |
@@ -114,7 +114,7 @@ The report charges snapshot reads on launch, compute for a recorded running phas
 - **Teardown:** `Sandbox::terminate` returns a report containing failures and undeleted resources, attempts VM termination before optional image deletion, and reports a requested log-group deletion for external cleanup. `crates/microvms-app/src/sandbox.rs:1827`.
 - **Route authorization:** Route metadata places bearer-protected endpoints behind token middleware and keeps open endpoints and platform hooks on their declared path. `crates/agentd/src/routes.rs:52`.
 - **Child environment:** Execution composes the optional image environment, passwd-derived identity, launch environment, and request environment in that order, with later layers overriding earlier values. `crates/agentd/src/exec_start.rs:440`, `crates/agentd/src/exec_start.rs:207`.
-- **Response behavior:** The router installs the version-stamping middleware and panic-response layer around the combined routes. `crates/agentd/src/routes.rs:78`.
+- **Response behavior:** The router installs the version-stamping middleware and panic-response layer around the combined routes. `crates/agentd/src/routes.rs:78-104`.
 
 ## See also
 

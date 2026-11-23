@@ -209,7 +209,7 @@ pub struct CloudWatchLogging {
     pub log_stream: Option<String>,
 }
 
-/// `CpuConfiguration`. One required member, whose enum has one value (`ARM_64`).
+/// `CpuConfiguration`. One required member, whose enum lists `ARM_64` and `X86_64`.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CpuConfiguration {
@@ -762,8 +762,8 @@ pub struct MicrovmImageBuildSummaryWire {
     pub image_version: String,
     pub build_id: String,
     pub build_state: String,
-    /// `ARM_64`, the enum's only value — carried as `String` rather than narrowed, because
-    /// a response is not a request and a second value AWS adds must parse rather than fail.
+    /// `ARM_64` for a build this client starts. Carried as `String` rather than narrowed, because
+    /// a response is not a request and a value AWS adds must parse rather than fail.
     pub architecture: String,
     pub chipset: String,
     pub chipset_generation: String,

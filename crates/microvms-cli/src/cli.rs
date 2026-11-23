@@ -26,8 +26,8 @@
 //! `agent-up`, do take one: core validates a run token, and retrying a launch with it adopts
 //! the VM the first attempt made. No `--capabilities` (TRAP-3: the intent is `--repair-identity`, and core injects
 //! `["ALL"]` itself). No `--connector` (TRAP-4: the intent is `--egress`). No
-//! `--architecture` (the model's enum has one value, so a flag could only express a rejected
-//! request). Their absence is asserted by
+//! `--architecture` (agentd ships an aarch64 binary only, so a flag could only add an image
+//! whose daemon cannot start). Their absence is asserted by
 //! `tests/thinness.rs` and by the manifest cross-check: an option added later that carries a
 //! free-text S1 value shows up as a `choices: null` on a parameter the test names.
 //!

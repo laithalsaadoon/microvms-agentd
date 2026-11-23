@@ -191,6 +191,43 @@ capabilities, or `verify/parity/capabilities.toml` says why one doesn't.
   runners' own seeded faults prove each runner can fail. CONTRIBUTING.md has the
   rest.
 
+## Stewards
+
+Stewards are standing agents. Each one watches one concern between changes. Each is a Claude
+Code subagent file in `.claude/agents/`, and it runs when a maintainer or a scheduled job
+starts it.
+
+Each one is a standing goal in one of three modes. Hold means a condition that is true now
+remains true. Maintain means the stewards keep current a thing that drifts with the outside
+world. Improve means a measured number moves in a stated direction. The file states the mode
+in a table whose rows are `Subject`, `Edit space`, `Guards`, `Objective`, and `Oracle`, and
+the oracle is a command or a count.
+
+- `.claude/agents/dependency-steward.md` (maintain): the pins and lockfiles are current and
+  have no open advisory.
+- `.claude/agents/docs-steward.md` (hold): every maintained page agrees with the code.
+- `.claude/agents/architecture-steward.md` (hold): the recorded architecture baselines still
+  pass.
+- `.claude/agents/security-steward.md` (hold): the scanners pass and each threat in
+  `docs/TRUST.md` has a running test.
+- `.claude/agents/product-steward.md` (maintain): the ledger of proposals matches the week's
+  customer signals.
+
+The `Edit space` row says what its owner may change. `product-steward` proposes only. The
+others make patch-level changes inside the limits their files list, each fix with its guard
+and with `mise run check` passing, and at most three commits a wake. A change outside the
+`Edit space` is a finding with a proposed diff, and setting the row to none makes its owner
+propose-only. Cutting a release and weakening a baseline or a check are outside every
+`Edit space`.
+
+Each wake appends one line to `.claude/stewards/cycles.jsonl`, in a commit of its own. The
+line is a JSON object with `steward` (the file's `name`), `date` (UTC), `result` (the
+oracle's reading: green, red, or not_measured), `findings` (a count), `commit` (the head the
+oracle ran at), and `note` (one line, with no detail of an unfixed security finding). The
+newest line for a name shows when it last checked.
+
+Start one with `claude --agent docs-steward`.
+
 ## Maintenance rules
 
 - Use `microvm manifest` for the current command contract. Regenerate
