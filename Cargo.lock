@@ -36,7 +36,7 @@ dependencies = [
  "hyper-util",
  "microvms-protocol",
  "mutants",
- "nix 0.31.4",
+ "nix 0.32.0",
  "pin-project-lite",
  "proptest",
  "rustix",
