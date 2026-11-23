@@ -3,9 +3,9 @@
 # Download Strands Box for the MicroVM guest: its published Linux ARM64 release, which needs
 # glibc 2.34 or newer (Amazon Linux 2023 has 2.34) and runs on Graviton, as Lambda MicroVMs do.
 #
-# Box v0.2.1 (2026-11-06) is the first release with a Linux archive, box-v0.2.1-linux-arm64.tar.gz.
+# The pin is Box v0.3.0 (2026-11-23), whose Linux ARM64 archive is box-v0.3.0-linux-arm64.tar.gz.
 # Its release notes say "Package availability does not establish security acceptance", and Box's
-# README calls Linux ARM64 a preview. This script downloads that archive, checks it against the
+# README calls Box a preview. This script downloads that archive, checks it against the
 # digest pinned below, and unpacks the three binaries `box run` needs side by side into .box-bin/.
 # It runs on any host, x86_64 or aarch64, macOS or Linux, because it only downloads: run.sh copies
 # the binaries into each VM.
@@ -13,10 +13,10 @@
 # Needs: curl, tar, and python3.
 set -euo pipefail
 
-BOX_VERSION="${BOX_VERSION:-v0.2.1}"
-# The archive's digest from the release's SHA256SUMS.txt, read 2026-11-06. A different
+BOX_VERSION="${BOX_VERSION:-v0.3.0}"
+# The archive's digest from the release's SHA256SUMS.txt, read 2026-11-23. A different
 # BOX_VERSION needs its own BOX_ARCHIVE_SHA256.
-BOX_ARCHIVE_SHA256="${BOX_ARCHIVE_SHA256:-9060a4ccca1d6d5153da31e9214d3fd64c9bab0aa7762b6556d2790a8a0f06c0}"
+BOX_ARCHIVE_SHA256="${BOX_ARCHIVE_SHA256:-5396e2e40a6a0446d2597de1e1bc3f2c66798cf7eaaca51c23833db4a039dbd3}"
 BOX_RELEASES="${BOX_RELEASES:-https://github.com/strands-agents/box/releases/download}"
 ARCHIVE="box-$BOX_VERSION-linux-arm64.tar.gz"
 HERE="$(cd "$(dirname "$0")" && pwd)"

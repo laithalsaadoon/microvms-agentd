@@ -173,7 +173,7 @@ def check_region_staging(results: Results, temporary: Path) -> None:
             and gateway["egress"]["model"]["destinations"] == [endpoint]
             and model["model_providers"]["amazon-bedrock-runtime"]["aws"]["region"]
             == region
-            and model["model"] == "global.openai.gpt-6.1-sol"
+            and model["model"] == "global.openai.gpt-6.2-sol"
             and model["model_provider"] == "amazon-bedrock-runtime"
             and policy.count(f'context.input.host == "{endpoint}"') == 3
             and policy.count(f'input.host: "{endpoint}"') == 1

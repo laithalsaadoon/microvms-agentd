@@ -33,8 +33,8 @@ class Rates:
     output: int
 
 
-# GPT-6.1 Sol, Global CRIS on bedrock-runtime, Standard tier, from the model card:
-# https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-1-sol.html
+# GPT-6.2 Sol, Global CRIS on bedrock-runtime, Standard tier, from the model card:
+# https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-2-sol.html
 SHORT = Rates(input=2_000, cache_write=2_500, cache_read=100, output=10_000)
 LONG = Rates(input=4_000, cache_write=5_000, cache_read=200, output=15_000)
 

@@ -20,7 +20,7 @@ RUN chmod 0755 /agentd
 
 # `microvm build --project guest` puts guest/pyproject.toml and guest/uv.lock in the build
 # context, and this layer installs exactly what the lockfile names: the Codex SDK
-# (openai-codex) and the Codex binary it drives (openai-codex-cli-bin), both 0.163.0.
+# (openai-codex) and the Codex binary it drives (openai-codex-cli-bin), both 0.171.0.
 WORKDIR /opt/guest
 COPY pyproject.toml uv.lock ./
 ENV UV_PROJECT_ENVIRONMENT=/opt/guest/.venv \
@@ -28,15 +28,15 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/guest/.venv \
     UV_PYTHON_DOWNLOADS=never
 RUN dnf -y --setopt=install_weak_deps=0 install python3.12 python3.12-pip tar gzip findutils procps-ng iproute git-core \
     && dnf clean all \
-    && pip3.12 install --no-cache-dir uv==0.13.0 \
+    && pip3.12 install --no-cache-dir uv==0.13.9 \
     && uv sync --locked \
     && chmod -R a+rX /opt/guest
 
 # Claude Code's native Linux ARM64 binary, from the npm package the claude-code installer itself
 # resolves, pinned by version and by the tarball's SHA-256 (npm's sha512 integrity for it is
-# PlyxaZTA...ACg==, read 2026-11-06). Box runs it as claude-box.toml's agent.
-ARG CLAUDE_CODE_VERSION=2.1.319
-ARG CLAUDE_CODE_SHA256=f1ce44ea6a383ff39463e82906ad2d9d6fe1bc92976d2ac38da965b15a6f8036
+# V4yanAY5...PcsA==, read 2026-11-23). Box runs it as claude-box.toml's agent.
+ARG CLAUDE_CODE_VERSION=2.1.330
+ARG CLAUDE_CODE_SHA256=5460d42c696670f4fd2a7ec619719edda14a576b28ee3c289b348ade96efbf6d
 RUN python3.12 -c "import hashlib, sys, urllib.request; data = urllib.request.urlopen(sys.argv[1]).read(); got = hashlib.sha256(data).hexdigest(); open('/tmp/claude-code.tgz', 'wb').write(data) if got == sys.argv[2] else sys.exit('claude-code tarball sha256 ' + got)" \
       "https://registry.npmjs.org/@anthropic-ai/claude-code-linux-arm64/-/claude-code-linux-arm64-${CLAUDE_CODE_VERSION}.tgz" \
       "$CLAUDE_CODE_SHA256" \

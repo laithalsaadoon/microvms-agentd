@@ -3,8 +3,8 @@
 // box.toml) fixes a bug and pushes the fix, and this file holds the order red check -> fix ->
 // commit -> check -> push. Nothing outside the agent sequences those steps. Box denies every
 // operation it checks unless a permit matches, and a matching forbid overrides any permit. A
-// path under the operator's home (/home/agent) starts with "~" on fs:*, and a host program's
-// cwd is a full path.
+// path under the operator's home (/home/agent) starts with "~": a file path on fs:*, and a
+// host program's cwd, which is "~/project" for the project.
 //
 // check.py is the project's one check. It exits 3 when it can't read the git tree, 2 when the
 // tree differs from HEAD (an untracked file counts), 1 when a test fails, and 0 when every test
@@ -38,19 +38,37 @@ when {
   context.input.program_path == "/usr/bin/python3.12" &&
   context.input has arg1 && context.input.arg1 == "check.py" &&
   context.input.arg_count == 1 &&
-  context.input.cwd == "/home/agent/project"
+  context.input.cwd == "~/project"
 };
 
 // git, as a host program, from the project only. A host program's own file operations raise no
 // fs:* decision, so only subcommands that leave tracked files in the work tree alone have a
-// permit: checkout, stash, reset, restore, apply, config and `git -c` have none.
+// permit: checkout, stash, reset, restore, apply, config and `git -c` have none. Box's decision
+// log redacts a command's arguments, so commit and push each have a permit of their own: the
+// rule id is how a reader of the log tells a commit from a push.
 @id("git_commands")
 permit (principal, action == Box::Action::"shell:spawn", resource)
 when {
   context.input.program_path == "/usr/bin/git" &&
-  context.input.cwd == "/home/agent/project" &&
+  context.input.cwd == "~/project" &&
   context.input has arg1 &&
-  ["status", "diff", "log", "show", "add", "commit", "push"].contains(context.input.arg1)
+  ["status", "diff", "log", "show", "add"].contains(context.input.arg1)
+};
+
+@id("git_commit")
+permit (principal, action == Box::Action::"shell:spawn", resource)
+when {
+  context.input.program_path == "/usr/bin/git" &&
+  context.input.cwd == "~/project" &&
+  context.input has arg1 && context.input.arg1 == "commit"
+};
+
+@id("git_push")
+permit (principal, action == Box::Action::"shell:spawn", resource)
+when {
+  context.input.program_path == "/usr/bin/git" &&
+  context.input.cwd == "~/project" &&
+  context.input has arg1 && context.input.arg1 == "push"
 };
 
 @id("project_read")
@@ -129,7 +147,7 @@ when { context.input.path == "~/project/.git" || context.input.path like "~/proj
 forbid (principal, action == Box::Action::"fs:write", resource)
 when { context.input.path like "~/project/*" }
 unless temporal {
-  formerly within 24h Box::Action::"shell:spawn"::response{ input.program_path: "/usr/bin/python3.12", input.arg1: "check.py", input.arg_count: 1, input.cwd: "/home/agent/project", output.status: 1 }
+  formerly within 24h Box::Action::"shell:spawn"::response{ input.program_path: "/usr/bin/python3.12", input.arg1: "check.py", input.arg_count: 1, input.cwd: "~/project", output.status: 1 }
 };
 
 @id("push_shape")
@@ -148,7 +166,7 @@ when { context.input.program_path == "/usr/bin/git" && context.input has arg1 &&
 unless temporal {
   !Box::Action::"shell:spawn"::response{ input.program_path: "/usr/bin/git", input.arg1: "commit" }
     since within 30m
-  Box::Action::"shell:spawn"::response{ input.program_path: "/usr/bin/python3.12", input.arg1: "check.py", input.arg_count: 1, input.cwd: "/home/agent/project", output.status: 0 }
+  Box::Action::"shell:spawn"::response{ input.program_path: "/usr/bin/python3.12", input.arg1: "check.py", input.arg_count: 1, input.cwd: "~/project", output.status: 0 }
 };
 
 // After 10 failed checks in the last hour, the agent is going in circles: refuse every project
@@ -161,7 +179,7 @@ when temporal {
   exists (fails: Long). (
     (count for (t: Timepoint). where (
       formerly within 1h (
-        Box::Action::"shell:spawn"::response{ input.program_path: "/usr/bin/python3.12", input.arg1: "check.py", input.arg_count: 1, input.cwd: "/home/agent/project" } &&
+        Box::Action::"shell:spawn"::response{ input.program_path: "/usr/bin/python3.12", input.arg1: "check.py", input.arg_count: 1, input.cwd: "~/project" } &&
         !Box::Action::"shell:spawn"::response{ output.status: 0 } && tp(t)
       )
     )) == fails

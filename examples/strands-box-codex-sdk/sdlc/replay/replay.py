@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Replay hand-built Box event traces against box/policy.dw with the Dogwood CLI.
 
-Usage: replay.py [--faults]   (DOGWOOD names the dogwood CLI, 1.1.0 or later)
+Usage: replay.py [--faults]   (DOGWOOD names the dogwood CLI, 1.1.2, the Dogwood that Box ships)
 
 Each case is a list of events; an event that asks for a decision carries the verdict it must
 get. A trace models check.py's exit status: 3 when git can't run, 2 for a dirty tree, 1 for a
@@ -20,7 +20,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 POLICY = HERE.parent / "box/policy.dw"
 SCHEMA = HERE / "schema"
-CWD = "/home/agent/project"
+CWD = "~/project"
 PY = "/usr/bin/python3.12"
 GIT = "/usr/bin/git"
 MODEL = "bedrock-runtime.us-east-1.amazonaws.com"
@@ -178,7 +178,7 @@ CASES = {
         PUSH(20, "DENY"),
     ],
     "push: a passing check.py from another directory does not count": [
-        spawned(10, 0, "python3.12", PY, ("check.py",), cwd="/home/agent/codex-tmp"),
+        spawned(10, 0, "python3.12", PY, ("check.py",), cwd="~/codex-tmp"),
         PUSH(20, "DENY"),
     ],
     "push: a pass older than 30 minutes is stale": [
@@ -215,7 +215,14 @@ CASES = {
     "git: config refused": [git(10, "DENY", "config", "core.hooksPath", "x")],
     "git: `git -c` refused": [git(10, "DENY", "-c", "core.hooksPath=x", "commit")],
     "git: from another directory refused": [
-        spawn(10, "DENY", "git", GIT, ("status",), cwd="/home/agent/codex-tmp")
+        spawn(10, "DENY", "git", GIT, ("status",), cwd="~/codex-tmp")
+    ],
+    "git: commit from another directory refused": [
+        spawn(10, "DENY", "git", GIT, ("commit", "-m", "x"), cwd="~/codex-tmp")
+    ],
+    "git: push from another directory refused, even after a passing check": [
+        check(10, 0),
+        spawn(20, "DENY", "git", GIT, ("push", "origin"), cwd="~/codex-tmp"),
     ],
     "host: another host program refused": [
         spawn(10, "DENY", "uname", "/usr/bin/uname", ("-a",))
@@ -345,29 +352,37 @@ CASES = {
 }
 
 # One edit per rule property. Each broken copy must make at least one case differ.
-GREEN = 'input.cwd: "/home/agent/project", output.status: 0 }\n};'
+GREEN = 'input.cwd: "~/project", output.status: 0 }\n};'
 FAULTS = {
     "push gate has no commit reset": (
         '!Box::Action::"shell:spawn"::response{ input.program_path: "/usr/bin/git", input.arg1: "commit" }\n    since within 30m\n  ',
         "formerly within 30m ",
     ),
     "push gate reads any program": (
-        'Box::Action::"shell:spawn"::response{ input.program_path: "/usr/bin/python3.12", input.arg1: "check.py", input.arg_count: 1, input.cwd: "/home/agent/project", output.status: 0 }',
-        'Box::Action::"shell:spawn"::response{ input.arg1: "check.py", input.arg_count: 1, input.cwd: "/home/agent/project", output.status: 0 }',
+        'Box::Action::"shell:spawn"::response{ input.program_path: "/usr/bin/python3.12", input.arg1: "check.py", input.arg_count: 1, input.cwd: "~/project", output.status: 0 }',
+        'Box::Action::"shell:spawn"::response{ input.arg1: "check.py", input.arg_count: 1, input.cwd: "~/project", output.status: 0 }',
     ),
     "push gate reads any directory": (GREEN, "output.status: 0 }\n};"),
     "push gate window 1h": ("since within 30m", "since within 1h"),
     "git permits checkout": (
-        '"show", "add", "commit", "push"]',
-        '"show", "add", "commit", "push", "checkout"]',
+        '"log", "show", "add"]',
+        '"log", "show", "add", "checkout"]',
+    ),
+    "git commits from any directory": (
+        'context.input.cwd == "~/project" &&\n  context.input has arg1 && context.input.arg1 == "commit"',
+        'context.input has arg1 && context.input.arg1 == "commit"',
+    ),
+    "git pushes from any directory": (
+        'context.input.cwd == "~/project" &&\n  context.input has arg1 && context.input.arg1 == "push"',
+        'context.input has arg1 && context.input.arg1 == "push"',
     ),
     "no .git rule": (
         'when { context.input.path == "~/project/.git" || context.input.path like "~/project/.git/*" };',
         "when { false };",
     ),
     "red rule accepts any status": (
-        'input.cwd: "/home/agent/project", output.status: 1 }',
-        'input.cwd: "/home/agent/project" }',
+        'input.cwd: "~/project", output.status: 1 }',
+        'input.cwd: "~/project" }',
     ),
     "no push shape": (
         "unless { context.input.arg_count == 2",
@@ -386,7 +401,7 @@ FAULTS = {
 def dogwood() -> str:
     path = os.environ.get("DOGWOOD")
     if not path or not Path(path).is_file():
-        sys.exit("set DOGWOOD to the dogwood CLI (1.1.0 or later)")
+        sys.exit("set DOGWOOD to the dogwood CLI (1.1.2, the Dogwood that Box ships)")
     return path
 
 

@@ -16,7 +16,7 @@ RUN chmod 0755 /agentd
 
 # `microvm build --project guest` puts guest/pyproject.toml and guest/uv.lock in the build
 # context, and this layer installs exactly what the lockfile names: the Codex SDK
-# (openai-codex) and the Codex binary it drives (openai-codex-cli-bin), both 0.163.0.
+# (openai-codex) and the Codex binary it drives (openai-codex-cli-bin), both 0.171.0.
 WORKDIR /opt/guest
 COPY pyproject.toml uv.lock ./
 ENV UV_PROJECT_ENVIRONMENT=/opt/guest/.venv \
@@ -24,7 +24,7 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/guest/.venv \
     UV_PYTHON_DOWNLOADS=never
 RUN dnf -y --setopt=install_weak_deps=0 install python3.12 python3.12-pip tar gzip findutils procps-ng iproute \
     && dnf clean all \
-    && pip3.12 install --no-cache-dir uv==0.13.0 \
+    && pip3.12 install --no-cache-dir uv==0.13.9 \
     && uv sync --locked \
     && chmod -R a+rX /opt/guest
 
