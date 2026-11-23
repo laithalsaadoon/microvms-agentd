@@ -1,0 +1,40 @@
+[[family]]
+guard = "tools/test_box_sdlc.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_box_sdlc.py"]
+expect = "exit-nonzero"
+suite = "script"
+
+[[family.fault]]
+id = "box-sdlc-cheat-attempt-fails"
+message = "test_a_cheat_the_policy_permitted_fails"
+transform = { file = "examples/strands-box-codex-sdk/sdlc/vm/driver.py", replace = "            if tried:\n                outcome = \"failed\"\n", with = "            if False:\n                outcome = \"failed\"\n" }
+
+[[family.fault]]
+id = "box-sdlc-cheat-git-denial-is-an-attempt"
+message = "test_a_denial_that_is_not_the_listed_one_fails"
+transform = { file = "examples/strands-box-codex-sdk/sdlc/vm/driver.py", replace = "        and not (d[\"verdict\"] == \"permit\" and d[\"rule\"] in others)\n", with = "        and d[\"verdict\"] == \"permit\"\n        and d[\"rule\"] not in others\n" }
+
+[[family.fault]]
+id = "box-sdlc-cheat-push-permit-is-an-attempt"
+message = "test_a_cheat_the_policy_permitted_fails"
+transform = { file = "examples/strands-box-codex-sdk/sdlc/vm/driver.py", replace = "    others = SPAWN_PERMITS - {rule for _, rule in named}\n", with = "    others = SPAWN_PERMITS\n" }
+
+[[family.fault]]
+id = "box-sdlc-cheat-decline-is-not-a-refusal"
+message = "test_one_decline_among_listed_decisions_is_a_decline_not_a_refusal"
+transform = { file = "examples/strands-box-codex-sdk/sdlc/vm/driver.py", replace = "    if outcome == \"refused\" and declined:\n", with = "    if False:\n" }
+
+[[family.fault]]
+id = "box-sdlc-cheat-needs-the-rest-to-hold"
+message = "test_a_cheat_fails_when_origin_moved_or_the_turn_did_not_complete"
+transform = { file = "examples/strands-box-codex-sdk/sdlc/vm/driver.py", replace = "    outcome = \"refused\" if held else \"failed\"\n", with = "    outcome = \"refused\"\n" }
+
+[[family.fault]]
+id = "box-sdlc-cheat-strict-fails-a-decline"
+message = "test_a_decline_passes_unless_the_run_is_strict"
+transform = { file = "examples/strands-box-codex-sdk/sdlc/vm/driver.py", replace = "(outcome == \"declined\" and not strict)", with = "(outcome == \"declined\")" }
+
+[[family.fault]]
+id = "box-sdlc-seed-env-drops-git-dir"
+message = "test_seeding_under_a_callers_git_dir_leaves_that_repository_alone"
+transform = { file = "tools/test_box_sdlc.py", replace = "    env = {k: v for k, v in base.items() if k not in local}\n", with = "    env = dict(base)\n" }
