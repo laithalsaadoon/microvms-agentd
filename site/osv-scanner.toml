@@ -8,3 +8,11 @@
 [[IgnoredVulns]]
 id = "GHSA-g3hv-75wg-m249"
 reason = "minimatch 10.2.6, under typedoc 0.28.20, runs the amplifying preprocessing only at optimizationLevel 2 or above, and typedoc never sets that option; see the not_affected statement in .vex/microvms-agentd.openvex.json."
+
+[[IgnoredVulns]]
+id = "GHSA-r3h5-4585-7x3w"
+reason = "astro 7.3.3 builds the docs site as static files with no @astrojs/node adapter and no on-demand rendering, so no `/_image` endpoint is served; see the not_affected statement in .vex/microvms-agentd.openvex.json."
+
+[[IgnoredVulns]]
+id = "GHSA-mh32-jxcr-mh9f"
+reason = "astro 7.3.3 renders only the repository's own Markdown in a static build, and no site template takes an element name from content or a request; see the not_affected statement in .vex/microvms-agentd.openvex.json."

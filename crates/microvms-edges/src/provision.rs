@@ -51,7 +51,7 @@
 //!
 //! # What is checked no matter where the bytes came from
 //!
-//! Every binary this module returns is an aarch64 ELF (BIND-20): MicroVMs are ARM64-only,
+//! Every binary this module returns is an aarch64 ELF (BIND-20): agentd images are ARM64-only,
 //! and a wrong binary baked into an image fails 45 minutes later as a run-hook timeout that
 //! says nothing about architecture. Twenty bytes of header now is the whole cost of never
 //! finding out.
@@ -510,8 +510,8 @@ fn caller_supplied(
         return Err(refuse(
             Failure::NotAarch64,
             format!(
-                "is {why}. MicroVMs are ARM64-only, and a wrong-architecture daemon fails as \
-                 a run-hook timeout 45 minutes into a build."
+                "is {why}. This client builds ARM64 images only, and a wrong-architecture daemon \
+                 fails as a run-hook timeout 45 minutes into a build."
             ),
         )
         .remedy("build one: cargo build --release -p agentd --target aarch64-unknown-linux-musl"));

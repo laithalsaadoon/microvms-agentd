@@ -177,7 +177,7 @@ pub const MEASURED_REGIONS: [&str; 14] = [/* "us-east-1", ... "eu-south-2" */];
 - Pricing retains the selected region in its rate table and exposes it by reference. `crates/microvms-domain/src/cost.rs:846-865`.
 
 **Drift risk:** `MEASURED_REGIONS`, the drift script's `PINNED_REGIONS`, and the live-rates script's `MICROVM_REGIONS` change together when AWS launches a region. A stale list refuses no region. It makes a null-message denial there cite the region as a cause, and it puts the wrong regions in the live-rates script's empty-catalog message. `crates/microvms-domain/src/region.rs:121-136`, `tools/check-model-drift.py:201-221`, `tools/check-live-rates.py:87-102`.
-Mitigation: `tools/check-model-drift.py` holds the emitted list equal to its pinned literal, and holds the deprecated `MICROVM_REGIONS` to the five. No check compares the list with AWS, so growing it follows a fresh Pricing API measurement recorded in `docs/PLATFORM.md`. `tools/check-model-drift.py:977-997`.
+Mitigation: `tools/check-model-drift.py` holds the emitted list equal to its pinned literal, and holds the deprecated `MICROVM_REGIONS` to the five. No check compares the list with AWS, so growing it follows a fresh Pricing API measurement recorded in `docs/PLATFORM.md`. `tools/check-model-drift.py:978-998`.
 
 ## WireKind: specific daemon and transport outcomes
 

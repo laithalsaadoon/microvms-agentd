@@ -1,4 +1,4 @@
-# aarch64 musl is the shipping target: MicroVMs are ARM_64 only, and a static
+# aarch64 musl is the shipping target: agentd ships for ARM64 only, and a static
 # binary is what lets the daemon bake into a task's own base image without
 # depending on an interpreter or libc that image may not have.
 #

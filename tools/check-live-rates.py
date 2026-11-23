@@ -14,9 +14,9 @@ seven of them, in every region AWS runs MicroVMs in, queryable for free.
 
 Three things about that catalog decide the shape of everything below.
 
-**There is an ARM and a non-ARM rate for compute, 17.9% apart.** MicroVMs are
-ARM64-only — `lambda-microvms`'s `Architecture` shape is `enum: ['ARM_64']` with no
-other member — so only the ARM rate can ever apply and the x86 one is a trap. The
+**There is an ARM and a non-ARM rate for compute, 17.9% apart.** This client builds
+ARM64 images only, although `lambda-microvms`'s `Architecture` shape is
+`enum: ['ARM_64', 'X86_64']`, so only the ARM rate applies to a VM it launches. The
 hand-pinned table happened to use the ARM figure, correctly but by luck. A fetch
 that fell back to the sibling when the ARM line went missing would overstate every
 estimate by 17.9% and look entirely healthy doing it, so a missing ARM rate raises.
@@ -279,7 +279,7 @@ class RateLine:
 
 
 #: The five figures the pinned table needs, out of the seven line items the catalog
-#: carries. The two we skip are the x86 compute rates, which a MicroVM can never be
+#: carries. The two we skip are the x86 compute rates, which an ARM64 MicroVM is not
 #: billed at.
 MICROVM_LINES: tuple[RateLine, ...] = (
     RateLine(
@@ -448,8 +448,8 @@ def missing(client: Any, region: str, line: RateLine) -> PricingError:
     )
     return RateCatalogChanged(
         f"{region} has no {line.group}, only the x86 rate {line.x86_group} at ${x86}. "
-        "MicroVMs are ARM64-only — the Architecture shape is enum ['ARM_64'] with no other "
-        f"member — so the x86 rate can never apply and is not substituted for {line.field}; "
+        "This client builds ARM64 images only, so the x86 rate does not apply to a VM it "
+        f"launches and is not substituted for {line.field}; "
         "doing so would overstate every compute figure by roughly 18%"
     )
 

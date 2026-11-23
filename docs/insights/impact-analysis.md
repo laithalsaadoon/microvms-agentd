@@ -121,7 +121,7 @@ Defined at: `crates/microvms-cli/src/exit.rs:79-134` and
 ## Service constants and JSON emission
 
 Defined at: `crates/microvms-domain/src/constants.rs:55` and
-`crates/microvms-domain/src/constants.rs:659-744`.
+`crates/microvms-domain/src/constants.rs:662-747`.
 
 | Downstream | Type | Touch on change | Citation |
 | --- | --- | --- | --- |
@@ -132,8 +132,8 @@ Defined at: `crates/microvms-domain/src/constants.rs:55` and
 | Image state and build parameters | direct import | likely | `crates/microvms-app/src/control/image.rs:112-113`, `crates/microvms-app/src/control/image.rs:219-233` |
 | Hook-timeout types | direct import | likely | `crates/microvms-domain/src/hooks.rs:37-40` |
 | Session keepalive and no-timeout ceiling | direct import | likely | `crates/microvms-app/src/session/keepalive.rs:32-37`, `crates/microvms-app/src/session/complete.rs:27-30` |
-| Region and size table emission | indirect | likely | `crates/microvms-domain/src/constants.rs:729-744` |
-| JSON key and value assertions | test | yes | `crates/microvms-domain/src/constants.rs:765-832` |
+| Region and size table emission | indirect | likely | `crates/microvms-domain/src/constants.rs:732-747` |
+| JSON key and value assertions | test | yes | `crates/microvms-domain/src/constants.rs:768-835` |
 | Bare-object command contract test | test | yes | `crates/microvms-cli/tests/manifest.rs:308-346` |
 | Model comparison task | config | no | `.config/mise/tasks/contracts.toml:316-341` |
 
@@ -141,14 +141,14 @@ Defined at: `crates/microvms-domain/src/constants.rs:55` and
 
 - The JSON keys are a script interface. Renaming a constant in Rust is incomplete
   until its emitted key and the script's expected-key set agree.
-  `crates/microvms-domain/src/constants.rs:659-664`, `tools/check-model-drift.py:90-152`
+  `crates/microvms-domain/src/constants.rs:662-667`, `tools/check-model-drift.py:90-152`
 - `constants --emit-json` exposes the bare object; the normal JSON command wraps
   it in `data.constants`. Preserve both views when changing command rendering.
   `crates/microvms-cli/src/commands/local.rs:946-967`
 - Region and size tables are compared with independent literals because the
   service model does not define them. A model comparison is not evidence that
   their measured platform behavior remains current.
-  `tools/check-model-drift.py:972-1006`
+  `tools/check-model-drift.py:973-1007`
 
 ## Size classes
 
@@ -164,7 +164,7 @@ Defined at: `crates/microvms-domain/src/sizing.rs:74-125`.
 | Published client defaults | indirect | likely | `crates/microvms-app/src/defaults.rs:51-52`, `crates/microvms-app/src/defaults.rs:159` |
 | Agent recipe sizes | direct import | likely | `crates/microvms-app/src/agents/mod.rs:44-52` |
 | CLI cost report | indirect | likely | `crates/microvms-cli/src/commands/cost.rs:33-34` |
-| Constants emission and independent size table | config | yes | `crates/microvms-domain/src/constants.rs:732-744`, `tools/check-model-drift.py:236-242` |
+| Constants emission and independent size table | config | yes | `crates/microvms-domain/src/constants.rs:735-747`, `tools/check-model-drift.py:236-242` |
 | CLI domain and resource-request tests | test | yes | `crates/microvms-cli/src/cli.rs:2765-2782`, `crates/microvms-cli/src/cli.rs:3971-3989` |
 | Binding sizing and billing tests | test | likely | `bindings/microvms-py/tests/test_smoke.py:413-437`, `bindings/microvms-js/__test__/smoke.mjs:332-357` |
 | Shared size and cost case runner | test | likely | `crates/microvms-core/tests/parity_cases.rs:35-73` |
@@ -197,7 +197,7 @@ Defined at: `crates/microvms-domain/src/region.rs:56-281`.
 | Signed transport configuration | direct import | likely | `crates/microvms-edges/src/control/transport.rs:48-81` |
 | Null-message denial diagnosis | direct import | yes | `crates/microvms-app/src/control/transport.rs:622-645` |
 | Control-plane identity | direct import | no | `crates/microvms-app/src/control/mod.rs:154`, `crates/microvms-app/src/control/mod.rs:268-270` |
-| Constant emission and independent region lists | config | yes | `crates/microvms-domain/src/constants.rs:629-636`, `crates/microvms-domain/src/constants.rs:729-730`, `tools/check-model-drift.py:201-232`, `tools/check-live-rates.py:87-102` |
+| Constant emission and independent region lists | config | yes | `crates/microvms-domain/src/constants.rs:632-639`, `crates/microvms-domain/src/constants.rs:732-733`, `tools/check-model-drift.py:201-232`, `tools/check-live-rates.py:87-102` |
 | Preflight and registered-name resolution | direct import | likely | `crates/microvms-app/src/preflight.rs:42-49`, `crates/microvms-app/src/names.rs:55-63` |
 | Agent recipe region | direct import | likely | `crates/microvms-app/src/agents/mod.rs:49` |
 | Pinned rate-table region | indirect | likely | `crates/microvms-domain/src/cost.rs:1007-1011` |
@@ -209,7 +209,7 @@ Defined at: `crates/microvms-domain/src/region.rs:56-281`.
 - The measured region list is client data, separate from the service-model enum, and
   parsing does not read it. Growing it needs new platform evidence and the same change
   to the two script literals that check it.
-  `crates/microvms-domain/src/region.rs:121-136`, `tools/check-model-drift.py:977-997`
+  `crates/microvms-domain/src/region.rs:121-136`, `tools/check-model-drift.py:978-998`
 - A parsed name equals its constant, so code compares regions by value. `Region::named`
   is the one place a name becomes a value; preserve that when changing the constants or
   parsing.

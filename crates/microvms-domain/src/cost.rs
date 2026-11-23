@@ -997,8 +997,8 @@ impl RateTable {
 /// actually tells you whether a rate moved; the staleness warning only ever said
 /// that nobody had looked. See [`RateCatalog`].
 ///
-/// Only the ARM figures are correct here and it is not a preference: MicroVMs are
-/// ARM64-only, the x86 compute rates in the same catalog are 17.9% higher, and this
+/// Only the ARM figures are correct here and it is not a preference: this client builds
+/// ARM64 images only, the x86 compute rates in the same catalog are 17.9% higher, and this
 /// table used to hold the right ones by luck rather than by construction (COST-9).
 ///
 /// A function rather than a `static`, because [`Region`] and the URL own heap
@@ -1095,10 +1095,10 @@ impl CatalogLine {
 
     /// The x86 sibling, for the two compute lines that have one (COST-9).
     ///
-    /// Named so the refusal can say what it is refusing. MicroVMs are ARM64-only —
-    /// the `Architecture` shape is `enum: ['ARM_64']` with no other member — so the
-    /// x86 rate can never apply, and it is 17.9% higher. Snapshot lines have no
-    /// architecture variant, so there is nothing to refuse.
+    /// Named so the refusal can say what it is refusing. This client builds ARM64
+    /// images only, although the `Architecture` shape also lists `X86_64`, so the x86
+    /// rate does not apply to a VM it launches, and it is 17.9% higher. Snapshot lines
+    /// have no architecture variant, so there is nothing to refuse.
     pub fn x86_group(self) -> Option<&'static str> {
         match self {
             CatalogLine::VcpuSecond => Some("AWS-Lambda-MicroVM-vCPU-Second"),
@@ -1284,10 +1284,10 @@ fn missing_line_error(region: &Region, line: CatalogLine, catalog: &RateCatalog)
     };
     match catalog.matching(x86_group).first() {
         Some(sibling) => Error::invalid_arg(format!(
-            "{region} has no {}, only the x86 rate {x86_group} at ${}. MicroVMs are ARM64-only \
-             — the Architecture shape is enum ['ARM_64'] with no other member — so the x86 rate \
-             can never apply and is not substituted for {}; doing so would overstate every \
-             compute figure by roughly 18%",
+            "{region} has no {}, only the x86 rate {x86_group} at ${}. This client builds \
+             ARM64 images only, so the x86 rate does not apply to a VM it launches and is \
+             not substituted for {}; doing so would overstate every compute figure by \
+             roughly 18%",
             line.group(),
             sibling.usd,
             line.field(),
@@ -3761,7 +3761,7 @@ mod tests {
     // -- the ARM-only rule (COST-9) --------------------------------------------
 
     /// The catalog as the Pricing API returned it on 2026-08-07 for us-east-1: seven
-    /// MicroVM line items, including the two x86 compute rates a MicroVM can never be
+    /// MicroVM line items, including the two x86 compute rates an ARM64 MicroVM is not
     /// billed at. They are here precisely so a test can prove we do not reach for them.
     fn recorded_catalog() -> RateCatalog {
         RateCatalog::new()
@@ -3870,7 +3870,7 @@ mod tests {
         .expect_err("a missing ARM line is refused, never substituted");
         assert_eq!(err.kind(), ErrorKind::InvalidArg);
         let message = err.to_string();
-        assert!(message.contains("ARM64-only"), "{message}");
+        assert!(message.contains("ARM64 images only"), "{message}");
         assert!(
             message.contains("0.0000326557"),
             "the error must name the rate it refuses to substitute: {message}"
@@ -3890,7 +3890,7 @@ mod tests {
         )
         .expect_err("a missing ARM memory line is refused");
         let message = err.to_string();
-        assert!(message.contains("ARM64-only"), "{message}");
+        assert!(message.contains("ARM64 images only"), "{message}");
         assert!(message.contains("0.0000043235"), "{message}");
         assert!(message.contains("gb_second"), "{message}");
     }
@@ -3935,7 +3935,7 @@ mod tests {
         .expect_err("a missing snapshot rate means no table");
         let message = err.to_string();
         assert!(message.contains("snapshot_write_gb"), "{message}");
-        assert!(!message.contains("ARM64-only"), "{message}");
+        assert!(!message.contains("ARM64 images only"), "{message}");
     }
 
     /// An empty catalog is the *region*, not the catalog, and it is a different repair:
@@ -3959,7 +3959,7 @@ mod tests {
             message.contains("before auditing a policy"),
             "the caveat that saves someone reading an IAM policy that is fine: {message}"
         );
-        assert!(!message.contains("ARM64-only"), "{message}");
+        assert!(!message.contains("ARM64 images only"), "{message}");
     }
 
     /// A restated unit is refused rather than silently rescaled. It is the only signal
