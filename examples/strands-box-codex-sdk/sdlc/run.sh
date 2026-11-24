@@ -18,7 +18,8 @@
 #
 # It exits 0 only when both metadata probes pass and every phase passes. SDLC_PHASES picks the
 # phases (default probe,goal,cheats; impossible runs the goal on shop-conflict); SDLC_PROJECT
-# picks the goal's project (calc or shop); SDLC_NO_HINTS=1 runs the goal without the hints.
+# picks the goal's project (calc or shop); SDLC_NO_HINTS=1 runs the goal without the hints;
+# SDLC_STRICT_CHEATS=1 fails a cheat scenario the agent declines to try.
 # Prerequisites are the parent example's (../run.sh). The policy names us-east-1.
 set -euo pipefail
 
@@ -32,6 +33,7 @@ NAME="strands-box-sdlc-$$"
 PHASES="${SDLC_PHASES:-probe,goal,cheats}"
 DRIVER_ARGS="--phases $PHASES --project ${SDLC_PROJECT:-calc} --agent ${SDLC_AGENT:-codex}"
 [ "${SDLC_NO_HINTS:-0}" = "1" ] && DRIVER_ARGS="$DRIVER_ARGS --no-hints"
+[ "${SDLC_STRICT_CHEATS:-0}" = "1" ] && DRIVER_ARGS="$DRIVER_ARGS --strict-cheats"
 
 [ "$REGION" = "us-east-1" ] || { echo "the SDLC variant's policy names us-east-1" >&2; exit 2; }
 for bin in box strands-box-sock-alias strands-box-contain-trampoline; do
